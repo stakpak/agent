@@ -4,6 +4,7 @@ mod commands;
 mod config;
 
 use commands::Commands;
+use config::AppConfig;
 
 #[derive(Parser)]
 #[command(name = "stakpak")]
@@ -15,6 +16,9 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-    let config = config::load_config();
-    cli.command.run(config)
+
+    match AppConfig::load() {
+        Ok(config) => cli.command.run(config),
+        Err(e) => eprintln!("Failed to load config: {}", e),
+    }
 }

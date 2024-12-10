@@ -1,14 +1,14 @@
 use clap::Subcommand;
 
-use crate::config::Config;
+use crate::config::AppConfig;
 
 #[derive(Subcommand)]
 pub enum Commands {
     /// Login to Stakpak
     Login {
         /// API key for authentication
-        #[arg(long)]
-        api_key: Option<String>,
+        #[arg(long, env("STAKPAK_API_KEY"))]
+        api_key: String,
     },
 
     /// Logout from Stakpak
@@ -25,15 +25,29 @@ pub enum Commands {
 }
 
 impl Commands {
-    pub fn run(self, _config: Config) {
+    pub fn run(self, config: AppConfig) {
         match self {
-            Commands::Login { api_key: _ } => {
-                println!("Logging in...");
-                // Add login logic here
+            Commands::Login { api_key } => {
+                let mut updated_config = config.clone();
+                updated_config.api_key = Some(api_key);
+
+                println!("Storing credentials...");
+                if let Err(e) = updated_config.save() {
+                    eprintln!("Failed to save config: {}", e);
+                    return;
+                }
+                println!("Logged in successfully");
             }
             Commands::Logout => {
-                println!("Logging out...");
-                // Add logout logic here
+                let mut updated_config = config.clone();
+                updated_config.api_key = None;
+
+                println!("Removing credentials...");
+                if let Err(e) = updated_config.save() {
+                    eprintln!("Failed to save config: {}", e);
+                    return;
+                }
+                println!("Logged out successfully");
             }
             Commands::Deploy => {
                 println!("Deploying...");

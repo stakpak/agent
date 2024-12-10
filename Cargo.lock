@@ -553,6 +553,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "config",
+ "serde",
+ "toml",
 ]
 
 [[package]]
