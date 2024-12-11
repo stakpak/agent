@@ -20,6 +20,9 @@ pub enum Commands {
     /// List my flows
     List,
 
+    /// Get a flow
+    Get { flow_name: String },
+
     /// Clone a Stakpak project
     Clone {
         flow_name: String,
@@ -78,6 +81,21 @@ impl Commands {
                         }
                     };
                     match client.list_flows(&owner_name).await {
+                        Ok(data) => println!("{}", data.to_text()),
+                        Err(e) => eprintln!("Failed to fetch account {}", e),
+                    };
+                }
+            }
+            Commands::Get { flow_name } => {
+                if let Ok(client) = Client::new(&config) {
+                    let owner_name = match client.get_my_account().await {
+                        Ok(data) => data.username,
+                        Err(e) => {
+                            eprintln!("Failed to fetch account {}", e);
+                            return;
+                        }
+                    };
+                    match client.get_flow(&owner_name, &flow_name).await {
                         Ok(data) => println!("{}", data.to_text()),
                         Err(e) => eprintln!("Failed to fetch account {}", e),
                     };

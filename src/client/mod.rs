@@ -192,6 +192,38 @@ pub struct GetFlowResponse {
     pub permission: GetFlowPermission,
     pub resource: Flow,
 }
+impl GetFlowResponse {
+    pub fn to_text(&self) -> String {
+        let mut output = String::new();
+
+        output.push_str(&format!(
+            "{} ({:?})\n",
+            self.resource.name, self.resource.visibility
+        ));
+        output.push_str("\nVersions:\n");
+
+        let mut versions = self.resource.versions.clone();
+        versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        for version in versions {
+            let tags = version
+                .tags
+                .iter()
+                .map(|t| t.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            output.push_str(&format!(
+                "{:<40} \"{:<20}\" {}\n",
+                version.id,
+                version.created_at.format("%Y-%m-%d %H:%M UTC"),
+                if tags.is_empty() { "-" } else { &tags }
+            ));
+        }
+
+        output
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetFlowPermission {
