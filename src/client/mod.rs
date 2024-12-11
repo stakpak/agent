@@ -1,7 +1,8 @@
-use chrono::{DateTime, Utc};
 use reqwest::{header, Client as ReqwestClient, Error as ReqwestError};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+mod models;
+use models::*;
 
 use crate::config::AppConfig;
 
@@ -30,7 +31,7 @@ impl Client {
 
         Ok(Self {
             client,
-            base_url: "https://apiv2.stakpak.dev/v1".to_string(),
+            base_url: config.api_endpoint.clone() + "/v1",
         })
     }
 
@@ -133,6 +134,28 @@ impl Client {
             }
         }
     }
+
+    pub async fn query_blocks(&self, query: &str) -> Result<QueryBlocksResponse, String> {
+        let url = format!("{}/commands/query?query={}", self.base_url, query);
+
+        let value: serde_json::Value = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?
+            .json()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+        match serde_json::from_value::<QueryBlocksResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
@@ -225,56 +248,34 @@ impl GetFlowResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GetFlowPermission {
-    pub read: bool,
-    pub write: bool,
+#[derive(Deserialize, Debug)]
+pub struct QueryBlocksResponse {
+    pub results: Vec<QueryBlockResult>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Flow {
-    pub id: Uuid,
-    pub updated_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-    pub name: String,
-    pub visibility: FlowVisibility,
-    pub versions: Vec<FlowVersion>,
-}
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, Default)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum FlowVisibility {
-    #[default]
-    Public,
-    Private,
-}
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct FlowVersion {
-    pub id: Uuid,
-    pub immutable: bool,
-    pub created_at: DateTime<Utc>,
-    pub tags: Vec<FlowTag>,
-    pub parent: Option<FlowVersionRelation>,
-    pub children: Vec<FlowVersionRelation>,
-}
+impl QueryBlocksResponse {
+    pub fn to_text(&self) -> String {
+        let mut output = String::new();
+        for result in &self.results {
+            output.push_str(&format!(
+                r#"
+-------------------------------------------------------
+Flow: {} ({})
+Document: {}:{}:{}
+Score: {:.2}%
+-------------------------------------------------------
+{}
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct FlowTag {
-    pub name: String,
-    pub description: String,
-}
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct FlowVersionRelation {
-    pub id: Uuid,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct GetFlowDocumentsResponse {
-    pub documents: Vec<Document>,
-    pub additional_documents: Vec<Document>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Document {
-    pub content: String,
-    pub uri: String,
+            "#,
+                result.flow_version.flow_name,
+                result.flow_version.version_id,
+                result.block.document_uri.strip_prefix("file:///").unwrap(),
+                result.block.start_point.row,
+                result.block.start_point.column,
+                result.similarity * 100.0,
+                result.block.code
+            ));
+        }
+        output.trim_end().to_string()
+    }
 }

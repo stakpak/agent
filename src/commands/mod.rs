@@ -31,6 +31,9 @@ pub enum Commands {
         #[arg(long, short)]
         dir: Option<String>,
     },
+
+    /// Query your configurations
+    Query { query: String },
     // /// Deploy your app
     // Deploy,
 
@@ -170,6 +173,14 @@ impl Commands {
                     }
 
                     println!("Successfully cloned flow to \"{}\"", base_dir);
+                }
+            }
+            Commands::Query { query } => {
+                if let Ok(client) = Client::new(&config) {
+                    match client.query_blocks(&query).await {
+                        Ok(data) => println!("{}", data.to_text()),
+                        Err(e) => eprintln!("Failed to query blocks {}", e),
+                    };
                 }
             }
         }

@@ -1,10 +1,11 @@
-use config::{Config, ConfigError, File};
+use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::fs::{create_dir_all, write};
 use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppConfig {
+    pub api_endpoint: String,
     pub api_key: Option<String>,
 }
 
@@ -20,6 +21,8 @@ impl AppConfig {
         let config_path: String = get_config_path();
 
         let config = Config::builder()
+            .set_default("api_endpoint", "https://apiv2.stakpak.dev")?
+            .add_source(Environment::with_prefix("STAKPAK"))
             .add_source(File::with_name(&config_path).required(false))
             .build()
             .unwrap_or_else(|_| Config::default());
