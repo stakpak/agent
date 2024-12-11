@@ -1,6 +1,6 @@
 use clap::Subcommand;
 
-use crate::config::AppConfig;
+use crate::{client::Client, config::AppConfig};
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -14,18 +14,23 @@ pub enum Commands {
     /// Logout from Stakpak
     Logout,
 
-    /// Deploy your app
-    Deploy,
+    /// Get current account
+    Account,
 
-    /// Import existing configurations
-    Import,
+    /// List my flows
+    List,
+    // /// Deploy your app
+    // Deploy,
 
-    /// Clone a Stakpak project
-    Clone,
+    // /// Import existing configurations
+    // Import,
+
+    // /// Clone a Stakpak project
+    // Clone,
 }
 
 impl Commands {
-    pub fn run(self, config: AppConfig) {
+    pub async fn run(self, config: AppConfig) {
         match self {
             Commands::Login { api_key } => {
                 let mut updated_config = config.clone();
@@ -49,18 +54,40 @@ impl Commands {
                 }
                 println!("Logged out successfully");
             }
-            Commands::Deploy => {
-                println!("Deploying...");
-                // Add deploy logic here
+            Commands::Account => {
+                if let Ok(client) = Client::new(&config) {
+                    match client.get_my_account().await {
+                        Ok(data) => println!("{}", serde_json::to_string_pretty(&data).unwrap()),
+                        Err(e) => eprintln!("Failed to fetch account {}", e),
+                    };
+                }
             }
-            Commands::Import => {
-                println!("Importing...");
-                // Add import logic here
-            }
-            Commands::Clone => {
-                println!("Cloning...");
-                // Add clone logic here
-            }
+            Commands::List => {
+                if let Ok(client) = Client::new(&config) {
+                    let owner_name = match client.get_my_account().await {
+                        Ok(data) => data.username,
+                        Err(e) => {
+                            eprintln!("Failed to fetch account {}", e);
+                            return;
+                        }
+                    };
+                    match client.list_flows(&owner_name).await {
+                        Ok(data) => println!("{}", serde_json::to_string_pretty(&data).unwrap()),
+                        Err(e) => eprintln!("Failed to fetch account {}", e),
+                    };
+                }
+            } // Commands::Deploy => {
+              //     println!("Deploying...");
+              //     // Add deploy logic here
+              // }
+              // Commands::Import => {
+              //     println!("Importing...");
+              //     // Add import logic here
+              // }
+              // Commands::Clone => {
+              //     println!("Cloning...");
+              //     // Add clone logic here
+              // }
         }
     }
 }

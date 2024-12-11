@@ -1,5 +1,6 @@
 use clap::Parser;
 
+mod client;
 mod commands;
 mod config;
 
@@ -14,11 +15,12 @@ struct Cli {
     command: Commands,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     match AppConfig::load() {
-        Ok(config) => cli.command.run(config),
+        Ok(config) => cli.command.run(config).await,
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
 }
