@@ -92,3 +92,59 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: stakpak/homebrew-stakpak
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew formula
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-x86_64.tar.gz" -o stakpak-darwin-x86_64.tar.gz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz" -o stakpak-darwin-aarch64.tar.gz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz" -o stakpak-linux-x86_64.tar.gz
+          
+          SHA256_DARWIN_X64=$(sha256sum stakpak-darwin-x86_64.tar.gz | cut -d ' ' -f 1)
+          SHA256_DARWIN_ARM=$(sha256sum stakpak-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
+          SHA256_LINUX_X64=$(sha256sum stakpak-linux-x86_64.tar.gz | cut -d ' ' -f 1)
+          
+          cat > Formula/stakpak.rb << EOF
+          class Stakpak < Formula
+            desc "Stakpak CLI tool"
+            homepage "https://github.com/stakpak/stakpak"
+            version "${VERSION}"
+            
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz"
+                sha256 "${SHA256_DARWIN_ARM}"
+              else
+                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-x86_64.tar.gz"
+                sha256 "${SHA256_DARWIN_X64}"
+              end
+            end
+            
+            on_linux do
+              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz"
+              sha256 "${SHA256_LINUX_X64}"
+            end
+            
+            def install
+              bin.install "stakpak"
+            end
+          end
+          EOF
+          
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/stakpak.rb
+          git commit -m "Update stakpak to v${VERSION}"
+          git push
