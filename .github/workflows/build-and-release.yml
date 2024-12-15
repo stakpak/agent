@@ -116,7 +116,7 @@ jobs:
           SHA256_DARWIN_ARM=$(sha256sum stakpak-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
           SHA256_LINUX_X64=$(sha256sum stakpak-linux-x86_64.tar.gz | cut -d ' ' -f 1)
           
-          cat > Formula/stakpak.rb << EOF
+          cat > stakpak.rb << EOF
           class Stakpak < Formula
             desc "Stakpak CLI tool"
             homepage "https://github.com/stakpak/stakpak"
