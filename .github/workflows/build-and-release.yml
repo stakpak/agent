@@ -145,6 +145,6 @@ jobs:
           
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add Formula/stakpak.rb
+          git add stakpak.rb
           git commit -m "Update stakpak to v${VERSION}"
           git push
