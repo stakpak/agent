@@ -33,7 +33,10 @@ pub enum Commands {
     },
 
     /// Query your configurations
-    Query { query: String },
+    Query {
+        #[arg(trailing_var_arg = true)]
+        query: Vec<String>,
+    },
     // /// Deploy your app
     // Deploy,
 
@@ -177,7 +180,7 @@ impl Commands {
             }
             Commands::Query { query } => {
                 if let Ok(client) = Client::new(&config) {
-                    match client.query_blocks(&query).await {
+                    match client.query_blocks(&query.join(" ")).await {
                         Ok(data) => println!("{}", data.to_text()),
                         Err(e) => eprintln!("Failed to query blocks {}", e),
                     };
