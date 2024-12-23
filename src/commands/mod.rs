@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use termimad::MadSkin;
 
 use crate::{
     client::{models::FlowRef, Client},
@@ -213,7 +214,10 @@ impl Commands {
                         )
                         .await
                     {
-                        Ok(data) => println!("{}", data.to_text(synthesize_output)),
+                        Ok(data) => {
+                            let skin = MadSkin::default();
+                            println!("{}", skin.inline(&data.to_text(synthesize_output)))
+                        }
                         Err(e) => eprintln!("Failed to query blocks {}", e),
                     };
                 }

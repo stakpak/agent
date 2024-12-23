@@ -13,3 +13,4 @@ toml = "0.8.19"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 chrono = { version = "0.4.38", features = ["serde"] }
+termimad = "0.31.1"
