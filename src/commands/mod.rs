@@ -103,7 +103,7 @@ impl Commands {
                         }
                     };
                     match client.list_flows(&owner_name).await {
-                        Ok(data) => println!("{}", data.to_text()),
+                        Ok(data) => println!("{}", data.to_text(&owner_name)),
                         Err(e) => eprintln!("Failed to fetch account {}", e),
                     };
                 }

@@ -196,7 +196,7 @@ pub struct GetFlowsResponse {
 }
 
 impl GetFlowsResponse {
-    pub fn to_text(&self) -> String {
+    pub fn to_text(&self, owner_name: &str) -> String {
         let mut output = String::new();
 
         for flow in &self.results {
@@ -213,12 +213,13 @@ impl GetFlowsResponse {
                 .join(", ");
 
             output.push_str(&format!(
-                "{:<20} {:<40} {:<10} {:<20} {:<40}\n",
+                "{} ({:7}) {:<10} {}/{}/{}\n",
+                latest_version.created_at.format("\"%Y-%m-%d %H:%M UTC\""),
+                format!("{:?}", flow.visibility),
+                if tags.is_empty() { "-" } else { &tags },
+                owner_name,
                 flow.name,
                 latest_version.id,
-                format!("{:?}", flow.visibility),
-                latest_version.created_at.format("\"%Y-%m-%d %H:%M UTC\""),
-                if tags.is_empty() { "-" } else { &tags }
             ));
         }
 
