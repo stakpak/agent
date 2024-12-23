@@ -213,3 +213,35 @@ pub struct QueryBlockFlowVersion {
     pub flow_name: String,
     pub version_id: Uuid,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum FlowRef {
+    Version {
+        owner_name: String,
+        flow_name: String,
+        version_id: String,
+    },
+    Tag {
+        owner_name: String,
+        flow_name: String,
+        tag_name: String,
+    },
+}
+
+impl FlowRef {
+    pub fn new(owner_name: String, flow_name: String, version_ref: String) -> Self {
+        match Uuid::try_parse(version_ref.as_str()) {
+            Ok(version_id) => FlowRef::Version {
+                owner_name,
+                flow_name,
+                version_id: version_id.to_string(),
+            },
+            Err(_) => FlowRef::Tag {
+                owner_name,
+                flow_name,
+                tag_name: version_ref,
+            },
+        }
+    }
+}

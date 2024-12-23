@@ -135,12 +135,36 @@ impl Client {
         }
     }
 
-    pub async fn query_blocks(&self, query: &str) -> Result<QueryBlocksResponse, String> {
-        let url = format!("{}/commands/query?query={}", self.base_url, query);
+    pub async fn query_blocks(
+        &self,
+        query: &str,
+        generate_query: bool,
+        synthesize_output: bool,
+        flow_ref: Option<&str>,
+    ) -> Result<QueryBlocksResponse, String> {
+        let url = format!("{}/commands/query", self.base_url);
+
+        let input = QueryCommandInput {
+            query: query.to_string(),
+            generate_query,
+            synthesize_output,
+            flow_ref: flow_ref.and_then(|flow_ref| {
+                let parts: Vec<&str> = flow_ref.split('/').collect();
+                if parts.len() != 3 {
+                    return None;
+                }
+                let owner_name = parts[0].to_string();
+                let flow_name = parts[1].to_string();
+                let version_ref = parts[2].to_string();
+
+                Some(FlowRef::new(owner_name, flow_name, version_ref))
+            }),
+        };
 
         let value: serde_json::Value = self
             .client
-            .get(&url)
+            .post(&url)
+            .json(&input)
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?
@@ -248,15 +272,28 @@ impl GetFlowResponse {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct QueryCommandInput {
+    query: String,
+    #[serde(default)]
+    generate_query: bool,
+    #[serde(default)]
+    synthesize_output: bool,
+    #[serde(default)]
+    flow_ref: Option<FlowRef>,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct QueryBlocksResponse {
-    pub results: Vec<QueryBlockResult>,
+    pub query_results: Vec<QueryBlockResult>,
+    pub semantic_query: String,
+    pub output: Option<String>,
 }
 
 impl QueryBlocksResponse {
     pub fn to_text(&self) -> String {
         let mut output = String::new();
-        for result in &self.results {
+        for result in &self.query_results {
             output.push_str(&format!(
                 r#"
 -------------------------------------------------------
@@ -276,6 +313,15 @@ Score: {:.2}%
                 result.block.code
             ));
         }
+
+        if !self.semantic_query.is_empty() {
+            output.push_str(&format!("\nQuery: {}\n", self.semantic_query));
+        }
+
+        if let Some(synthesized_output) = &self.output {
+            output.push_str(&format!("\nOutput: {}\n", synthesized_output));
+        }
+
         output.trim_end().to_string()
     }
 }

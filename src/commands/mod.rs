@@ -34,8 +34,13 @@ pub enum Commands {
 
     /// Query your configurations
     Query {
-        #[arg(trailing_var_arg = true)]
-        query: Vec<String>,
+        query: String,
+        #[arg(long, short)]
+        flow_ref: Option<String>,
+        #[arg(long, short)]
+        generate_query: bool,
+        #[arg(long, short)]
+        synthesize_output: bool,
     },
     // /// Deploy your app
     // Deploy,
@@ -178,9 +183,22 @@ impl Commands {
                     println!("Successfully cloned flow to \"{}\"", base_dir);
                 }
             }
-            Commands::Query { query } => {
+            Commands::Query {
+                query,
+                flow_ref,
+                generate_query,
+                synthesize_output,
+            } => {
                 if let Ok(client) = Client::new(&config) {
-                    match client.query_blocks(&query.join(" ")).await {
+                    match client
+                        .query_blocks(
+                            &query,
+                            generate_query,
+                            synthesize_output,
+                            flow_ref.as_deref(),
+                        )
+                        .await
+                    {
                         Ok(data) => println!("{}", data.to_text()),
                         Err(e) => eprintln!("Failed to query blocks {}", e),
                     };
