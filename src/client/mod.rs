@@ -1,7 +1,7 @@
 use reqwest::{header, Client as ReqwestClient, Error as ReqwestError};
 use serde::{Deserialize, Serialize};
 
-mod models;
+pub mod models;
 use models::*;
 
 use crate::config::AppConfig;
@@ -107,14 +107,9 @@ impl Client {
 
     pub async fn get_flow_documents(
         &self,
-        owner_name: &str,
-        flow_name: &str,
-        version_ref: &str,
+        flow_ref: &FlowRef,
     ) -> Result<GetFlowDocumentsResponse, String> {
-        let url = format!(
-            "{}/flows/{}/{}/{}/documents",
-            self.base_url, owner_name, flow_name, version_ref
-        );
+        let url = format!("{}/flows/{}/documents", self.base_url, flow_ref);
 
         let value: serde_json::Value = self
             .client
@@ -144,21 +139,18 @@ impl Client {
     ) -> Result<QueryBlocksResponse, String> {
         let url = format!("{}/commands/query", self.base_url);
 
+        let flow_ref = if let Some(flow_ref) = flow_ref {
+            let flow_ref: FlowRef = FlowRef::new(flow_ref.to_string())?;
+            Some(flow_ref)
+        } else {
+            None
+        };
+
         let input = QueryCommandInput {
             query: query.to_string(),
             generate_query,
             synthesize_output,
-            flow_ref: flow_ref.and_then(|flow_ref| {
-                let parts: Vec<&str> = flow_ref.split('/').collect();
-                if parts.len() != 3 {
-                    return None;
-                }
-                let owner_name = parts[0].to_string();
-                let flow_name = parts[1].to_string();
-                let version_ref = parts[2].to_string();
-
-                Some(FlowRef::new(owner_name, flow_name, version_ref))
-            }),
+            flow_ref,
         };
 
         let value: serde_json::Value = self
@@ -240,14 +232,13 @@ pub struct GetFlowResponse {
     pub resource: Flow,
 }
 impl GetFlowResponse {
-    pub fn to_text(&self) -> String {
+    pub fn to_text(&self, owner_name: &str) -> String {
         let mut output = String::new();
 
         output.push_str(&format!(
-            "{} ({:?})\n",
-            self.resource.name, self.resource.visibility
+            "Flow: {}/{} ({:?})\n\n",
+            owner_name, self.resource.name, self.resource.visibility
         ));
-        output.push_str("\nVersions:\n");
 
         let mut versions = self.resource.versions.clone();
         versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -261,10 +252,12 @@ impl GetFlowResponse {
                 .join(", ");
 
             output.push_str(&format!(
-                "{:<40} \"{:<20}\" {}\n",
-                version.id,
+                "\"{:<20}\" {} {}/{}/{} \n",
                 version.created_at.format("%Y-%m-%d %H:%M UTC"),
-                if tags.is_empty() { "-" } else { &tags }
+                if tags.is_empty() { "-" } else { &tags },
+                owner_name,
+                self.resource.name,
+                version.id,
             ));
         }
 

@@ -229,9 +229,37 @@ pub enum FlowRef {
     },
 }
 
+impl std::fmt::Display for FlowRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlowRef::Version {
+                owner_name,
+                flow_name,
+                version_id,
+            } => write!(f, "{}/{}/{}", owner_name, flow_name, version_id),
+            FlowRef::Tag {
+                owner_name,
+                flow_name,
+                tag_name,
+            } => write!(f, "{}/{}/{}", owner_name, flow_name, tag_name),
+        }
+    }
+}
+
 impl FlowRef {
-    pub fn new(owner_name: String, flow_name: String, version_ref: String) -> Self {
-        match Uuid::try_parse(version_ref.as_str()) {
+    pub fn new(flow_ref: String) -> Result<Self, String> {
+        let parts: Vec<&str> = flow_ref.split('/').collect();
+        if parts.len() != 3 {
+            return Err(
+                "Flow ref must be of the format <owner name>/<flow name>/<flow version id or tag>"
+                    .into(),
+            );
+        }
+        let owner_name = parts[0].to_string();
+        let flow_name = parts[1].to_string();
+        let version_ref = parts[2].to_string();
+
+        let flow_version = match Uuid::try_parse(version_ref.as_str()) {
             Ok(version_id) => FlowRef::Version {
                 owner_name,
                 flow_name,
@@ -242,6 +270,7 @@ impl FlowRef {
                 flow_name,
                 tag_name: version_ref,
             },
-        }
+        };
+        Ok(flow_version)
     }
 }
