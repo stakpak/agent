@@ -286,16 +286,19 @@ pub struct QueryCommandInput {
 #[derive(Deserialize, Debug)]
 pub struct QueryBlocksResponse {
     pub query_results: Vec<QueryBlockResult>,
-    pub semantic_query: String,
+    // not used
+    // pub semantic_query: String,
     pub output: Option<String>,
 }
 
 impl QueryBlocksResponse {
-    pub fn to_text(&self) -> String {
+    pub fn to_text(&self, output_only: bool) -> String {
         let mut output = String::new();
-        for result in &self.query_results {
-            output.push_str(&format!(
-                r#"
+
+        if !output_only {
+            for result in &self.query_results {
+                output.push_str(&format!(
+                    r#"
 -------------------------------------------------------
 Flow: {} ({})
 Document: {}:{}:{}
@@ -304,22 +307,23 @@ Score: {:.2}%
 {}
 
             "#,
-                result.flow_version.flow_name,
-                result.flow_version.version_id,
-                result.block.document_uri.strip_prefix("file:///").unwrap(),
-                result.block.start_point.row,
-                result.block.start_point.column,
-                result.similarity * 100.0,
-                result.block.code
-            ));
-        }
+                    result.flow_version.flow_name,
+                    result.flow_version.version_id,
+                    result.block.document_uri.strip_prefix("file:///").unwrap(),
+                    result.block.start_point.row,
+                    result.block.start_point.column,
+                    result.similarity * 100.0,
+                    result.block.code
+                ));
+            }
 
-        if !self.semantic_query.is_empty() {
-            output.push_str(&format!("\nQuery: {}\n", self.semantic_query));
+            // if !self.semantic_query.is_empty() {
+            //     output.push_str(&format!("\nQuery: {}\n", self.semantic_query));
+            // }
         }
 
         if let Some(synthesized_output) = &self.output {
-            output.push_str(&format!("\nOutput: {}\n", synthesized_output));
+            output.push_str(&format!("{}\n", synthesized_output));
         }
 
         output.trim_end().to_string()

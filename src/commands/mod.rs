@@ -39,7 +39,7 @@ pub enum Commands {
         flow_ref: Option<String>,
         #[arg(long, short)]
         generate_query: bool,
-        #[arg(long, short)]
+        #[arg(long, short = 'o')]
         synthesize_output: bool,
     },
     // /// Deploy your app
@@ -199,7 +199,7 @@ impl Commands {
                         )
                         .await
                     {
-                        Ok(data) => println!("{}", data.to_text()),
+                        Ok(data) => println!("{}", data.to_text(synthesize_output)),
                         Err(e) => eprintln!("Failed to query blocks {}", e),
                     };
                 }
