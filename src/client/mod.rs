@@ -3,12 +3,24 @@ use serde::{Deserialize, Serialize};
 
 pub mod models;
 use models::*;
+pub mod norbert_v1;
 
 use crate::config::AppConfig;
 
 pub struct Client {
     client: ReqwestClient,
     base_url: String,
+}
+
+#[derive(Deserialize)]
+struct ApiError {
+    error: ApiErrorDetail,
+}
+
+#[derive(Deserialize)]
+struct ApiErrorDetail {
+    // key: String,
+    message: String,
 }
 
 impl Client {
@@ -38,15 +50,19 @@ impl Client {
     pub async fn get_my_account(&self) -> Result<GetMyAccountResponse, String> {
         let url = format!("{}/account", self.base_url);
 
-        let value: serde_json::Value = self
+        let response = self
             .client
             .get(&url)
             .send()
             .await
-            .map_err(|e: ReqwestError| e.to_string())?
-            .json()
-            .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetMyAccountResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
@@ -60,15 +76,19 @@ impl Client {
     pub async fn list_flows(&self, owner_name: &str) -> Result<GetFlowsResponse, String> {
         let url = format!("{}/flows/{}", self.base_url, owner_name);
 
-        let value: serde_json::Value = self
+        let response = self
             .client
             .get(&url)
             .send()
             .await
-            .map_err(|e: ReqwestError| e.to_string())?
-            .json()
-            .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowsResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
@@ -86,15 +106,19 @@ impl Client {
     ) -> Result<GetFlowResponse, String> {
         let url = format!("{}/flows/{}/{}", self.base_url, owner_name, flow_name);
 
-        let value: serde_json::Value = self
+        let response = self
             .client
             .get(&url)
             .send()
             .await
-            .map_err(|e: ReqwestError| e.to_string())?
-            .json()
-            .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
@@ -111,15 +135,19 @@ impl Client {
     ) -> Result<GetFlowDocumentsResponse, String> {
         let url = format!("{}/flows/{}/documents", self.base_url, flow_ref);
 
-        let value: serde_json::Value = self
+        let response = self
             .client
             .get(&url)
             .send()
             .await
-            .map_err(|e: ReqwestError| e.to_string())?
-            .json()
-            .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowDocumentsResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
@@ -153,17 +181,110 @@ impl Client {
             flow_ref,
         };
 
-        let value: serde_json::Value = self
+        let response = self
             .client
             .post(&url)
             .json(&input)
             .send()
             .await
-            .map_err(|e: ReqwestError| e.to_string())?
-            .json()
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<QueryBlocksResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, String> {
+        let url = format!("{}/agents/sessions", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
-        match serde_json::from_value::<QueryBlocksResponse>(value.clone()) {
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<Vec<AgentSession>>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn create_agent_session(
+        &self,
+        agent_id: AgentID,
+        visibility: AgentSessionVisibility,
+    ) -> Result<AgentSession, String> {
+        let url = format!("{}/agents/sessions", self.base_url);
+
+        let input = serde_json::json!({
+            "agent_id": agent_id,
+            "visibility": visibility,
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<AgentSession>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn run_agent(&self, input: RunAgentInput) -> Result<RunAgentOutput, String> {
+        let url = format!("{}/agents/run", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<RunAgentOutput>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);

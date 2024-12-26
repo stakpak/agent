@@ -274,3 +274,175 @@ impl FlowRef {
         Ok(flow_version)
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AgentSession {
+    pub id: Uuid,
+    pub agent_id: AgentID,
+    pub visibility: AgentSessionVisibility,
+    pub checkpoints: Vec<AgentCheckpointListItem>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+pub enum AgentID {
+    #[default]
+    #[serde(rename = "norbert:v1")]
+    NorbertV1,
+    #[serde(rename = "norbert:v0")]
+    NorbertV0,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum AgentSessionVisibility {
+    #[serde(rename = "PRIVATE")]
+    Private,
+    #[serde(rename = "PUBLIC")]
+    Public,
+}
+
+impl std::fmt::Display for AgentSessionVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentSessionVisibility::Private => write!(f, "PRIVATE"),
+            AgentSessionVisibility::Public => write!(f, "PUBLIC"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AgentCheckpointListItem {
+    pub id: Uuid,
+    pub status: AgentStatus,
+    pub execution_depth: usize,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum AgentStatus {
+    #[serde(rename = "RUNNING")]
+    Running,
+    #[serde(rename = "COMPLETE")]
+    Complete,
+    #[serde(rename = "BLOCKED")]
+    Blocked,
+    #[serde(rename = "FAILED")]
+    Failed,
+}
+impl std::fmt::Display for AgentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentStatus::Running => write!(f, "RUNNING"),
+            AgentStatus::Complete => write!(f, "COMPLETE"),
+            AgentStatus::Blocked => write!(f, "BLOCKED"),
+            AgentStatus::Failed => write!(f, "FAILED"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RunAgentOutput {
+    pub checkpoint: AgentCheckpointListItem,
+
+    pub output: AgentOutput,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "agent_id")]
+pub enum AgentOutput {
+    #[serde(rename = "norbert:v1")]
+    NorbertV1 {
+        message: Option<String>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: super::norbert_v1::state::Scratchpad,
+    },
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum Action {
+    AskUser {
+        id: String,
+        status: ActionStatus,
+
+        args: AskUserArgs,
+
+        answers: Vec<String>,
+    },
+    RunCommand {
+        id: String,
+        status: ActionStatus,
+
+        args: RunCommandArgs,
+
+        exit_code: Option<i32>,
+        output: Option<String>,
+    },
+}
+
+#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ActionStatus {
+    PendingHumanApproval,
+    #[default]
+    Pending,
+    Succeeded,
+    Failed,
+    Aborted,
+}
+
+impl std::fmt::Display for ActionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ActionStatus::PendingHumanApproval => write!(f, "PENDING_HUMAN_APPROVAL"),
+            ActionStatus::Pending => write!(f, "PENDING"),
+            ActionStatus::Succeeded => write!(f, "SUCCEEDED"),
+            ActionStatus::Failed => write!(f, "FAILED"),
+            ActionStatus::Aborted => write!(f, "ABORTED"),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+/// Ask the user clarifying questions or more information
+pub struct AskUserArgs {
+    /// Brief description of why you're asking the user
+    pub description: String,
+    /// Detailed reasoning for why you need this information
+    pub reasoning: String,
+    /// List of questions to ask the user
+    pub questions: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+/// Run a shell command and get the output
+pub struct RunCommandArgs {
+    /// Brief description of why you're asking the user
+    pub description: String,
+    /// Detailed reasoning for why you need this information
+    pub reasoning: String,
+    /// The shell command to execute
+    pub command: String,
+    /// Command to run to undo the changes if needed
+    pub rollback_command: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RunAgentInput {
+    pub checkpoint_id: Uuid,
+
+    pub input: AgentInput,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "agent_id")]
+pub enum AgentInput {
+    #[serde(rename = "norbert:v1")]
+    NorbertV1 {
+        user_prompt: Option<String>,
+        action_queue: Option<Vec<Action>>,
+        scratchpad: Option<super::norbert_v1::state::Scratchpad>,
+    },
+}

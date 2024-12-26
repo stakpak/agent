@@ -20,7 +20,13 @@ async fn main() {
     let cli = Cli::parse();
 
     match AppConfig::load() {
-        Ok(config) => cli.command.run(config).await,
+        Ok(config) => match Commands::run(cli.command, config).await {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Ops! something went wrong: {}", e);
+                std::process::exit(1);
+            }
+        },
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
 }
