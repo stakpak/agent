@@ -1,4 +1,5 @@
 FROM rust:1.82.0-slim-bookworm AS builder
+RUN apt-get update && apt-get install -y pkg-config libssl-dev
 WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release --target-dir /usr/src/app/target
@@ -6,8 +7,8 @@ RUN strip /usr/src/app/target/release/stakpak
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/stakpak/cli" \
-      org.opencontainers.image.description="Stakpak CLI Tool" \
-      maintainer="contact@stakpak.dev"
+    org.opencontainers.image.description="Stakpak CLI Tool" \
+    maintainer="contact@stakpak.dev"
 
 RUN apt-get update -y && apt-get install -y curl \
     unzip \
