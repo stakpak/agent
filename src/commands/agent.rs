@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::Subcommand;
 use tokio::process;
 use uuid::Uuid;
@@ -17,6 +19,12 @@ use crate::{
 pub enum AgentCommands {
     /// List agent sessions
     List,
+
+    /// Get agent checkpoint details
+    Get {
+        /// Checkpoint ID to inspect
+        checkpoint_id: String,
+    },
 
     /// Run the Stakpak Agent
     Run {
@@ -95,6 +103,7 @@ impl AgentCommands {
                             action_queue,
                             action_history: _,
                             scratchpad: _,
+                            user_prompt: _,
                         } => {
                             if let Some(message) = message {
                                 println!("\n{}", message);
@@ -130,6 +139,12 @@ impl AgentCommands {
                         input: next_agent_input,
                     };
                 }
+            }
+            AgentCommands::Get { checkpoint_id } => {
+                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let checkpoint_uuid = Uuid::from_str(&checkpoint_id).map_err(|e| e.to_string())?;
+                let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
             }
         }
         Ok(())

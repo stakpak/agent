@@ -357,6 +357,7 @@ pub enum AgentOutput {
         action_queue: Vec<Action>,
         action_history: Vec<Action>,
         scratchpad: super::norbert_v1::state::Scratchpad,
+        user_prompt: String,
     },
 }
 
