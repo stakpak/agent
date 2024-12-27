@@ -6,7 +6,7 @@ use crate::{
     client::{
         models::{
             Action, ActionStatus, AgentID, AgentInput, AgentOutput, AgentSessionVisibility,
-            RunAgentInput,
+            AgentStatus, RunAgentInput,
         },
         Client,
     },
@@ -111,6 +111,18 @@ impl AgentCommands {
                                 scratchpad: None,
                             }
                         }
+                    };
+
+                    match output.checkpoint.status {
+                        AgentStatus::Complete => {
+                            println!("[Mission Accomplished]");
+                            break;
+                        }
+                        AgentStatus::Failed => {
+                            println!("[Mission Failed :'(]");
+                            break;
+                        }
+                        _ => {}
                     };
 
                     input = RunAgentInput {
