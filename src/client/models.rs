@@ -316,8 +316,13 @@ pub struct AgentCheckpointListItem {
     pub id: Uuid,
     pub status: AgentStatus,
     pub execution_depth: usize,
+    pub parent: Option<AgentParentCheckpoint>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AgentParentCheckpoint {
+    pub id: Uuid,
 }
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum AgentStatus {
@@ -383,6 +388,31 @@ pub enum Action {
     },
 }
 
+impl Action {
+    pub fn get_id(&self) -> &String {
+        match self {
+            Action::AskUser { id, .. } => id,
+            Action::RunCommand { id, .. } => id,
+        }
+    }
+    pub fn get_status(&self) -> &ActionStatus {
+        match self {
+            Action::AskUser { status, .. } => status,
+            Action::RunCommand { status, .. } => status,
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        match self.get_status() {
+            ActionStatus::PendingHumanApproval => true,
+            ActionStatus::Pending => true,
+            ActionStatus::Succeeded => false,
+            ActionStatus::Failed => false,
+            ActionStatus::Aborted => false,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ActionStatus {
@@ -444,6 +474,7 @@ pub enum AgentInput {
     NorbertV1 {
         user_prompt: Option<String>,
         action_queue: Option<Vec<Action>>,
+        action_history: Option<Vec<Action>>,
         scratchpad: Option<super::norbert_v1::state::Scratchpad>,
     },
 }

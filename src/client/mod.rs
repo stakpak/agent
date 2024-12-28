@@ -268,7 +268,7 @@ impl Client {
         }
     }
 
-    pub async fn run_agent(&self, input: RunAgentInput) -> Result<RunAgentOutput, String> {
+    pub async fn run_agent(&self, input: &RunAgentInput) -> Result<RunAgentOutput, String> {
         let url = format!("{}/agents/run", self.base_url);
 
         let response = self
