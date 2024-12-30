@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::{dave_v1, norbert_v1};
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetFlowPermission {
     pub read: bool,
@@ -290,8 +292,20 @@ pub enum AgentID {
     #[default]
     #[serde(rename = "norbert:v1")]
     NorbertV1,
-    #[serde(rename = "norbert:v0")]
-    NorbertV0,
+    #[serde(rename = "dave:v1")]
+    DaveV1,
+}
+
+impl std::str::FromStr for AgentID {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "norbert:v1" => Ok(AgentID::NorbertV1),
+            "dave:v1" => Ok(AgentID::DaveV1),
+            _ => Err(format!("Invalid agent ID: {}", s)),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -344,26 +358,6 @@ impl std::fmt::Display for AgentStatus {
             AgentStatus::Failed => write!(f, "FAILED"),
         }
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct RunAgentOutput {
-    pub checkpoint: AgentCheckpointListItem,
-
-    pub output: AgentOutput,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(tag = "agent_id")]
-pub enum AgentOutput {
-    #[serde(rename = "norbert:v1")]
-    NorbertV1 {
-        message: Option<String>,
-        action_queue: Vec<Action>,
-        action_history: Vec<Action>,
-        scratchpad: super::norbert_v1::state::Scratchpad,
-        user_prompt: String,
-    },
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -468,6 +462,13 @@ pub struct RunAgentInput {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RunAgentOutput {
+    pub checkpoint: AgentCheckpointListItem,
+
+    pub output: AgentOutput,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "agent_id")]
 pub enum AgentInput {
     #[serde(rename = "norbert:v1")]
@@ -475,6 +476,43 @@ pub enum AgentInput {
         user_prompt: Option<String>,
         action_queue: Option<Vec<Action>>,
         action_history: Option<Vec<Action>>,
-        scratchpad: Option<super::norbert_v1::state::Scratchpad>,
+        scratchpad: Box<Option<norbert_v1::state::Scratchpad>>,
     },
+    #[serde(rename = "dave:v1")]
+    DaveV1 {
+        user_prompt: Option<String>,
+        action_queue: Option<Vec<Action>>,
+        action_history: Option<Vec<Action>>,
+        scratchpad: Box<Option<dave_v1::state::Scratchpad>>,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "agent_id")]
+pub enum AgentOutput {
+    #[serde(rename = "norbert:v1")]
+    NorbertV1 {
+        message: Option<String>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: Box<norbert_v1::state::Scratchpad>,
+        user_prompt: String,
+    },
+    #[serde(rename = "dave:v1")]
+    DaveV1 {
+        message: Option<String>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: Box<dave_v1::state::Scratchpad>,
+        user_prompt: String,
+    },
+}
+
+impl AgentOutput {
+    pub fn get_agent_id(&self) -> AgentID {
+        match self {
+            AgentOutput::NorbertV1 { .. } => AgentID::NorbertV1,
+            AgentOutput::DaveV1 { .. } => AgentID::DaveV1,
+        }
+    }
 }

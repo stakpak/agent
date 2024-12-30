@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub mod models;
 use models::*;
 use uuid::Uuid;
+pub mod dave_v1;
 pub mod norbert_v1;
 
 use crate::config::AppConfig;

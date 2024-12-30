@@ -57,7 +57,7 @@ pub enum Commands {
         #[arg(long, short = 'o')]
         synthesize_output: bool,
     },
-    /// Stakpak Agent
+    /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
     Agent(AgentCommands),
     // /// Import existing configurations
@@ -179,7 +179,18 @@ impl Commands {
                 let skin = MadSkin::default();
                 println!("{}", skin.inline(&data.to_text(synthesize_output)));
             }
-            Commands::Agent(agent_commands) => AgentCommands::run(agent_commands, config).await?,
+            Commands::Agent(agent_commands) => {
+                if let AgentCommands::Get { .. } = agent_commands {
+                } else {
+                    println!();
+                    println!(
+                    "[WARNING: These agents are in early alpha development and may be unstable]"
+                );
+                    println!();
+                };
+
+                AgentCommands::run(agent_commands, config).await?;
+            }
         }
         Ok(())
     }
