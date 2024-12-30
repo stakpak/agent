@@ -392,41 +392,36 @@ impl Action {
                 {
                     Ok(output) => {
                         let exit_code = output.status.code().unwrap_or(1);
-                        if exit_code == 0 {
-                            let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
-                            // Truncate long output
-                            const MAX_OUTPUT_LENGTH: usize = 4000;
-                            if stdout.len() > MAX_OUTPUT_LENGTH {
-                                let offset = MAX_OUTPUT_LENGTH / 2;
-                                stdout = format!(
-                                    "{}\n...truncated...\n{}",
-                                    &stdout[..offset],
-                                    &stdout[stdout.len() - offset..]
-                                );
-                            }
+                        const MAX_OUTPUT_LENGTH: usize = 4000;
 
-                            println!("{}", stdout);
-
-                            Ok(Action::RunCommand {
-                                id,
-                                status: ActionStatus::Succeeded,
-                                args,
-                                exit_code: Some(exit_code),
-                                output: Some(stdout),
-                            })
+                        let (status, output_bytes) = if exit_code == 0 {
+                            (ActionStatus::Succeeded, output.stdout)
                         } else {
-                            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                            println!("{}", stderr);
+                            (ActionStatus::Failed, output.stderr)
+                        };
 
-                            Ok(Action::RunCommand {
-                                id,
-                                status: ActionStatus::Failed,
-                                args,
-                                exit_code: Some(exit_code),
-                                output: Some(stderr),
-                            })
+                        let mut output_str = String::from_utf8_lossy(&output_bytes).to_string();
+
+                        // Truncate long output
+                        if output_str.len() > MAX_OUTPUT_LENGTH {
+                            let offset = MAX_OUTPUT_LENGTH / 2;
+                            output_str = format!(
+                                "{}\n...truncated...\n{}",
+                                &output_str[..offset],
+                                &output_str[output_str.len() - offset..]
+                            );
                         }
+
+                        println!("{}", output_str);
+
+                        Ok(Action::RunCommand {
+                            id,
+                            status,
+                            args,
+                            exit_code: Some(exit_code),
+                            output: Some(output_str),
+                        })
                     }
                     Err(e) => Err(e),
                 }?;
