@@ -18,6 +18,8 @@ pub mod agent;
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Get CLI Version
+    Version,
     /// Login to Stakpak
     Login {
         /// API key for authentication
@@ -480,6 +482,12 @@ impl Commands {
                 };
 
                 AgentCommands::run(agent_commands, config).await?;
+            }
+            Commands::Version => {
+                println!(
+                    "stakpak v{} (https://github.com/stakpak/cli)",
+                    env!("CARGO_PKG_VERSION")
+                );
             }
         }
         Ok(())
