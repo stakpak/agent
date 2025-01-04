@@ -448,6 +448,17 @@ impl Commands {
                 }
 
                 let save_result = client.save_edits(&flow_ref, edits).await?;
+
+                if !save_result.errors.is_empty() {
+                    println!("\nSave errors:");
+                    for error in save_result.errors {
+                        println!("\t{}: {}", error.uri, error.message);
+                        if let Some(details) = error.details {
+                            println!("\t\t{}", details);
+                        }
+                    }
+                }
+
                 let total_blocks =
                     save_result.created_blocks.len() + save_result.modified_blocks.len();
 
