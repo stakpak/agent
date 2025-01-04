@@ -134,13 +134,13 @@ impl Client {
 
     pub async fn create_flow(
         &self,
-        name: &str,
+        flow_name: &str,
         visibility: Option<FlowVisibility>,
     ) -> Result<CreateFlowResponse, String> {
         let url = format!("{}/flows", self.base_url);
 
         let input = CreateFlowInput {
-            name: name.to_string(),
+            name: flow_name.to_string(),
             visibility,
         };
 

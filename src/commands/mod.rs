@@ -234,9 +234,10 @@ impl Commands {
 
                         if create {
                             let result = client.create_flow(flow_name, None).await?;
+                            println!("Created flow: {}/{}", result.owner_name, result.flow_name);
                             FlowRef::Version {
-                                owner_name: owner_name.to_string(),
-                                flow_name: flow_name.to_string(),
+                                owner_name: result.owner_name,
+                                flow_name: result.flow_name,
                                 version_id: result.version_id.to_string(),
                             }
                         } else {
@@ -434,7 +435,7 @@ impl Commands {
                 println!("\nSyncing {} files", files_synced);
                 println!("Deleting {} files", files_deleted);
 
-                if !auto_approve {
+                if !auto_approve && !create {
                     println!("\nDo you want to continue? Type 'yes' to confirm: ");
                     let mut input = String::new();
                     std::io::stdin()
