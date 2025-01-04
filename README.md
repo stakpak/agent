@@ -10,7 +10,7 @@ A CLI for the Stakpak API. Manage all your DevOps flows and configurations in on
 ### Homebrew (macOS & Linux)
 
 ```bash
-brew tap stakpak/homebrew-stakpak
+brew tap stakpak/stakpak
 brew install stakpak
 ```
 
