@@ -55,15 +55,30 @@ docker run ghcr.io/stakpak/stakpak:latest <command>
 
 ### Authentication
 
-You can also use the env var `STAKPAK_API_KEY`.
+#### Create an API Key
 
-Login with your API key (alternative to env var)
+1. Visit [stakpak.ai](https://stakpak.ai)
+2. Click "Login" in the top right
+
+   <img src="assets/login.png" width="800">
+
+3. Click "Create API Key" in the account menu
+
+   <img src="assets/apikeys.png" width="800">
+
+#### Set the environment variable `STAKPAK_API_KEY`
 
 ```bash
-stakpak login --api-key <YOUR_API_KEY>
+export STAKPAK_API_KEY=<mykey>
 ```
 
-View current account
+#### Save your API key to `~/.stakpak/config.toml`
+
+```bash
+stakpak login --api-key $STAKPAK_API_KEY
+```
+
+#### View current account (Optional)
 
 ```bash
 stakpak account
