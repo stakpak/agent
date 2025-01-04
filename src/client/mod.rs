@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use reqwest::{header, Client as ReqwestClient, Error as ReqwestError};
 use serde::{Deserialize, Serialize};
 
@@ -122,6 +123,75 @@ impl Client {
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn create_flow(
+        &self,
+        name: &str,
+        visibility: Option<FlowVisibility>,
+    ) -> Result<CreateFlowResponse, String> {
+        let url = format!("{}/flows", self.base_url);
+
+        let input = CreateFlowInput {
+            name: name.to_string(),
+            visibility,
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<CreateFlowResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn save_edits(
+        &self,
+        flow_ref: &FlowRef,
+        edits: Vec<Edit>,
+    ) -> Result<SaveEditsResponse, String> {
+        let url = format!("{}/flows/{}/save", self.base_url, flow_ref);
+
+        let input = SaveEditsInput { edits };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<SaveEditsResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);
@@ -474,4 +544,55 @@ Score: {:.2}%
 
         output.trim_end().to_string()
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateFlowResponse {
+    pub flow_name: String,
+    pub owner_name: String,
+    #[serde(rename = "type")]
+    pub response_type: String,
+    pub version_id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateFlowInput {
+    pub name: String,
+    pub visibility: Option<FlowVisibility>,
+}
+
+#[derive(Serialize)]
+pub struct SaveEditsInput {
+    pub edits: Vec<Edit>,
+}
+
+#[derive(Serialize)]
+pub struct Edit {
+    pub content: String,
+    pub document_uri: String,
+    pub end_byte: usize,
+    pub end_column: usize,
+    pub end_row: usize,
+    pub language: String,
+    pub operation: String,
+    pub start_byte: usize,
+    pub start_column: usize,
+    pub start_row: usize,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SaveEditsResponse {
+    pub created_blocks: Vec<Block>,
+    pub modified_blocks: Vec<Block>,
+    pub removed_blocks: Vec<Block>,
+    pub errors: Vec<EditError>,
+    pub flow_ref: FlowRef,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct EditError {
+    pub details: Option<String>,
+    pub message: String,
+    pub uri: String,
 }
