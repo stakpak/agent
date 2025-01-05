@@ -42,13 +42,13 @@ sudo mv stakpak /usr/local/bin/
 ### Docker
 
 ```bash
-docker pull ghcr.io/stakpak/stakpak:latest
+docker pull ghcr.io/stakpak/cli:latest
 ```
 
 To run the CLI using Docker:
 
 ```bash
-docker run ghcr.io/stakpak/stakpak:latest <command>
+docker run ghcr.io/stakpak/cli:latest <command>
 ```
 
 ## Usage
