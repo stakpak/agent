@@ -59,13 +59,6 @@ jobs:
 
       - name: Prepare binary
         if: startsWith(github.ref, 'refs/tags/')
-        shell: ${{ contains(matrix.os, 'windows') && 'pwsh' || 'bash' }}
-        run: |
-          cd target/${{ matrix.target }}/release
-          ${{ contains(matrix.os, 'windows') && '7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe' || 'tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}' }}
-
-      - name: Prepare binary
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
