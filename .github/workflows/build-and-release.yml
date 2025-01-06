@@ -59,10 +59,10 @@ jobs:
 
       - name: Prepare binary
         if: startsWith(github.ref, 'refs/tags/')
-        shell: ${{ github.runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        shell: ${{ contains(matrix.os, 'windows') && 'pwsh' || 'bash' }}
         run: |
           cd target/${{ matrix.target }}/release
-          ${{ github.runner.os == 'Windows' && '7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe' || 'tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}' }}
+          ${{ contains(matrix.os, 'windows') && '7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe' || 'tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}' }}
 
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/')
