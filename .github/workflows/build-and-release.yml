@@ -59,9 +59,10 @@ jobs:
 
       - name: Prepare binary
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          if [ "$RUNNER_OS" == "Windows" ]; then
             7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe
           else
             tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}
