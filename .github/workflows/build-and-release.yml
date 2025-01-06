@@ -64,6 +64,17 @@ jobs:
           cd target/${{ matrix.target }}/release
           ${{ contains(matrix.os, 'windows') && '7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe' || 'tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}' }}
 
+      - name: Prepare binary
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe
+          else
+            tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}
+          fi
+
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
