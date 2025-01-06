@@ -21,21 +21,21 @@ Download the latest binary for your platform from our [GitHub Releases](https://
 #### Linux (x86_64)
 
 ```bash
-curl -L "https://github.com/stakpak/cli/releases/latest/download/stakpak-linux-x86_64.tar.gz" | tar xz
+curl -L "https://github.com/stakpak/cli/releases/v0.1.21/download/stakpak-linux-x86_64.tar.gz" | tar xz
 sudo mv stakpak /usr/local/bin/
 ```
 
 #### macOS (Intel)
 
 ```bash
-curl -L "https://github.com/stakpak/cli/releases/latest/download/stakpak-darwin-x86_64.tar.gz" | tar xz
+curl -L "https://github.com/stakpak/cli/releases/v0.1.21/download/stakpak-darwin-x86_64.tar.gz" | tar xz
 sudo mv stakpak /usr/local/bin/
 ```
 
 #### macOS (Apple Silicon)
 
 ```bash
-curl -L "https://github.com/stakpak/cli/releases/latest/download/stakpak-darwin-aarch64.tar.gz" | tar xz
+curl -L "https://github.com/stakpak/cli/releases/v0.1.21/download/stakpak-darwin-aarch64.tar.gz" | tar xz
 sudo mv stakpak /usr/local/bin/
 ```
 
