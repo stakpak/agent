@@ -59,13 +59,10 @@ jobs:
 
       - name: Prepare binary
         if: startsWith(github.ref, 'refs/tags/')
+        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
         run: |
           cd target/${{ matrix.target }}/release
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe
-          else
-            tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}
-          fi
+          ${{ runner.os == 'Windows' && '7z a ../../../${{ matrix.artifact_name }}.zip ${{ env.BINARY_NAME }}.exe' || 'tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ env.BINARY_NAME }}' }}
 
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/')
