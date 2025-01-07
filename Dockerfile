@@ -7,7 +7,7 @@ RUN strip /usr/src/app/target/release/stakpak
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/stakpak/cli" \
-    org.opencontainers.image.description="Stakpak CLI Tool with Docker support" \
+    org.opencontainers.image.description="Stakpak CLI Tool" \
     maintainer="contact@stakpak.dev"
 
 # Install basic dependencies
