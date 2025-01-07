@@ -18,37 +18,12 @@ brew install stakpak
 
 Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/cli/releases).
 
-#### Linux (x86_64)
-
-```bash
-curl -L "https://github.com/stakpak/cli/releases/v0.1.22/download/stakpak-linux-x86_64.tar.gz" | tar xz
-sudo mv stakpak /usr/local/bin/
-```
-
-#### macOS (Intel)
-
-```bash
-curl -L "https://github.com/stakpak/cli/releases/v0.1.22/download/stakpak-darwin-x86_64.tar.gz" | tar xz
-sudo mv stakpak /usr/local/bin/
-```
-
-#### macOS (Apple Silicon)
-
-```bash
-curl -L "https://github.com/stakpak/cli/releases/v0.1.22/download/stakpak-darwin-aarch64.tar.gz" | tar xz
-sudo mv stakpak /usr/local/bin/
-```
-
 ### Docker
-
-```bash
-docker pull ghcr.io/stakpak/cli:latest
-```
 
 To run the CLI using Docker:
 
 ```bash
-docker run ghcr.io/stakpak/cli:latest <command>
+docker run -it ghcr.io/stakpak/cli:latest
 ```
 
 ## Usage
