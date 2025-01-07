@@ -10,7 +10,9 @@ LABEL org.opencontainers.image.source="https://github.com/stakpak/cli" \
     org.opencontainers.image.description="Stakpak CLI Tool" \
     maintainer="contact@stakpak.dev"
 
-RUN apt-get update -y && apt-get install -y curl \
+# Install basic dependencies
+RUN apt-get update -y && apt-get install -y \
+    curl \
     unzip \
     git \
     apt-transport-https \
@@ -20,6 +22,18 @@ RUN apt-get update -y && apt-get install -y curl \
     wget \
     jq \
     dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo \
+    "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+    "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+    tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Install aws cli
@@ -56,10 +70,11 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 # Install azure cli
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 
-WORKDIR /usr/local/bin
-COPY --from=builder /usr/src/app/target/release/stakpak .
+COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
 
-#USER nobody
+# Create docker group
+RUN groupadd -r docker
+
 ENTRYPOINT ["/usr/local/bin/stakpak"]
 CMD ["--help"]
