@@ -70,8 +70,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 # Install azure cli
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 
-WORKDIR /usr/local/bin
-COPY --from=builder /usr/src/app/target/release/stakpak .
+COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
 
 # Create docker group
