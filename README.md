@@ -32,7 +32,7 @@ docker run -it ghcr.io/stakpak/cli:latest
 
 #### Create an API Key
 
-1. Visit [stakpak.ai](https://stakpak.ai)
+1. Visit [stakpak.dev](https://stakpak.dev)
 2. Click "Login" in the top right
 
    <img src="assets/login.png" width="800">
