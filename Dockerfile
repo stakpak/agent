@@ -73,7 +73,7 @@ RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
 
-WORKDIR /apps/
+WORKDIR /agent/
 
 # Create docker group
 RUN groupadd -r docker
