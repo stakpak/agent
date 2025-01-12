@@ -6,6 +6,7 @@ pub mod models;
 use models::*;
 use uuid::Uuid;
 pub mod dave_v1;
+pub mod kevin_v1;
 pub mod norbert_v1;
 
 use crate::config::AppConfig;
@@ -307,12 +308,14 @@ impl Client {
         &self,
         agent_id: AgentID,
         visibility: AgentSessionVisibility,
+        input: Option<AgentInput>,
     ) -> Result<AgentSession, String> {
         let url = format!("{}/agents/sessions", self.base_url);
 
         let input = serde_json::json!({
             "agent_id": agent_id,
             "visibility": visibility,
+            "input": input,
         });
 
         let response = self
@@ -585,9 +588,9 @@ pub struct Edit {
 pub struct SaveEditsResponse {
     pub created_blocks: Vec<Block>,
     pub modified_blocks: Vec<Block>,
-    pub removed_blocks: Vec<Block>,
+    // pub removed_blocks: Vec<Block>,
     pub errors: Vec<EditError>,
-    pub flow_ref: FlowRef,
+    // pub flow_ref: FlowRef,
 }
 
 #[derive(Deserialize, Debug)]

@@ -1,7 +1,8 @@
-use std::str::FromStr;
-
 use clap::Subcommand;
+use std::str::FromStr;
 use tokio::process;
+use tokio_process_stream::{Item, ProcessLineStream};
+use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::{
@@ -38,12 +39,12 @@ pub enum AgentCommands {
         checkpoint_id: Option<String>,
         /// Agent ID to use (norbert:v1, dave:v1)
         #[arg(long, short)]
-        agent_id: Option<AgentID>,
+        agent_id: AgentID,
     },
 }
 
 impl AgentCommands {
-    pub async fn run(self, config: AppConfig) -> Result<(), String> {
+    pub async fn run(self, config: AppConfig, short_circuit_actions: bool) -> Result<(), String> {
         match self {
             AgentCommands::Agents => {
                 println!();
@@ -83,81 +84,22 @@ impl AgentCommands {
             }
             AgentCommands::Run {
                 user_prompt,
-                checkpoint_id,
                 agent_id,
+                checkpoint_id,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
-                let (agent_id, checkpoint) = match checkpoint_id {
-                    Some(checkpoint_id) => {
-                        let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
-                            format!(
-                                "Invalid checkpoint ID '{}' - must be a valid UUID",
-                                checkpoint_id
-                            )
-                        })?;
 
-                        let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
+                let mut input = AgentInput::new(&agent_id);
+                input.set_user_prompt(user_prompt);
 
-                        (output.output.get_agent_id(), output.checkpoint)
-                    }
-                    None => {
-                        let agent_id = agent_id.unwrap_or(AgentID::NorbertV1);
-                        let session = client
-                            .create_agent_session(agent_id.clone(), AgentSessionVisibility::Private)
-                            .await?;
-
-                        let checkpoint = session
-                            .checkpoints
-                            .first()
-                            .ok_or("No checkpoint found in new session")?
-                            .clone();
-
-                        (agent_id, checkpoint)
-                    }
-                };
-
-                let mut input = RunAgentInput {
-                    checkpoint_id: checkpoint.id,
-                    input: match agent_id {
-                        AgentID::NorbertV1 => AgentInput::NorbertV1 {
-                            user_prompt,
-                            action_queue: None,
-                            action_history: None,
-                            scratchpad: Box::new(None),
-                        },
-                        AgentID::DaveV1 => AgentInput::DaveV1 {
-                            user_prompt,
-                            action_queue: None,
-                            action_history: None,
-                            scratchpad: Box::new(None),
-                        },
-                    },
-                };
-
-                loop {
-                    println!("[Thinking...]");
-                    let output = client.run_agent(&input).await?;
-                    println!(
-                        "[Current Checkpoint {} (Agent Status: {})]",
-                        output.checkpoint.id, output.checkpoint.status
-                    );
-
-                    let next_input = get_next_input(&agent_id, &client, &output).await?;
-
-                    match output.checkpoint.status {
-                        AgentStatus::Complete => {
-                            println!("[Mission Accomplished]");
-                            break;
-                        }
-                        AgentStatus::Failed => {
-                            println!("[Mission Failed :'(]");
-                            break;
-                        }
-                        _ => {}
-                    };
-
-                    input = next_input;
-                }
+                run_agent(
+                    &client,
+                    agent_id,
+                    checkpoint_id,
+                    Some(input),
+                    short_circuit_actions,
+                )
+                .await?;
             }
             AgentCommands::Get { checkpoint_id } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
@@ -170,11 +112,103 @@ impl AgentCommands {
     }
 }
 
-async fn run_actions(action_queue: Vec<Action>) -> Result<Vec<Action>, String> {
+pub async fn run_agent(
+    client: &Client,
+    agent_id: AgentID,
+    checkpoint_id: Option<String>,
+    input: Option<AgentInput>,
+    short_circuit_actions: bool,
+) -> Result<Uuid, String> {
+    let (agent_id, checkpoint) = match checkpoint_id {
+        Some(checkpoint_id) => {
+            let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
+                format!(
+                    "Invalid checkpoint ID '{}' - must be a valid UUID",
+                    checkpoint_id
+                )
+            })?;
+
+            let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
+
+            (output.output.get_agent_id(), output.checkpoint)
+        }
+        None => {
+            let session = client
+                .create_agent_session(
+                    agent_id.clone(),
+                    AgentSessionVisibility::Private,
+                    input.clone(),
+                )
+                .await?;
+
+            let checkpoint = session
+                .checkpoints
+                .first()
+                .ok_or("No checkpoint found in new session")?
+                .clone();
+
+            (agent_id, checkpoint)
+        }
+    };
+
+    let mut input = RunAgentInput {
+        checkpoint_id: checkpoint.id,
+        input: match input {
+            Some(input) => input,
+            None => AgentInput::new(&agent_id),
+        },
+    };
+
+    loop {
+        println!("[ ▄▀ Stakpaking... ]");
+        let output = client.run_agent(&input).await?;
+        println!(
+            "[Current Checkpoint {} (Agent Status: {})]",
+            output.checkpoint.id, output.checkpoint.status
+        );
+
+        input = get_next_input(&agent_id, client, &output, short_circuit_actions).await?;
+
+        match output.checkpoint.status {
+            AgentStatus::Complete => {
+                println!("[Mission Accomplished]");
+                break;
+            }
+            AgentStatus::Failed => {
+                println!("[Mission Failed :'(]");
+                break;
+            }
+            _ => {}
+        };
+    }
+
+    Ok(input.checkpoint_id)
+}
+
+async fn run_actions(
+    action_queue: Vec<Action>,
+    short_circuit_actions: bool,
+) -> Result<Vec<Action>, String> {
     let mut updated_actions = Vec::with_capacity(action_queue.len());
     for action in action_queue.into_iter().filter(|a| a.is_pending()) {
-        updated_actions.push(action.run().await?);
+        let updated_action = action.run().await?;
+
+        if short_circuit_actions {
+            if let Action::RunCommand {
+                exit_code: Some(code),
+                ..
+            } = &updated_action
+            {
+                if *code != 0 {
+                    updated_actions.push(updated_action);
+                    return Ok(updated_actions);
+                }
+            }
+        }
+
+        updated_actions.push(updated_action);
     }
+
     Ok(updated_actions)
 }
 
@@ -182,6 +216,7 @@ async fn get_next_input(
     agent_id: &AgentID,
     client: &Client,
     output: &RunAgentOutput,
+    short_circuit_actions: bool,
 ) -> Result<RunAgentInput, String> {
     match &output.output {
         AgentOutput::NorbertV1 {
@@ -195,12 +230,18 @@ async fn get_next_input(
             action_queue,
             action_history,
             ..
+        }
+        | AgentOutput::KevinV1 {
+            message,
+            action_queue,
+            action_history,
+            ..
         } => {
             if let Some(message) = message {
                 println!("\n{}", message);
             }
 
-            let result = match run_actions(action_queue.to_owned()).await {
+            let result = match run_actions(action_queue.to_owned(), short_circuit_actions).await {
                 Ok(updated_actions) => RunAgentInput {
                     checkpoint_id: output.checkpoint.id,
                     input: match agent_id {
@@ -211,6 +252,12 @@ async fn get_next_input(
                             scratchpad: Box::new(None),
                         },
                         AgentID::DaveV1 => AgentInput::DaveV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                        AgentID::KevinV1 => AgentInput::KevinV1 {
                             user_prompt: None,
                             action_queue: Some(updated_actions),
                             action_history: None,
@@ -242,6 +289,7 @@ async fn get_next_input(
                     let parent_action_queue = match parent_run_data.output {
                         AgentOutput::NorbertV1 { action_queue, .. } => action_queue,
                         AgentOutput::DaveV1 { action_queue, .. } => action_queue,
+                        AgentOutput::KevinV1 { action_queue, .. } => action_queue,
                     };
 
                     let updated_actions = parent_action_queue
@@ -272,6 +320,12 @@ async fn get_next_input(
                                 action_history: None,
                                 scratchpad: Box::new(None),
                             },
+                            AgentID::KevinV1 => AgentInput::KevinV1 {
+                                user_prompt: Some(user_prompt_input.trim().to_string()),
+                                action_queue: Some(updated_actions),
+                                action_history: None,
+                                scratchpad: Box::new(None),
+                            },
                         },
                     }
                 }
@@ -288,7 +342,7 @@ impl Action {
         match self {
             Action::AskUser { id, args, .. } => {
                 println!(
-                    "\n[Action Description: {}] (Ctrl+P & Enter to re-prompt the agent)",
+                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
                     args.description
                 );
                 println!("[Reasoning]");
@@ -333,7 +387,7 @@ impl Action {
             }
             Action::RunCommand { id, args, .. } => {
                 println!(
-                    "\n[Action Description: {}] (Ctrl+P & Enter to re-prompt the agent)",
+                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
                     args.description
                 );
                 println!("[Reasoning]");
@@ -383,50 +437,58 @@ impl Action {
                     args.command.clone()
                 };
 
-                let output = match process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&command)
-                    .output()
-                    .await
-                    .map_err(|e| format!("Failed to execute command: {}", e))
-                {
-                    Ok(output) => {
-                        let exit_code = output.status.code().unwrap_or(1);
+                let mut cmd = process::Command::new("sh");
+                cmd.arg("-c").arg(&command);
 
-                        const MAX_OUTPUT_LENGTH: usize = 4000;
+                let mut output_lines = Vec::new();
+                let mut process_stream = ProcessLineStream::try_from(cmd)
+                    .map_err(|e| format!("Failed to create process stream: {}", e))?;
+                let mut exit_code = -1;
 
-                        let (status, output_bytes) = if exit_code == 0 {
-                            (ActionStatus::Succeeded, output.stdout)
-                        } else {
-                            (ActionStatus::Failed, output.stderr)
-                        };
-
-                        let mut output_str = String::from_utf8_lossy(&output_bytes).to_string();
-
-                        // Truncate long output
-                        if output_str.len() > MAX_OUTPUT_LENGTH {
-                            let offset = MAX_OUTPUT_LENGTH / 2;
-                            output_str = format!(
-                                "{}\n...truncated...\n{}",
-                                &output_str[..offset],
-                                &output_str[output_str.len() - offset..]
-                            );
+                while let Some(item) = process_stream.next().await {
+                    match item {
+                        Item::Stdout(line) | Item::Stderr(line) => {
+                            println!("{}", line);
+                            output_lines.push(line.to_string());
                         }
-
-                        println!("{}", output_str);
-
-                        Ok(Action::RunCommand {
-                            id,
-                            status,
-                            args,
-                            exit_code: Some(exit_code),
-                            output: Some(output_str),
-                        })
+                        Item::Done(exit_status) => {
+                            exit_code = match exit_status {
+                                Ok(status) => status.code().unwrap_or(-1),
+                                Err(e) => {
+                                    println!("Error: {}", e);
+                                    -1
+                                }
+                            };
+                        }
                     }
-                    Err(e) => Err(e),
-                }?;
+                }
 
-                Ok(output)
+                let mut output = output_lines.join("\n");
+
+                const MAX_OUTPUT_LENGTH: usize = 4000;
+                // Truncate long output
+                if output.len() > MAX_OUTPUT_LENGTH {
+                    let offset = MAX_OUTPUT_LENGTH / 2;
+                    output = format!(
+                        "{}\n...truncated...\n{}",
+                        &output[..offset],
+                        &output[output.len() - offset..]
+                    );
+                }
+
+                let status = if exit_code == 0 {
+                    ActionStatus::Succeeded
+                } else {
+                    ActionStatus::Failed
+                };
+
+                Ok(Action::RunCommand {
+                    id,
+                    status,
+                    args,
+                    exit_code: Some(exit_code),
+                    output: Some(output),
+                })
             }
         }
     }

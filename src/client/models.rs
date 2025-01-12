@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{dave_v1, norbert_v1};
+use super::{dave_v1, kevin_v1, norbert_v1};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetFlowPermission {
@@ -56,6 +56,7 @@ pub struct GetFlowDocumentsResponse {
 pub struct Document {
     pub content: String,
     pub uri: String,
+    pub provisioner: ProvisionerType,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,9 +112,28 @@ pub enum ProvisionerType {
     #[serde(rename = "None")]
     None,
 }
+impl std::str::FromStr for ProvisionerType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "terraform" => Ok(Self::Terraform),
+            "kubernetes" => Ok(Self::Kubernetes),
+            "dockerfile" => Ok(Self::Dockerfile),
+            "github-actions" => Ok(Self::GithubActions),
+            _ => Ok(Self::None),
+        }
+    }
+}
 impl std::fmt::Display for ProvisionerType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            ProvisionerType::Terraform => write!(f, "terraform"),
+            ProvisionerType::Kubernetes => write!(f, "kubernetes"),
+            ProvisionerType::Dockerfile => write!(f, "dockerfile"),
+            ProvisionerType::GithubActions => write!(f, "github-actions"),
+            ProvisionerType::None => write!(f, "none"),
+        }
     }
 }
 
@@ -294,6 +314,8 @@ pub enum AgentID {
     NorbertV1,
     #[serde(rename = "dave:v1")]
     DaveV1,
+    #[serde(rename = "kevin:v1")]
+    KevinV1,
 }
 
 impl std::str::FromStr for AgentID {
@@ -303,6 +325,7 @@ impl std::str::FromStr for AgentID {
         match s {
             "norbert:v1" => Ok(AgentID::NorbertV1),
             "dave:v1" => Ok(AgentID::DaveV1),
+            "kevin:v1" => Ok(AgentID::KevinV1),
             _ => Err(format!("Invalid agent ID: {}", s)),
         }
     }
@@ -485,6 +508,47 @@ pub enum AgentInput {
         action_history: Option<Vec<Action>>,
         scratchpad: Box<Option<dave_v1::state::Scratchpad>>,
     },
+    #[serde(rename = "kevin:v1")]
+    KevinV1 {
+        user_prompt: Option<String>,
+        action_queue: Option<Vec<Action>>,
+        action_history: Option<Vec<Action>>,
+        scratchpad: Box<Option<kevin_v1::state::Scratchpad>>,
+    },
+}
+
+impl AgentInput {
+    pub fn new(agent_id: &AgentID) -> Self {
+        match agent_id {
+            AgentID::NorbertV1 => AgentInput::NorbertV1 {
+                user_prompt: None,
+                action_queue: None,
+                action_history: None,
+                scratchpad: Box::new(None),
+            },
+            AgentID::DaveV1 => AgentInput::DaveV1 {
+                user_prompt: None,
+                action_queue: None,
+                action_history: None,
+                scratchpad: Box::new(None),
+            },
+            AgentID::KevinV1 => AgentInput::KevinV1 {
+                user_prompt: None,
+                action_queue: None,
+                action_history: None,
+                scratchpad: Box::new(None),
+            },
+        }
+    }
+    pub fn set_user_prompt(&mut self, prompt: Option<String>) {
+        match self {
+            AgentInput::NorbertV1 { user_prompt, .. }
+            | AgentInput::DaveV1 { user_prompt, .. }
+            | AgentInput::KevinV1 { user_prompt, .. } => {
+                *user_prompt = prompt;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -506,6 +570,14 @@ pub enum AgentOutput {
         scratchpad: Box<dave_v1::state::Scratchpad>,
         user_prompt: String,
     },
+    #[serde(rename = "kevin:v1")]
+    KevinV1 {
+        message: Option<String>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: Box<kevin_v1::state::Scratchpad>,
+        user_prompt: String,
+    },
 }
 
 impl AgentOutput {
@@ -513,6 +585,7 @@ impl AgentOutput {
         match self {
             AgentOutput::NorbertV1 { .. } => AgentID::NorbertV1,
             AgentOutput::DaveV1 { .. } => AgentID::DaveV1,
+            AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
         }
     }
 }
