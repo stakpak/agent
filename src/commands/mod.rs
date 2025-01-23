@@ -1,27 +1,23 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
 
-use agent::{run_agent, AgentCommands};
+use agent::{run_dockerfile_agent, run_kubernetes_agent, run_terraform_agent, AgentCommands};
 use chrono::Utc;
 use clap::Subcommand;
+use flow::{clone, get_flow_ref};
 use termimad::MadSkin;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::{
     client::{
-        models::{
-            Action, ActionStatus, AgentID, AgentInput, Document, FlowRef, ProvisionerType,
-            RunCommandArgs, TranspileTargetProvisionerType,
-        },
+        models::{Document, FlowRef, ProvisionerType, TranspileTargetProvisionerType},
         Client, Edit,
     },
     config::AppConfig,
 };
 
 pub mod agent;
+pub mod flow;
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -524,9 +520,10 @@ impl Commands {
                 }
 
                 if documents.is_empty() {
-                    return Err(
-                        format!("No {} files found to transpile", source_provisioner).into(),
-                    );
+                    return Err(format!(
+                        "No {} files found to transpile",
+                        source_provisioner
+                    ));
                 }
 
                 let result = client
@@ -610,199 +607,4 @@ impl Commands {
         }
         Ok(())
     }
-}
-
-async fn clone(
-    client: &Client,
-    flow_ref: &FlowRef,
-    dir: Option<&str>,
-) -> Result<HashMap<ProvisionerType, Vec<PathBuf>>, String> {
-    let documents = client.get_flow_documents(flow_ref).await?;
-    let base_dir = dir.unwrap_or(".");
-
-    let mut path_map = HashMap::new();
-
-    for doc in documents
-        .documents
-        .into_iter()
-        .chain(documents.additional_documents)
-    {
-        let path = doc.uri.strip_prefix("file:///").unwrap_or(&doc.uri);
-        let full_path = std::path::Path::new(&base_dir).join(path);
-
-        path_map
-            .entry(doc.provisioner)
-            .or_insert_with(Vec::new)
-            .push(full_path.clone());
-
-        // Create parent directories if they don't exist
-        if let Some(parent) = full_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
-        }
-
-        // Write the files
-        std::fs::write(&full_path, doc.content)
-            .map_err(|e| format!("Failed to write file {}: {}", full_path.display(), e))?;
-
-        println!("Cloned {} -> \"{}\"", doc.uri, full_path.display());
-    }
-
-    println!("Successfully cloned flow to \"{}\"", base_dir);
-
-    Ok(path_map)
-}
-
-async fn get_flow_ref(client: &Client, flow_ref: String) -> Result<FlowRef, String> {
-    let parts: Vec<&str> = flow_ref.split('/').collect();
-
-    Ok(match parts.len() {
-        3 => FlowRef::Version {
-            owner_name: parts[0].to_string(),
-            flow_name: parts[1].to_string(),
-            version_id: parts[2].to_string(),
-        },
-        2 => {
-            let owner_name = parts[0];
-            let flow_name = parts[1];
-
-            let res = client.get_flow(owner_name, flow_name).await?;
-
-            let latest_version = res
-                .resource
-                .versions
-                .iter()
-                .max_by_key(|v| v.created_at)
-                .ok_or("No versions found")?;
-
-            FlowRef::Version {
-                owner_name: owner_name.to_string(),
-                flow_name: flow_name.to_string(),
-                version_id: latest_version.id.to_string(),
-            }
-        }
-        _ => FlowRef::new(flow_ref).map_err(|e| format!("Failed to parse flow ref: {}", e))?,
-    })
-}
-
-async fn run_terraform_agent(client: &Client, dir: Option<String>) -> Result<Uuid, String> {
-    let dir_arg = dir
-        .as_ref()
-        .map(|d| format!("-chdir={}", d))
-        .unwrap_or_default();
-
-    let action_queue = vec![
-        Action::RunCommand {
-            id: Uuid::new_v4().to_string(),
-            status: ActionStatus::PendingHumanApproval,
-            args: RunCommandArgs {
-                description: "Initialize Terraform working directory".to_string(),
-                reasoning: "Need to initialize Terraform before we can create a plan".to_string(),
-                command: format!("terraform {} init", dir_arg),
-                rollback_command: None,
-            },
-            exit_code: None,
-            output: None,
-        },
-        Action::RunCommand {
-            id: Uuid::new_v4().to_string(),
-            status: ActionStatus::PendingHumanApproval,
-            args: RunCommandArgs {
-                description: "Create Terraform plan".to_string(),
-                reasoning: "Generate execution plan to preview changes".to_string(),
-                command: format!("terraform {} plan -out=tfplan", dir_arg),
-                rollback_command: None,
-            },
-            exit_code: None,
-            output: None,
-        },
-        Action::RunCommand {
-            id: Uuid::new_v4().to_string(),
-            status: ActionStatus::PendingHumanApproval,
-            args: RunCommandArgs {
-                description: "Apply Terraform plan".to_string(),
-                reasoning: "Apply the reviewed Terraform plan to create/update infrastructure"
-                    .to_string(),
-                command: format!("terraform {} apply -auto-approve tfplan", dir_arg),
-                rollback_command: Some(format!("terraform {} destroy -auto-approve", dir_arg)),
-            },
-            exit_code: None,
-            output: None,
-        },
-    ];
-
-    let agent_id = AgentID::KevinV1;
-    let input = AgentInput::KevinV1 {
-        user_prompt: Some("apply my Terrafrom code".into()),
-        action_queue: Some(action_queue),
-        action_history: None,
-        scratchpad: Box::new(None),
-    };
-
-    run_agent(client, agent_id, None, Some(input), true).await
-}
-
-async fn run_dockerfile_agent(client: &Client, dir: Option<String>) -> Result<Uuid, String> {
-    let dir = dir.unwrap_or(".".into());
-
-    let action_queue = vec![Action::RunCommand {
-        id: Uuid::new_v4().to_string(),
-        status: ActionStatus::PendingHumanApproval,
-        args: RunCommandArgs {
-            description: "Build Docker image".to_string(),
-            reasoning: "Build container image from Dockerfile in the specified directory"
-                .to_string(),
-            command: format!("docker build -f {}/Dockerfile {}", dir, dir),
-            rollback_command: None,
-        },
-        exit_code: None,
-        output: None,
-    }];
-
-    let agent_id = AgentID::KevinV1;
-    let input = AgentInput::KevinV1 {
-        user_prompt: Some("build my Dockerfile".into()),
-        action_queue: Some(action_queue),
-        action_history: None,
-        scratchpad: Box::new(None),
-    };
-
-    run_agent(client, agent_id, None, Some(input), true).await
-}
-
-async fn run_kubernetes_agent(client: &Client, documents: &[PathBuf]) -> Result<Uuid, String> {
-    let action_queue = vec![Action::RunCommand {
-        id: Uuid::new_v4().to_string(),
-        status: ActionStatus::PendingHumanApproval,
-        args: RunCommandArgs {
-            description: "Apply Kubernetes manifests".to_string(),
-            reasoning:
-                "Apply Kubernetes configuration files to create/update resources in the cluster"
-                    .to_string(),
-            command: documents
-                .iter()
-                .map(|p| format!("kubectl apply -f {}", p.display()))
-                .collect::<Vec<_>>()
-                .join(" && "),
-            rollback_command: Some(
-                documents
-                    .iter()
-                    .map(|p| format!("kubectl delete -f {}", p.display()))
-                    .collect::<Vec<_>>()
-                    .join(" && "),
-            ),
-        },
-        exit_code: None,
-        output: None,
-    }];
-
-    let agent_id = AgentID::KevinV1;
-    let input = AgentInput::KevinV1 {
-        user_prompt: Some("apply my Kubernetes manifests".into()),
-        action_queue: Some(action_queue),
-        action_history: None,
-        scratchpad: Box::new(None),
-    };
-
-    run_agent(client, agent_id, None, Some(input), true).await
 }
