@@ -21,8 +21,6 @@ impl SocketClient {
             .connect()
             .await?;
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
         Ok(SocketClient {
             client,
             session_id: None,

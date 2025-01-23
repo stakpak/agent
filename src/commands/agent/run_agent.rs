@@ -63,9 +63,6 @@ pub async fn run_agent(
         .await
         .set_session_id(session.id.to_string());
 
-    // Sleep for five seconds
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-
     let print = setup_output_handler(socket_client.clone());
 
     let mut input = RunAgentInput {
