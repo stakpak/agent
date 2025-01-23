@@ -137,6 +137,29 @@ impl std::fmt::Display for ProvisionerType {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
+pub enum TranspileTargetProvisionerType {
+    #[serde(rename = "EraserDSL")]
+    EraserDSL,
+}
+impl std::str::FromStr for TranspileTargetProvisionerType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "eraser" => Ok(Self::EraserDSL),
+            _ => Ok(Self::EraserDSL),
+        }
+    }
+}
+impl std::fmt::Display for TranspileTargetProvisionerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            TranspileTargetProvisionerType::EraserDSL => write!(f, "EraserDSL"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(untagged)]
 pub enum Segment {
@@ -588,4 +611,29 @@ impl AgentOutput {
             AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TranspileInput {
+    pub content: Vec<Document>,
+    pub output: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TranspileOutput {
+    pub result: TranspileResult,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TranspileResult {
+    pub blocks: Vec<Block>,
+    pub score: i32,
+    pub references: Vec<String>,
+    pub trace: TranspileTrace,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TranspileTrace {
+    pub trace_id: String,
+    pub observation_id: Option<String>,
 }
