@@ -14,7 +14,7 @@ use crate::{
     client::{
         models::{
             Action, ActionStatus, AgentID, AgentInput, Document, FlowRef, ProvisionerType,
-            RunCommandArgs,
+            RunCommandArgs, TranspileTargetProvisionerType,
         },
         Client, Edit,
     },
@@ -106,9 +106,21 @@ pub enum Commands {
         /// Provisioner type to apply (terraform, kubernetes, dockerfile, github-actions)
         #[arg(long, short = 'p')]
         provisioner: Option<ProvisionerType>,
-        // /// Don't clone configurations before applying
-        // #[arg(long, short, default_value_t = false)]
-        // no_clone: bool,
+    },
+
+    /// Transpile configurations
+    Transpile {
+        /// Source directory
+        #[arg(long, short)]
+        dir: Option<String>,
+
+        /// Source DSL to transpile from (currently only supports terraform)
+        #[arg(long, short = 's')]
+        source_provisioner: ProvisionerType,
+
+        /// Target DSL to transpile to (currently only supports eraser)
+        #[arg(long, short = 't')]
+        target_provisioner: TranspileTargetProvisionerType,
     },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
@@ -439,6 +451,97 @@ impl Commands {
                         total_blocks as f64 * 1.5 / 60.0
                     );
                 }
+            }
+            Commands::Transpile {
+                dir,
+                source_provisioner,
+                target_provisioner,
+            } => {
+                if target_provisioner != TranspileTargetProvisionerType::EraserDSL {
+                    return Err(
+                        "Currently only EraserDSL is supported as a transpile target".into(),
+                    );
+                }
+                if source_provisioner != ProvisionerType::Terraform {
+                    return Err("Currently only terraform is supported as a source DSL".into());
+                }
+
+                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let base_dir = dir.unwrap_or_else(|| ".".into());
+
+                let mut documents = Vec::new();
+
+                for entry in WalkDir::new(&base_dir)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_entry(|e| {
+                        // Skip hidden directories and non-supported files
+                        let file_name = e.file_name().to_str();
+                        match file_name {
+                            Some(name) => {
+                                // Skip hidden files/dirs that aren't just "."
+                                if name.starts_with('.') && name.len() > 1 {
+                                    return false;
+                                }
+                                // Only allow terraform files when from is terraform
+                                if e.file_type().is_file() {
+                                    name.ends_with(".tf")
+                                } else {
+                                    true // Allow directories to be traversed
+                                }
+                            }
+                            None => false,
+                        }
+                    })
+                    .filter_map(|e| e.ok())
+                {
+                    // Skip directories
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+
+                    let path = entry.path();
+                    // Skip binary files by attempting to read as UTF-8 and checking for errors
+                    let content = match std::fs::read_to_string(path) {
+                        Ok(content) => content,
+                        Err(_) => continue, // Skip file if it can't be read as valid UTF-8
+                    };
+
+                    // Convert path to URI format
+                    let document_uri = format!(
+                        "file:///{}",
+                        path.strip_prefix(&base_dir)
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    );
+
+                    documents.push(Document {
+                        content,
+                        uri: document_uri,
+                        provisioner: source_provisioner.clone(),
+                    });
+                }
+
+                if documents.is_empty() {
+                    return Err(
+                        format!("No {} files found to transpile", source_provisioner).into(),
+                    );
+                }
+
+                let result = client
+                    .transpile(documents, source_provisioner, target_provisioner)
+                    .await?;
+                println!(
+                    "{}",
+                    result
+                        .result
+                        .blocks
+                        .into_iter()
+                        .map(|b| b.code)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
             }
             Commands::Agent(agent_commands) => {
                 if let AgentCommands::Get { .. } = agent_commands {

@@ -397,6 +397,50 @@ impl Client {
             }
         }
     }
+
+    pub async fn transpile(
+        &self,
+        content: Vec<Document>,
+        source_provisioner: ProvisionerType,
+        target_provisioner: TranspileTargetProvisionerType,
+    ) -> Result<TranspileOutput, String> {
+        let url = format!(
+            "{}/commands/{}/transpile",
+            self.base_url,
+            serde_json::to_value(&source_provisioner)
+                .unwrap()
+                .as_str()
+                .unwrap()
+        );
+
+        let input = TranspileInput {
+            content,
+            output: target_provisioner.to_string(),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<TranspileOutput>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
