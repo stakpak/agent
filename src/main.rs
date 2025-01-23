@@ -3,6 +3,7 @@ use clap::Parser;
 mod client;
 mod commands;
 mod config;
+mod utils;
 
 use commands::Commands;
 use config::AppConfig;

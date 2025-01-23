@@ -1,6 +1,6 @@
 use clap::Subcommand;
-use std::str::FromStr;
-use tokio::process;
+use std::{str::FromStr, sync::Arc};
+use tokio::{process, sync::Mutex};
 use tokio_process_stream::{Item, ProcessLineStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
@@ -11,6 +11,7 @@ use crate::{
         Client,
     },
     config::AppConfig,
+    utils::socket::SocketClient,
 };
 
 mod get_next_input;
@@ -94,12 +95,18 @@ impl AgentCommands {
                 checkpoint_id,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let socket_client = Arc::new(Mutex::new(
+                    SocketClient::connect(&config)
+                        .await
+                        .map_err(|e| e.to_string())?,
+                ));
 
                 let mut input = AgentInput::new(&agent_id);
                 input.set_user_prompt(user_prompt);
 
                 run_agent(
                     &client,
+                    socket_client,
                     agent_id,
                     checkpoint_id,
                     Some(input),
@@ -119,24 +126,29 @@ impl AgentCommands {
 }
 
 impl Action {
-    pub async fn run(self) -> Result<Action, String> {
+    pub async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
         match self {
             Action::AskUser { id, args, .. } => {
-                println!(
-                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
-                    args.description
+                print(
+                    format!(
+                        "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
+                        args.description,
+                    )
+                    .as_str(),
                 );
-                println!("[Reasoning]");
+                print("[Reasoning]");
                 for line in args.reasoning.lines() {
-                    println!("  {}", line);
+                    print(format!("  {}", line).as_str());
                 }
 
                 let total_questions = args.questions.len();
                 let mut answers = Vec::new();
 
                 for (i, question) in args.questions.iter().enumerate() {
-                    println!("\n[Question {}/{}] {}", i + 1, total_questions, question);
-                    println!("(Press Enter twice to finish this answer)");
+                    print(
+                        format!("\n[Question {}/{}] {}", i + 1, total_questions, question).as_str(),
+                    );
+                    print("(Press Enter twice to finish this answer)");
 
                     let mut lines = Vec::new();
                     loop {
@@ -151,6 +163,7 @@ impl Action {
                                     // Ctrl+P
                                     return Err("re-prompt".to_string());
                                 }
+                                print(line);
                                 lines.push(line.to_string());
                             }
                             Err(e) => return Err(format!("Failed to read input: {}", e)),
@@ -167,18 +180,21 @@ impl Action {
                 })
             }
             Action::RunCommand { id, args, .. } => {
-                println!(
-                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
-                    args.description
+                print(
+                    format!(
+                        "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
+                        args.description,
+                    )
+                    .as_str(),
                 );
-                println!("[Reasoning]");
+                print("[Reasoning]");
                 for line in args.reasoning.lines() {
-                    println!("  {}", line);
+                    print(format!("  {}", line).as_str());
                 }
-                println!("\n[WARNING] About to execute the following command:");
-                println!(">{}", args.command);
+                print("\n[WARNING] About to execute the following command:");
+                print(format!(">{}", args.command).as_str());
 
-                println!("Please confirm [yes/edit/skip] (skip):");
+                print("Please confirm [yes/edit/skip] (skip):");
                 let mut input = String::new();
                 match std::io::stdin().read_line(&mut input) {
                     Ok(_) => {
@@ -190,6 +206,7 @@ impl Action {
                     Err(e) => return Err(format!("Failed to read input: {}", e)),
                 }
                 let confirmation = input.trim().to_lowercase();
+                print(confirmation.as_str());
 
                 if confirmation == "skip" {
                     return Ok(Action::RunCommand {
@@ -202,7 +219,7 @@ impl Action {
                 }
 
                 let command = if confirmation == "edit" {
-                    println!("> ");
+                    print("> ");
                     let mut edited_cmd = String::new();
                     match std::io::stdin().read_line(&mut edited_cmd) {
                         Ok(_) => {
@@ -229,14 +246,14 @@ impl Action {
                 while let Some(item) = process_stream.next().await {
                     match item {
                         Item::Stdout(line) | Item::Stderr(line) => {
-                            println!("{}", line);
+                            print(line.as_str());
                             output_lines.push(line.to_string());
                         }
                         Item::Done(exit_status) => {
                             exit_code = match exit_status {
                                 Ok(status) => status.code().unwrap_or(-1),
                                 Err(e) => {
-                                    println!("Error: {}", e);
+                                    print(format!("Error: {}", e).as_str());
                                     -1
                                 }
                             };
