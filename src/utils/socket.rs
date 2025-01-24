@@ -11,7 +11,7 @@ pub struct SocketClient {
 impl SocketClient {
     pub async fn connect(config: &AppConfig, session_id: String) -> io::Result<Self> {
         let client = ClientBuilder::new(config.api_endpoint.clone())
-            .namespace("/v1/agents")
+            .namespace("/v1/sessions")
             .reconnect(true)
             .reconnect_delay(1000, 5000)
             .opening_header(
