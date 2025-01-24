@@ -380,6 +380,28 @@ pub struct AgentCheckpointListItem {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AgentSessionListItem {
+    pub id: Uuid,
+    pub agent_id: AgentID,
+    pub visibility: AgentSessionVisibility,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<AgentSession> for AgentSessionListItem {
+    fn from(item: AgentSession) -> Self {
+        Self {
+            id: item.id,
+            agent_id: item.agent_id,
+            visibility: item.visibility,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AgentParentCheckpoint {
     pub id: Uuid,
@@ -510,7 +532,7 @@ pub struct RunAgentInput {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RunAgentOutput {
     pub checkpoint: AgentCheckpointListItem,
-
+    pub session: AgentSessionListItem,
     pub output: AgentOutput,
 }
 

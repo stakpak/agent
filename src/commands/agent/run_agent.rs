@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use std::{path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
 use crate::{
@@ -11,16 +10,19 @@ use crate::{
         Client,
     },
     commands::agent::get_next_input,
+    config::AppConfig,
+    utils::{output::setup_output_handler, socket::SocketClient},
 };
 
 pub async fn run_agent(
+    config: &AppConfig,
     client: &Client,
     agent_id: AgentID,
     checkpoint_id: Option<String>,
     input: Option<AgentInput>,
     short_circuit_actions: bool,
 ) -> Result<Uuid, String> {
-    let (agent_id, checkpoint) = match checkpoint_id {
+    let (agent_id, session, checkpoint) = match checkpoint_id {
         Some(checkpoint_id) => {
             let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
                 format!(
@@ -31,7 +33,11 @@ pub async fn run_agent(
 
             let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
 
-            (output.output.get_agent_id(), output.checkpoint)
+            (
+                output.output.get_agent_id(),
+                output.session,
+                output.checkpoint,
+            )
         }
         None => {
             let session = client
@@ -48,9 +54,17 @@ pub async fn run_agent(
                 .ok_or("No checkpoint found in new session")?
                 .clone();
 
-            (agent_id, checkpoint)
+            (agent_id, session.into(), checkpoint)
         }
     };
+
+    let socket_client = Arc::new(
+        SocketClient::connect(config, session.id.to_string())
+            .await
+            .unwrap(),
+    );
+
+    let print = setup_output_handler(socket_client.clone());
 
     let mut input = RunAgentInput {
         checkpoint_id: checkpoint.id,
@@ -61,22 +75,22 @@ pub async fn run_agent(
     };
 
     loop {
-        println!("[ ▄▀ Stakpaking... ]");
+        print("[ ▄▀ Stakpaking... ]");
         let output = client.run_agent(&input).await?;
-        println!(
+        print(&format!(
             "[Current Checkpoint {} (Agent Status: {})]",
             output.checkpoint.id, output.checkpoint.status
-        );
+        ));
 
-        input = get_next_input(&agent_id, client, &output, short_circuit_actions).await?;
+        input = get_next_input(&agent_id, client, &print, &output, short_circuit_actions).await?;
 
         match output.checkpoint.status {
             AgentStatus::Complete => {
-                println!("[Mission Accomplished]");
+                print("[Mission Accomplished]");
                 break;
             }
             AgentStatus::Failed => {
-                println!("[Mission Failed :'(]");
+                print("[Mission Failed :'(]");
                 break;
             }
             _ => {}
@@ -86,7 +100,11 @@ pub async fn run_agent(
     Ok(input.checkpoint_id)
 }
 
-pub async fn run_terraform_agent(client: &Client, dir: Option<String>) -> Result<Uuid, String> {
+pub async fn run_terraform_agent(
+    config: &AppConfig,
+    client: &Client,
+    dir: Option<String>,
+) -> Result<Uuid, String> {
     let dir_arg = dir
         .as_ref()
         .map(|d| format!("-chdir={}", d))
@@ -140,10 +158,14 @@ pub async fn run_terraform_agent(client: &Client, dir: Option<String>) -> Result
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }
 
-pub async fn run_dockerfile_agent(client: &Client, dir: Option<String>) -> Result<Uuid, String> {
+pub async fn run_dockerfile_agent(
+    config: &AppConfig,
+    client: &Client,
+    dir: Option<String>,
+) -> Result<Uuid, String> {
     let dir = dir.unwrap_or(".".into());
 
     let action_queue = vec![Action::RunCommand {
@@ -168,10 +190,14 @@ pub async fn run_dockerfile_agent(client: &Client, dir: Option<String>) -> Resul
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }
 
-pub async fn run_kubernetes_agent(client: &Client, documents: &[PathBuf]) -> Result<Uuid, String> {
+pub async fn run_kubernetes_agent(
+    config: &AppConfig,
+    client: &Client,
+    documents: &[PathBuf],
+) -> Result<Uuid, String> {
     let action_queue = vec![Action::RunCommand {
         id: Uuid::new_v4().to_string(),
         status: ActionStatus::PendingHumanApproval,
@@ -205,5 +231,5 @@ pub async fn run_kubernetes_agent(client: &Client, documents: &[PathBuf]) -> Res
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }

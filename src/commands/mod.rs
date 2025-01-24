@@ -582,10 +582,15 @@ impl Commands {
                         Err("Must specify provisioner type to apply".into())
                     }
                     Some(provisioner) => match provisioner {
-                        ProvisionerType::Terraform => run_terraform_agent(&client, dir).await,
-                        ProvisionerType::Dockerfile => run_dockerfile_agent(&client, dir).await,
+                        ProvisionerType::Terraform => {
+                            run_terraform_agent(&config, &client, dir).await
+                        }
+                        ProvisionerType::Dockerfile => {
+                            run_dockerfile_agent(&config, &client, dir).await
+                        }
                         ProvisionerType::Kubernetes => {
                             run_kubernetes_agent(
+                                &config,
                                 &client,
                                 path_map.get(&ProvisionerType::Kubernetes).unwrap(),
                             )

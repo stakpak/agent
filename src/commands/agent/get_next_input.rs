@@ -8,6 +8,7 @@ use super::run_actions;
 pub async fn get_next_input(
     agent_id: &AgentID,
     client: &Client,
+    print: &impl Fn(&str),
     output: &RunAgentOutput,
     short_circuit_actions: bool,
 ) -> Result<RunAgentInput, String> {
@@ -31,10 +32,12 @@ pub async fn get_next_input(
             ..
         } => {
             if let Some(message) = message {
-                println!("\n{}", message);
+                print(format!("\n{}", message).as_str());
             }
 
-            let result = match run_actions(action_queue.to_owned(), short_circuit_actions).await {
+            let result = match run_actions(action_queue.to_owned(), short_circuit_actions, print)
+                .await
+            {
                 Ok(updated_actions) => RunAgentInput {
                     checkpoint_id: output.checkpoint.id,
                     input: match agent_id {
@@ -59,7 +62,7 @@ pub async fn get_next_input(
                     },
                 },
                 Err(e) if e == "re-prompt" => {
-                    println!("Please re-prompt the agent:");
+                    print("Please re-prompt the agent:");
                     let mut user_prompt_input = String::new();
                     std::io::stdin()
                         .read_line(&mut user_prompt_input)
@@ -75,7 +78,7 @@ pub async fn get_next_input(
                         }
                     };
 
-                    println!("\nRetrying from checkpoint {}", parent_checkpoint_id);
+                    print(format!("\nRetrying from checkpoint {}", parent_checkpoint_id).as_str());
 
                     let parent_run_data = client.get_agent_checkpoint(parent_checkpoint_id).await?;
 
