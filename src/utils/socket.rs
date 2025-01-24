@@ -5,11 +5,11 @@ use std::io;
 
 pub struct SocketClient {
     client: Client,
-    session_id: Option<String>,
+    session_id: String,
 }
 
 impl SocketClient {
-    pub async fn connect(config: &AppConfig) -> io::Result<Self> {
+    pub async fn connect(config: &AppConfig, session_id: String) -> io::Result<Self> {
         let client = ClientBuilder::new(config.api_endpoint.clone())
             .namespace("/v1/agents")
             .reconnect(true)
@@ -21,17 +21,10 @@ impl SocketClient {
             .connect()
             .await?;
 
-        Ok(SocketClient {
-            client,
-            session_id: None,
-        })
+        Ok(SocketClient { client, session_id })
     }
 
-    pub fn set_session_id(&mut self, session_id: String) {
-        self.session_id = Some(session_id);
-    }
-
-    pub async fn publish(&mut self, data: &str) -> io::Result<()> {
+    pub async fn publish(&self, data: &str) -> io::Result<()> {
         self.client
             .emit(
                 "publish",

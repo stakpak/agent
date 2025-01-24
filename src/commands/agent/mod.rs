@@ -1,6 +1,6 @@
 use clap::Subcommand;
-use std::{str::FromStr, sync::Arc};
-use tokio::{process, sync::Mutex};
+use std::str::FromStr;
+use tokio::process;
 use tokio_process_stream::{Item, ProcessLineStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
@@ -11,7 +11,6 @@ use crate::{
         Client,
     },
     config::AppConfig,
-    utils::socket::SocketClient,
 };
 
 mod get_next_input;
@@ -95,18 +94,13 @@ impl AgentCommands {
                 checkpoint_id,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
-                let socket_client = Arc::new(Mutex::new(
-                    SocketClient::connect(&config)
-                        .await
-                        .map_err(|e| e.to_string())?,
-                ));
 
                 let mut input = AgentInput::new(&agent_id);
                 input.set_user_prompt(user_prompt);
 
                 run_agent(
+                    &config,
                     &client,
-                    socket_client,
                     agent_id,
                     checkpoint_id,
                     Some(input),

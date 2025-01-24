@@ -1,5 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
-use tokio::sync::Mutex;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use uuid::Uuid;
 
 use crate::{
@@ -11,12 +10,13 @@ use crate::{
         Client,
     },
     commands::agent::get_next_input,
+    config::AppConfig,
     utils::{output::setup_output_handler, socket::SocketClient},
 };
 
 pub async fn run_agent(
+    config: &AppConfig,
     client: &Client,
-    socket_client: Arc<Mutex<SocketClient>>,
     agent_id: AgentID,
     checkpoint_id: Option<String>,
     input: Option<AgentInput>,
@@ -57,11 +57,20 @@ pub async fn run_agent(
             (agent_id, session.into(), checkpoint)
         }
     };
+
     println!("Session ID: {}", session.id);
-    socket_client
-        .lock()
-        .await
-        .set_session_id(session.id.to_string());
+
+    let socket_client = Arc::new(
+        SocketClient::connect(config, session.id.to_string())
+            .await
+            .unwrap(),
+    );
+
+    println!("Connected to session");
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    println!("Sleeping for 5 seconds");
 
     let print = setup_output_handler(socket_client.clone());
 
@@ -100,8 +109,8 @@ pub async fn run_agent(
 }
 
 pub async fn run_terraform_agent(
+    config: &AppConfig,
     client: &Client,
-    socket_client: Arc<Mutex<SocketClient>>,
     dir: Option<String>,
 ) -> Result<Uuid, String> {
     let dir_arg = dir
@@ -157,12 +166,12 @@ pub async fn run_terraform_agent(
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, socket_client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }
 
 pub async fn run_dockerfile_agent(
+    config: &AppConfig,
     client: &Client,
-    socket_client: Arc<Mutex<SocketClient>>,
     dir: Option<String>,
 ) -> Result<Uuid, String> {
     let dir = dir.unwrap_or(".".into());
@@ -189,12 +198,12 @@ pub async fn run_dockerfile_agent(
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, socket_client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }
 
 pub async fn run_kubernetes_agent(
+    config: &AppConfig,
     client: &Client,
-    socket_client: Arc<Mutex<SocketClient>>,
     documents: &[PathBuf],
 ) -> Result<Uuid, String> {
     let action_queue = vec![Action::RunCommand {
@@ -230,5 +239,5 @@ pub async fn run_kubernetes_agent(
         scratchpad: Box::new(None),
     };
 
-    run_agent(client, socket_client, agent_id, None, Some(input), true).await
+    run_agent(config, client, agent_id, None, Some(input), true).await
 }

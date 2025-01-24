@@ -1,14 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
 use agent::{run_dockerfile_agent, run_kubernetes_agent, run_terraform_agent, AgentCommands};
 use chrono::Utc;
 use clap::Subcommand;
 use flow::{clone, get_flow_ref};
 use termimad::MadSkin;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -18,7 +14,6 @@ use crate::{
         Client, Edit,
     },
     config::AppConfig,
-    utils::socket::SocketClient,
 };
 
 pub mod agent;
@@ -570,11 +565,6 @@ impl Commands {
                 // no_clone,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
-                let socket_client = Arc::new(Mutex::new(
-                    SocketClient::connect(&config)
-                        .await
-                        .map_err(|e| e.to_string())?,
-                ));
 
                 let flow_ref = get_flow_ref(&client, flow_ref).await?;
                 let path_map = clone(&client, &flow_ref, dir.as_deref()).await?;
@@ -593,15 +583,15 @@ impl Commands {
                     }
                     Some(provisioner) => match provisioner {
                         ProvisionerType::Terraform => {
-                            run_terraform_agent(&client, socket_client, dir).await
+                            run_terraform_agent(&config, &client, dir).await
                         }
                         ProvisionerType::Dockerfile => {
-                            run_dockerfile_agent(&client, socket_client, dir).await
+                            run_dockerfile_agent(&config, &client, dir).await
                         }
                         ProvisionerType::Kubernetes => {
                             run_kubernetes_agent(
+                                &config,
                                 &client,
-                                socket_client,
                                 path_map.get(&ProvisionerType::Kubernetes).unwrap(),
                             )
                             .await
