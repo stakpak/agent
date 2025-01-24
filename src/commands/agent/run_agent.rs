@@ -58,19 +58,11 @@ pub async fn run_agent(
         }
     };
 
-    println!("Session ID: {}", session.id);
-
     let socket_client = Arc::new(
         SocketClient::connect(config, session.id.to_string())
             .await
             .unwrap(),
     );
-
-    println!("Connected to session");
-
-    tokio::time::sleep(Duration::from_secs(10)).await;
-
-    println!("Sleeping for 5 seconds");
 
     let print = setup_output_handler(socket_client.clone());
 
