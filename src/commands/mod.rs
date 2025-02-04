@@ -1,17 +1,13 @@
-use std::collections::{HashMap, HashSet};
-
-use agent::{run_dockerfile_agent, run_kubernetes_agent, run_terraform_agent, AgentCommands};
-use chrono::Utc;
+use agent::{run_agent, AgentCommands};
 use clap::Subcommand;
-use flow::{clone, get_flow_ref};
+use flow::{clone, get_flow_ref, push};
 use termimad::MadSkin;
-use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::{
     client::{
-        models::{Document, FlowRef, ProvisionerType, TranspileTargetProvisionerType},
-        Client, Edit,
+        models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
+        Client,
     },
     config::AppConfig,
 };
@@ -199,253 +195,30 @@ impl Commands {
                 auto_approve,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
-                let parts: Vec<&str> = flow_ref.split('/').collect();
 
-                let flow_ref = match parts.len() {
-                    3 => FlowRef::Version {
-                        owner_name: parts[0].to_string(),
-                        flow_name: parts[1].to_string(),
-                        version_id: parts[2].to_string(),
-                    },
-                    2 => {
-                        let owner_name = parts[0];
-                        let flow_name = parts[1];
+                let save_result =
+                    push(&client, flow_ref, create, dir, ignore_delete, auto_approve).await?;
 
-                        if create {
-                            let result = client.create_flow(flow_name, None).await?;
-                            println!("Created flow: {}/{}", result.owner_name, result.flow_name);
-                            FlowRef::Version {
-                                owner_name: result.owner_name,
-                                flow_name: result.flow_name,
-                                version_id: result.version_id.to_string(),
-                            }
-                        } else {
-                            let result = client.get_flow(owner_name, flow_name).await?;
-
-                            let latest_version = result
-                                .resource
-                                .versions
-                                .iter()
-                                .max_by_key(|v| v.created_at)
-                                .ok_or("No versions found")?;
-
-                            FlowRef::Version {
-                                owner_name: owner_name.to_string(),
-                                flow_name: flow_name.to_string(),
-                                version_id: latest_version.id.to_string(),
+                if let Some(save_result) = save_result {
+                    if !save_result.errors.is_empty() {
+                        println!("\nSave errors:");
+                        for error in save_result.errors {
+                            println!("\t{}: {}", error.uri, error.message);
+                            if let Some(details) = error.details {
+                                println!("\t\t{}", details);
                             }
                         }
                     }
-                    _ => FlowRef::new(flow_ref)
-                        .map_err(|e| format!("Failed to parse flow ref: {}", e))?,
-                };
 
-                println!("Pushing to flow version: {}\n", flow_ref);
+                    let total_blocks =
+                        save_result.created_blocks.len() + save_result.modified_blocks.len();
 
-                let documents_map: HashMap<String, Document> = client
-                    .get_flow_documents(&flow_ref)
-                    .await?
-                    .documents
-                    .into_iter()
-                    .map(|doc| (doc.uri.clone(), doc))
-                    .collect();
-
-                let base_dir = dir.unwrap_or_else(|| ".".into());
-
-                let mut edits = Vec::new();
-                let mut processed_uris = HashSet::new();
-                let mut files_synced = 0;
-                let mut files_deleted = 0;
-
-                for entry in WalkDir::new(&base_dir)
-                    .follow_links(false)
-                    .into_iter()
-                    .filter_entry(|e| {
-                        // Skip hidden directories and non-supported files
-                        let file_name = e.file_name().to_str();
-                        match file_name {
-                            Some(name) => {
-                                // Skip hidden files/dirs that aren't just "."
-                                if name.starts_with('.') && name.len() > 1 {
-                                    return false;
-                                }
-                                // Only allow supported files
-                                if e.file_type().is_file() {
-                                    name.ends_with(".tf")
-                                        || name.ends_with(".yaml")
-                                        || name.ends_with(".yml")
-                                        || name.to_lowercase().contains("dockerfile")
-                                } else {
-                                    true // Allow directories to be traversed
-                                }
-                            }
-                            None => false,
-                        }
-                    })
-                    .filter_map(|e| e.ok())
-                {
-                    // Skip directories
-                    if !entry.file_type().is_file() {
-                        continue;
+                    if total_blocks > 0 {
+                        println!(
+                            "Please wait {:.2} minutes for indexing to complete",
+                            total_blocks as f64 * 1.5 / 60.0
+                        );
                     }
-
-                    let path = entry.path();
-                    // Skip binary files by attempting to read as UTF-8 and checking for errors
-                    let content = match std::fs::read_to_string(path) {
-                        Ok(content) => content,
-                        Err(_) => continue, // Skip file if it can't be read as valid UTF-8
-                    };
-
-                    // Convert path to URI format
-                    let document_uri = format!(
-                        "file:///{}",
-                        path.strip_prefix(&base_dir)
-                            .unwrap()
-                            .to_string_lossy()
-                            .replace('\\', "/")
-                    );
-                    processed_uris.insert(document_uri.clone());
-
-                    if let Some(document) = documents_map.get(&document_uri) {
-                        if content == document.content {
-                            // println!("\tunchanged:\t{}", document_uri);
-                            continue;
-                        }
-
-                        println!("\tmodified:\t{}", document_uri);
-                        edits.extend([
-                            Edit {
-                                document_uri: document_uri.clone(),
-
-                                start_byte: 0,
-                                start_row: 0,
-                                start_column: 0,
-
-                                end_byte: document.content.len(),
-                                end_row: document.content.lines().count(),
-                                end_column: document
-                                    .content
-                                    .lines()
-                                    .last()
-                                    .map_or(0, |line| line.len()),
-
-                                content: document.content.to_owned(),
-
-                                language: "".to_string(),
-                                operation: "delete".to_string(),
-                                timestamp: Utc::now(),
-                            },
-                            Edit {
-                                document_uri,
-
-                                start_byte: 0,
-                                start_row: 0,
-                                start_column: 0,
-
-                                end_byte: content.len(),
-                                end_row: content.lines().count(),
-                                end_column: content.lines().last().map_or(0, |line| line.len()),
-
-                                content,
-
-                                language: "".to_string(),
-                                operation: "insert".to_string(),
-                                timestamp: Utc::now(),
-                            },
-                        ]);
-                    } else {
-                        println!("\tadded:\t{}", document_uri);
-                        edits.push(Edit {
-                            document_uri,
-
-                            start_byte: 0,
-                            start_row: 0,
-                            start_column: 0,
-
-                            end_byte: content.len(),
-                            end_row: content.lines().count(),
-                            end_column: content.lines().last().map_or(0, |line| line.len()),
-
-                            content,
-
-                            language: "".to_string(),
-                            operation: "insert".to_string(),
-                            timestamp: Utc::now(),
-                        });
-                    };
-
-                    files_synced += 1;
-                }
-
-                if !ignore_delete {
-                    // Handle deleted files
-                    for (uri, document) in documents_map {
-                        if !processed_uris.contains(&uri) {
-                            println!("\tdeleted:\t{}", uri);
-                            edits.push(Edit {
-                                document_uri: uri,
-                                start_byte: 0,
-                                start_row: 0,
-                                start_column: 0,
-                                end_byte: document.content.len(),
-                                end_row: document.content.lines().count(),
-                                end_column: document
-                                    .content
-                                    .lines()
-                                    .last()
-                                    .map_or(0, |line| line.len()),
-                                content: "".to_string(),
-                                language: "".to_string(),
-                                operation: "delete".to_string(),
-                                timestamp: Utc::now(),
-                            });
-                            files_deleted += 1;
-                        }
-                    }
-                }
-
-                let total_changes = files_deleted + files_synced;
-
-                if total_changes == 0 {
-                    println!("No changes found");
-                    return Ok(());
-                }
-
-                println!("\nSyncing {} files", files_synced);
-                println!("Deleting {} files", files_deleted);
-
-                if !auto_approve && !create {
-                    println!("\nDo you want to continue? Type 'yes' to confirm: ");
-                    let mut input = String::new();
-                    std::io::stdin()
-                        .read_line(&mut input)
-                        .map_err(|e| format!("Failed to read input: {}", e))?;
-
-                    if input.trim() != "yes" {
-                        return Ok(());
-                    }
-                }
-
-                let save_result = client.save_edits(&flow_ref, edits).await?;
-
-                if !save_result.errors.is_empty() {
-                    println!("\nSave errors:");
-                    for error in save_result.errors {
-                        println!("\t{}: {}", error.uri, error.message);
-                        if let Some(details) = error.details {
-                            println!("\t\t{}", details);
-                        }
-                    }
-                }
-
-                let total_blocks =
-                    save_result.created_blocks.len() + save_result.modified_blocks.len();
-
-                if total_blocks > 0 {
-                    println!(
-                        "Please wait {:.2} minutes for indexing to complete",
-                        total_blocks as f64 * 1.5 / 60.0
-                    );
                 }
             }
             Commands::Transpile {
@@ -572,8 +345,9 @@ impl Commands {
                 if path_map.is_empty() {
                     return Err("No configurations found to apply".into());
                 }
+                let agent_id = AgentID::KevinV1;
 
-                let checkpoint_id: Uuid = match provisioner {
+                let agent_input = match provisioner {
                     None => {
                         println!("Please specify a provisioner to apply with -p. Available provisioners:");
                         for provisioner in path_map.keys() {
@@ -581,27 +355,15 @@ impl Commands {
                         }
                         Err("Must specify provisioner type to apply".into())
                     }
-                    Some(provisioner) => match provisioner {
-                        ProvisionerType::Terraform => {
-                            run_terraform_agent(&config, &client, dir).await
-                        }
-                        ProvisionerType::Dockerfile => {
-                            run_dockerfile_agent(&config, &client, dir).await
-                        }
-                        ProvisionerType::Kubernetes => {
-                            run_kubernetes_agent(
-                                &config,
-                                &client,
-                                path_map.get(&ProvisionerType::Kubernetes).unwrap(),
-                            )
+                    Some(provisioner) => {
+                        client
+                            .agent_presets(&agent_id, &provisioner, dir, Some(&flow_ref))
                             .await
-                        }
-                        ProvisionerType::GithubActions => {
-                            Err("Unable to apply this type at the moment".into())
-                        }
-                        ProvisionerType::None => Err("Nothing to apply".into()),
-                    },
+                    }
                 }?;
+
+                let checkpoint_id =
+                    run_agent(&config, &client, agent_id, None, Some(agent_input), true).await?;
 
                 // Write checkpoint ID to local file for resuming later
                 std::fs::write(".stakpak_apply_checkpoint", checkpoint_id.to_string())

@@ -659,3 +659,16 @@ pub struct TranspileTrace {
     pub trace_id: String,
     pub observation_id: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AgentPresetInput {
+    pub agent_id: AgentID,
+    pub provisioner: ProvisionerType,
+    pub dir: Option<String>,
+    pub flow_ref: Option<FlowRef>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AgentPresetOutput {
+    pub input: AgentInput,
+}

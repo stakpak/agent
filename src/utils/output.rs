@@ -1,7 +1,10 @@
 use std::sync::mpsc;
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use super::socket::SocketClient;
+use rust_socketio::asynchronous::ClientBuilder;
+use serde_json::json;
+
+use crate::config::AppConfig;
 
 pub struct OutputHandler {
     tx: mpsc::Sender<String>,
@@ -35,18 +38,52 @@ impl Clone for OutputHandler {
     }
 }
 
-pub fn setup_output_handler(socket_client: Arc<SocketClient>) -> impl Fn(&str) {
+pub async fn setup_output_handler(
+    config: &AppConfig,
+    session_id: String,
+) -> Result<impl Fn(&str), String> {
+    // Attempt to connect to the socket
+    let socket_client = match ClientBuilder::new(config.api_endpoint.clone())
+        .namespace("/v1/sessions")
+        .reconnect(true)
+        .reconnect_delay(1000, 5000)
+        .opening_header(
+            String::from("Authorization"),
+            format!("Bearer {}", config.api_key.clone().unwrap_or_default()),
+        )
+        .connect()
+        .await
+    {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            return Err(format!("Failed to connect to server: {}", e));
+        }
+    };
+
+    // Create output handler with the connected client
     let output_handler = OutputHandler::new(Box::new(move |msg: String| {
         println!("{}", msg);
         let socket_client = socket_client.clone();
-        let msg = msg.clone();
+        let msg_clone = msg.clone();
+        let session_id = session_id.clone();
         Box::pin(async move {
-            socket_client.publish(&msg).await.unwrap_or(());
+            if let Err(e) = socket_client
+                .emit(
+                    "publish",
+                    json!({
+                        "text": msg_clone,
+                        "session_id": session_id
+                    }),
+                )
+                .await
+            {
+                eprintln!("Failed to publish message: {}", e);
+            }
         })
     }));
 
-    // Return a closure that sends messages to the `OutputHandler`
-    move |msg: &str| {
+    // Return closure that forwards messages to the output handler
+    Ok(move |msg: &str| {
         output_handler.send(msg.to_string());
-    }
+    })
 }

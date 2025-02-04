@@ -441,6 +441,46 @@ impl Client {
             }
         }
     }
+
+    pub async fn agent_presets(
+        &self,
+        agent_id: &AgentID,
+        provisioner: &ProvisionerType,
+        dir: Option<String>,
+        flow_ref: Option<&FlowRef>,
+    ) -> Result<AgentInput, String> {
+        let url = format!("{}/agents/presets", self.base_url,);
+
+        let input = AgentPresetInput {
+            agent_id: agent_id.clone(),
+            provisioner: provisioner.clone(),
+            dir,
+            flow_ref: flow_ref.cloned(),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<AgentPresetOutput>(value.clone()) {
+            Ok(response) => Ok(response.input),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
