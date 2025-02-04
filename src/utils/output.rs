@@ -67,7 +67,8 @@ pub async fn setup_output_handler(
         let msg_clone = msg.clone();
         let session_id = session_id.clone();
         Box::pin(async move {
-            if let Err(e) = socket_client
+            let mut retries = 0;
+            while let Err(e) = socket_client
                 .emit(
                     "publish",
                     json!({
@@ -77,7 +78,12 @@ pub async fn setup_output_handler(
                 )
                 .await
             {
-                eprintln!("Failed to publish message: {}", e);
+                tokio::time::sleep(std::time::Duration::from_millis(100 * (retries + 1))).await;
+                retries += 1;
+                if retries >= 5 {
+                    eprintln!("Failed to publish message: {}", e);
+                    break;
+                }
             }
         })
     }));
