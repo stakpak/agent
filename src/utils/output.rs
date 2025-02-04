@@ -44,7 +44,7 @@ pub async fn setup_output_handler(
 ) -> Result<impl Fn(&str), String> {
     // Attempt to connect to the socket
     let socket_client = match ClientBuilder::new(config.api_endpoint.clone())
-        .namespace("/v1/sessions")
+        .namespace("/v1/agents/sessions")
         .reconnect(true)
         .reconnect_delay(1000, 5000)
         .opening_header(
