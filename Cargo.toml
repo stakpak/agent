@@ -19,3 +19,5 @@ tokio-process-stream = "0.4.0"
 tokio-stream = "0.1.17"
 rust_socketio = { version = "0.6.0", features = ["async"] }
 futures-util = "0.3.31"
+notify = "8.0.0"
+

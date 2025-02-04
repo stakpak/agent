@@ -1,6 +1,6 @@
 use agent::{run_agent, AgentCommands};
 use clap::Subcommand;
-use flow::{clone, get_flow_ref, push};
+use flow::{clone, get_flow_ref, push, sync};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -49,6 +49,22 @@ pub enum Commands {
         /// Destination directory
         #[arg(long, short)]
         dir: Option<String>,
+    },
+
+    /// Sync configurations from and to a flow
+    Sync {
+        /// Flow reference in format: <owner_name>/<flow_name>(/<version_id_or_tag>)?
+        #[arg(name = "flow-ref")]
+        flow_ref: String,
+        /// Source/Destination directory
+        #[arg(long, short)]
+        dir: Option<String>,
+        /// Ignore delete operations
+        #[arg(long, default_value_t = false)]
+        ignore_delete: bool,
+        /// Auto approve all changes
+        #[arg(long, short = 'y', default_value_t = false)]
+        auto_approve: bool,
     },
 
     /// Query your configurations
@@ -186,6 +202,14 @@ impl Commands {
 
                 let skin = MadSkin::default();
                 println!("{}", skin.inline(&data.to_text(synthesize_output)));
+            }
+            Commands::Sync {
+                flow_ref,
+                dir,
+                ignore_delete,
+                auto_approve,
+            } => {
+                sync(flow_ref, dir, ignore_delete, auto_approve).await?;
             }
             Commands::Push {
                 flow_ref,
