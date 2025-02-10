@@ -1,13 +1,18 @@
-use crate::client::models::Action;
+use crate::{client::models::Action, config::AppConfig};
 
 pub async fn run_actions(
+    config: &AppConfig,
+    session_id: String,
     action_queue: Vec<Action>,
-    short_circuit_actions: bool,
     print: &impl Fn(&str),
+    short_circuit_actions: bool,
+    interactive: bool,
 ) -> Result<Vec<Action>, String> {
     let mut updated_actions = Vec::with_capacity(action_queue.len());
     for action in action_queue.into_iter().filter(|a| a.is_pending()) {
-        let updated_action = action.run(print).await?;
+        let updated_action = action
+            .run(config, session_id.clone(), print, interactive)
+            .await?;
 
         if short_circuit_actions {
             if let Action::RunCommand {

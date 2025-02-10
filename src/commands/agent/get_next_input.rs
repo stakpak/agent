@@ -1,16 +1,23 @@
-use crate::client::{
-    models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
-    Client,
+use crate::{
+    client::{
+        models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
+        Client,
+    },
+    config::AppConfig,
 };
 
 use super::run_actions;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn get_next_input(
-    agent_id: &AgentID,
+    config: &AppConfig,
     client: &Client,
+    agent_id: &AgentID,
+    session_id: String,
     print: &impl Fn(&str),
     output: &RunAgentOutput,
     short_circuit_actions: bool,
+    interactive: bool,
 ) -> Result<RunAgentInput, String> {
     match &output.output {
         AgentOutput::NorbertV1 {
@@ -35,8 +42,15 @@ pub async fn get_next_input(
                 print(format!("\n{}", message).as_str());
             }
 
-            let result = match run_actions(action_queue.to_owned(), short_circuit_actions, print)
-                .await
+            let result = match run_actions(
+                config,
+                session_id,
+                action_queue.to_owned(),
+                print,
+                short_circuit_actions,
+                interactive,
+            )
+            .await
             {
                 Ok(updated_actions) => RunAgentInput {
                     checkpoint_id: output.checkpoint.id,

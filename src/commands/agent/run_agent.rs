@@ -17,6 +17,7 @@ pub async fn run_agent(
     checkpoint_id: Option<String>,
     input: Option<AgentInput>,
     short_circuit_actions: bool,
+    interactive: bool,
 ) -> Result<Uuid, String> {
     let (agent_id, session, checkpoint) = match checkpoint_id {
         Some(checkpoint_id) => {
@@ -72,7 +73,17 @@ pub async fn run_agent(
             output.checkpoint.id, output.checkpoint.status
         ));
 
-        input = get_next_input(&agent_id, client, &print, &output, short_circuit_actions).await?;
+        input = get_next_input(
+            config,
+            client,
+            &agent_id,
+            session.id.to_string(),
+            &print,
+            &output,
+            short_circuit_actions,
+            interactive,
+        )
+        .await?;
 
         match output.checkpoint.status {
             AgentStatus::Complete => {

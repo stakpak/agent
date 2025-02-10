@@ -1,13 +1,26 @@
 use clap::Subcommand;
-use std::str::FromStr;
-use tokio::process;
+use futures_util::future::BoxFuture;
+use rust_socketio::{
+    asynchronous::{Client as SocketClient, ClientBuilder},
+    Payload,
+};
+use serde_json::{json, Value};
+use std::{
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use tokio::{process, sync::Mutex, time::sleep};
 use tokio_process_stream::{Item, ProcessLineStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::{
     client::{
-        models::{Action, ActionStatus, AgentID, AgentInput},
+        models::{Action, ActionStatus, AgentID, AgentInput, AgentStatusOutput, RunCommandArgs},
         Client,
     },
     config::AppConfig,
@@ -44,8 +57,11 @@ pub enum AgentCommands {
         #[arg(long, short)]
         checkpoint_id: Option<String>,
         /// Agent ID to use (norbert:v1, dave:v1)
-        #[arg(long, short)]
-        agent_id: AgentID,
+        #[arg(long, short, required_unless_present = "checkpoint_id")]
+        agent_id: Option<AgentID>,
+        /// Run in interactive mode
+        #[arg(long, short, default_value_t = false)]
+        interactive: bool,
     },
 }
 
@@ -92,10 +108,24 @@ impl AgentCommands {
                 user_prompt,
                 agent_id,
                 checkpoint_id,
+                interactive,
             } => {
                 let client = Client::new(&config).map_err(|e| e.to_string())?;
 
+                let agent_id = match (checkpoint_id.clone(), agent_id) {
+                    (Some(checkpoint_id), _) => {
+                        let checkpoint_id =
+                            Uuid::parse_str(&checkpoint_id).map_err(|e| e.to_string())?;
+
+                        let checkpoint = client.get_agent_checkpoint(checkpoint_id).await?;
+                        checkpoint.session.agent_id
+                    }
+                    (_, Some(agent_id)) => agent_id,
+                    _ => return Err("Must provide either agent_id or checkpoint_id".into()),
+                };
+
                 let mut input = AgentInput::new(&agent_id);
+
                 input.set_user_prompt(user_prompt);
 
                 run_agent(
@@ -105,6 +135,7 @@ impl AgentCommands {
                     checkpoint_id,
                     Some(input),
                     short_circuit_actions,
+                    interactive,
                 )
                 .await?;
             }
@@ -120,7 +151,13 @@ impl AgentCommands {
 }
 
 impl Action {
-    pub async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
+    pub async fn run(
+        self,
+        config: &AppConfig,
+        session_id: String,
+        print: &impl Fn(&str),
+        interactive: bool,
+    ) -> Result<Action, String> {
         match self {
             Action::AskUser { id, args, .. } => {
                 print(
@@ -173,7 +210,13 @@ impl Action {
                     answers,
                 })
             }
-            Action::RunCommand { id, args, .. } => {
+            Action::RunCommand {
+                id,
+                args,
+                status,
+                output,
+                exit_code,
+            } => {
                 print(
                     format!(
                         "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
@@ -189,44 +232,91 @@ impl Action {
                 print(format!(">{}", args.command).as_str());
 
                 print("Please confirm [yes/edit/skip] (skip):");
-                let mut input = String::new();
-                match std::io::stdin().read_line(&mut input) {
-                    Ok(_) => {
-                        if input.trim() == "\x10" {
-                            // Ctrl+P
-                            return Err("re-prompt".to_string());
-                        }
+
+                let mut command = args.command.clone();
+
+                // Interactive mode
+                if interactive {
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_err() {
+                        return Err("Failed to read input".to_string());
                     }
-                    Err(e) => return Err(format!("Failed to read input: {}", e)),
-                }
-                let confirmation = input.trim().to_lowercase();
-                print(confirmation.as_str());
 
-                if confirmation == "skip" {
-                    return Ok(Action::RunCommand {
-                        id,
-                        status: ActionStatus::Aborted,
-                        args,
-                        exit_code: None,
-                        output: Some("Command execution skipped by user".to_string()),
-                    });
-                }
+                    // Check for Ctrl+P
+                    if input.trim() == "\x10" {
+                        return Err("re-prompt".to_string());
+                    }
 
-                let command = if confirmation == "edit" {
-                    print("> ");
-                    let mut edited_cmd = String::new();
-                    match std::io::stdin().read_line(&mut edited_cmd) {
-                        Ok(_) => {
+                    let confirmation = input.trim().to_lowercase();
+                    print(confirmation.as_str());
+
+                    match confirmation.as_str() {
+                        "skip" => {
+                            return Ok(Action::RunCommand {
+                                id,
+                                status: ActionStatus::Aborted,
+                                args,
+                                exit_code: None,
+                                output: Some("Command execution skipped by user".to_string()),
+                            })
+                        }
+
+                        "edit" => {
+                            print("> ");
+                            let mut edited_cmd = String::new();
+
+                            if std::io::stdin().read_line(&mut edited_cmd).is_err() {
+                                return Err("Failed to read input".to_string());
+                            }
+
+                            // Check for Ctrl+P in edit mode
                             if edited_cmd.trim() == "\x10" {
-                                // Ctrl+P
                                 return Err("re-prompt".to_string());
                             }
-                            edited_cmd.trim().to_string()
+
+                            command = edited_cmd.trim().to_string();
                         }
-                        Err(e) => return Err(format!("Failed to read input: {}", e)),
+
+                        _ => {}
                     }
-                } else {
-                    args.command.clone()
+                }
+
+                let listener = StatusListener::new(
+                    config,
+                    session_id,
+                    Action::RunCommand {
+                        id: id.clone(),
+                        args: RunCommandArgs {
+                            command: command.clone(),
+                            ..args.clone()
+                        },
+                        status,
+                        output,
+                        exit_code,
+                    },
+                );
+
+                listener.start().await?;
+
+                // Wait for human approval if not in interactive mode
+                if !interactive {
+                    while matches!(
+                        listener.get_current_state().await.get_status(),
+                        ActionStatus::PendingHumanApproval
+                    ) {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                }
+
+                let current_action = listener.get_current_state().await;
+
+                if matches!(current_action.get_status(), ActionStatus::Failed) {
+                    return Ok(current_action);
+                }
+
+                let command = match current_action {
+                    Action::RunCommand { args, .. } => args.command,
+                    _ => command,
                 };
 
                 let mut cmd = process::Command::new("sh");
@@ -283,5 +373,143 @@ impl Action {
                 })
             }
         }
+    }
+}
+
+struct StatusListener<'a> {
+    config: &'a AppConfig,
+    session_id: String,
+    action: Arc<Mutex<Action>>,
+}
+
+impl<'a> StatusListener<'a> {
+    fn new(config: &'a AppConfig, session_id: String, initial_state: Action) -> Self {
+        let action_state = Arc::new(Mutex::new(initial_state));
+        Self {
+            config,
+            session_id,
+            action: action_state.clone(),
+        }
+    }
+
+    async fn listener<
+        T: Fn(Payload, SocketClient) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+    >(
+        &self,
+        event: String,
+        callback: T,
+    ) -> Result<(), String> {
+        let socket_client = match ClientBuilder::new(self.config.api_endpoint.clone())
+            .namespace("/v1/agents/sessions")
+            .reconnect(true)
+            .reconnect_delay(1000, 5000)
+            .opening_header(
+                String::from("Authorization"),
+                format!("Bearer {}", self.config.api_key.clone().unwrap_or_default()),
+            )
+            .on(event, callback)
+            .connect()
+            .await
+        {
+            Ok(client) => Arc::new(client),
+            Err(e) => {
+                return Err(format!("Failed to connect to server: {}", e));
+            }
+        };
+
+        let subscription_complete = Arc::new(AtomicBool::new(false));
+
+        for retry in 0.. {
+            sleep(Duration::from_millis(100 * (retry + 1))).await;
+
+            let subscription_complete_clone = Arc::clone(&subscription_complete);
+            let ack_callback =
+                move |_message: Payload, _socket: SocketClient| -> BoxFuture<'static, ()> {
+                    let subscription_complete_clone = Arc::clone(&subscription_complete_clone);
+                    Box::pin(async move {
+                        subscription_complete_clone.store(true, Ordering::SeqCst);
+                    })
+                };
+
+            if let Err(e) = socket_client
+                .emit_with_ack(
+                    "subscribe",
+                    json!({ "session_id": self.session_id }),
+                    Duration::from_secs(2),
+                    ack_callback,
+                )
+                .await
+            {
+                return Err(format!("Failed to subscribe to session: {}", e));
+            }
+
+            if subscription_complete.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn start(&self) -> Result<(), String> {
+        self.listen_for_status_updates().await?;
+        Ok(())
+    }
+
+    async fn listen_for_status_updates(&self) -> Result<(), String> {
+        let action_clone = Arc::clone(&self.action);
+
+        self.listener(
+            "status".to_string(),
+            move |msg: Payload, _client: SocketClient| -> BoxFuture<'static, ()> {
+                let state = action_clone.clone();
+                Box::pin(async move {
+                    let id = state.lock().await.get_id().clone();
+                    if let Payload::Text(text) = msg {
+                        Self::process_status_message(&state, &id, text.first().unwrap()).await;
+                    }
+                })
+            },
+        )
+        .await
+        .map_err(|_| "Failed to listen for events".to_string())
+    }
+
+    async fn process_status_message(
+        state_mutex: &Arc<Mutex<Action>>,
+        action_id: &str,
+        value: &Value,
+    ) {
+        match Self::parse_status_output(value) {
+            Ok(agent_status) => {
+                if let Some(action) = Self::find_action_by_id(&agent_status, action_id) {
+                    let mut state = state_mutex.lock().await;
+                    *state = action.clone();
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+            }
+        }
+    }
+
+    fn parse_status_output(value: &Value) -> Result<AgentStatusOutput, String> {
+        serde_json::from_value(value.clone())
+            .map_err(|e| format!("Failed to deserialize response: {}", e))
+    }
+
+    fn find_action_by_id(status: &AgentStatusOutput, id: &str) -> Option<Action> {
+        status
+            .output
+            .get_action_queue()
+            .iter()
+            .find(|action| action.get_id() == id)
+            .cloned()
+    }
+
+    // New method to get the current action state
+    pub async fn get_current_state(&self) -> Action {
+        self.action.lock().await.clone()
     }
 }
