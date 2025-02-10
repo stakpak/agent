@@ -341,6 +341,8 @@ impl Action {
                     print("\n[WARNING] About to execute the following command:");
                     print(format!(">{}", args.command).as_str());
 
+                    print("Please confirm [yes/edit/skip] (skip):");
+
                     return Ok(self);
                 }
 
