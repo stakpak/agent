@@ -221,8 +221,6 @@ impl Action {
 
                 print("Please confirm [yes/edit/skip] (skip):");
 
-                let mut command = args.command.clone();
-
                 let mut input = String::new();
                 if std::io::stdin().read_line(&mut input).is_err() {
                     return Err("Failed to read input".to_string());
@@ -236,17 +234,9 @@ impl Action {
                 let confirmation = input.trim().to_lowercase();
                 print(confirmation.as_str());
 
-                match confirmation.as_str() {
-                    "skip" => {
-                        return Ok(Action::RunCommand {
-                            id,
-                            status: ActionStatus::Aborted,
-                            args,
-                            exit_code: None,
-                            output: Some("Command execution skipped by user".to_string()),
-                        })
-                    }
+                let mut command = args.command.clone();
 
+                match confirmation.as_str() {
                     "edit" => {
                         print("> ");
                         let mut edited_cmd = String::new();
@@ -262,8 +252,20 @@ impl Action {
 
                         command = edited_cmd.trim().to_string();
                     }
-
-                    _ => {}
+                    "skip" => {
+                        return Ok(Action::RunCommand {
+                            id,
+                            status: ActionStatus::Aborted,
+                            args,
+                            exit_code: None,
+                            output: Some("Command execution skipped by user".to_string()),
+                        })
+                    }
+                    // Added to not drop the command value
+                    "yes" => {}
+                    _ => {
+                        return Err("Invalid input".to_string());
+                    }
                 }
 
                 let mut cmd = process::Command::new("sh");
