@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::{
     client::{
-        models::{Action, ActionStatus, AgentID, AgentInput, AgentStatusOutput, RunCommandArgs},
+        models::{Action, ActionStatus, AgentID, AgentInput, RunAgentOutput},
         Client,
     },
     config::AppConfig,
@@ -151,13 +151,7 @@ impl AgentCommands {
 }
 
 impl Action {
-    pub async fn run(
-        self,
-        config: &AppConfig,
-        session_id: String,
-        print: &impl Fn(&str),
-        interactive: bool,
-    ) -> Result<Action, String> {
+    pub async fn run_interactive(self, print: &impl Fn(&str)) -> Result<Action, String> {
         match self {
             Action::AskUser { id, args, .. } => {
                 print(
@@ -210,13 +204,7 @@ impl Action {
                     answers,
                 })
             }
-            Action::RunCommand {
-                id,
-                args,
-                status,
-                output,
-                exit_code,
-            } => {
+            Action::RunCommand { id, args, .. } => {
                 print(
                     format!(
                         "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
@@ -235,89 +223,48 @@ impl Action {
 
                 let mut command = args.command.clone();
 
-                // Interactive mode
-                if interactive {
-                    let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_err() {
-                        return Err("Failed to read input".to_string());
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err() {
+                    return Err("Failed to read input".to_string());
+                }
+
+                // Check for Ctrl+P
+                if input.trim() == "\x10" {
+                    return Err("re-prompt".to_string());
+                }
+
+                let confirmation = input.trim().to_lowercase();
+                print(confirmation.as_str());
+
+                match confirmation.as_str() {
+                    "skip" => {
+                        return Ok(Action::RunCommand {
+                            id,
+                            status: ActionStatus::Aborted,
+                            args,
+                            exit_code: None,
+                            output: Some("Command execution skipped by user".to_string()),
+                        })
                     }
 
-                    // Check for Ctrl+P
-                    if input.trim() == "\x10" {
-                        return Err("re-prompt".to_string());
-                    }
+                    "edit" => {
+                        print("> ");
+                        let mut edited_cmd = String::new();
 
-                    let confirmation = input.trim().to_lowercase();
-                    print(confirmation.as_str());
-
-                    match confirmation.as_str() {
-                        "skip" => {
-                            return Ok(Action::RunCommand {
-                                id,
-                                status: ActionStatus::Aborted,
-                                args,
-                                exit_code: None,
-                                output: Some("Command execution skipped by user".to_string()),
-                            })
+                        if std::io::stdin().read_line(&mut edited_cmd).is_err() {
+                            return Err("Failed to read input".to_string());
                         }
 
-                        "edit" => {
-                            print("> ");
-                            let mut edited_cmd = String::new();
-
-                            if std::io::stdin().read_line(&mut edited_cmd).is_err() {
-                                return Err("Failed to read input".to_string());
-                            }
-
-                            // Check for Ctrl+P in edit mode
-                            if edited_cmd.trim() == "\x10" {
-                                return Err("re-prompt".to_string());
-                            }
-
-                            command = edited_cmd.trim().to_string();
+                        // Check for Ctrl+P in edit mode
+                        if edited_cmd.trim() == "\x10" {
+                            return Err("re-prompt".to_string());
                         }
 
-                        _ => {}
+                        command = edited_cmd.trim().to_string();
                     }
+
+                    _ => {}
                 }
-
-                let listener = StatusListener::new(
-                    config,
-                    session_id,
-                    Action::RunCommand {
-                        id: id.clone(),
-                        args: RunCommandArgs {
-                            command: command.clone(),
-                            ..args.clone()
-                        },
-                        status,
-                        output,
-                        exit_code,
-                    },
-                );
-
-                listener.start().await?;
-
-                // Wait for human approval if not in interactive mode
-                if !interactive {
-                    while matches!(
-                        listener.get_current_state().await.get_status(),
-                        ActionStatus::PendingHumanApproval
-                    ) {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    }
-                }
-
-                let current_action = listener.get_current_state().await;
-
-                if matches!(current_action.get_status(), ActionStatus::Failed) {
-                    return Ok(current_action);
-                }
-
-                let command = match current_action {
-                    Action::RunCommand { args, .. } => args.command,
-                    _ => command,
-                };
 
                 let mut cmd = process::Command::new("sh");
                 cmd.arg("-c").arg(&command);
@@ -374,21 +321,100 @@ impl Action {
             }
         }
     }
+    pub async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
+        match self.clone() {
+            Action::RunCommand {
+                id, args, status, ..
+            } => {
+                if status == ActionStatus::PendingHumanApproval {
+                    print(
+                        format!(
+                            "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
+                            args.description,
+                        )
+                        .as_str(),
+                    );
+                    print("[Reasoning]");
+                    for line in args.reasoning.lines() {
+                        print(format!("  {}", line).as_str());
+                    }
+                    print("\n[WARNING] About to execute the following command:");
+                    print(format!(">{}", args.command).as_str());
+
+                    return Ok(self);
+                }
+
+                let mut cmd = process::Command::new("sh");
+                cmd.arg("-c").arg(&args.command);
+
+                let mut output_lines = Vec::new();
+                let mut process_stream = ProcessLineStream::try_from(cmd)
+                    .map_err(|e| format!("Failed to create process stream: {}", e))?;
+                let mut exit_code = -1;
+
+                while let Some(item) = process_stream.next().await {
+                    match item {
+                        Item::Stdout(line) | Item::Stderr(line) => {
+                            print(line.as_str());
+                            output_lines.push(line.to_string());
+                        }
+                        Item::Done(exit_status) => {
+                            exit_code = match exit_status {
+                                Ok(status) => status.code().unwrap_or(-1),
+                                Err(e) => {
+                                    print(format!("Error: {}", e).as_str());
+                                    -1
+                                }
+                            };
+                        }
+                    }
+                }
+
+                let mut output = output_lines.join("\n");
+
+                const MAX_OUTPUT_LENGTH: usize = 4000;
+                // Truncate long output
+                if output.len() > MAX_OUTPUT_LENGTH {
+                    let offset = MAX_OUTPUT_LENGTH / 2;
+                    output = format!(
+                        "{}\n...truncated...\n{}",
+                        &output[..offset],
+                        &output[output.len() - offset..]
+                    );
+                }
+
+                let status = if exit_code == 0 {
+                    ActionStatus::Succeeded
+                } else {
+                    ActionStatus::Failed
+                };
+
+                Ok(Action::RunCommand {
+                    id,
+                    status,
+                    args,
+                    exit_code: Some(exit_code),
+                    output: Some(output),
+                })
+            }
+            _ => Ok(self),
+        }
+    }
 }
 
-struct StatusListener<'a> {
+struct AgentOutputListener<'a> {
     config: &'a AppConfig,
     session_id: String,
-    action: Arc<Mutex<Action>>,
+    output: Arc<Mutex<RunAgentOutput>>,
 }
 
-impl<'a> StatusListener<'a> {
-    fn new(config: &'a AppConfig, session_id: String, initial_state: Action) -> Self {
-        let action_state = Arc::new(Mutex::new(initial_state));
+impl<'a> AgentOutputListener<'a> {
+    fn new(config: &'a AppConfig, session_id: String, initial_state: RunAgentOutput) -> Self {
+        let output_state = Arc::new(Mutex::new(initial_state));
         Self {
             config,
             session_id,
-            action: action_state.clone(),
+            output: output_state.clone(),
         }
     }
 
@@ -457,16 +483,18 @@ impl<'a> StatusListener<'a> {
     }
 
     async fn listen_for_status_updates(&self) -> Result<(), String> {
-        let action_clone = Arc::clone(&self.action);
+        let output_clone = Arc::clone(&self.output);
 
         self.listener(
             "status".to_string(),
             move |msg: Payload, _client: SocketClient| -> BoxFuture<'static, ()> {
-                let state = action_clone.clone();
+                let output = output_clone.clone();
                 Box::pin(async move {
-                    let id = state.lock().await.get_id().clone();
                     if let Payload::Text(text) = msg {
-                        Self::process_status_message(&state, &id, text.first().unwrap()).await;
+                        if let Ok(status) = Self::parse_agent_output(text.first().unwrap()) {
+                            let mut state = output.lock().await;
+                            *state = status;
+                        }
                     }
                 })
             },
@@ -475,41 +503,13 @@ impl<'a> StatusListener<'a> {
         .map_err(|_| "Failed to listen for events".to_string())
     }
 
-    async fn process_status_message(
-        state_mutex: &Arc<Mutex<Action>>,
-        action_id: &str,
-        value: &Value,
-    ) {
-        match Self::parse_status_output(value) {
-            Ok(agent_status) => {
-                if let Some(action) = Self::find_action_by_id(&agent_status, action_id) {
-                    let mut state = state_mutex.lock().await;
-                    *state = action.clone();
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
-            }
-        }
-    }
-
-    fn parse_status_output(value: &Value) -> Result<AgentStatusOutput, String> {
+    fn parse_agent_output(value: &Value) -> Result<RunAgentOutput, String> {
         serde_json::from_value(value.clone())
             .map_err(|e| format!("Failed to deserialize response: {}", e))
     }
 
-    fn find_action_by_id(status: &AgentStatusOutput, id: &str) -> Option<Action> {
-        status
-            .output
-            .get_action_queue()
-            .iter()
-            .find(|action| action.get_id() == id)
-            .cloned()
-    }
-
     // New method to get the current action state
-    pub async fn get_current_state(&self) -> Action {
-        self.action.lock().await.clone()
+    pub async fn get_current_state(&self) -> RunAgentOutput {
+        self.output.lock().await.clone()
     }
 }

@@ -1,23 +1,16 @@
-use crate::{
-    client::{
-        models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
-        Client,
-    },
-    config::AppConfig,
+use crate::client::{
+    models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
+    Client,
 };
 
-use super::run_actions;
+use super::{run_interactive_actions, run_remote_actions};
 
-#[allow(clippy::too_many_arguments)]
-pub async fn get_next_input(
-    config: &AppConfig,
+pub async fn get_next_input_interactive(
     client: &Client,
     agent_id: &AgentID,
-    session_id: String,
     print: &impl Fn(&str),
     output: &RunAgentOutput,
     short_circuit_actions: bool,
-    interactive: bool,
 ) -> Result<RunAgentInput, String> {
     match &output.output {
         AgentOutput::NorbertV1 {
@@ -42,13 +35,10 @@ pub async fn get_next_input(
                 print(format!("\n{}", message).as_str());
             }
 
-            let result = match run_actions(
-                config,
-                session_id,
+            let result = match run_interactive_actions(
                 action_queue.to_owned(),
                 print,
                 short_circuit_actions,
-                interactive,
             )
             .await
             {
@@ -139,6 +129,63 @@ pub async fn get_next_input(
                         },
                     }
                 }
+                Err(e) => return Err(e),
+            };
+
+            Ok(result)
+        }
+    }
+}
+
+pub async fn get_next_input(
+    agent_id: &AgentID,
+    print: &impl Fn(&str),
+    output: &RunAgentOutput,
+) -> Result<RunAgentInput, String> {
+    match &output.output {
+        AgentOutput::NorbertV1 {
+            message,
+            action_queue,
+            ..
+        }
+        | AgentOutput::DaveV1 {
+            message,
+            action_queue,
+            ..
+        }
+        | AgentOutput::KevinV1 {
+            message,
+            action_queue,
+            ..
+        } => {
+            if let Some(message) = message {
+                print(format!("\n{}", message).as_str());
+            }
+
+            let result = match run_remote_actions(action_queue.to_owned(), print).await {
+                Ok(updated_actions) => RunAgentInput {
+                    checkpoint_id: output.checkpoint.id,
+                    input: match agent_id {
+                        AgentID::NorbertV1 => AgentInput::NorbertV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                        AgentID::DaveV1 => AgentInput::DaveV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                        AgentID::KevinV1 => AgentInput::KevinV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                    },
+                },
                 Err(e) => return Err(e),
             };
 

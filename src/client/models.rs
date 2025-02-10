@@ -537,13 +537,6 @@ pub struct RunAgentOutput {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AgentStatusOutput {
-    pub checkpoint_id: Uuid,
-    pub session_id: Uuid,
-    pub output: AgentOutput,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "agent_id")]
 pub enum AgentInput {
     #[serde(rename = "norbert:v1")]
@@ -638,13 +631,6 @@ impl AgentOutput {
             AgentOutput::NorbertV1 { .. } => AgentID::NorbertV1,
             AgentOutput::DaveV1 { .. } => AgentID::DaveV1,
             AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
-        }
-    }
-    pub fn get_action_queue(&self) -> &Vec<Action> {
-        match self {
-            AgentOutput::NorbertV1 { action_queue, .. }
-            | AgentOutput::DaveV1 { action_queue, .. }
-            | AgentOutput::KevinV1 { action_queue, .. } => action_queue,
         }
     }
 }
