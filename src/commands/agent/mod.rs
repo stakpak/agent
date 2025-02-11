@@ -237,16 +237,6 @@ impl Action {
                 print(confirmation.as_str());
 
                 match confirmation.as_str() {
-                    "skip" => {
-                        return Ok(Action::RunCommand {
-                            id,
-                            status: ActionStatus::Aborted,
-                            args,
-                            exit_code: None,
-                            output: Some("Command execution skipped by user".to_string()),
-                        })
-                    }
-
                     "edit" => {
                         print("> ");
                         let mut edited_cmd = String::new();
@@ -262,8 +252,17 @@ impl Action {
 
                         command = edited_cmd.trim().to_string();
                     }
-
-                    _ => {}
+                    // Added to not drop the command value
+                    "yes" => {}
+                    _ => {
+                        return Ok(Action::RunCommand {
+                            id,
+                            status: ActionStatus::Aborted,
+                            args,
+                            exit_code: None,
+                            output: Some("Command execution skipped by user".to_string()),
+                        })
+                    }
                 }
 
                 let mut cmd = process::Command::new("sh");
