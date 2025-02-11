@@ -221,8 +221,8 @@ fn handle_remote_change(
     for uri in change.uris {
         if !document_uris.contains(&uri) {
             let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
-            std::fs::remove_file(&absolute_path).unwrap();
             watched_files.remove(&uri);
+            std::fs::remove_file(&absolute_path).unwrap();
         }
     }
     for doc in change.documents {
