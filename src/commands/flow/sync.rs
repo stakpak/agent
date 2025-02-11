@@ -40,7 +40,7 @@ pub struct DocumentBuffer {
 pub struct DocumentsChange {
     pub flow_ref: String,
     pub documents: Vec<Document>,
-    pub uris: HashSet<String>,
+    pub touched_document_uris: HashSet<String>,
 }
 
 pub enum Change {
@@ -220,7 +220,7 @@ fn handle_remote_change(
 ) {
     println!("🔄 Syncing changes...");
     let document_uris: HashSet<String> = change.documents.iter().map(|d| d.uri.clone()).collect();
-    for uri in change.uris {
+    for uri in change.touched_document_uris {
         if !document_uris.contains(&uri) {
             let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
             watched_files.remove(&uri);
