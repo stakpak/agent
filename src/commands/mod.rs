@@ -386,8 +386,16 @@ impl Commands {
                     }
                 }?;
 
-                let checkpoint_id =
-                    run_agent(&config, &client, agent_id, None, Some(agent_input), true).await?;
+                let checkpoint_id = run_agent(
+                    &config,
+                    &client,
+                    agent_id,
+                    None,
+                    Some(agent_input),
+                    true,
+                    true,
+                )
+                .await?;
 
                 // Write checkpoint ID to local file for resuming later
                 std::fs::write(".stakpak_apply_checkpoint", checkpoint_id.to_string())

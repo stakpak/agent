@@ -44,7 +44,7 @@ pub async fn setup_output_handler(
 ) -> Result<impl Fn(&str), String> {
     // Attempt to connect to the socket
     let socket_client = match ClientBuilder::new(config.api_endpoint.clone())
-        .namespace("/v1/sessions")
+        .namespace("/v1/agents/sessions")
         .reconnect(true)
         .reconnect_delay(1000, 5000)
         .opening_header(
@@ -67,7 +67,8 @@ pub async fn setup_output_handler(
         let msg_clone = msg.clone();
         let session_id = session_id.clone();
         Box::pin(async move {
-            if let Err(e) = socket_client
+            let mut retries = 0;
+            while let Err(e) = socket_client
                 .emit(
                     "publish",
                     json!({
@@ -77,7 +78,12 @@ pub async fn setup_output_handler(
                 )
                 .await
             {
-                eprintln!("Failed to publish message: {}", e);
+                tokio::time::sleep(std::time::Duration::from_millis(100 * (retries + 1))).await;
+                retries += 1;
+                if retries >= 5 {
+                    eprintln!("Failed to publish message: {}", e);
+                    break;
+                }
             }
         })
     }));
