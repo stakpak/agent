@@ -59,12 +59,6 @@ pub enum Commands {
         /// Source/Destination directory
         #[arg(long, short)]
         dir: Option<String>,
-        /// Ignore delete operations
-        #[arg(long, default_value_t = false)]
-        ignore_delete: bool,
-        /// Auto approve all changes
-        #[arg(long, short = 'y', default_value_t = false)]
-        auto_approve: bool,
     },
 
     /// Query your configurations
@@ -203,13 +197,10 @@ impl Commands {
                 let skin = MadSkin::default();
                 println!("{}", skin.inline(&data.to_text(synthesize_output)));
             }
-            Commands::Sync {
-                flow_ref,
-                dir,
-                ignore_delete,
-                auto_approve,
-            } => {
-                sync(flow_ref, dir, ignore_delete, auto_approve).await?;
+            Commands::Sync { flow_ref, dir } => {
+                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let flow_ref = get_flow_ref(&client, flow_ref).await?;
+                sync(&config, &client, &flow_ref, dir.as_deref()).await?;
             }
             Commands::Push {
                 flow_ref,
