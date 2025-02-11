@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
     path::Path,
     sync::{
@@ -40,6 +40,7 @@ pub struct DocumentBuffer {
 pub struct DocumentsChange {
     pub flow_ref: String,
     pub documents: Vec<Document>,
+    pub uris: HashSet<String>,
 }
 
 pub enum Change {
@@ -216,6 +217,13 @@ fn handle_remote_change(
     watched_files: &mut HashMap<String, DocumentBuffer>,
 ) {
     println!("🔄 Syncing changes...");
+    let document_uris: HashSet<String> = change.documents.iter().map(|d| d.uri.clone()).collect();
+    for uri in change.uris {
+        if !document_uris.contains(&uri) {
+            let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
+            std::fs::remove_file(&absolute_path).unwrap();
+        }
+    }
     for doc in change.documents {
         let uri = doc.uri.clone();
         let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
