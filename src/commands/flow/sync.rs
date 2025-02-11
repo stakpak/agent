@@ -151,7 +151,7 @@ async fn handle_internal_change(
         event.kind,
         notify::EventKind::Modify(ModifyKind::Name(_)) | notify::EventKind::Remove(_)
     ) {
-        process_deleted_files(watched_files, &mut edits);
+        process_deleted_files(dir, watched_files, &mut edits);
     }
 
     // Handle modifications
@@ -166,12 +166,17 @@ async fn handle_internal_change(
 }
 
 fn process_deleted_files(
+    dir: &Path,
     watched_files: &mut HashMap<String, DocumentBuffer>,
     edits: &mut Vec<Edit>,
 ) {
     let invalid_paths: Vec<_> = watched_files
         .keys()
-        .filter(|path| std::fs::read_to_string(path).is_err())
+        .filter(|path| {
+            let absolute_path = Path::new(dir).join(path.strip_prefix("file:///").unwrap_or(path));
+
+            std::fs::read_to_string(absolute_path).is_err()
+        })
         .cloned()
         .collect();
 
@@ -223,8 +228,10 @@ fn handle_remote_change(
     for uri in change.touched_document_uris {
         if !document_uris.contains(&uri) {
             let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
-            watched_files.remove(&uri);
-            std::fs::remove_file(&absolute_path).unwrap();
+            if watched_files.contains_key(&uri) {
+                watched_files.remove(&uri);
+            }
+            std::fs::remove_file(&absolute_path).ok();
         }
     }
     for doc in change.documents {
