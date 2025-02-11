@@ -252,7 +252,9 @@ impl Action {
 
                         command = edited_cmd.trim().to_string();
                     }
-                    "skip" => {
+                    // Added to not drop the command value
+                    "yes" => {}
+                    _ => {
                         return Ok(Action::RunCommand {
                             id,
                             status: ActionStatus::Aborted,
@@ -260,11 +262,6 @@ impl Action {
                             exit_code: None,
                             output: Some("Command execution skipped by user".to_string()),
                         })
-                    }
-                    // Added to not drop the command value
-                    "yes" => {}
-                    _ => {
-                        return Err("Invalid input".to_string());
                     }
                 }
 
