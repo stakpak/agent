@@ -172,7 +172,7 @@ async fn process_directory(
     Ok((edits, files_synced, files_deleted))
 }
 
-fn create_edit(document_uri: &str, content: &str, operation: &str) -> Edit {
+pub fn create_edit(document_uri: &str, content: &str, operation: &str) -> Edit {
     Edit {
         document_uri: document_uri.to_string(),
         start_byte: 0,

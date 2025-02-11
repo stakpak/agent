@@ -653,7 +653,7 @@ pub struct SaveEditsInput {
     pub edits: Vec<Edit>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Edit {
     pub content: String,
     pub document_uri: String,
