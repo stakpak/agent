@@ -40,7 +40,7 @@ pub struct DocumentBuffer {
 pub struct DocumentsChange {
     pub flow_ref: String,
     pub documents: Vec<Document>,
-    pub uris: HashSet<String>,
+    pub touched_document_uris: HashSet<String>,
 }
 
 pub enum Change {
@@ -76,7 +76,9 @@ pub async fn sync(
     while let Some(change) = rx.recv().await {
         match change {
             Change::Internal(event) => {
-                handle_internal_change(event, &dir, &mut watched_files, client, flow_ref).await?;
+                handle_internal_change(event, &dir, &mut watched_files, client, flow_ref)
+                    .await
+                    .ok();
             }
             Change::Remote(change) => {
                 handle_remote_change(change, &dir, &mut watched_files);
@@ -149,7 +151,7 @@ async fn handle_internal_change(
         event.kind,
         notify::EventKind::Modify(ModifyKind::Name(_)) | notify::EventKind::Remove(_)
     ) {
-        process_deleted_files(watched_files, &mut edits);
+        process_deleted_files(dir, watched_files, &mut edits);
     }
 
     // Handle modifications
@@ -164,12 +166,17 @@ async fn handle_internal_change(
 }
 
 fn process_deleted_files(
+    dir: &Path,
     watched_files: &mut HashMap<String, DocumentBuffer>,
     edits: &mut Vec<Edit>,
 ) {
     let invalid_paths: Vec<_> = watched_files
         .keys()
-        .filter(|path| std::fs::read_to_string(path).is_err())
+        .filter(|path| {
+            let absolute_path = Path::new(dir).join(path.strip_prefix("file:///").unwrap_or(path));
+
+            std::fs::read_to_string(absolute_path).is_err()
+        })
         .cloned()
         .collect();
 
@@ -218,10 +225,13 @@ fn handle_remote_change(
 ) {
     println!("🔄 Syncing changes...");
     let document_uris: HashSet<String> = change.documents.iter().map(|d| d.uri.clone()).collect();
-    for uri in change.uris {
+    for uri in change.touched_document_uris {
         if !document_uris.contains(&uri) {
             let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
-            std::fs::remove_file(&absolute_path).unwrap();
+            if watched_files.contains_key(&uri) {
+                watched_files.remove(&uri);
+            }
+            std::fs::remove_file(&absolute_path).ok();
         }
     }
     for doc in change.documents {
