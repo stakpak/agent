@@ -221,6 +221,8 @@ impl Action {
 
                 print("Please confirm [yes/edit/skip] (skip):");
 
+                let mut command = args.command.clone();
+
                 let mut input = String::new();
                 if std::io::stdin().read_line(&mut input).is_err() {
                     return Err("Failed to read input".to_string());
@@ -233,8 +235,6 @@ impl Action {
 
                 let confirmation = input.trim().to_lowercase();
                 print(confirmation.as_str());
-
-                let mut command = args.command.clone();
 
                 match confirmation.as_str() {
                     "edit" => {
