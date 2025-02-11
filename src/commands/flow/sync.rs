@@ -76,7 +76,9 @@ pub async fn sync(
     while let Some(change) = rx.recv().await {
         match change {
             Change::Internal(event) => {
-                handle_internal_change(event, &dir, &mut watched_files, client, flow_ref).await?;
+                handle_internal_change(event, &dir, &mut watched_files, client, flow_ref)
+                    .await
+                    .ok();
             }
             Change::Remote(change) => {
                 handle_remote_change(change, &dir, &mut watched_files);
