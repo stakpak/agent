@@ -324,6 +324,7 @@ impl FlowRef {
 pub struct AgentSession {
     pub id: Uuid,
     pub agent_id: AgentID,
+    pub flow_ref: Option<FlowRef>,
     pub visibility: AgentSessionVisibility,
     pub checkpoints: Vec<AgentCheckpointListItem>,
     pub created_at: DateTime<Utc>,
@@ -385,6 +386,7 @@ pub struct AgentCheckpointListItem {
 pub struct AgentSessionListItem {
     pub id: Uuid,
     pub agent_id: AgentID,
+    pub flow_ref: Option<FlowRef>,
     pub visibility: AgentSessionVisibility,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -395,6 +397,7 @@ impl From<AgentSession> for AgentSessionListItem {
         Self {
             id: item.id,
             agent_id: item.agent_id,
+            flow_ref: item.flow_ref,
             visibility: item.visibility,
             created_at: item.created_at,
             updated_at: item.updated_at,

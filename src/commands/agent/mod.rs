@@ -29,11 +29,16 @@ use crate::{
 mod get_next_input;
 pub use get_next_input::*;
 
+mod get_or_create_session;
+pub use get_or_create_session::*;
+
 mod run_actions;
 pub use run_actions::*;
 
 mod run_agent;
 pub use run_agent::*;
+
+use super::flow;
 
 #[derive(Subcommand)]
 pub enum AgentCommands {
@@ -128,11 +133,25 @@ impl AgentCommands {
 
                 input.set_user_prompt(user_prompt);
 
+                let (agent_id, session, checkpoint) =
+                    get_or_create_session(&client, agent_id, checkpoint_id, Some(input.clone()))
+                        .await?;
+
+                if let Some(flow_ref) = &session.flow_ref {
+                    let config_clone = config.clone();
+                    let client_clone = Client::new(&config_clone).map_err(|e| e.to_string())?;
+                    let flow_ref = flow_ref.clone();
+                    tokio::spawn(async move {
+                        flow::sync(&config_clone, &client_clone, &flow_ref, None).await
+                    });
+                }
+
                 run_agent(
                     &config,
                     &client,
                     agent_id,
-                    checkpoint_id,
+                    session,
+                    checkpoint,
                     Some(input),
                     short_circuit_actions,
                     interactive,
