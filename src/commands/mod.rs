@@ -1,4 +1,4 @@
-use agent::{run_agent, AgentCommands};
+use agent::{get_or_create_session, run_agent, AgentCommands};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
 use termimad::MadSkin;
@@ -360,6 +360,21 @@ impl Commands {
                 if path_map.is_empty() {
                     return Err("No configurations found to apply".into());
                 }
+
+                let config_clone = config.clone();
+                let client_clone = Client::new(&config_clone).map_err(|e| e.to_string())?;
+                let flow_ref_clone = flow_ref.clone();
+                let dir_clone = dir.clone();
+                tokio::spawn(async move {
+                    flow::sync(
+                        &config_clone,
+                        &client_clone,
+                        &flow_ref_clone,
+                        dir_clone.as_deref(),
+                    )
+                    .await
+                });
+
                 let agent_id = AgentID::KevinV1;
 
                 let agent_input = match provisioner {
@@ -377,11 +392,16 @@ impl Commands {
                     }
                 }?;
 
+                let (agent_id, session, checkpoint) =
+                    get_or_create_session(&client, agent_id, None, Some(agent_input.clone()))
+                        .await?;
+
                 let checkpoint_id = run_agent(
                     &config,
                     &client,
                     agent_id,
-                    None,
+                    session,
+                    checkpoint,
                     Some(agent_input),
                     true,
                     true,

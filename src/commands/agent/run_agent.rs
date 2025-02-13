@@ -2,7 +2,10 @@ use uuid::Uuid;
 
 use crate::{
     client::{
-        models::{AgentID, AgentInput, AgentSessionVisibility, AgentStatus, RunAgentInput},
+        models::{
+            AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentStatus,
+            RunAgentInput,
+        },
         Client,
     },
     commands::agent::get_next_input,
@@ -12,51 +15,17 @@ use crate::{
 
 use super::{get_next_input_interactive, AgentOutputListener};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_agent(
     config: &AppConfig,
     client: &Client,
     agent_id: AgentID,
-    checkpoint_id: Option<String>,
+    session: AgentSessionListItem,
+    checkpoint: AgentCheckpointListItem,
     input: Option<AgentInput>,
     short_circuit_actions: bool,
     interactive: bool,
 ) -> Result<Uuid, String> {
-    let (agent_id, session, checkpoint) = match checkpoint_id {
-        Some(checkpoint_id) => {
-            let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
-                format!(
-                    "Invalid checkpoint ID '{}' - must be a valid UUID",
-                    checkpoint_id
-                )
-            })?;
-
-            let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
-
-            (
-                output.output.get_agent_id(),
-                output.session,
-                output.checkpoint,
-            )
-        }
-        None => {
-            let session = client
-                .create_agent_session(
-                    agent_id.clone(),
-                    AgentSessionVisibility::Private,
-                    input.clone(),
-                )
-                .await?;
-
-            let checkpoint = session
-                .checkpoints
-                .first()
-                .ok_or("No checkpoint found in new session")?
-                .clone();
-
-            (agent_id, session.into(), checkpoint)
-        }
-    };
-
     let print = setup_output_handler(config, session.id.to_string()).await?;
 
     let mut input = RunAgentInput {
