@@ -79,16 +79,22 @@ pub async fn run_agent(
 
             // Execute the sequence once before the loop
             let current_state = listener.get_current_state().await;
-            input = get_next_input(&agent_id, &print, &current_state).await?;
-            client.run_agent(&input).await?;
+            let next_input = get_next_input(&agent_id, &print, &current_state).await?;
+            if next_input != input {
+                input = next_input;
+                client.run_agent(&input).await?;
+            }
 
             loop {
                 let current_state = listener.get_current_state().await;
                 if checkpoint_id != current_state.checkpoint.id {
                     print("[ ▄▀ Stakpaking... ]");
                     checkpoint_id = current_state.checkpoint.id;
-                    input = get_next_input(&agent_id, &print, &current_state).await?;
-                    client.run_agent(&input).await?;
+                    let next_input = get_next_input(&agent_id, &print, &current_state).await?;
+                    if next_input != input {
+                        input = next_input;
+                        client.run_agent(&input).await?;
+                    }
                 }
 
                 match current_state.checkpoint.status {

@@ -431,7 +431,7 @@ impl std::fmt::Display for AgentStatus {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
 pub enum Action {
     AskUser {
@@ -501,7 +501,7 @@ impl std::fmt::Display for ActionStatus {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 /// Ask the user clarifying questions or more information
 pub struct AskUserArgs {
     /// Brief description of why you're asking the user
@@ -512,7 +512,7 @@ pub struct AskUserArgs {
     pub questions: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 /// Run a shell command and get the output
 pub struct RunCommandArgs {
     /// Brief description of why you're asking the user
@@ -525,7 +525,7 @@ pub struct RunCommandArgs {
     pub rollback_command: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct RunAgentInput {
     pub checkpoint_id: Uuid,
 
@@ -539,7 +539,7 @@ pub struct RunAgentOutput {
     pub output: AgentOutput,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(tag = "agent_id")]
 pub enum AgentInput {
     #[serde(rename = "norbert:v1")]
