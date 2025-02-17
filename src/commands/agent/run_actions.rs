@@ -33,22 +33,27 @@ pub async fn run_remote_actions(
     print: &impl Fn(&str),
 ) -> Result<Vec<Action>, String> {
     let mut updated_actions = Vec::with_capacity(action_queue.len());
-    for action in action_queue.clone().into_iter() {
-        if !action.is_pending() || !matches!(action, Action::RunCommand { .. }) {
+
+    for action in action_queue.iter() {
+        if !action.is_pending() {
             continue;
         }
 
-        if action.get_status() == &ActionStatus::PendingHumanApproval {
-            // To Print Warnings and Reasoning
-            if updated_actions.is_empty() {
-                action.clone().run(print).await?;
+        match action {
+            Action::RunCommand { .. } => {
+                if action.get_status() == &ActionStatus::PendingHumanApproval {
+                    if updated_actions.is_empty() {
+                        action.clone().run(print).await?;
+                    }
+                    updated_actions
+                        .extend(action_queue.iter().skip(updated_actions.len()).cloned());
+                    return Ok(updated_actions);
+                }
+                let updated_action = action.clone().run(print).await?;
+                updated_actions.push(updated_action);
             }
-            updated_actions.extend(action_queue.iter().skip(updated_actions.len()).cloned());
-            return Ok(updated_actions);
+            _ => updated_actions.push(action.clone()),
         }
-
-        let updated_action = action.run(print).await?;
-        updated_actions.push(updated_action);
     }
 
     Ok(updated_actions)
