@@ -343,11 +343,17 @@ async fn wait_for_subscription(
             )
             .await
         {
-            return Err(format!("Failed to subscribe to session: {}", e));
+            if retry >= 5 {
+                return Err(format!("Failed to subscribe to session: {}", e));
+            }
         }
 
         if subscription_complete.load(Ordering::SeqCst) {
             break;
+        }
+
+        if retry >= 5 {
+            return Err("Failed to subscribe to session: Timed out".to_string());
         }
     }
 

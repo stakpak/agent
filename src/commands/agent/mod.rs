@@ -486,11 +486,17 @@ impl<'a> AgentOutputListener<'a> {
                 )
                 .await
             {
-                return Err(format!("Failed to subscribe to session: {}", e));
+                if retry >= 5 {
+                    return Err(format!("Failed to subscribe to session: {}", e));
+                }
             }
 
             if subscription_complete.load(Ordering::SeqCst) {
                 break;
+            }
+
+            if retry >= 5 {
+                return Err("Failed to subscribe to session: Timed out".to_string());
             }
         }
 
@@ -504,7 +510,6 @@ impl<'a> AgentOutputListener<'a> {
 
     async fn listen_for_status_updates(&self) -> Result<(), String> {
         let output_clone = Arc::clone(&self.output);
-
         self.listener(
             "status".to_string(),
             move |msg: Payload, _client: SocketClient| -> BoxFuture<'static, ()> {
@@ -520,7 +525,7 @@ impl<'a> AgentOutputListener<'a> {
             },
         )
         .await
-        .map_err(|_| "Failed to listen for events".to_string())
+        .map_err(|e| format!("Failed to listen for status updates: {}", e))
     }
 
     fn parse_agent_output(value: &Value) -> Result<RunAgentOutput, String> {
