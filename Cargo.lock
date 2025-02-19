@@ -2031,13 +2031,14 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stakpak"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "chrono",
  "clap",
  "config",
  "futures-util",
  "notify",
+ "regex",
  "reqwest",
  "rust_socketio",
  "serde",

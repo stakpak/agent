@@ -318,6 +318,21 @@ impl FlowRef {
         };
         Ok(flow_version)
     }
+
+    pub fn to_url(&self) -> String {
+        match self {
+            FlowRef::Version {
+                owner_name,
+                flow_name,
+                ..
+            } => format!("https://stakpak.dev/{}/{}", owner_name, flow_name,),
+            FlowRef::Tag {
+                owner_name,
+                flow_name,
+                ..
+            } => format!("https://stakpak.dev/{}/{}", owner_name, flow_name),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
