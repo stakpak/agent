@@ -290,6 +290,7 @@ async fn setup_socket_client(
         .namespace("/v1/flows")
         .reconnect(true)
         .reconnect_delay(1000, 5000)
+        .reconnect_on_disconnect(true)
         .opening_header(
             "Authorization",
             format!("Bearer {}", config.api_key.clone().unwrap_or_default()),

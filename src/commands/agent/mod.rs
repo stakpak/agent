@@ -1,5 +1,6 @@
 use clap::Subcommand;
 use futures_util::future::BoxFuture;
+use regex::Regex;
 use rust_socketio::{
     asynchronous::{Client as SocketClient, ClientBuilder},
     Payload,
@@ -372,11 +373,13 @@ impl Action {
                     .map_err(|e| format!("Failed to create process stream: {}", e))?;
                 let mut exit_code = -1;
 
+                let regex = Regex::new(r"\x1B\[[0-9;]*[mK]").unwrap();
                 while let Some(item) = process_stream.next().await {
                     match item {
                         Item::Stdout(line) | Item::Stderr(line) => {
-                            print(line.as_str());
-                            output_lines.push(line.to_string());
+                            let clean_line = regex.replace_all(line.as_str(), "").to_string();
+                            print(&clean_line);
+                            output_lines.push(clean_line.to_string());
                         }
                         Item::Done(exit_status) => {
                             exit_code = match exit_status {
@@ -449,6 +452,7 @@ impl<'a> AgentOutputListener<'a> {
             .namespace("/v1/agents/sessions")
             .reconnect(true)
             .reconnect_delay(1000, 5000)
+            .reconnect_on_disconnect(true)
             .opening_header(
                 String::from("Authorization"),
                 format!("Bearer {}", self.config.api_key.clone().unwrap_or_default()),

@@ -27,7 +27,6 @@ pub async fn run_agent(
     interactive: bool,
 ) -> Result<Uuid, String> {
     let print = setup_output_handler(config, session.id.to_string()).await?;
-
     let mut input = RunAgentInput {
         checkpoint_id: checkpoint.id,
         input: match input {
@@ -67,6 +66,17 @@ pub async fn run_agent(
             };
         },
         false => {
+            if let Some(flow_ref) = &session.flow_ref {
+                let url = format!("{}?session_id={}", flow_ref.to_url(), session.id);
+                println!("\x1b[1;34m{}\x1b[0m", "━".repeat(80));
+                println!("\x1b[1;36mContinue the agent session in your browser:\x1b[0m");
+                println!(
+                    "\x1b]8;;{}\x1b\\\x1b[1;32m{}\x1b[0m\x1b]8;;\x1b\\",
+                    url, url
+                );
+                println!("\x1b[1;34m{}\x1b[0m", "━".repeat(80));
+            }
+
             print("[ ▄▀ Stakpaking... ]");
             let output = client.run_agent(&input).await?;
             print(&format!(

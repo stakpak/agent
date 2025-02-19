@@ -36,6 +36,7 @@ pub async fn run_remote_actions(
 
     for action in action_queue.iter() {
         if !action.is_pending() {
+            updated_actions.push(action.clone());
             continue;
         }
 

@@ -1,8 +1,8 @@
 use rust_socketio::asynchronous::ClientBuilder;
 use serde_json::json;
 use std::future::Future;
-use std::sync::mpsc;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 
@@ -16,10 +16,9 @@ impl OutputHandler {
         F: Fn(String) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let (tx, rx) = mpsc::channel::<String>();
-
+        let (tx, mut rx) = mpsc::channel::<String>(100);
         tokio::spawn(async move {
-            while let Ok(msg) = rx.recv() {
+            while let Some(msg) = rx.recv().await {
                 handler(msg).await;
             }
         });
@@ -27,8 +26,8 @@ impl OutputHandler {
         Self { tx }
     }
 
-    pub fn send(&self, content: String) {
-        self.tx.send(content).unwrap_or(());
+    pub async fn send(&self, content: String) {
+        self.tx.send(content).await.unwrap_or(());
     }
 }
 
@@ -48,6 +47,7 @@ pub async fn setup_output_handler(
         .namespace("/v1/agents/sessions")
         .reconnect(true)
         .reconnect_delay(1000, 5000)
+        .reconnect_on_disconnect(true)
         .opening_header(
             String::from("Authorization"),
             format!("Bearer {}", config.api_key.clone().unwrap_or_default()),
@@ -64,30 +64,33 @@ pub async fn setup_output_handler(
         let session_id = session_id.clone();
 
         async move {
-            tokio::spawn(async move {
-                let payload = json!({
-                    "text": msg,
-                    "session_id": session_id
-                });
+            let payload = json!({
+                "text": msg,
+                "session_id": session_id
+            });
 
-                for retry in 0..5 {
-                    match socket_client.emit("publish", payload.clone()).await {
-                        Ok(_) => break,
-                        Err(e) => {
-                            if retry == 4 {
-                                eprintln!("Failed to publish message: {}", e);
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(100 * (retry + 1)))
-                                .await;
+            for retry in 0..5 {
+                match socket_client.emit("publish", payload.clone()).await {
+                    Ok(_) => break,
+                    Err(e) => {
+                        if retry == 4 {
+                            eprintln!("Failed to publish message: {}", e);
+                            break;
                         }
+                        tokio::time::sleep(std::time::Duration::from_millis(100 * (retry + 1)))
+                            .await;
                     }
                 }
-            });
+            }
         }
     });
 
+    let output_handler = Arc::new(output_handler);
     Ok(move |msg: &str| {
-        output_handler.send(msg.to_string());
+        let output_handler = output_handler.clone();
+        let msg = msg.to_string();
+        tokio::spawn(async move {
+            output_handler.send(msg).await;
+        });
     })
 }
