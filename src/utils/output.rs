@@ -69,15 +69,15 @@ pub async fn setup_output_handler(
                 "session_id": session_id
             });
 
-            for retry in 0..5 {
+            for retry in 0..10 {
                 match socket_client.emit("publish", payload.clone()).await {
                     Ok(_) => break,
                     Err(e) => {
-                        if retry == 4 {
+                        if retry == 9 {
                             eprintln!("Failed to publish message: {}", e);
                             break;
                         }
-                        tokio::time::sleep(std::time::Duration::from_millis(100 * (retry + 1)))
+                        tokio::time::sleep(std::time::Duration::from_millis(200 * (retry + 1)))
                             .await;
                     }
                 }

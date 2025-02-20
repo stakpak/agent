@@ -66,6 +66,10 @@ pub async fn run_agent(
             };
         },
         false => {
+            println!(
+                "\x1b[33m[NOTE: This agent is in non-interactive mode. Use the \x1b[1;32m-i\x1b[33m flag to enable interactive mode.]\x1b[0m"
+            );
+
             if let Some(flow_ref) = &session.flow_ref {
                 let url = format!("{}?session_id={}", flow_ref.to_url(), session.id);
                 println!("\x1b[1;34m{}\x1b[0m", "━".repeat(80));
