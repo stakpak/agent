@@ -208,7 +208,6 @@ impl Action {
                                     // Ctrl+P
                                     return Err("re-prompt".to_string());
                                 }
-                                println!("{}", line);
                                 lines.push(line.to_string());
                             }
                             Err(e) => return Err(format!("Failed to read input: {}", e)),
@@ -254,7 +253,6 @@ impl Action {
                 }
 
                 let confirmation = input.trim().to_lowercase();
-                println!("{}", confirmation.as_str());
 
                 match confirmation.as_str() {
                     "edit" => {
