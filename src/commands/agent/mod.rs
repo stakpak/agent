@@ -208,7 +208,7 @@ impl Action {
                                     // Ctrl+P
                                     return Err("re-prompt".to_string());
                                 }
-                                print(line);
+                                println!("{}", line);
                                 lines.push(line.to_string());
                             }
                             Err(e) => return Err(format!("Failed to read input: {}", e)),
@@ -254,7 +254,7 @@ impl Action {
                 }
 
                 let confirmation = input.trim().to_lowercase();
-                print(confirmation.as_str());
+                println!("{}", confirmation.as_str());
 
                 match confirmation.as_str() {
                     "edit" => {
@@ -470,7 +470,7 @@ impl<'a> AgentOutputListener<'a> {
         let subscription_complete = Arc::new(AtomicBool::new(false));
 
         for retry in 0.. {
-            sleep(Duration::from_millis(100 * (retry + 1))).await;
+            sleep(Duration::from_millis(200 * (retry + 1))).await;
 
             let subscription_complete_clone = Arc::clone(&subscription_complete);
             let ack_callback =
@@ -490,7 +490,7 @@ impl<'a> AgentOutputListener<'a> {
                 )
                 .await
             {
-                if retry >= 5 {
+                if retry >= 9 {
                     return Err(format!("Failed to subscribe to session: {}", e));
                 }
             }

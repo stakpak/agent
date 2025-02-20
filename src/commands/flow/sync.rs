@@ -325,7 +325,7 @@ async fn wait_for_subscription(
     let subscription_complete = Arc::new(AtomicBool::new(false));
 
     for retry in 0.. {
-        sleep(Duration::from_millis(100 * (retry + 1))).await;
+        sleep(Duration::from_millis(200 * (retry + 1))).await;
 
         let subscription_complete_clone = Arc::clone(&subscription_complete);
         let ack_callback = move |_: Payload, _: SocketClient| -> BoxFuture<'static, ()> {
@@ -344,7 +344,7 @@ async fn wait_for_subscription(
             )
             .await
         {
-            if retry >= 5 {
+            if retry >= 9 {
                 return Err(format!("Failed to subscribe to session: {}", e));
             }
         }
