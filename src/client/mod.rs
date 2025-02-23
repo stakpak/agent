@@ -304,6 +304,33 @@ impl Client {
         }
     }
 
+    pub async fn get_agent_session(&self, session_id: Uuid) -> Result<AgentSession, String> {
+        let url = format!("{}/agents/sessions/{}", self.base_url, session_id);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<AgentSession>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
     pub async fn create_agent_session(
         &self,
         agent_id: AgentID,

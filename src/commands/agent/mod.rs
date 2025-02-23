@@ -1,27 +1,14 @@
 use clap::Subcommand;
-use futures_util::future::BoxFuture;
 use regex::Regex;
-use rust_socketio::{
-    asynchronous::{Client as SocketClient, ClientBuilder},
-    Payload,
-};
-use serde_json::{json, Value};
-use std::{
-    str::FromStr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-use tokio::{process, sync::Mutex, time::sleep};
+use std::str::FromStr;
+use tokio::process;
 use tokio_process_stream::{Item, ProcessLineStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::{
     client::{
-        models::{Action, ActionStatus, AgentID, AgentInput, RunAgentOutput},
+        models::{Action, ActionStatus, AgentID, AgentInput},
         Client,
     },
     config::AppConfig,
@@ -344,24 +331,16 @@ impl Action {
                 id, args, status, ..
             } => {
                 if status == ActionStatus::PendingHumanApproval {
-                    print(
-                        format!(
-                            "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
-                            args.description,
-                        )
-                        .as_str(),
-                    );
                     print("[Reasoning]");
                     for line in args.reasoning.lines() {
                         print(format!("  {}", line).as_str());
                     }
                     print("\n[WARNING] About to execute the following command:");
                     print(format!(">{}", args.command).as_str());
-
-                    print("Please confirm [yes/edit/skip] (skip):");
-
                     return Ok(self);
                 }
+                print("\n[WARNING] About to execute the following command:");
+                print(format!(">{}", args.command).as_str());
 
                 let mut cmd = process::Command::new("sh");
                 cmd.arg("-c").arg(&args.command);
@@ -423,120 +402,120 @@ impl Action {
     }
 }
 
-struct AgentOutputListener<'a> {
-    config: &'a AppConfig,
-    session_id: String,
-    output: Arc<Mutex<RunAgentOutput>>,
-}
+// struct AgentOutputListener<'a> {
+//     config: &'a AppConfig,
+//     session_id: String,
+//     output: Arc<Mutex<RunAgentOutput>>,
+// }
 
-impl<'a> AgentOutputListener<'a> {
-    fn new(config: &'a AppConfig, session_id: String, initial_state: RunAgentOutput) -> Self {
-        let output_state = Arc::new(Mutex::new(initial_state));
-        Self {
-            config,
-            session_id,
-            output: output_state.clone(),
-        }
-    }
+// impl<'a> AgentOutputListener<'a> {
+//     fn new(config: &'a AppConfig, session_id: String, initial_state: RunAgentOutput) -> Self {
+//         let output_state = Arc::new(Mutex::new(initial_state));
+//         Self {
+//             config,
+//             session_id,
+//             output: output_state.clone(),
+//         }
+//     }
 
-    async fn listener<
-        T: Fn(Payload, SocketClient) -> BoxFuture<'static, ()> + 'static + Send + Sync,
-    >(
-        &self,
-        event: String,
-        callback: T,
-    ) -> Result<(), String> {
-        let socket_client = match ClientBuilder::new(self.config.api_endpoint.clone())
-            .namespace("/v1/agents/sessions")
-            .reconnect(true)
-            .reconnect_delay(1000, 5000)
-            .reconnect_on_disconnect(true)
-            .opening_header(
-                String::from("Authorization"),
-                format!("Bearer {}", self.config.api_key.clone().unwrap_or_default()),
-            )
-            .on(event, callback)
-            .connect()
-            .await
-        {
-            Ok(client) => Arc::new(client),
-            Err(e) => {
-                return Err(format!("Failed to connect to server: {}", e));
-            }
-        };
+//     async fn listener<
+//         T: Fn(Payload, SocketClient) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+//     >(
+//         &self,
+//         event: String,
+//         callback: T,
+//     ) -> Result<(), String> {
+//         let socket_client = match ClientBuilder::new(self.config.api_endpoint.clone())
+//             .namespace("/v1/agents/sessions")
+//             .reconnect(true)
+//             .reconnect_delay(1000, 5000)
+//             .reconnect_on_disconnect(true)
+//             .opening_header(
+//                 String::from("Authorization"),
+//                 format!("Bearer {}", self.config.api_key.clone().unwrap_or_default()),
+//             )
+//             .on(event, callback)
+//             .connect()
+//             .await
+//         {
+//             Ok(client) => Arc::new(client),
+//             Err(e) => {
+//                 return Err(format!("Failed to connect to server: {}", e));
+//             }
+//         };
 
-        let subscription_complete = Arc::new(AtomicBool::new(false));
+//         let subscription_complete = Arc::new(AtomicBool::new(false));
 
-        for retry in 0.. {
-            sleep(Duration::from_millis(200 * (retry + 1))).await;
+//         for retry in 0.. {
+//             sleep(Duration::from_millis(200 * (retry + 1))).await;
 
-            let subscription_complete_clone = Arc::clone(&subscription_complete);
-            let ack_callback =
-                move |_message: Payload, _socket: SocketClient| -> BoxFuture<'static, ()> {
-                    let subscription_complete_clone = Arc::clone(&subscription_complete_clone);
-                    Box::pin(async move {
-                        subscription_complete_clone.store(true, Ordering::SeqCst);
-                    })
-                };
+//             let subscription_complete_clone = Arc::clone(&subscription_complete);
+//             let ack_callback =
+//                 move |_message: Payload, _socket: SocketClient| -> BoxFuture<'static, ()> {
+//                     let subscription_complete_clone = Arc::clone(&subscription_complete_clone);
+//                     Box::pin(async move {
+//                         subscription_complete_clone.store(true, Ordering::SeqCst);
+//                     })
+//                 };
 
-            if let Err(e) = socket_client
-                .emit_with_ack(
-                    "subscribe",
-                    json!({ "session_id": self.session_id }),
-                    Duration::from_secs(2),
-                    ack_callback,
-                )
-                .await
-            {
-                if retry >= 9 {
-                    return Err(format!("Failed to subscribe to session: {}", e));
-                }
-            }
+//             if let Err(e) = socket_client
+//                 .emit_with_ack(
+//                     "subscribe",
+//                     json!({ "session_id": self.session_id }),
+//                     Duration::from_secs(2),
+//                     ack_callback,
+//                 )
+//                 .await
+//             {
+//                 if retry >= 9 {
+//                     return Err(format!("Failed to subscribe to session: {}", e));
+//                 }
+//             }
 
-            if subscription_complete.load(Ordering::SeqCst) {
-                break;
-            }
+//             if subscription_complete.load(Ordering::SeqCst) {
+//                 break;
+//             }
 
-            if retry >= 5 {
-                return Err("Failed to subscribe to session: Timed out".to_string());
-            }
-        }
+//             if retry >= 5 {
+//                 return Err("Failed to subscribe to session: Timed out".to_string());
+//             }
+//         }
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    pub async fn start(&self) -> Result<(), String> {
-        self.listen_for_status_updates().await?;
-        Ok(())
-    }
+//     pub async fn start(&self) -> Result<(), String> {
+//         self.listen_for_status_updates().await?;
+//         Ok(())
+//     }
 
-    async fn listen_for_status_updates(&self) -> Result<(), String> {
-        let output_clone = Arc::clone(&self.output);
-        self.listener(
-            "status".to_string(),
-            move |msg: Payload, _client: SocketClient| -> BoxFuture<'static, ()> {
-                let output = output_clone.clone();
-                Box::pin(async move {
-                    if let Payload::Text(text) = msg {
-                        if let Ok(status) = Self::parse_agent_output(text.first().unwrap()) {
-                            let mut state = output.lock().await;
-                            *state = status;
-                        }
-                    }
-                })
-            },
-        )
-        .await
-        .map_err(|e| format!("Failed to listen for status updates: {}", e))
-    }
+//     async fn listen_for_status_updates(&self) -> Result<(), String> {
+//         let output_clone = Arc::clone(&self.output);
+//         self.listener(
+//             "status".to_string(),
+//             move |msg: Payload, _client: SocketClient| -> BoxFuture<'static, ()> {
+//                 let output = output_clone.clone();
+//                 Box::pin(async move {
+//                     if let Payload::Text(text) = msg {
+//                         if let Ok(status) = Self::parse_agent_output(text.first().unwrap()) {
+//                             let mut state = output.lock().await;
+//                             *state = status;
+//                         }
+//                     }
+//                 })
+//             },
+//         )
+//         .await
+//         .map_err(|e| format!("Failed to listen for status updates: {}", e))
+//     }
 
-    fn parse_agent_output(value: &Value) -> Result<RunAgentOutput, String> {
-        serde_json::from_value(value.clone())
-            .map_err(|e| format!("Failed to deserialize response: {}", e))
-    }
+//     fn parse_agent_output(value: &Value) -> Result<RunAgentOutput, String> {
+//         serde_json::from_value(value.clone())
+//             .map_err(|e| format!("Failed to deserialize response: {}", e))
+//     }
 
-    // New method to get the current action state
-    pub async fn get_current_state(&self) -> RunAgentOutput {
-        self.output.lock().await.clone()
-    }
-}
+//     // New method to get the current action state
+//     pub async fn get_current_state(&self) -> RunAgentOutput {
+//         self.output.lock().await.clone()
+//     }
+// }
