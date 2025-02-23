@@ -475,7 +475,7 @@ impl Client {
         provisioner: &ProvisionerType,
         dir: Option<String>,
         flow_ref: Option<&FlowRef>,
-    ) -> Result<AgentInput, String> {
+    ) -> Result<Vec<AgentPresetResult>, String> {
         let url = format!("{}/agents/presets", self.base_url,);
 
         let input = AgentPresetInput {
@@ -500,7 +500,7 @@ impl Client {
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<AgentPresetOutput>(value.clone()) {
-            Ok(response) => Ok(response.input),
+            Ok(response) => Ok(response.results),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);
                 eprintln!("Raw response: {}", value);

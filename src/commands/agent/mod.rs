@@ -210,6 +210,10 @@ impl Action {
                     answers,
                 })
             }
+            Action::GetDockerfileTemplate { .. } => {
+                print("Fetching relevant documentation");
+                Ok(self)
+            }
             Action::RunCommand { id, args, .. } => {
                 print(
                     format!(
@@ -396,6 +400,10 @@ impl Action {
                     exit_code: Some(exit_code),
                     output: Some(output),
                 })
+            }
+            Action::GetDockerfileTemplate { .. } => {
+                print("Fetching relevant documentation");
+                Ok(self)
             }
             _ => Ok(self),
         }

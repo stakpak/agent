@@ -25,6 +25,12 @@ pub async fn get_next_input_interactive(
             action_history,
             ..
         }
+        | AgentOutput::DaveV2 {
+            message,
+            action_queue,
+            action_history,
+            ..
+        }
         | AgentOutput::KevinV1 {
             message,
             action_queue,
@@ -52,6 +58,12 @@ pub async fn get_next_input_interactive(
                             scratchpad: Box::new(None),
                         },
                         AgentID::DaveV1 => AgentInput::DaveV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                        AgentID::DaveV2 => AgentInput::DaveV2 {
                             user_prompt: None,
                             action_queue: Some(updated_actions),
                             action_history: None,
@@ -89,6 +101,7 @@ pub async fn get_next_input_interactive(
                     let parent_action_queue = match parent_run_data.output {
                         AgentOutput::NorbertV1 { action_queue, .. } => action_queue,
                         AgentOutput::DaveV1 { action_queue, .. } => action_queue,
+                        AgentOutput::DaveV2 { action_queue, .. } => action_queue,
                         AgentOutput::KevinV1 { action_queue, .. } => action_queue,
                     };
 
@@ -115,6 +128,12 @@ pub async fn get_next_input_interactive(
                                 scratchpad: Box::new(None),
                             },
                             AgentID::DaveV1 => AgentInput::DaveV1 {
+                                user_prompt: Some(user_prompt_input.trim().to_string()),
+                                action_queue: Some(updated_actions),
+                                action_history: None,
+                                scratchpad: Box::new(None),
+                            },
+                            AgentID::DaveV2 => AgentInput::DaveV2 {
                                 user_prompt: Some(user_prompt_input.trim().to_string()),
                                 action_queue: Some(updated_actions),
                                 action_history: None,
@@ -153,6 +172,11 @@ pub async fn get_next_input(
             action_queue,
             ..
         }
+        | AgentOutput::DaveV2 {
+            message,
+            action_queue,
+            ..
+        }
         | AgentOutput::KevinV1 {
             message,
             action_queue,
@@ -173,6 +197,12 @@ pub async fn get_next_input(
                             scratchpad: Box::new(None),
                         },
                         AgentID::DaveV1 => AgentInput::DaveV1 {
+                            user_prompt: None,
+                            action_queue: Some(updated_actions),
+                            action_history: None,
+                            scratchpad: Box::new(None),
+                        },
+                        AgentID::DaveV2 => AgentInput::DaveV2 {
                             user_prompt: None,
                             action_queue: Some(updated_actions),
                             action_history: None,

@@ -383,14 +383,21 @@ impl Commands {
                         for provisioner in path_map.keys() {
                             println!("  {}", provisioner);
                         }
-                        Err("Must specify provisioner type to apply".into())
+                        return Err("Must specify provisioner type to apply".to_string());
                     }
                     Some(provisioner) => {
-                        client
-                            .agent_presets(&agent_id, &provisioner, dir, Some(&flow_ref))
+                        let presets = client
+                            .agent_presets(&agent_id, &provisioner, dir.clone(), Some(&flow_ref))
                             .await
+                            .map_err(|e| e.to_string())?;
+
+                        let preset = presets
+                            .first()
+                            .ok_or_else(|| "No presets found".to_string())?;
+
+                        preset.input.clone()
                     }
-                }?;
+                };
 
                 let (agent_id, session, checkpoint) =
                     get_or_create_session(&client, agent_id, None, Some(agent_input.clone()))

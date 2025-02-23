@@ -353,6 +353,8 @@ pub enum AgentID {
     NorbertV1,
     #[serde(rename = "dave:v1")]
     DaveV1,
+    #[serde(rename = "dave:v2")]
+    DaveV2,
     #[serde(rename = "kevin:v1")]
     KevinV1,
 }
@@ -364,6 +366,7 @@ impl std::str::FromStr for AgentID {
         match s {
             "norbert:v1" => Ok(AgentID::NorbertV1),
             "dave:v1" => Ok(AgentID::DaveV1),
+            "dave:v2" => Ok(AgentID::DaveV2),
             "kevin:v1" => Ok(AgentID::KevinV1),
             _ => Err(format!("Invalid agent ID: {}", s)),
         }
@@ -466,6 +469,14 @@ pub enum Action {
         exit_code: Option<i32>,
         output: Option<String>,
     },
+    GetDockerfileTemplate {
+        id: String,
+        status: ActionStatus,
+
+        args: GetDockerfileTemplateArgs,
+
+        template: Option<String>,
+    },
 }
 
 impl Action {
@@ -473,12 +484,14 @@ impl Action {
         match self {
             Action::AskUser { id, .. } => id,
             Action::RunCommand { id, .. } => id,
+            Action::GetDockerfileTemplate { id, .. } => id,
         }
     }
     pub fn get_status(&self) -> &ActionStatus {
         match self {
             Action::AskUser { status, .. } => status,
             Action::RunCommand { status, .. } => status,
+            Action::GetDockerfileTemplate { status, .. } => status,
         }
     }
 
@@ -540,6 +553,21 @@ pub struct RunCommandArgs {
     pub rollback_command: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Get a Dockerfile template for a specific technology stack
+pub struct GetDockerfileTemplateArgs {
+    /// Brief description of why you're requesting the template
+    pub description: String,
+    /// Detailed reasoning for why you need this template
+    pub reasoning: String,
+    /// The main language (e.g., "python", "node", "rust", etc.)
+    pub programming_language: String,
+    /// The main framework (e.g., "flask", "django", "rails", "laravel", etc.)
+    pub framework: Option<String>,
+    /// Optional runtime version (e.g., "3.9", "18", etc.)
+    pub runtime_version: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct RunAgentInput {
     pub checkpoint_id: Uuid,
@@ -571,6 +599,13 @@ pub enum AgentInput {
         action_history: Option<Vec<Action>>,
         scratchpad: Box<Option<dave_v1::state::Scratchpad>>,
     },
+    #[serde(rename = "dave:v2")]
+    DaveV2 {
+        user_prompt: Option<String>,
+        action_queue: Option<Vec<Action>>,
+        action_history: Option<Vec<Action>>,
+        scratchpad: Box<Option<dave_v1::state::Scratchpad>>,
+    },
     #[serde(rename = "kevin:v1")]
     KevinV1 {
         user_prompt: Option<String>,
@@ -595,6 +630,12 @@ impl AgentInput {
                 action_history: None,
                 scratchpad: Box::new(None),
             },
+            AgentID::DaveV2 => AgentInput::DaveV2 {
+                user_prompt: None,
+                action_queue: None,
+                action_history: None,
+                scratchpad: Box::new(None),
+            },
             AgentID::KevinV1 => AgentInput::KevinV1 {
                 user_prompt: None,
                 action_queue: None,
@@ -607,6 +648,7 @@ impl AgentInput {
         match self {
             AgentInput::NorbertV1 { user_prompt, .. }
             | AgentInput::DaveV1 { user_prompt, .. }
+            | AgentInput::DaveV2 { user_prompt, .. }
             | AgentInput::KevinV1 { user_prompt, .. } => {
                 *user_prompt = prompt;
             }
@@ -633,6 +675,14 @@ pub enum AgentOutput {
         scratchpad: Box<dave_v1::state::Scratchpad>,
         user_prompt: String,
     },
+    #[serde(rename = "dave:v2")]
+    DaveV2 {
+        message: Option<String>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: Box<dave_v1::state::Scratchpad>,
+        user_prompt: String,
+    },
     #[serde(rename = "kevin:v1")]
     KevinV1 {
         message: Option<String>,
@@ -648,6 +698,7 @@ impl AgentOutput {
         match self {
             AgentOutput::NorbertV1 { .. } => AgentID::NorbertV1,
             AgentOutput::DaveV1 { .. } => AgentID::DaveV1,
+            AgentOutput::DaveV2 { .. } => AgentID::DaveV2,
             AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
         }
     }
@@ -686,7 +737,15 @@ pub struct AgentPresetInput {
     pub flow_ref: Option<FlowRef>,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct AgentPresetResult {
+    pub input: AgentInput,
+    pub name: String,
+    pub description: String,
+    pub provisioner: Option<ProvisionerType>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AgentPresetOutput {
-    pub input: AgentInput,
+    pub results: Vec<AgentPresetResult>,
 }
