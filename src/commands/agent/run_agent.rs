@@ -1,3 +1,5 @@
+use std::vec;
+
 use uuid::Uuid;
 
 use crate::{
@@ -13,7 +15,7 @@ use crate::{
     utils::output::setup_output_handler,
 };
 
-use super::{get_next_input_interactive, AgentOutputListener};
+use super::get_next_input_interactive;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_agent(
@@ -81,37 +83,33 @@ pub async fn run_agent(
                 println!("\x1b[1;34m{}\x1b[0m", "━".repeat(80));
             }
 
-            print("[ ▄▀ Stakpaking... ]");
-            let output = client.run_agent(&input).await?;
-            print(&format!(
-                "[Current Checkpoint {} (Agent Status: {})]",
-                output.checkpoint.id, output.checkpoint.status
-            ));
-            let mut checkpoint_id = output.checkpoint.id;
-            let listener = AgentOutputListener::new(config, output.session.id.to_string(), output);
-            listener.start().await?;
-
-            // Execute the sequence once before the loop
-            let current_state = listener.get_current_state().await;
-            let next_input = get_next_input(&agent_id, &print, &current_state).await?;
-            if next_input != input {
-                input = next_input;
-                client.run_agent(&input).await?;
-            }
+            let mut processed_outputs: Vec<crate::client::models::RunAgentOutput> = vec![];
+            let mut input = input.clone();
 
             loop {
-                let current_state = listener.get_current_state().await;
-                if checkpoint_id != current_state.checkpoint.id {
+                let mut session = client.get_agent_session(session.id).await?;
+                session
+                    .checkpoints
+                    .sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                let checkpoint = session.checkpoints.first().unwrap();
+
+                if !processed_outputs
+                    .iter()
+                    .any(|x| x.checkpoint.id == checkpoint.id)
+                {
                     print("[ ▄▀ Stakpaking... ]");
-                    checkpoint_id = current_state.checkpoint.id;
-                    let next_input = get_next_input(&agent_id, &print, &current_state).await?;
+                    let output = client.get_agent_checkpoint(checkpoint.id).await?;
+                    let next_input = get_next_input(&agent_id, &print, &output).await?;
+
                     if next_input != input {
                         input = next_input;
                         client.run_agent(&input).await?;
                     }
+
+                    processed_outputs.push(output);
                 }
 
-                match current_state.checkpoint.status {
+                match checkpoint.status {
                     AgentStatus::Complete => {
                         print("[Mission Accomplished]");
                         break;
@@ -122,6 +120,8 @@ pub async fn run_agent(
                     }
                     _ => {}
                 };
+
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }

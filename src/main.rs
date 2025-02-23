@@ -7,6 +7,7 @@ mod utils;
 
 use commands::Commands;
 use config::AppConfig;
+use utils::check_update::check_update;
 
 #[derive(Parser)]
 #[command(name = "stakpak")]
@@ -19,6 +20,8 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
+    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
 
     match AppConfig::load() {
         Ok(config) => match Commands::run(cli.command, config).await {
