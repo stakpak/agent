@@ -125,10 +125,11 @@ impl AgentCommands {
                     get_or_create_session(&client, agent_id, checkpoint_id, Some(input.clone()))
                         .await?;
 
-                if let Some(flow_ref) = &session.flow_ref {
+                // TODO: Better way to allow sync for specific agents
+                if matches!(agent_id, AgentID::KevinV1) && session.flow_ref.is_some() {
                     let config_clone = config.clone();
                     let client_clone = Client::new(&config_clone).map_err(|e| e.to_string())?;
-                    let flow_ref = flow_ref.clone();
+                    let flow_ref = session.flow_ref.clone().unwrap();
                     tokio::spawn(async move {
                         flow::sync(&config_clone, &client_clone, &flow_ref, None).await
                     });

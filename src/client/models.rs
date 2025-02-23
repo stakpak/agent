@@ -568,11 +568,16 @@ pub struct GetDockerfileTemplateArgs {
     pub runtime_version: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RunAgentInput {
     pub checkpoint_id: Uuid,
-
     pub input: AgentInput,
+}
+
+impl PartialEq for RunAgentInput {
+    fn eq(&self, other: &Self) -> bool {
+        self.input == other.input
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
