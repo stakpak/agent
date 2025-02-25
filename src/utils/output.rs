@@ -59,7 +59,6 @@ pub async fn setup_output_handler(
     let socket_client = Arc::new(socket_client);
 
     let output_handler = OutputHandler::new(move |msg: String| {
-        println!("{}", msg);
         let socket_client = socket_client.clone();
         let session_id = session_id.clone();
 
@@ -89,6 +88,7 @@ pub async fn setup_output_handler(
     Ok(move |msg: &str| {
         let output_handler = output_handler.clone();
         let msg = msg.to_string();
+        println!("{}", msg);
         tokio::spawn(async move {
             output_handler.send(msg).await;
         });
