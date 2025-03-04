@@ -158,29 +158,24 @@ impl AgentCommands {
 }
 
 impl Action {
-    pub async fn run_interactive(self, print: &impl Fn(&str)) -> Result<Action, String> {
+    pub async fn run_interactive(self) -> Result<Action, String> {
         match self {
             Action::AskUser { id, args, .. } => {
-                print(
-                    format!(
-                        "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
-                        args.description,
-                    )
-                    .as_str(),
+                println!(
+                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
+                    args.description,
                 );
-                print("[Reasoning]");
+                println!("[Reasoning]");
                 for line in args.reasoning.lines() {
-                    print(format!("  {}", line).as_str());
+                    println!("  {}", line);
                 }
 
                 let total_questions = args.questions.len();
                 let mut answers = Vec::new();
 
                 for (i, question) in args.questions.iter().enumerate() {
-                    print(
-                        format!("\n[Question {}/{}] {}", i + 1, total_questions, question).as_str(),
-                    );
-                    print("(Press Enter twice to finish this answer)");
+                    println!("\n[Question {}/{}] {}", i + 1, total_questions, question);
+                    println!("(Press Enter twice to finish this answer)");
 
                     let mut lines = Vec::new();
                     loop {
@@ -211,25 +206,22 @@ impl Action {
                 })
             }
             Action::GetDockerfileTemplate { .. } => {
-                print("Fetching relevant documentation");
+                println!("Fetching relevant documentation");
                 Ok(self)
             }
             Action::RunCommand { id, args, .. } => {
-                print(
-                    format!(
-                        "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
-                        args.description,
-                    )
-                    .as_str(),
+                println!(
+                    "\n[Action] (Ctrl+P & Enter to re-prompt the agent)\n  {}",
+                    args.description
                 );
-                print("[Reasoning]");
+                println!("[Reasoning]");
                 for line in args.reasoning.lines() {
-                    print(format!("  {}", line).as_str());
+                    println!("  {}", line);
                 }
-                print("\n[WARNING] About to execute the following command:");
-                print(format!(">{}", args.command).as_str());
+                println!("\n[WARNING] About to execute the following command:");
+                println!(">{}", args.command);
 
-                print("Please confirm [yes/edit/skip] (skip):");
+                println!("Please confirm [yes/edit/skip] (skip):");
 
                 let mut command = args.command.clone();
 
@@ -247,7 +239,7 @@ impl Action {
 
                 match confirmation.as_str() {
                     "edit" => {
-                        print("> ");
+                        println!("> ");
                         let mut edited_cmd = String::new();
 
                         if std::io::stdin().read_line(&mut edited_cmd).is_err() {
@@ -285,14 +277,14 @@ impl Action {
                 while let Some(item) = process_stream.next().await {
                     match item {
                         Item::Stdout(line) | Item::Stderr(line) => {
-                            print(line.as_str());
+                            println!("{}", line.as_str());
                             output_lines.push(line.to_string());
                         }
                         Item::Done(exit_status) => {
                             exit_code = match exit_status {
                                 Ok(status) => status.code().unwrap_or(-1),
                                 Err(e) => {
-                                    print(format!("Error: {}", e).as_str());
+                                    println!("Error: {}", e);
                                     -1
                                 }
                             };
@@ -335,7 +327,7 @@ impl Action {
                 id, args, status, ..
             } => {
                 if status == ActionStatus::PendingHumanApproval {
-                    print("[Reasoning]");
+                    println!("[Reasoning]");
                     for line in args.reasoning.lines() {
                         print(format!("  {}", line).as_str());
                     }
@@ -402,7 +394,7 @@ impl Action {
                 })
             }
             Action::GetDockerfileTemplate { .. } => {
-                print("Fetching relevant documentation");
+                println!("Fetching relevant documentation");
                 Ok(self)
             }
             _ => Ok(self),

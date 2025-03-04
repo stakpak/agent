@@ -2,12 +2,11 @@ use crate::client::models::{Action, ActionStatus};
 
 pub async fn run_interactive_actions(
     action_queue: Vec<Action>,
-    print: &impl Fn(&str),
     short_circuit_actions: bool,
 ) -> Result<Vec<Action>, String> {
     let mut updated_actions = Vec::with_capacity(action_queue.len());
     for action in action_queue.into_iter().filter(|a| a.is_pending()) {
-        let updated_action = action.run_interactive(print).await?;
+        let updated_action = action.run_interactive().await?;
 
         if short_circuit_actions {
             if let Action::RunCommand {
