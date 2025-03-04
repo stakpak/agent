@@ -386,16 +386,20 @@ impl Commands {
                         return Err("Must specify provisioner type to apply".to_string());
                     }
                     Some(provisioner) => {
-                        let presets = client
-                            .agent_presets(&agent_id, &provisioner, dir.clone(), Some(&flow_ref))
+                        let tasks = client
+                            .get_agent_tasks(&provisioner, dir)
                             .await
                             .map_err(|e| e.to_string())?;
 
-                        let preset = presets
-                            .first()
-                            .ok_or_else(|| "No presets found".to_string())?;
+                        let task = tasks
+                            .iter()
+                            .find(|t| {
+                                t.input.get_agent_id() == agent_id
+                                    && t.provisioner == Some(provisioner.clone())
+                            })
+                            .ok_or("No matching task found")?;
 
-                        preset.input.clone()
+                        task.input.clone()
                     }
                 };
 

@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub mod dave_v1;
 pub mod kevin_v1;
 pub mod norbert_v1;
+pub mod stuart_v1;
 
 use crate::config::AppConfig;
 
@@ -469,26 +470,21 @@ impl Client {
         }
     }
 
-    pub async fn agent_presets(
+    pub async fn get_agent_tasks(
         &self,
-        agent_id: &AgentID,
         provisioner: &ProvisionerType,
         dir: Option<String>,
-        flow_ref: Option<&FlowRef>,
-    ) -> Result<Vec<AgentPresetResult>, String> {
-        let url = format!("{}/agents/presets", self.base_url,);
-
-        let input = AgentPresetInput {
-            agent_id: agent_id.clone(),
-            provisioner: provisioner.clone(),
-            dir,
-            flow_ref: flow_ref.cloned(),
-        };
+    ) -> Result<Vec<AgentTask>, String> {
+        let url = format!(
+            "{}/agents/tasks?provisioner={}{}",
+            self.base_url,
+            serde_json::to_value(provisioner).unwrap().as_str().unwrap(),
+            dir.map(|d| format!("&dir={}", d)).unwrap_or_default(),
+        );
 
         let response = self
             .client
-            .post(&url)
-            .json(&input)
+            .get(&url)
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
@@ -499,7 +495,7 @@ impl Client {
         }
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        match serde_json::from_value::<AgentPresetOutput>(value.clone()) {
+        match serde_json::from_value::<AgentTaskOutput>(value.clone()) {
             Ok(response) => Ok(response.results),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);
@@ -709,4 +705,18 @@ pub struct EditError {
     pub details: Option<String>,
     pub message: String,
     pub uri: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SimpleLLMMessage {
+    #[serde(rename = "role")]
+    pub role: SimpleLLMRole,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SimpleLLMRole {
+    User,
+    Assistant,
 }

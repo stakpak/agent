@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{dave_v1, kevin_v1, norbert_v1};
+use super::{dave_v1, kevin_v1, norbert_v1, stuart_v1, SimpleLLMMessage, SimpleLLMRole};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetFlowPermission {
@@ -346,7 +346,7 @@ pub struct AgentSession {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone, PartialEq)]
 pub enum AgentID {
     #[default]
     #[serde(rename = "norbert:v1")]
@@ -357,6 +357,8 @@ pub enum AgentID {
     DaveV2,
     #[serde(rename = "kevin:v1")]
     KevinV1,
+    #[serde(rename = "stuart:v1")]
+    StuartV1,
 }
 
 impl std::str::FromStr for AgentID {
@@ -368,6 +370,7 @@ impl std::str::FromStr for AgentID {
             "dave:v1" => Ok(AgentID::DaveV1),
             "dave:v2" => Ok(AgentID::DaveV2),
             "kevin:v1" => Ok(AgentID::KevinV1),
+            "stuart:v1" => Ok(AgentID::StuartV1),
             _ => Err(format!("Invalid agent ID: {}", s)),
         }
     }
@@ -618,6 +621,13 @@ pub enum AgentInput {
         action_history: Option<Vec<Action>>,
         scratchpad: Box<Option<kevin_v1::state::Scratchpad>>,
     },
+    #[serde(rename = "stuart:v1")]
+    StuartV1 {
+        messages: Option<Vec<SimpleLLMMessage>>,
+        action_queue: Option<Vec<Action>>,
+        action_history: Option<Vec<Action>>,
+        scratchpad: Box<Option<stuart_v1::state::Scratchpad>>,
+    },
 }
 
 impl AgentInput {
@@ -647,6 +657,12 @@ impl AgentInput {
                 action_history: None,
                 scratchpad: Box::new(None),
             },
+            AgentID::StuartV1 => AgentInput::StuartV1 {
+                messages: None,
+                action_queue: None,
+                action_history: None,
+                scratchpad: Box::new(None),
+            },
         }
     }
     pub fn set_user_prompt(&mut self, prompt: Option<String>) {
@@ -657,10 +673,24 @@ impl AgentInput {
             | AgentInput::KevinV1 { user_prompt, .. } => {
                 *user_prompt = prompt;
             }
+            AgentInput::StuartV1 { messages, .. } => {
+                *messages = Some(vec![SimpleLLMMessage {
+                    role: SimpleLLMRole::User,
+                    content: prompt.unwrap(),
+                }]);
+            }
+        }
+    }
+    pub fn get_agent_id(&self) -> AgentID {
+        match self {
+            AgentInput::NorbertV1 { .. } => AgentID::NorbertV1,
+            AgentInput::DaveV1 { .. } => AgentID::DaveV1,
+            AgentInput::DaveV2 { .. } => AgentID::DaveV2,
+            AgentInput::KevinV1 { .. } => AgentID::KevinV1,
+            AgentInput::StuartV1 { .. } => AgentID::StuartV1,
         }
     }
 }
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "agent_id")]
 pub enum AgentOutput {
@@ -753,4 +783,17 @@ pub struct AgentPresetResult {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AgentPresetOutput {
     pub results: Vec<AgentPresetResult>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct AgentTask {
+    pub input: AgentInput,
+    pub name: String,
+    pub description: String,
+    pub provisioner: Option<ProvisionerType>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AgentTaskOutput {
+    pub results: Vec<AgentTask>,
 }
