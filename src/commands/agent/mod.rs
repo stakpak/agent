@@ -327,16 +327,10 @@ impl Action {
                 id, args, status, ..
             } => {
                 if status == ActionStatus::PendingHumanApproval {
-                    println!("[Reasoning]");
-                    for line in args.reasoning.lines() {
-                        print(format!("  {}", line).as_str());
-                    }
                     print("\n[WARNING] About to execute the following command:");
                     print(format!(">{}", args.command).as_str());
                     return Ok(self);
                 }
-                // print("\n[WARNING] About to execute the following command:");
-                // print(format!(">{}", args.command).as_str());
 
                 let mut cmd = process::Command::new("sh");
                 cmd.arg("-c").arg(&args.command);
