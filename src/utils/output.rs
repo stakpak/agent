@@ -17,7 +17,6 @@ impl OutputHandler {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let (tx, rx) = std_mpsc::sync_channel::<String>(100);
-        let tx_clone = tx.clone();
 
         tokio::spawn(async move {
             while let Ok(msg) = rx.recv() {
@@ -25,7 +24,7 @@ impl OutputHandler {
             }
         });
 
-        Self { tx: tx_clone }
+        Self { tx }
     }
 
     pub fn send(&self, content: String) {
