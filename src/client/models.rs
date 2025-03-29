@@ -674,10 +674,12 @@ impl AgentInput {
                 *user_prompt = prompt;
             }
             AgentInput::StuartV1 { messages, .. } => {
-                *messages = Some(vec![SimpleLLMMessage {
-                    role: SimpleLLMRole::User,
-                    content: prompt.unwrap(),
-                }]);
+                if let Some(prompt) = prompt {
+                    *messages = Some(vec![SimpleLLMMessage {
+                        role: SimpleLLMRole::User,
+                        content: prompt,
+                    }]);
+                }
             }
         }
     }
@@ -726,6 +728,13 @@ pub enum AgentOutput {
         scratchpad: Box<kevin_v1::state::Scratchpad>,
         user_prompt: String,
     },
+    #[serde(rename = "stuart:v1")]
+    StuartV1 {
+        messages: Vec<SimpleLLMMessage>,
+        action_queue: Vec<Action>,
+        action_history: Vec<Action>,
+        scratchpad: Box<stuart_v1::state::Scratchpad>,
+    },
 }
 
 impl AgentOutput {
@@ -735,6 +744,7 @@ impl AgentOutput {
             AgentOutput::DaveV1 { .. } => AgentID::DaveV1,
             AgentOutput::DaveV2 { .. } => AgentID::DaveV2,
             AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
+            AgentOutput::StuartV1 { .. } => AgentID::StuartV1,
         }
     }
 }

@@ -13,34 +13,52 @@ pub async fn get_next_input_interactive(
     short_circuit_actions: bool,
 ) -> Result<RunAgentInput, String> {
     match &output.output {
+        AgentOutput::StuartV1 { messages, .. } => {
+            for message in messages {
+                print(format!("\n{}: {}\n", message.role, message.content).as_str());
+            }
+        }
+        _ => {}
+    }
+
+    match &output.output {
+        AgentOutput::NorbertV1 { message, .. }
+        | AgentOutput::DaveV1 { message, .. }
+        | AgentOutput::DaveV2 { message, .. }
+        | AgentOutput::KevinV1 { message, .. } => {
+            if let Some(message) = message {
+                print(format!("\n{}", message).as_str());
+            }
+        }
+        _ => {}
+    }
+
+    match &output.output {
         AgentOutput::NorbertV1 {
-            message,
             action_queue,
             action_history,
             ..
         }
         | AgentOutput::DaveV1 {
-            message,
             action_queue,
             action_history,
             ..
         }
         | AgentOutput::DaveV2 {
-            message,
             action_queue,
             action_history,
             ..
         }
         | AgentOutput::KevinV1 {
-            message,
+            action_queue,
+            action_history,
+            ..
+        }
+        | AgentOutput::StuartV1 {
             action_queue,
             action_history,
             ..
         } => {
-            if let Some(message) = message {
-                print(format!("\n{}", message).as_str());
-            }
-
             let result =
                 match run_interactive_actions(action_queue.to_owned(), short_circuit_actions).await
                 {
@@ -108,6 +126,7 @@ pub async fn get_next_input_interactive(
                             AgentOutput::DaveV1 { action_queue, .. } => action_queue,
                             AgentOutput::DaveV2 { action_queue, .. } => action_queue,
                             AgentOutput::KevinV1 { action_queue, .. } => action_queue,
+                            AgentOutput::StuartV1 { action_queue, .. } => action_queue,
                         };
 
                         let updated_actions = parent_action_queue
@@ -176,30 +195,32 @@ pub async fn get_next_input(
     output: &RunAgentOutput,
 ) -> Result<RunAgentInput, String> {
     match &output.output {
-        AgentOutput::NorbertV1 {
-            message,
-            action_queue,
-            ..
+        AgentOutput::StuartV1 { messages, .. } => {
+            for message in messages {
+                print(format!("{}: {}\n", message.role, message.content).as_str());
+            }
         }
-        | AgentOutput::DaveV1 {
-            message,
-            action_queue,
-            ..
-        }
-        | AgentOutput::DaveV2 {
-            message,
-            action_queue,
-            ..
-        }
-        | AgentOutput::KevinV1 {
-            message,
-            action_queue,
-            ..
-        } => {
+        _ => {}
+    }
+
+    match &output.output {
+        AgentOutput::NorbertV1 { message, .. }
+        | AgentOutput::DaveV1 { message, .. }
+        | AgentOutput::DaveV2 { message, .. }
+        | AgentOutput::KevinV1 { message, .. } => {
             if let Some(message) = message {
                 print(format!("\n{}", message).as_str());
             }
+        }
+        _ => {}
+    }
 
+    match &output.output {
+        AgentOutput::NorbertV1 { action_queue, .. }
+        | AgentOutput::DaveV1 { action_queue, .. }
+        | AgentOutput::DaveV2 { action_queue, .. }
+        | AgentOutput::KevinV1 { action_queue, .. }
+        | AgentOutput::StuartV1 { action_queue, .. } => {
             let result = match run_remote_actions(action_queue.to_owned(), print).await {
                 Ok(updated_actions) => RunAgentInput {
                     checkpoint_id: output.checkpoint.id,

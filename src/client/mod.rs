@@ -720,3 +720,12 @@ pub enum SimpleLLMRole {
     User,
     Assistant,
 }
+
+impl std::fmt::Display for SimpleLLMRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SimpleLLMRole::User => write!(f, "user"),
+            SimpleLLMRole::Assistant => write!(f, "assistant"),
+        }
+    }
+}
