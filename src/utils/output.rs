@@ -1,13 +1,14 @@
 use rust_socketio::asynchronous::ClientBuilder;
 use serde_json::json;
 use std::future::Future;
-use std::sync::mpsc as std_mpsc;
+
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 
 pub struct OutputHandler {
-    tx: std_mpsc::SyncSender<String>,
+    tx: mpsc::Sender<String>,
 }
 
 impl OutputHandler {
@@ -16,10 +17,10 @@ impl OutputHandler {
         F: Fn(String) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let (tx, rx) = std_mpsc::sync_channel::<String>(100);
+        let (tx, mut rx) = mpsc::channel::<String>(100);
 
         tokio::spawn(async move {
-            while let Ok(msg) = rx.recv() {
+            while let Some(msg) = rx.recv().await {
                 handler(msg).await;
             }
         });
@@ -27,8 +28,8 @@ impl OutputHandler {
         Self { tx }
     }
 
-    pub fn send(&self, content: String) {
-        self.tx.send(content).unwrap_or(());
+    pub async fn send(&self, content: String) {
+        self.tx.send(content).await.unwrap_or(());
     }
 }
 
@@ -90,6 +91,8 @@ pub async fn setup_output_handler(
         let output_handler = output_handler.clone();
         let msg = msg.to_string();
         println!("{}", msg);
-        output_handler.send(msg);
+        tokio::spawn(async move {
+            output_handler.send(msg).await;
+        });
     })
 }
