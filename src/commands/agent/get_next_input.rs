@@ -14,8 +14,12 @@ pub async fn get_next_input_interactive(
 ) -> Result<RunAgentInput, String> {
     match &output.output {
         AgentOutput::StuartV1 { messages, .. } => {
-            for message in messages {
-                print(format!("\n{}: {}\n", message.role, message.content).as_str());
+            if let Some(last_system_msg) = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == SimpleLLMRole::Assistant)
+            {
+                print(format!("\n{}", last_system_msg.content).as_str());
             }
         }
         _ => {}
@@ -196,8 +200,12 @@ pub async fn get_next_input(
 ) -> Result<RunAgentInput, String> {
     match &output.output {
         AgentOutput::StuartV1 { messages, .. } => {
-            for message in messages {
-                print(format!("{}: {}\n", message.role, message.content).as_str());
+            if let Some(last_system_msg) = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == SimpleLLMRole::Assistant)
+            {
+                print(format!("\n{}", last_system_msg.content).as_str());
             }
         }
         _ => {}
