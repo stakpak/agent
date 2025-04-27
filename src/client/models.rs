@@ -70,7 +70,7 @@ pub struct QueryBlockResult {
     pub flow_version: QueryBlockFlowVersion,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Block {
     pub id: Uuid,
     pub provider: String,
@@ -472,6 +472,30 @@ pub enum Action {
         exit_code: Option<i32>,
         output: Option<String>,
     },
+    ReadDocumentCommand {
+        id: String,
+        status: ActionStatus,
+
+        args: ReadDocumentCommandArgs,
+
+        content: Option<String>,
+    },
+    GenerateCodeCommand {
+        id: String,
+        status: ActionStatus,
+
+        args: GenerateCodeCommandArgs,
+
+        result: Box<Option<serde_json::Value>>,
+    },
+    SearchCodeCommand {
+        id: String,
+        status: ActionStatus,
+
+        args: SearchCodeCommandArgs,
+
+        results: Box<Option<Vec<SearchCodeResult>>>,
+    },
     GetDockerfileTemplate {
         id: String,
         status: ActionStatus,
@@ -488,6 +512,9 @@ impl Action {
             Action::AskUser { id, .. } => id,
             Action::RunCommand { id, .. } => id,
             Action::GetDockerfileTemplate { id, .. } => id,
+            Action::ReadDocumentCommand { id, .. } => id,
+            Action::GenerateCodeCommand { id, .. } => id,
+            Action::SearchCodeCommand { id, .. } => id,
         }
     }
     pub fn get_status(&self) -> &ActionStatus {
@@ -495,6 +522,9 @@ impl Action {
             Action::AskUser { status, .. } => status,
             Action::RunCommand { status, .. } => status,
             Action::GetDockerfileTemplate { status, .. } => status,
+            Action::ReadDocumentCommand { status, .. } => status,
+            Action::GenerateCodeCommand { status, .. } => status,
+            Action::SearchCodeCommand { status, .. } => status,
         }
     }
 
@@ -554,6 +584,80 @@ pub struct RunCommandArgs {
     pub command: String,
     /// Command to run to undo the changes if needed
     pub rollback_command: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Project name (aka Flow name)
+pub struct FlowName {
+    /// The owner of the project
+    pub owner: String,
+    /// The name of the project
+    pub name: String,
+    /// The version of the project
+    pub version: Option<String>,
+}
+
+impl std::fmt::Display for FlowName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(version) = &self.version {
+            write!(f, "{}/{}/{}", self.owner, self.name, version)
+        } else {
+            write!(f, "{}/{}", self.owner, self.name)
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Read the contents of a document
+pub struct ReadDocumentCommandArgs {
+    /// Brief description of why you're reading the document
+    pub description: String,
+    /// Detailed reasoning for why you need to read this document
+    pub reasoning: String,
+    pub target: Option<FlowName>,
+    /// The uri of the document to read in the format `file:///path/to/document`
+    pub document_uri: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Generate or modify code for a document in the codebase
+pub struct GenerateCodeCommandArgs {
+    /// Brief description of why you're writing to the document
+    pub description: String,
+    /// Detailed reasoning for why you need to write to this document
+    pub reasoning: String,
+    pub target: Option<FlowName>,
+    /// The uri of the document to write to
+    pub document_uri: String,
+    /// The prompt for a specialized LLM to make changes to the document
+    pub prompt: String,
+    pub content_type: ProvisionerType,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Perform exact search to find relevant code blocks in the codebase
+pub struct SearchCodeCommandArgs {
+    /// Brief description of why you're searching the code
+    pub description: String,
+    /// Detailed reasoning for why you need to search the code
+    pub reasoning: String,
+    /// The search query to find relevant code
+    pub query: String,
+    /// Optional list of projects (aka Flows) to search in
+    pub targets: Option<Vec<FlowName>>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// A search result from code search
+pub struct SearchCodeResult {
+    /// The uri of the document where the match was found
+    pub document_uri: String,
+    /// The line number where the match starts
+    pub start_row: u32,
+    /// The line number where the match ends
+    pub end_row: u32,
+    /// The matched code snippet
+    pub content: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
