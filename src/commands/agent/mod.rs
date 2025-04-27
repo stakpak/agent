@@ -319,6 +319,7 @@ impl Action {
                     output: Some(output),
                 })
             }
+            _ => Ok(self),
         }
     }
     pub async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
