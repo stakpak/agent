@@ -530,6 +530,7 @@ impl Action {
 
     pub fn is_pending(&self) -> bool {
         match self.get_status() {
+            ActionStatus::PendingHumanReview => true,
             ActionStatus::PendingHumanApproval => true,
             ActionStatus::Pending => true,
             ActionStatus::Succeeded => false,
@@ -548,6 +549,7 @@ pub enum ActionStatus {
     Succeeded,
     Failed,
     Aborted,
+    PendingHumanReview,
 }
 
 impl std::fmt::Display for ActionStatus {
@@ -558,6 +560,7 @@ impl std::fmt::Display for ActionStatus {
             ActionStatus::Succeeded => write!(f, "SUCCEEDED"),
             ActionStatus::Failed => write!(f, "FAILED"),
             ActionStatus::Aborted => write!(f, "ABORTED"),
+            ActionStatus::PendingHumanReview => write!(f, "PENDING_HUMAN_REVIEW"),
         }
     }
 }

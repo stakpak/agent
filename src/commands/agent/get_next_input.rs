@@ -198,17 +198,14 @@ pub async fn get_next_input(
     print: &impl Fn(&str),
     output: &RunAgentOutput,
 ) -> Result<RunAgentInput, String> {
-    match &output.output {
-        AgentOutput::StuartV1 { messages, .. } => {
-            if let Some(last_system_msg) = messages
-                .iter()
-                .rev()
-                .find(|m| m.role == SimpleLLMRole::Assistant)
-            {
-                print(format!("\n{}", last_system_msg.content).as_str());
-            }
+    if let AgentOutput::StuartV1 { messages, .. } = &output.output {
+        if let Some(last_system_msg) = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == SimpleLLMRole::Assistant)
+        {
+            print(format!("\n{}", last_system_msg.content).as_str());
         }
-        _ => {}
     }
 
     match &output.output {
