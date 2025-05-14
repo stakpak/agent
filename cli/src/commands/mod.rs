@@ -1,4 +1,4 @@
-use agent::{get_or_create_session, run_agent, AgentCommands};
+use agent::{AgentCommands, get_or_create_session, run_agent};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
 use termimad::MadSkin;
@@ -6,8 +6,8 @@ use walkdir::WalkDir;
 
 use crate::{
     client::{
-        models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
         Client,
+        models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
     },
     config::AppConfig,
 };
@@ -124,6 +124,8 @@ pub enum Commands {
         #[arg(long, short = 't')]
         target_provisioner: TranspileTargetProvisionerType,
     },
+    // Open the coding assistant
+    Code,
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
@@ -133,6 +135,9 @@ pub enum Commands {
 impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
+            Commands::Code => {
+                let _ = stakpak_tui::run();
+            }
             Commands::Login { api_key } => {
                 let mut updated_config = config.clone();
                 updated_config.api_key = Some(api_key);
@@ -333,8 +338,8 @@ impl Commands {
                 } else {
                     println!();
                     println!(
-                    "[WARNING: These agents are in early alpha development and may be unstable]"
-                );
+                        "[WARNING: These agents are in early alpha development and may be unstable]"
+                    );
                     println!();
                 };
 
@@ -379,7 +384,9 @@ impl Commands {
 
                 let agent_input = match provisioner {
                     None => {
-                        println!("Please specify a provisioner to apply with -p. Available provisioners:");
+                        println!(
+                            "Please specify a provisioner to apply with -p. Available provisioners:"
+                        );
                         for provisioner in path_map.keys() {
                             println!("  {}", provisioner);
                         }
