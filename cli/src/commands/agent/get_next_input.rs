@@ -1,6 +1,6 @@
 use crate::client::{
-    models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
     Client, SimpleLLMMessage, SimpleLLMRole,
+    models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
 };
 
 use super::{run_interactive_actions, run_remote_actions};
@@ -12,17 +12,14 @@ pub async fn get_next_input_interactive(
     output: &RunAgentOutput,
     short_circuit_actions: bool,
 ) -> Result<RunAgentInput, String> {
-    match &output.output {
-        AgentOutput::StuartV1 { messages, .. } => {
-            if let Some(last_system_msg) = messages
-                .iter()
-                .rev()
-                .find(|m| m.role == SimpleLLMRole::Assistant)
-            {
-                print(format!("\n{}", last_system_msg.content).as_str());
-            }
+    if let AgentOutput::StuartV1 { messages, .. } = &output.output {
+        if let Some(last_system_msg) = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == SimpleLLMRole::Assistant)
+        {
+            print(format!("\n{}", last_system_msg.content).as_str());
         }
-        _ => {}
     }
 
     match &output.output {
@@ -114,7 +111,7 @@ pub async fn get_next_input_interactive(
                                 return Err(format!(
                                     "Checkpoint {} parent id not found!",
                                     output.checkpoint.id
-                                ))
+                                ));
                             }
                         };
 

@@ -3,7 +3,7 @@ use std::io;
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{EnterAlternateScreen, enable_raw_mode},
 };
 use ratatui::{
     Frame, Terminal,
@@ -13,7 +13,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 // Message struct for user and info messages
 #[derive(Clone)]
@@ -32,13 +32,13 @@ impl Message {
     fn user(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
             text: text.into(),
-            style: style.unwrap_or_default(),
+            style: style.unwrap_or(Style::default().fg(Color::Rgb(180, 180, 180))),
         }
     }
-    fn _assistant(text: impl Into<String>, style: Option<Style>) -> Self {
+    fn assistant(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
             text: text.into(),
-            style: style.unwrap_or(Style::default().fg(Color::White)),
+            style: style.unwrap_or_default(),
         }
     }
 }
@@ -56,10 +56,12 @@ struct AppState {
 }
 
 // Messages/events
-enum Msg {
+#[derive(Debug)]
+pub enum Msg {
     InputChanged(char),
     InputBackspace,
     InputSubmitted,
+    InputSubmittedWith(String),
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -69,14 +71,7 @@ enum Msg {
 
 fn update(state: &mut AppState, msg: Msg, term_height: usize) {
     let input_height = 3;
-    let lines_per_message = 2;
-    let max_visible_messages = std::cmp::max(
-        1,
-        term_height.saturating_sub(input_height) / lines_per_message,
-    );
-    let total_lines = state.messages.len() * 2;
-    let max_scroll = total_lines.saturating_sub(max_visible_messages);
-    state.scroll = state.scroll.min(max_scroll);
+    state.scroll = state.scroll.max(0);
     match msg {
         Msg::InputChanged(c) => {
             if c == '?' && state.input.is_empty() {
@@ -132,7 +127,9 @@ fn update(state: &mut AppState, msg: Msg, term_height: usize) {
                 let max_scroll = total_lines.saturating_sub(max_visible_lines);
                 let was_at_bottom = state.scroll == max_scroll;
                 let selected = state.filtered_helpers[state.helper_selected];
-                state.messages.push(Message::user(selected, None));
+                state
+                    .messages
+                    .push(Message::user(format!("> {}", selected), None));
                 state.input.clear();
                 state.show_helper_dropdown = false;
                 state.helper_selected = 0;
@@ -149,13 +146,26 @@ fn update(state: &mut AppState, msg: Msg, term_height: usize) {
                 let was_at_bottom = state.scroll == max_scroll;
                 state
                     .messages
-                    .push(Message::user(state.input.clone(), None));
+                    .push(Message::user(format!("> {}", state.input), None));
                 state.input.clear();
                 let total_lines = state.messages.len() * 2;
                 let max_scroll = total_lines.saturating_sub(max_visible_lines);
                 if was_at_bottom {
                     state.scroll = max_scroll;
                 }
+            }
+        }
+        Msg::InputSubmittedWith(s) => {
+            let total_lines = state.messages.len() * 2;
+            let max_visible_lines = std::cmp::max(1, term_height.saturating_sub(input_height));
+            let max_scroll = total_lines.saturating_sub(max_visible_lines);
+            let was_at_bottom = state.scroll == max_scroll;
+            state.messages.push(Message::assistant(s.clone(), None));
+            state.input.clear();
+            let total_lines = state.messages.len() * 2;
+            let max_scroll = total_lines.saturating_sub(max_visible_lines);
+            if was_at_bottom {
+                state.scroll = max_scroll;
             }
         }
         Msg::ScrollUp => {
@@ -173,10 +183,7 @@ fn update(state: &mut AppState, msg: Msg, term_height: usize) {
                     state.helper_selected += 1;
                 }
             } else {
-                if state.scroll < max_scroll {
-                    state.scroll += 1;
-                }
-                state.scroll = state.scroll.min(max_scroll);
+                state.scroll += 1;
             }
         }
         Msg::PageUp => {
@@ -189,7 +196,6 @@ fn update(state: &mut AppState, msg: Msg, term_height: usize) {
                 } else {
                     state.scroll = 0;
                 }
-                state.scroll = state.scroll.min(max_scroll);
             }
         }
         Msg::PageDown => {
@@ -197,16 +203,38 @@ fn update(state: &mut AppState, msg: Msg, term_height: usize) {
                 state.helper_selected = state.filtered_helpers.len().saturating_sub(1);
             } else {
                 let page = std::cmp::max(1, term_height.saturating_sub(input_height));
-                if state.scroll + page < max_scroll {
-                    state.scroll += page;
-                } else {
-                    state.scroll = max_scroll;
-                }
-                state.scroll = state.scroll.min(max_scroll);
+                state.scroll += page;
             }
         }
         Msg::Quit => {}
     }
+    let input_height = 3;
+    let message_area_height = term_height.saturating_sub(input_height);
+    let mut all_lines: Vec<String> = Vec::new();
+    for msg in &state.messages {
+        for line in msg.text.lines() {
+            let mut current = line;
+            while !current.is_empty() {
+                let take = current
+                    .char_indices()
+                    .scan(0, |acc, (i, c)| {
+                        *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                        Some((i, *acc))
+                    })
+                    .take_while(|&(_i, w)| w <= message_area_height)
+                    .last()
+                    .map(|(i, _w)| i + 1)
+                    .unwrap_or(current.len());
+                let (part, rest) = current.split_at(take);
+                all_lines.push(part.to_string());
+                current = rest;
+            }
+        }
+        all_lines.push(String::new());
+    }
+    let total_lines = all_lines.len();
+    let max_scroll = total_lines.saturating_sub(message_area_height);
+    state.scroll = state.scroll.min(max_scroll);
 }
 
 fn view(f: &mut Frame, state: &AppState) {
@@ -221,23 +249,52 @@ fn view(f: &mut Frame, state: &AppState) {
             Constraint::Length(margin_height),
         ])
         .split(f.size());
-    let message_area_height = outer_chunks[0].height as usize;
-    let lines_per_message = 2;
-    let max_visible_messages = std::cmp::max(1, message_area_height / lines_per_message);
-    let max_scroll = state.messages.len().saturating_sub(max_visible_messages);
-    let scroll = state.scroll.min(max_scroll);
-    let visible_messages = state
-        .messages
-        .iter()
-        .skip(scroll)
-        .take(max_visible_messages);
-    let mut message_lines = Vec::new();
-    for msg in visible_messages {
-        message_lines.push(Line::from(vec![Span::styled(&msg.text, msg.style)]));
-        message_lines.push(Line::from("")); // Add empty line for spacing
+    let message_area = outer_chunks[0];
+    let message_area_height = message_area.height as usize;
+    let message_area_width = message_area.width as usize;
+
+    // --- NEW: Calculate wrapped lines for each message ---
+    let mut all_lines: Vec<(Line, Style)> = Vec::new();
+    for msg in &state.messages {
+        for line in msg.text.lines() {
+            let mut current = line;
+            while !current.is_empty() {
+                let take = current
+                    .char_indices()
+                    .scan(0, |acc, (i, c)| {
+                        *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                        Some((i, *acc))
+                    })
+                    .take_while(|&(_i, w)| w <= message_area_width)
+                    .last()
+                    .map(|(i, _w)| i + 1)
+                    .unwrap_or(current.len());
+                let (part, rest) = current.split_at(take);
+                all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
+                current = rest;
+            }
+        }
+        // Add an empty line for spacing
+        all_lines.push((Line::from(""), msg.style));
     }
-    let message_widget = Paragraph::new(message_lines);
-    f.render_widget(message_widget, outer_chunks[0]);
+    // --- END NEW ---
+
+    // --- NEW: Scrolling logic based on wrapped lines ---
+    let total_lines = all_lines.len();
+    let max_scroll = total_lines.saturating_sub(message_area_height);
+    let scroll = state.scroll.min(max_scroll);
+    let mut visible_lines = Vec::new();
+    for i in 0..message_area_height {
+        if let Some((line, _)) = all_lines.get(scroll + i) {
+            visible_lines.push(line.clone());
+        } else {
+            visible_lines.push(Line::from(""));
+        }
+    }
+    // --- END NEW ---
+
+    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    f.render_widget(message_widget, message_area);
     let input_widget = Paragraph::new(vec![Line::from(vec![
         Span::raw("> "),
         Span::raw(&state.input),
@@ -247,7 +304,8 @@ fn view(f: &mut Frame, state: &AppState) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray)),
-    );
+    )
+    .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(input_widget, outer_chunks[1]);
     // Render helper dropdown if needed (overlay, does not move input)
     if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
@@ -305,7 +363,17 @@ fn view(f: &mut Frame, state: &AppState) {
     }
 }
 
-pub async fn run_tui(mut external_rx: mpsc::Receiver<Msg>) -> io::Result<()> {
+// Add a guard to always restore terminal state
+struct TerminalGuard;
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    }
+}
+
+pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> io::Result<()> {
+    let _guard = TerminalGuard;
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
@@ -320,7 +388,10 @@ pub async fn run_tui(mut external_rx: mpsc::Receiver<Msg>) -> io::Result<()> {
             ),
             Message::info("/help for help, /status for your current setup", None),
             Message::info(
-                format!("cwd: {}", std::env::current_dir().unwrap().display()),
+                format!(
+                    "cwd: {}",
+                    std::env::current_dir().unwrap_or_default().display()
+                ),
                 None,
             ),
         ],
@@ -363,10 +434,12 @@ pub async fn run_tui(mut external_rx: mpsc::Receiver<Msg>) -> io::Result<()> {
     });
 
     // Main async update/view loop
+    // Draw the UI once before entering the loop
+    terminal.draw(|f| view(f, &state))?;
     let mut should_quit = false;
     while !should_quit {
         tokio::select! {
-            Some(msg) = external_rx.recv() => {
+            Some(msg) = input_rx.recv() => {
                 if let Msg::Quit = msg { should_quit = true; }
                 else {
                     let term_height = terminal.size()?.height as usize;
@@ -377,6 +450,12 @@ pub async fn run_tui(mut external_rx: mpsc::Receiver<Msg>) -> io::Result<()> {
                 if let Msg::Quit = msg { should_quit = true; }
                 else {
                     let term_height = terminal.size()?.height as usize;
+                    // On InputSubmitted, send input to output_tx
+                    if let Msg::InputSubmitted = msg {
+                        if !state.input.trim().is_empty() {
+                            let _ = output_tx.try_send(state.input.clone());
+                        }
+                    }
                     update(&mut state, msg, term_height);
                 }
             }
@@ -384,8 +463,7 @@ pub async fn run_tui(mut external_rx: mpsc::Receiver<Msg>) -> io::Result<()> {
         terminal.draw(|f| view(f, &state))?;
     }
 
-    // Tear down raw mode + alt screen
-    disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    println!("Quitting...");
+
     Ok(())
 }

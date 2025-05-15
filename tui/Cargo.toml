@@ -7,3 +7,4 @@ edition = "2024"
 ratatui = "0.26"
 crossterm = "0.27"
 tokio = { version = "1.39", features = ["full"] }
+unicode-width = "0.2.0"
