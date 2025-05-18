@@ -1,23 +1,17 @@
-[package]
-name = "stakpak"
-version = "0.1.50"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = ["cli", "tui"]
+default-members = ["cli"]
 
-[dependencies]
-clap = { version = "4.5.23", features = ["derive", "env"] }
-config = "0.14.1"
-reqwest = { version = "0.12.9", features = ["json"] }
+
+[workspace.package]
+version = "0.1.50"
+edition = "2024"
+
+
+[workspace.dependencies]
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
-toml = "0.8.19"
-tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
-chrono = { version = "0.4.38", features = ["serde"] }
-termimad = "0.31.1"
-walkdir = "2"
-tokio-process-stream = "0.4.0"
-tokio-stream = "0.1.17"
-rust_socketio = { version = "0.6.0", features = ["async"] }
-futures-util = "0.3.31"
-notify = "8.0.0"
-regex = "1.11.1"
+
+

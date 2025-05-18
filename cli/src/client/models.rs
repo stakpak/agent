@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{dave_v1, kevin_v1, norbert_v1, stuart_v1, SimpleLLMMessage, SimpleLLMRole};
+use super::{SimpleLLMMessage, SimpleLLMRole, dave_v1, kevin_v1, norbert_v1, stuart_v1};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetFlowPermission {

@@ -1,9 +1,12 @@
 use chrono::{DateTime, Utc};
-use reqwest::{header, Client as ReqwestClient, Error as ReqwestError};
+use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
 use serde::{Deserialize, Serialize};
 
 pub mod models;
 use models::*;
+use stakpak_shared::models::integrations::openai::{
+    ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
+};
 use uuid::Uuid;
 pub mod dave_v1;
 pub mod kevin_v1;
@@ -497,6 +500,39 @@ impl Client {
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<AgentTaskOutput>(value.clone()) {
             Ok(response) => Ok(response.results),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn chat_completion(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<ChatCompletionResponse, String> {
+        let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
+
+        let input = ChatCompletionRequest::new(messages);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<ChatCompletionResponse>(value.clone()) {
+            Ok(response) => Ok(response),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);
                 eprintln!("Raw response: {}", value);

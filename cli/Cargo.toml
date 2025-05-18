@@ -1,0 +1,29 @@
+[package]
+name = "stakpak"
+version = { workspace = true }
+edition = "2024"
+
+[dependencies]
+stakpak-tui = { path = "../tui" }
+stakpak-shared = { path = "../shared" }
+clap = { version = "4.5.23", features = ["derive", "env"] }
+config = "0.14.1"
+reqwest = { version = "0.12.9", features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8.19"
+tokio = { version = "1", features = ["full"] }
+uuid = { workspace = true }
+chrono = { version = "0.4.38", features = ["serde"] }
+termimad = "0.31.1"
+walkdir = "2"
+tokio-process-stream = "0.4.0"
+tokio-stream = "0.1.17"
+rust_socketio = { version = "0.6.0", features = ["async"] }
+futures-util = "0.3.31"
+notify = "8.0.0"
+regex = "1.11.1"
+
+
+
+
