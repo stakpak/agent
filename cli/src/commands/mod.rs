@@ -129,6 +129,9 @@ pub enum Commands {
     // Open the coding assistant
     Code,
 
+    /// Start the MCP server
+    Mcp,
+
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
     Agent(AgentCommands),
@@ -193,6 +196,11 @@ impl Commands {
                 let (_, client_res) =
                     tokio::try_join!(tui_handle, client_handle).map_err(|e| e.to_string())?;
                 client_res?; // If your client returns Result<(), String>
+            }
+            Commands::Mcp => {
+                stakpak_mcp_server::start_server()
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
             Commands::Login { api_key } => {
                 let mut updated_config = config.clone();
