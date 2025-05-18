@@ -27,11 +27,15 @@ impl Tools {
         #[tool(param)]
         #[schemars(description = "The shell command to execute")]
         command: String,
+        #[tool(param)]
+        #[schemars(description = "Optional working directory for command execution")]
+        work_dir: Option<String>,
     ) -> Result<CallToolResult, McpError> {
         let command_clone = command.clone();
         let output = Command::new("sh")
             .arg("-c")
             .arg(command)
+            .current_dir(work_dir.unwrap_or(".".to_string()))
             .output()
             .map_err(|e| {
                 error!("Failed to run command: {}", e);
