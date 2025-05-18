@@ -13,6 +13,8 @@ pub fn map_event_to_msg(event: Event) -> Option<Msg> {
             KeyCode::Esc => Some(Msg::Quit),
             KeyCode::Up => Some(Msg::Up),
             KeyCode::Down => Some(Msg::Down),
+            KeyCode::Left => Some(Msg::CursorLeft),
+            KeyCode::Right => Some(Msg::CursorRight),
             KeyCode::PageUp => Some(Msg::PageUp),
             KeyCode::PageDown => Some(Msg::PageDown),
             _ => None,
@@ -22,6 +24,7 @@ pub fn map_event_to_msg(event: Event) -> Option<Msg> {
             MouseEventKind::ScrollDown => Some(Msg::ScrollDown),
             _ => None,
         },
+        Event::Resize(w, h) => Some(Msg::Resized(w, h)),
         _ => None,
     }
 }

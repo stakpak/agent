@@ -44,7 +44,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
         message_area_width,
         message_area_height,
     );
-    render_input(f, &state.input, input_area);
+    render_input(f, &state.input, input_area, state.cursor_position);
     render_helper_dropdown(f, state, dropdown_area);
     if !dropdown_showing {
         render_hint_or_shortcuts(f, state, hint_area);
@@ -97,8 +97,27 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     f.render_widget(message_widget, area);
 }
 
-fn render_input(f: &mut Frame, input: &str, area: Rect) {
-    let input_widget = Paragraph::new(vec![Line::from(vec![Span::raw("> "), Span::raw(input)])])
+fn render_input(f: &mut Frame, input: &str, area: Rect, cursor_position: usize) {
+    let mut spans = vec![Span::raw("> ")];
+    let pos = cursor_position.min(input.len());
+    let (before, after) = input.split_at(pos);
+    spans.push(Span::raw(before));
+    // Render a block cursor or caret
+    let cursor_char = after.chars().next().unwrap_or(' ');
+    spans.push(Span::styled(
+        cursor_char.to_string(),
+        Style::default()
+            .bg(Color::Cyan)
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD),
+    ));
+    if !after.is_empty() {
+        let char_len = cursor_char.len_utf8();
+        if after.len() > char_len {
+            spans.push(Span::raw(&after[char_len..]));
+        }
+    }
+    let input_widget = Paragraph::new(vec![Line::from(spans)])
         .style(Style::default())
         .block(
             Block::default()

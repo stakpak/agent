@@ -44,20 +44,64 @@ pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> 
             Some(msg) = input_rx.recv() => {
                 if let Msg::Quit = msg { should_quit = true; }
                 else {
-                    let term_height = terminal.size()?.height as usize;
-                    app::update(&mut state, msg, term_height);
+                    let term_size = terminal.size()?;
+                    let input_height = 3;
+                    let margin_height = 2;
+                    let dropdown_showing = state.show_helper_dropdown
+                        && !state.filtered_helpers.is_empty()
+                        && state.input.starts_with('/');
+                    let dropdown_height = if dropdown_showing {
+                        state.filtered_helpers.len() as u16
+                    } else {
+                        0
+                    };
+                    let hint_height = if dropdown_showing { 0 } else { margin_height };
+                    let outer_chunks = ratatui::layout::Layout::default()
+                        .direction(ratatui::layout::Direction::Vertical)
+                        .constraints([
+                            ratatui::layout::Constraint::Min(1),
+                            ratatui::layout::Constraint::Length(input_height as u16),
+                            ratatui::layout::Constraint::Length(dropdown_height),
+                            ratatui::layout::Constraint::Length(hint_height),
+                        ])
+                        .split(term_size);
+                    let message_area_width = outer_chunks[0].width as usize;
+                    let message_area_height = outer_chunks[0].height as usize;
+                    app::update(&mut state, msg, message_area_height, message_area_width);
                 }
             }
             Some(msg) = internal_rx.recv() => {
                 if let Msg::Quit = msg { should_quit = true; }
                 else {
-                    let term_height = terminal.size()?.height as usize;
+                    let term_size = terminal.size()?;
+                    let input_height = 3;
+                    let margin_height = 2;
+                    let dropdown_showing = state.show_helper_dropdown
+                        && !state.filtered_helpers.is_empty()
+                        && state.input.starts_with('/');
+                    let dropdown_height = if dropdown_showing {
+                        state.filtered_helpers.len() as u16
+                    } else {
+                        0
+                    };
+                    let hint_height = if dropdown_showing { 0 } else { margin_height };
+                    let outer_chunks = ratatui::layout::Layout::default()
+                        .direction(ratatui::layout::Direction::Vertical)
+                        .constraints([
+                            ratatui::layout::Constraint::Min(1),
+                            ratatui::layout::Constraint::Length(input_height as u16),
+                            ratatui::layout::Constraint::Length(dropdown_height),
+                            ratatui::layout::Constraint::Length(hint_height),
+                        ])
+                        .split(term_size);
+                    let message_area_width = outer_chunks[0].width as usize;
+                    let message_area_height = outer_chunks[0].height as usize;
                     if let Msg::InputSubmitted = msg {
                         if !state.input.trim().is_empty() {
                             let _ = output_tx.try_send(state.input.clone());
                         }
                     }
-                    app::update(&mut state, msg, term_height);
+                    app::update(&mut state, msg, message_area_height, message_area_width);
                 }
             }
         }
