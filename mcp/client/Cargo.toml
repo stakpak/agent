@@ -1,0 +1,4 @@
+[package]
+name = "stakpak-mcp-client"
+version = { workspace = true }
+edition = "2024"
