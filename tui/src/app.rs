@@ -185,8 +185,8 @@ pub fn update(
                 state.cursor_position += next;
             }
         }
-        Msg::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
-        Msg::ShowConfirmationDialog(cmd) => {
+        InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        InputEvent::ShowConfirmationDialog(cmd) => {
             state.is_dialog_open = true;
             state.dialog_command = Some(cmd);
             state.dialog_selected = 0;

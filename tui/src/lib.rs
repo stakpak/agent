@@ -45,9 +45,8 @@ pub async fn run_tui(
     let mut should_quit = false;
     while !should_quit {
         tokio::select! {
-            Some(msg) = input_rx.recv() => {
-                // Intercept run_command messages
-                if let Msg::InputSubmittedWith(ref s) = msg {
+            Some(event) = input_rx.recv() => {
+                if let InputEvent::InputSubmittedWith(ref s) = event {
                     if s.starts_with("run_command:") {
                         // Remove the run_command message from chat and show dialog instead
                         let re = Regex::new(r#"command"\s*:\s*"([^"]+)""#).unwrap();
@@ -58,12 +57,12 @@ pub async fn run_tui(
                                 state.messages.pop();
                             }
                         }
-                        app::update(&mut state, Msg::ShowConfirmationDialog(command), 10, 40);
+                        app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40);
                         terminal.draw(|f| view::view(f, &state))?;
                         continue;
                     }
                 }
-                if let Msg::Quit = msg { should_quit = true; }
+                if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
                     let input_height = 3;
