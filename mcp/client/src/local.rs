@@ -8,14 +8,18 @@ use rmcp::{
 use tokio::process::Command;
 
 pub async fn local_client() -> Result<RunningService<RoleClient, ()>> {
-    let service = serve_client(
-        (),
-        TokioChildProcess::new(Command::new("stakpak").configure(|cmd| {
+    // Run in dev mode
+    let process = match cfg!(debug_assertions) {
+        true => TokioChildProcess::new(Command::new("cargo").configure(|cmd| {
+            cmd.arg("run");
             cmd.arg("mcp");
-        }))?,
-    )
-    .await
-    .inspect_err(|e| {
+        })),
+        false => TokioChildProcess::new(Command::new("stakpak").configure(|cmd| {
+            cmd.arg("mcp");
+        })),
+    }?;
+
+    let service = serve_client((), process).await.inspect_err(|e| {
         tracing::error!("serving error: {:?}", e);
     })?;
 

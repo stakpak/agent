@@ -22,9 +22,9 @@ impl ClientManager {
         })
     }
 
-    pub async fn get_clients(&self) -> Result<Vec<RunningService<RoleClient, ()>>> {
-        let client1 = local_client().await?;
-        Ok(vec![client1])
+    pub async fn get_clients(&self) -> Result<Vec<&RunningService<RoleClient, ()>>> {
+        let clients = self.clients.values().collect();
+        Ok(clients)
     }
 
     pub async fn get_tools(&self) -> Result<HashMap<String, Vec<Tool>>> {
