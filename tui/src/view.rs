@@ -75,23 +75,26 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
         let mut words = line.split_whitespace().peekable();
         let mut current_width = 0;
         let mut is_first_line_in_segment = true;
-        
+
         while words.peek().is_some() {
             let word = words.next().unwrap();
-            let word_width = word.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)).sum::<usize>();
-            
+            let word_width = word
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
+                .sum::<usize>();
+
             // Determine available width for this line
             let line_width_limit = if is_first_line_in_segment && total_lines == 0 {
                 first_line_width
             } else {
                 available_width
             };
-            
+
             // Add space before word (except at start of line)
             if current_width > 0 {
                 current_width += 1; // Space width
             }
-            
+
             // Check if word fits on current line
             if current_width + word_width <= line_width_limit {
                 current_width += word_width;
@@ -102,10 +105,10 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
                 is_first_line_in_segment = false;
             }
         }
-        
+
         total_lines += 1;
     }
-    
+
     total_lines
 }
 
@@ -159,37 +162,37 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     // Make a copy of input to avoid borrowing issues
     let input = state.input.clone();
     let available_width = area.width.saturating_sub(4) as usize; // -4 for borders and padding
-    
+
     // Ensure the cursor position is valid
     let cursor_pos = state.cursor_position.min(input.len());
-    
+
     // Split the input by newlines first
     let line_segments: Vec<&str> = input.split('\n').collect();
-    
+
     let mut lines = Vec::new();
     let mut cursor_rendered = false;
-    
+
     // Track position in the input string (in bytes)
     let mut current_pos = 0;
-    
+
     for (segment_idx, segment) in line_segments.iter().enumerate() {
         let mut current_line = Vec::new();
         // Add prompt to first line only
         let prompt = if segment_idx == 0 { "> " } else { "" };
         let prompt_width = prompt.len();
         current_line.push(Span::raw(prompt));
-        
+
         let mut current_width = prompt_width;
-        
+
         // Process this line segment
         let mut word_segments = Vec::new();
         let mut current_word = String::new();
         let mut in_word = false;
-        
+
         // Split segment into words and spaces, preserving exact positions
         for (i, c) in segment.char_indices() {
             let byte_pos = current_pos + i;
-            
+
             // Render cursor if it's at this exact position
             if byte_pos == cursor_pos && !cursor_rendered {
                 if in_word {
@@ -199,12 +202,12 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                         current_word.clear();
                     }
                 }
-                
+
                 // Add the cursor
                 word_segments.push((c.to_string(), true));
                 cursor_rendered = true;
                 in_word = !c.is_whitespace();
-                
+
                 if in_word {
                     current_word.push(c);
                 }
@@ -215,7 +218,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                     current_word.clear();
                     in_word = false;
                 }
-                
+
                 // Add the whitespace
                 word_segments.push((c.to_string(), false));
             } else {
@@ -224,36 +227,37 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 in_word = true;
             }
         }
-        
+
         // Add any remaining word
         if in_word && !current_word.is_empty() {
             word_segments.push((current_word, false));
         }
-        
+
         // If cursor is at the end of this segment
         if current_pos + segment.len() == cursor_pos && !cursor_rendered {
             word_segments.push((" ".to_string(), true));
             cursor_rendered = true;
         }
-        
+
         // Render the word segments with proper wrapping
         for (text, is_cursor) in word_segments {
-            let text_width = text.chars()
+            let text_width = text
+                .chars()
                 .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
                 .sum::<usize>();
-            
+
             // Check if this segment would exceed line width
-            let needs_wrap = !text.trim().is_empty() && 
-                        current_width > prompt_width && 
-                        current_width + text_width > available_width;
-            
+            let needs_wrap = !text.trim().is_empty()
+                && current_width > prompt_width
+                && current_width + text_width > available_width;
+
             if needs_wrap {
                 // Add current line and start a new one
                 lines.push(Line::from(std::mem::take(&mut current_line)));
                 current_line = Vec::new();
                 current_width = 0;
             }
-            
+
             // Add the segment (with or without cursor highlighting)
             if is_cursor {
                 current_line.push(Span::styled(
@@ -266,17 +270,17 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 current_line.push(Span::raw(text));
             }
-            
+
             current_width += text_width;
         }
-        
+
         // Add this line
         lines.push(Line::from(std::mem::take(&mut current_line)));
-        
+
         // Move to next segment
         current_pos += segment.len() + 1; // +1 for newline
     }
-    
+
     // If cursor is at the very end and we haven't rendered it yet
     if cursor_pos == input.len() && !cursor_rendered {
         // If the last line is empty, add cursor there
@@ -290,19 +294,19 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             ));
         } else {
             // Create a new line with prompt and cursor
-            let mut line = Vec::new();
-            line.push(Span::raw("> "));
-            line.push(Span::styled(
-                " ",
-                Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            lines.push(Line::from(line));
+            lines.push(Line::from(vec![
+                Span::raw("> "),
+                Span::styled(
+                    " ",
+                    Style::default()
+                        .bg(Color::Cyan)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
         }
     }
-    
+
     // Ensure we have at least one line
     if lines.is_empty() {
         lines.push(Line::from(vec![
@@ -316,7 +320,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             ),
         ]));
     }
-    
+
     // Render the input widget
     let input_widget = Paragraph::new(lines)
         .style(Style::default())
@@ -326,7 +330,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
         .wrap(ratatui::widgets::Wrap { trim: false });
-    
+
     f.render_widget(input_widget, area);
 }
 

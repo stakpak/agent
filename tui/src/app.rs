@@ -1,5 +1,6 @@
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use stakpak_shared::models::integrations::openai::ToolCall;
 
 #[derive(Clone)]
 pub struct Message {
@@ -44,7 +45,9 @@ pub struct AppState {
 }
 
 #[derive(Debug)]
-pub enum Msg {
+pub enum InputEvent {
+    AssistantMessage(String),
+    RunCommand(ToolCall),
     InputChanged(char),
     InputBackspace,
     InputChangedNewline,
@@ -63,6 +66,12 @@ pub enum Msg {
     CursorRight,
     ToggleCursorVisible,
     Resized(u16, u16),
+}
+
+#[derive(Debug)]
+pub enum OutputEvent {
+    UserMessage(String),
+    AcceptTool(ToolCall),
 }
 
 impl AppState {
@@ -99,13 +108,13 @@ impl AppState {
 
 pub fn update(
     state: &mut AppState,
-    msg: Msg,
+    event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
 ) {
     state.scroll = state.scroll.max(0);
-    match msg {
-        Msg::Up => {
+    match event {
+        InputEvent::Up => {
             if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
@@ -115,7 +124,7 @@ pub fn update(
                 handle_scroll_up(state);
             }
         }
-        Msg::Down => {
+        InputEvent::Down => {
             if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
@@ -125,19 +134,23 @@ pub fn update(
                 handle_scroll_down(state, message_area_height, message_area_width);
             }
         }
-        Msg::DropdownUp => handle_dropdown_up(state),
-        Msg::DropdownDown => handle_dropdown_down(state),
-        Msg::InputChanged(c) => handle_input_changed(state, c),
-        Msg::InputBackspace => handle_input_backspace(state),
-        Msg::InputSubmitted => handle_input_submitted(state, message_area_height),
-        Msg::InputChangedNewline => handle_input_changed(state, '\n'),
-        Msg::InputSubmittedWith(s) => handle_input_submitted_with(state, s, message_area_height),
-        Msg::ScrollUp => handle_scroll_up(state),
-        Msg::ScrollDown => handle_scroll_down(state, message_area_height, message_area_width),
-        Msg::PageUp => handle_page_up(state, message_area_height),
-        Msg::PageDown => handle_page_down(state, message_area_height, message_area_width),
-        Msg::Quit => {}
-        Msg::CursorLeft => {
+        InputEvent::DropdownUp => handle_dropdown_up(state),
+        InputEvent::DropdownDown => handle_dropdown_down(state),
+        InputEvent::InputChanged(c) => handle_input_changed(state, c),
+        InputEvent::InputBackspace => handle_input_backspace(state),
+        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height),
+        InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
+        InputEvent::InputSubmittedWith(s) => {
+            handle_input_submitted_with(state, s, message_area_height)
+        }
+        InputEvent::ScrollUp => handle_scroll_up(state),
+        InputEvent::ScrollDown => {
+            handle_scroll_down(state, message_area_height, message_area_width)
+        }
+        InputEvent::PageUp => handle_page_up(state, message_area_height),
+        InputEvent::PageDown => handle_page_down(state, message_area_height, message_area_width),
+        InputEvent::Quit => {}
+        InputEvent::CursorLeft => {
             if state.cursor_position > 0 {
                 let prev = state.input[..state.cursor_position]
                     .chars()
@@ -147,7 +160,7 @@ pub fn update(
                 state.cursor_position -= prev;
             }
         }
-        Msg::CursorRight => {
+        InputEvent::CursorRight => {
             if state.cursor_position < state.input.len() {
                 let next = state.input[state.cursor_position..]
                     .chars()
@@ -157,7 +170,7 @@ pub fn update(
                 state.cursor_position += next;
             }
         }
-        Msg::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -184,7 +197,6 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-   
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -193,7 +205,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     let pos = state.cursor_position.min(state.input.len());
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
-  
+
     if state.input.starts_with('/') {
         state.show_helper_dropdown = true;
         state.filtered_helpers = state
@@ -212,7 +224,6 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.filtered_helpers.clear();
         state.helper_selected = 0;
     }
-    
 }
 
 fn handle_input_backspace(state: &mut AppState) {
