@@ -124,8 +124,6 @@ pub enum Commands {
         #[arg(long, short = 't')]
         target_provisioner: TranspileTargetProvisionerType,
     },
-    // Open the coding assistant
-    Code,
 
     /// Start the MCP server
     Mcp,
@@ -138,9 +136,6 @@ pub enum Commands {
 impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
-            Commands::Code => {
-                agent::code::run(config).await?;
-            }
             Commands::Mcp => {
                 stakpak_mcp_server::start_server()
                     .await
