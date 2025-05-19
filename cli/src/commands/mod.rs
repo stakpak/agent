@@ -1,8 +1,6 @@
 use agent::{AgentCommands, get_or_create_session, run_agent};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
-use stakpak_shared::models::integrations::openai::ChatMessage;
-use stakpak_tui::Msg;
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -141,61 +139,7 @@ impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
             Commands::Code => {
-                let mut messages: Vec<ChatMessage> = Vec::new();
-                let (input_tx, input_rx) = tokio::sync::mpsc::channel::<Msg>(100);
-                let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<String>(100);
-
-                let tui_handle = tokio::spawn(async move {
-                    let _ = stakpak_tui::run_tui(input_rx, output_tx)
-                        .await
-                        .map_err(|e| e.to_string());
-                });
-
-                let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(
-                    async move {
-                        let client = Client::new(&config).map_err(|e| e.to_string())?;
-                        while let Some(user_input) = output_rx.recv().await {
-                            messages.push(ChatMessage {
-                                role: stakpak_shared::models::integrations::openai::Role::User,
-                                content: Some(
-                                    stakpak_shared::models::integrations::openai::MessageContent::String(
-                                    user_input,
-                                ),
-                            ),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            });
-
-                            let response = match client.chat_completion(messages.clone()).await {
-                                Ok(response) => response,
-                                Err(e) => {
-                                    input_tx.send(Msg::Quit).await.map_err(|e| e.to_string())?;
-                                    return Err(e.to_string());
-                                }
-                            };
-
-                            messages.push(response.choices[0].message.clone());
-
-                            input_tx
-                            .send(Msg::InputSubmittedWith(
-                                response.choices[0]
-                                    .message
-                                    .content
-                                    .clone()
-                                    .unwrap_or(stakpak_shared::models::integrations::openai::MessageContent::String("".to_string()))
-                                    .to_string(),
-                            ))
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        }
-                        Ok(())
-                    },
-                );
-
-                let (_, client_res) =
-                    tokio::try_join!(tui_handle, client_handle).map_err(|e| e.to_string())?;
-                client_res?; // If your client returns Result<(), String>
+                agent::code::run(config).await?;
             }
             Commands::Mcp => {
                 stakpak_mcp_server::start_server()

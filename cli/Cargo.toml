@@ -5,8 +5,12 @@ edition = "2024"
 
 [dependencies]
 stakpak-mcp-server = { path = "../mcp/server" }
+stakpak-mcp-client = { path = "../mcp/client" }
 stakpak-tui = { path = "../tui" }
 stakpak-shared = { path = "../shared" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rmcp = { workspace = true }
 clap = { version = "4.5.23", features = ["derive", "env"] }
 config = "0.14.1"
 reqwest = { version = "0.12.9", features = ["json"] }

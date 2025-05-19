@@ -283,6 +283,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
 name = "chrono"
 version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1019,7 +1025,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows-core",
+ "windows-core 0.52.0",
 ]
 
 [[package]]
@@ -1456,6 +1462,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.9.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1707,6 +1725,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-wrap"
+version = "8.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d35f4dc9988d1326b065b4def5e950c3ed727aa03e3151b86cc9e2aec6b03f54"
+dependencies = [
+ "futures",
+ "indexmap",
+ "nix",
+ "tokio",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1882,13 +1914,14 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "0.1.5"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#35282ee34cedf41c0bdf4f1e47a99710e64ba401"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#c1c4c9a0c9afbfbbf9eb42d6f8b00d8546fbdc2c"
 dependencies = [
  "base64 0.21.7",
  "chrono",
  "futures",
  "paste",
  "pin-project-lite",
+ "process-wrap",
  "rmcp-macros",
  "schemars",
  "serde",
@@ -1902,7 +1935,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "0.1.5"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#35282ee34cedf41c0bdf4f1e47a99710e64ba401"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#c1c4c9a0c9afbfbbf9eb42d6f8b00d8546fbdc2c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2296,7 +2329,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stakpak"
-version = "0.1.50"
+version = "0.1.51"
 dependencies = [
  "chrono",
  "clap",
@@ -2305,9 +2338,11 @@ dependencies = [
  "notify",
  "regex",
  "reqwest",
+ "rmcp",
  "rust_socketio",
  "serde",
  "serde_json",
+ "stakpak-mcp-client",
  "stakpak-mcp-server",
  "stakpak-shared",
  "stakpak-tui",
@@ -2316,17 +2351,30 @@ dependencies = [
  "tokio-process-stream",
  "tokio-stream",
  "toml",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
  "walkdir",
 ]
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.1.50"
+version = "0.1.51"
+dependencies = [
+ "anyhow",
+ "futures",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "stakpak-mcp-server",
+ "stakpak-shared",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.1.50"
+version = "0.1.51"
 dependencies = [
  "anyhow",
  "rmcp",
@@ -2335,12 +2383,11 @@ dependencies = [
  "stakpak-shared",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "stakpak-shared"
-version = "0.1.50"
+version = "0.1.51"
 dependencies = [
  "serde",
  "serde_json",
@@ -2349,7 +2396,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.1.50"
+version = "0.1.51"
 dependencies = [
  "crossterm 0.27.0",
  "ratatui",
@@ -3091,12 +3138,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
+name = "windows"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f919aee0a93304be7f62e8e5027811bbba96bcb1de84d6618be56e43f8a32a1"
+dependencies = [
+ "windows-core 0.59.0",
+ "windows-targets 0.53.0",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
 dependencies = [
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "810ce18ed2112484b0d4e15d022e5f598113e220c53e373fb31e67e21670c1ce"
+dependencies = [
+ "windows-implement",
+ "windows-interface",
+ "windows-result",
+ "windows-strings",
+ "windows-targets 0.53.0",
+]
+
+[[package]]
+name = "windows-implement"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83577b051e2f49a058c308f17f273b570a6a758386fc291b5f6a934dd84e48c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.59.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
 ]
 
 [[package]]
