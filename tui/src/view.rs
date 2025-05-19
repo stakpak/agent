@@ -148,6 +148,16 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         }
         all_lines.push((Line::from(""), msg.style));
     }
+    // Add loader as a new message line if loading
+    if state.loading {
+        let spinner_chars = ["|", "/", "-", "\\"];
+        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+        let loading_line = Line::from(vec![Span::styled(
+            format!("{} Stakpaking...", spinner),
+            Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+        )]);
+        all_lines.push((loading_line, Style::default()));
+    }
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
     let scroll = state.scroll.min(max_scroll);

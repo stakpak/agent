@@ -47,6 +47,8 @@ pub struct AppState {
     pub is_dialog_open: bool,
     pub dialog_command: Option<String>,
     pub dialog_selected: usize,
+    pub loading: bool,
+    pub spinner_frame: usize,
 }
 
 #[derive(Debug)]
@@ -76,6 +78,7 @@ pub enum InputEvent {
     ShowConfirmationDialog(String),
     DialogConfirm,
     DialogCancel,
+    Tick,
 }
 
 #[derive(Debug)]
@@ -115,6 +118,8 @@ impl AppState {
             is_dialog_open: false,
             dialog_command: None,
             dialog_selected: 0,
+            loading: false,
+            spinner_frame: 0,
         }
     }
 }
@@ -194,7 +199,11 @@ pub fn update(
             state.dialog_command = Some(cmd);
             state.dialog_selected = 0;
         },
-       
+        InputEvent::Tick => {
+            if state.loading {
+                state.spinner_frame = state.spinner_frame.wrapping_add(1);
+            }
+        }
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -329,6 +338,8 @@ fn handle_input_submitted(state: &mut AppState, message_area_height: usize, outp
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
+        state.loading = true;
+        state.spinner_frame = 0;
     } else if !state.input.trim().is_empty() {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -346,6 +357,8 @@ fn handle_input_submitted(state: &mut AppState, message_area_height: usize, outp
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
+        state.loading = true;
+        state.spinner_frame = 0;
     }
 }
 
@@ -365,6 +378,7 @@ fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_hei
         state.scroll_to_bottom = true;
         state.stay_at_bottom = true;
     }
+    state.loading = false;
 }
 
 fn handle_scroll_up(state: &mut AppState) {

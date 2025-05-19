@@ -40,6 +40,15 @@ pub async fn run_tui(
         }
     });
 
+    // Create a tick channel for Tick events
+    let (tick_tx, mut tick_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+        while tick_tx.send(InputEvent::Tick).await.is_ok() {
+            interval.tick().await;
+        }
+    });
+
     // Main async update/view loop
     terminal.draw(|f| view::view(f, &state))?;
     let mut should_quit = false;
@@ -131,6 +140,33 @@ pub async fn run_tui(
                     }
                     app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
                 }
+            }
+            Some(_) = tick_rx.recv() => {
+                // Only update spinner on Tick
+                let term_size = terminal.size()?;
+                let input_height = 3;
+                let margin_height = 2;
+                let dropdown_showing = state.show_helper_dropdown
+                    && !state.filtered_helpers.is_empty()
+                    && state.input.starts_with('/');
+                let dropdown_height = if dropdown_showing {
+                    state.filtered_helpers.len() as u16
+                } else {
+                    0
+                };
+                let hint_height = if dropdown_showing { 0 } else { margin_height };
+                let outer_chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        ratatui::layout::Constraint::Min(1),
+                        ratatui::layout::Constraint::Length(input_height as u16),
+                        ratatui::layout::Constraint::Length(dropdown_height),
+                        ratatui::layout::Constraint::Length(hint_height),
+                    ])
+                    .split(term_size);
+                let message_area_width = outer_chunks[0].width as usize;
+                let message_area_height = outer_chunks[0].height as usize;
+                app::update(&mut state, InputEvent::Tick, message_area_height, message_area_width, &output_tx);
             }
         }
         terminal.draw(|f| view::view(f, &state))?;
