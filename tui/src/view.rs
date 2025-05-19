@@ -9,7 +9,8 @@ use ratatui::{
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
-    let input_lines = calculate_input_lines(&state.input, f.size().width as usize - 4); // -4 for borders and padding
+    let input_area_width = f.size().width.saturating_sub(4) as usize;
+    let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16; // +2 for border
 
     let margin_height = 2;
@@ -102,10 +103,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
             }
         }
         
-        // Count the last line in this segment
-        if line.len() > 0 || total_lines == 0 {
-            total_lines += 1;
-        }
+        total_lines += 1;
     }
     
     total_lines

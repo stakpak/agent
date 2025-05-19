@@ -47,6 +47,7 @@ pub struct AppState {
 pub enum Msg {
     InputChanged(char),
     InputBackspace,
+    InputChangedNewline,
     InputSubmitted,
     InputSubmittedWith(String),
     ScrollUp,
@@ -129,6 +130,7 @@ pub fn update(
         Msg::InputChanged(c) => handle_input_changed(state, c),
         Msg::InputBackspace => handle_input_backspace(state),
         Msg::InputSubmitted => handle_input_submitted(state, message_area_height),
+        Msg::InputChangedNewline => handle_input_changed(state, '\n'),
         Msg::InputSubmittedWith(s) => handle_input_submitted_with(state, s, message_area_height),
         Msg::ScrollUp => handle_scroll_up(state),
         Msg::ScrollDown => handle_scroll_down(state, message_area_height, message_area_width),
@@ -182,31 +184,35 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
+   
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
-    } else {
-        let pos = state.cursor_position.min(state.input.len());
-        state.input.insert(pos, c);
-        state.cursor_position = pos + c.len_utf8();
-        if state.input.starts_with('/') {
-            state.show_helper_dropdown = true;
-            state.filtered_helpers = state
-                .helpers
-                .iter()
-                .filter(|h| h.starts_with(&state.input))
-                .cloned()
-                .collect();
-            if state.filtered_helpers.is_empty()
-                || state.helper_selected >= state.filtered_helpers.len()
-            {
-                state.helper_selected = 0;
-            }
-        } else {
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
+        return;
+    }
+
+    let pos = state.cursor_position.min(state.input.len());
+    state.input.insert(pos, c);
+    state.cursor_position = pos + c.len_utf8();
+  
+    if state.input.starts_with('/') {
+        state.show_helper_dropdown = true;
+        state.filtered_helpers = state
+            .helpers
+            .iter()
+            .filter(|h| h.starts_with(&state.input))
+            .cloned()
+            .collect();
+        if state.filtered_helpers.is_empty()
+            || state.helper_selected >= state.filtered_helpers.len()
+        {
             state.helper_selected = 0;
         }
+    } else {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.helper_selected = 0;
     }
+    
 }
 
 fn handle_input_backspace(state: &mut AppState) {
