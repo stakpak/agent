@@ -53,8 +53,7 @@ pub async fn run_tui(
                     app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40, &output_tx);
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
-                }
-                if let  InputEvent::InputSubmittedWith(ref s) = event {
+                } else  if let  InputEvent::InputSubmittedWith(ref s) = event {
                     if s.starts_with("run_command:") {
                         // Remove the run_command message from chat and show dialog instead
                         let re = Regex::new(r#"command"\s*:\s*"([^"]+)""#).unwrap();
@@ -70,6 +69,7 @@ pub async fn run_tui(
                         continue;
                     }
                 }
+               
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
