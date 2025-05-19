@@ -42,6 +42,9 @@ pub struct AppState {
     pub helper_selected: usize,
     pub filtered_helpers: Vec<&'static str>,
     pub show_shortcuts: bool,
+    pub is_dialog_open: bool,
+    pub dialog_command: Option<String>,
+    pub dialog_selected: usize,
 }
 
 #[derive(Debug)]
@@ -59,6 +62,8 @@ pub enum InputEvent {
     PageDown,
     DropdownUp,
     DropdownDown,
+    DialogUp,
+    DialogDown,
     Up,
     Down,
     Quit,
@@ -66,6 +71,9 @@ pub enum InputEvent {
     CursorRight,
     ToggleCursorVisible,
     Resized(u16, u16),
+    ShowConfirmationDialog(String),
+    DialogConfirm,
+    DialogCancel,
 }
 
 #[derive(Debug)]
@@ -102,6 +110,9 @@ impl AppState {
             helper_selected: 0,
             filtered_helpers: helpers,
             show_shortcuts: false,
+            is_dialog_open: false,
+            dialog_command: None,
+            dialog_selected: 0,
         }
     }
 }
@@ -120,6 +131,8 @@ pub fn update(
                 && state.input.starts_with('/')
             {
                 handle_dropdown_up(state);
+            } else if state.is_dialog_open {
+                handle_dialog_up(state);
             } else {
                 handle_scroll_up(state);
             }
@@ -130,6 +143,8 @@ pub fn update(
                 && state.input.starts_with('/')
             {
                 handle_dropdown_down(state);
+            } else if state.is_dialog_open {
+                handle_dialog_down(state);
             } else {
                 handle_scroll_down(state, message_area_height, message_area_width);
             }
@@ -170,7 +185,13 @@ pub fn update(
                 state.cursor_position += next;
             }
         }
-        InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        Msg::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        Msg::ShowConfirmationDialog(cmd) => {
+            state.is_dialog_open = true;
+            state.dialog_command = Some(cmd);
+            state.dialog_selected = 0;
+        },
+       
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -195,6 +216,20 @@ fn handle_dropdown_down(state: &mut AppState) {
         state.helper_selected += 1;
     }
 }
+
+fn handle_dialog_up(state: &mut AppState) {
+    if state.is_dialog_open && state.dialog_selected > 0 {
+        state.dialog_selected -= 1;
+    }
+}
+
+fn handle_dialog_down(state: &mut AppState) {
+    if state.is_dialog_open && state.dialog_selected < 1 {
+        state.dialog_selected += 1;
+    }
+}
+
+
 
 fn handle_input_changed(state: &mut AppState, c: char) {
     if c == '?' && state.input.is_empty() {
@@ -260,6 +295,17 @@ fn handle_input_backspace(state: &mut AppState) {
 
 fn handle_input_submitted(state: &mut AppState, message_area_height: usize) {
     let input_height = 3;
+    if state.is_dialog_open {
+        state.is_dialog_open = false;
+        state.input.clear();
+        state.cursor_position = 0;
+        if state.dialog_selected == 0 {
+            state.messages.push(Message::user(format!("> {}", "yes"), None));
+        } else {
+            state.messages.push(Message::user(format!("> {}", "no"), None));
+        }
+        return;
+    }
     if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));

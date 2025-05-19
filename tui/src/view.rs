@@ -48,10 +48,15 @@ pub fn view(f: &mut Frame, state: &AppState) {
         message_area_width,
         message_area_height,
     );
-    render_multiline_input(f, state, input_area);
-    render_helper_dropdown(f, state, dropdown_area);
-    if !dropdown_showing {
-        render_hint_or_shortcuts(f, state, hint_area);
+    if !state.is_dialog_open {
+        render_multiline_input(f, state, input_area);
+        render_helper_dropdown(f, state, dropdown_area);
+        if !dropdown_showing {
+            render_hint_or_shortcuts(f, state, hint_area);
+        }
+    }
+    if state.is_dialog_open {
+        render_confirmation_dialog(f, state);
     }
 }
 
@@ -396,4 +401,57 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         ));
         f.render_widget(hint, area);
     }
+}
+
+fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
+    use ratatui::widgets::{Block, Borders, Paragraph};
+    use ratatui::layout::Alignment;
+    use ratatui::style::{Style, Color, Modifier};
+    use ratatui::text::{Span, Line};
+    let screen = f.size();
+    // Calculate the number of visible message lines
+    let message_lines = crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
+    // Clamp so dialog fits on screen
+    let dialog_height = 9;
+    if last_message_y + dialog_height > screen.height {
+        last_message_y = screen.height.saturating_sub(dialog_height);
+    }
+    let area = ratatui::layout::Rect {
+        x: 1,
+        y: last_message_y,
+        width: 70.min(screen.width - 4),
+        height: dialog_height,
+    };
+    let command = state.dialog_command.as_deref().unwrap_or("");
+    let title = format!("Bash({})...", command);
+    let desc = ""; // TODO: make this dynamic
+    let options = [
+        "Yes",
+        "No, and tell Stapak what to do differently (esc)",
+    ];
+    let pad = "  "; // 2 spaces of padding
+
+    let mut lines = vec![
+        Line::from(vec![Span::styled(format!("{pad}{}{pad}", title), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![Span::styled(format!("{pad}{}{pad}", desc), Style::default().fg(Color::Gray))]),
+        Line::from(format!("{pad}{pad}")),
+        Line::from(format!("{pad}Do you want to proceed?{pad}")),
+        Line::from(format!("{pad}{pad}")),
+    ];
+    for (i, opt) in options.iter().enumerate() {
+        let style = if state.dialog_selected == i {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        lines.push(Line::from(vec![Span::styled(format!("{pad}{}. {}{pad}", i+1, opt), style)]));
+    }
+    let dialog = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightYellow))
+            .title("Bash command"))
+        .alignment(Alignment::Left);
+    f.render_widget(dialog, area);
 }

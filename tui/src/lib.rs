@@ -12,6 +12,7 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
+use regex::Regex;
 
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
@@ -44,8 +45,25 @@ pub async fn run_tui(
     let mut should_quit = false;
     while !should_quit {
         tokio::select! {
-            Some(event) = input_rx.recv() => {
-                if let InputEvent::Quit = event { should_quit = true; }
+            Some(msg) = input_rx.recv() => {
+                // Intercept run_command messages
+                if let Msg::InputSubmittedWith(ref s) = msg {
+                    if s.starts_with("run_command:") {
+                        // Remove the run_command message from chat and show dialog instead
+                        let re = Regex::new(r#"command"\s*:\s*"([^"]+)""#).unwrap();
+                        let command = re.captures(s).and_then(|cap| cap.get(1)).map(|m| m.as_str().to_string()).unwrap_or_else(|| "unknown".to_string());
+                        // Remove last message if it is the run_command message
+                        if let Some(last) = state.messages.last() {
+                            if last.text.trim().starts_with("run_command:") {
+                                state.messages.pop();
+                            }
+                        }
+                        app::update(&mut state, Msg::ShowConfirmationDialog(command), 10, 40);
+                        terminal.draw(|f| view::view(f, &state))?;
+                        continue;
+                    }
+                }
+                if let Msg::Quit = msg { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
                     let input_height = 3;
