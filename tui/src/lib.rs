@@ -3,8 +3,8 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, Message, Msg, update};
-pub use event::map_event_to_msg;
+pub use app::{AppState, InputEvent, Message, OutputEvent, update};
+pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
 
@@ -13,7 +13,10 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> io::Result<()> {
+pub async fn run_tui(
+    mut input_rx: Receiver<InputEvent>,
+    output_tx: Sender<OutputEvent>,
+) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
     execute!(std::io::stdout(), EnterAlternateScreen)?;
@@ -23,12 +26,12 @@ pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> 
     let mut state = AppState::new(all_helpers.clone());
 
     // Internal channel for event handling
-    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<Msg>(100);
+    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     std::thread::spawn(move || {
         loop {
             if let Ok(event) = crossterm::event::read() {
-                if let Some(msg) = crate::event::map_event_to_msg(event) {
-                    if internal_tx.blocking_send(msg).is_err() {
+                if let Some(event) = crate::event::map_crossterm_event_to_input_event(event) {
+                    if internal_tx.blocking_send(event).is_err() {
                         break;
                     }
                 }
@@ -41,8 +44,8 @@ pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> 
     let mut should_quit = false;
     while !should_quit {
         tokio::select! {
-            Some(msg) = input_rx.recv() => {
-                if let Msg::Quit = msg { should_quit = true; }
+            Some(event) = input_rx.recv() => {
+                if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
                     let input_height = 3;
@@ -67,11 +70,11 @@ pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> 
                         .split(term_size);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
-                    app::update(&mut state, msg, message_area_height, message_area_width);
+                    app::update(&mut state, event, message_area_height, message_area_width);
                 }
             }
-            Some(msg) = internal_rx.recv() => {
-                if let Msg::Quit = msg { should_quit = true; }
+            Some(event) = internal_rx.recv() => {
+                if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
                     let input_height = 3;
@@ -96,12 +99,12 @@ pub async fn run_tui(mut input_rx: Receiver<Msg>, output_tx: Sender<String>) -> 
                         .split(term_size);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
-                    if let Msg::InputSubmitted = msg {
+                    if let InputEvent::InputSubmitted = event {
                         if !state.input.trim().is_empty() {
-                            let _ = output_tx.try_send(state.input.clone());
+                            let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
                         }
                     }
-                    app::update(&mut state, msg, message_area_height, message_area_width);
+                    app::update(&mut state, event, message_area_height, message_area_width);
                 }
             }
         }

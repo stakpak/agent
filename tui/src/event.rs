@@ -1,33 +1,35 @@
-use crate::app::Msg;
+use crate::app::InputEvent;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 
-pub fn map_event_to_msg(event: Event) -> Option<Msg> {
+pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
     match event {
         Event::Key(KeyEvent {
             code, modifiers, ..
-        }) => {
-            match code {
-                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
-                KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::InputChangedNewline),                
-                KeyCode::Char(c) => Some(Msg::InputChanged(c)),
-                KeyCode::Backspace => Some(Msg::InputBackspace),
-                KeyCode::Enter => Some(Msg::InputSubmitted),
-                KeyCode::Esc => Some(Msg::Quit),
-                KeyCode::Up => Some(Msg::Up),
-                KeyCode::Down => Some(Msg::Down),
-                KeyCode::Left => Some(Msg::CursorLeft),
-                KeyCode::Right => Some(Msg::CursorRight),
-                KeyCode::PageUp => Some(Msg::PageUp),
-                KeyCode::PageDown => Some(Msg::PageDown),
-                    _ => None,
+        }) => match code {
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputEvent::Quit)
             }
-        }
-        Event::Mouse(me) => match me.kind {
-            MouseEventKind::ScrollUp => Some(Msg::ScrollUp),
-            MouseEventKind::ScrollDown => Some(Msg::ScrollDown),
+            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputEvent::InputChangedNewline)
+            }
+            KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
+            KeyCode::Backspace => Some(InputEvent::InputBackspace),
+            KeyCode::Enter => Some(InputEvent::InputSubmitted),
+            KeyCode::Esc => Some(InputEvent::Quit),
+            KeyCode::Up => Some(InputEvent::Up),
+            KeyCode::Down => Some(InputEvent::Down),
+            KeyCode::Left => Some(InputEvent::CursorLeft),
+            KeyCode::Right => Some(InputEvent::CursorRight),
+            KeyCode::PageUp => Some(InputEvent::PageUp),
+            KeyCode::PageDown => Some(InputEvent::PageDown),
             _ => None,
         },
-        Event::Resize(w, h) => Some(Msg::Resized(w, h)),
+        Event::Mouse(me) => match me.kind {
+            MouseEventKind::ScrollUp => Some(InputEvent::ScrollUp),
+            MouseEventKind::ScrollDown => Some(InputEvent::ScrollDown),
+            _ => None,
+        },
+        Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),
         _ => None,
     }
 }
