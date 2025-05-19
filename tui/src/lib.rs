@@ -46,7 +46,15 @@ pub async fn run_tui(
     while !should_quit {
         tokio::select! {
             Some(event) = input_rx.recv() => {
-                if let InputEvent::InputSubmittedWith(ref s) = event {
+                eprintln!("event: {:?}", event);
+                if let InputEvent::RunCommand(tool_call) = &event {
+                    let command = format!("{:?}", tool_call);
+                    eprintln!("command: {}", command);
+                    app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40, &output_tx);
+                    terminal.draw(|f| view::view(f, &state))?;
+                    continue;
+                }
+                if let  InputEvent::InputSubmittedWith(ref s) = event {
                     if s.starts_with("run_command:") {
                         // Remove the run_command message from chat and show dialog instead
                         let re = Regex::new(r#"command"\s*:\s*"([^"]+)""#).unwrap();
@@ -57,7 +65,7 @@ pub async fn run_tui(
                                 state.messages.pop();
                             }
                         }
-                        app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40);
+                        app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40, &output_tx);
                         terminal.draw(|f| view::view(f, &state))?;
                         continue;
                     }
@@ -87,7 +95,7 @@ pub async fn run_tui(
                         .split(term_size);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
-                    app::update(&mut state, event, message_area_height, message_area_width);
+                    app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
                 }
             }
             Some(event) = internal_rx.recv() => {
@@ -121,7 +129,7 @@ pub async fn run_tui(
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
                         }
                     }
-                    app::update(&mut state, event, message_area_height, message_area_width);
+                    app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
                 }
             }
         }

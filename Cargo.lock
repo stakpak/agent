@@ -2436,6 +2436,7 @@ dependencies = [
  "crossterm 0.27.0",
  "ratatui",
  "regex",
+ "serde_json",
  "stakpak-shared",
  "tokio",
  "unicode-width 0.2.0",

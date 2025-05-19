@@ -1,6 +1,8 @@
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use tokio::sync::mpsc::Sender;
+use serde_json;
 
 #[derive(Clone)]
 pub struct Message {
@@ -122,6 +124,7 @@ pub fn update(
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
+    output_tx: &Sender<OutputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -153,7 +156,7 @@ pub fn update(
         InputEvent::DropdownDown => handle_dropdown_down(state),
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
-        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height),
+        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height, output_tx),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -229,8 +232,6 @@ fn handle_dialog_down(state: &mut AppState) {
     }
 }
 
-
-
 fn handle_input_changed(state: &mut AppState, c: char) {
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
@@ -293,20 +294,21 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_input_submitted(state: &mut AppState, message_area_height: usize) {
+fn handle_input_submitted(state: &mut AppState, message_area_height: usize, output_tx: &Sender<OutputEvent>) {
     let input_height = 3;
     if state.is_dialog_open {
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
+
         if state.dialog_selected == 0 {
-            state.messages.push(Message::user(format!("> {}", "yes"), None));
-        } else {
-            state.messages.push(Message::user(format!("> {}", "no"), None));
+            if let Some(cmd) = &state.dialog_command {
+                if let Ok(tool_call) = serde_json::from_str::<ToolCall>(cmd) {
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call));
+                }
+            }
         }
-        return;
-    }
-    if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
+    } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
