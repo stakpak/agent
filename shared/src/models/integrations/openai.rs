@@ -64,7 +64,7 @@ pub struct ChatCompletionRequest {
 }
 
 impl ChatCompletionRequest {
-    pub fn new(messages: Vec<ChatMessage>) -> Self {
+    pub fn new(messages: Vec<ChatMessage>, tools: Option<Vec<Tool>>) -> Self {
         Self {
             model: "pablo-v1".to_string(),
             messages,
@@ -80,7 +80,7 @@ impl ChatCompletionRequest {
             stream: None,
             temperature: None,
             top_p: None,
-            tools: None,
+            tools,
             tool_choice: None,
             user: None,
             context: None,

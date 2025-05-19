@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     client::{
-        models::{Action, ActionStatus, AgentID, AgentInput},
         Client,
+        models::{Action, ActionStatus, AgentID, AgentInput},
     },
     config::AppConfig,
 };
@@ -25,6 +25,8 @@ pub use run_actions::*;
 
 mod run_agent;
 pub use run_agent::*;
+
+pub mod code;
 
 use super::flow;
 
@@ -262,7 +264,7 @@ impl Action {
                             args,
                             exit_code: None,
                             output: Some("Command execution skipped by user".to_string()),
-                        })
+                        });
                     }
                 }
 

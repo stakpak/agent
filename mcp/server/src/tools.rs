@@ -8,9 +8,14 @@ use tracing::error;
 #[derive(Clone)]
 pub struct Tools {}
 
+impl Default for Tools {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tool(tool_box)]
 impl Tools {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {}
     }

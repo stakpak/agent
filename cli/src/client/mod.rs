@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod models;
 use models::*;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
+    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, Tool,
 };
 use uuid::Uuid;
 pub mod dave_v1;
@@ -511,10 +511,11 @@ impl Client {
     pub async fn chat_completion(
         &self,
         messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
     ) -> Result<ChatCompletionResponse, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(messages);
+        let input = ChatCompletionRequest::new(messages, tools);
 
         let response = self
             .client

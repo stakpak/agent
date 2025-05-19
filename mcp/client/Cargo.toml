@@ -2,3 +2,14 @@
 name = "stakpak-mcp-client"
 version = { workspace = true }
 edition = "2024"
+
+[dependencies]
+stakpak-shared = { path = "../../shared" }
+stakpak-mcp-server = { path = "../server" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+rmcp = { workspace = true }
+futures = { workspace = true }
