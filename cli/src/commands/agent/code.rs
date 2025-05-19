@@ -1,3 +1,4 @@
+use rmcp::model::CallToolRequestParam;
 use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool,
@@ -39,12 +40,9 @@ fn user_message(user_input: String) -> ChatMessage {
 // Helper to send a message to the TUI
 async fn send_input_event(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-    content: String,
+    event: InputEvent,
 ) -> Result<(), String> {
-    input_tx
-        .send(InputEvent::InputSubmittedWith(content))
-        .await
-        .map_err(|e| e.to_string())
+    input_tx.send(event).await.map_err(|e| e.to_string())
 }
 
 // Helper to send tool call messages to the TUI
@@ -52,17 +50,12 @@ async fn send_tool_calls(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     tool_calls: &[stakpak_shared::models::integrations::openai::ToolCall],
 ) -> Result<(), String> {
-    let msg = tool_calls
-        .iter()
-        .map(|tool_call| {
-            format!(
-                "{}: {}",
-                tool_call.function.name, tool_call.function.arguments
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-    send_input_event(input_tx, msg).await
+    for tool_call in tool_calls {
+        if tool_call.function.name == "run_command" {
+            send_input_event(input_tx, InputEvent::RunCommand(tool_call.clone())).await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn run(config: AppConfig) -> Result<(), String> {
@@ -113,15 +106,49 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                         .clone()
                         .unwrap_or(MessageContent::String("".to_string()))
                         .to_string();
-                    send_input_event(&input_tx, content).await?;
+                    send_input_event(&input_tx, InputEvent::InputSubmittedWith(content)).await?;
 
                     // Send tool calls to TUI if present
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                         send_tool_calls(&input_tx, tool_calls).await?;
                     }
                 }
-                OutputEvent::AcceptTool(_tool_call) => {
-                    // TODO: Implement tool call
+                OutputEvent::AcceptTool(tool_call) => {
+                    //find client name from tool call map
+                    let tool_name = tool_call.function.name;
+                    let client_name = tools_map
+                        .iter()
+                        .find(|(_, tools)| tools.iter().any(|tool| tool.name == tool_name))
+                        .map(|(name, _)| name.clone());
+                    if let Some(client_name) = client_name {
+                        let client = clients
+                            .get_client(&client_name)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let result = client
+                            .call_tool(CallToolRequestParam {
+                                name: tool_name.into(),
+                                arguments: Some(
+                                    serde_json::from_str(&tool_call.function.arguments)
+                                        .map_err(|e| e.to_string())?,
+                                ),
+                            })
+                            .await
+                            .map_err(|e| e.to_string())?;
+
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::ToolResult(
+                                result
+                                    .content
+                                    .iter()
+                                    .map(|c| c.raw.as_text().unwrap().text.clone())
+                                    .collect::<Vec<String>>()
+                                    .join("\n"),
+                            ),
+                        )
+                        .await?;
+                    }
                 }
             }
         }

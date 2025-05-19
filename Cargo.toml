@@ -24,3 +24,4 @@ rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", features = [
     "transport-child-process"
 ], branch = "main" }
 futures = "0.3.31"
+regex = "1.11.1"

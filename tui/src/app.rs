@@ -2,7 +2,6 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
-use serde_json;
 
 #[derive(Clone)]
 pub struct Message {
@@ -45,7 +44,7 @@ pub struct AppState {
     pub filtered_helpers: Vec<&'static str>,
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
-    pub dialog_command: Option<String>,
+    pub dialog_command: Option<ToolCall>,
     pub dialog_selected: usize,
     pub loading: bool,
     pub spinner_frame: usize,
@@ -55,6 +54,7 @@ pub struct AppState {
 pub enum InputEvent {
     AssistantMessage(String),
     RunCommand(ToolCall),
+    ToolResult(String),
     InputChanged(char),
     InputBackspace,
     InputChangedNewline,
@@ -75,7 +75,7 @@ pub enum InputEvent {
     CursorRight,
     ToggleCursorVisible,
     Resized(u16, u16),
-    ShowConfirmationDialog(String),
+    ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
     Tick,
@@ -194,11 +194,11 @@ pub fn update(
             }
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
-        InputEvent::ShowConfirmationDialog(cmd) => {
+        InputEvent::ShowConfirmationDialog(tool_call) => {
             state.is_dialog_open = true;
-            state.dialog_command = Some(cmd);
+            state.dialog_command = Some(tool_call);
             state.dialog_selected = 0;
-        },
+        }
         InputEvent::Tick => {
             if state.loading {
                 state.spinner_frame = state.spinner_frame.wrapping_add(1);
@@ -303,7 +303,11 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_input_submitted(state: &mut AppState, message_area_height: usize, output_tx: &Sender<OutputEvent>) {
+fn handle_input_submitted(
+    state: &mut AppState,
+    message_area_height: usize,
+    output_tx: &Sender<OutputEvent>,
+) {
     let input_height = 3;
     if state.is_dialog_open {
         state.is_dialog_open = false;
@@ -311,10 +315,8 @@ fn handle_input_submitted(state: &mut AppState, message_area_height: usize, outp
         state.cursor_position = 0;
 
         if state.dialog_selected == 0 {
-            if let Some(cmd) = &state.dialog_command {
-                if let Ok(tool_call) = serde_json::from_str::<ToolCall>(cmd) {
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call));
-                }
+            if let Some(tool_call) = &state.dialog_command {
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
         }
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {

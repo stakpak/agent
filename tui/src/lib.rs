@@ -12,7 +12,6 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
-use regex::Regex;
 
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
@@ -59,26 +58,10 @@ pub async fn run_tui(
                 if let InputEvent::RunCommand(tool_call) = &event {
                     let command = format!("{:?}", tool_call);
                     eprintln!("command: {}", command);
-                    app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40, &output_tx);
+                    app::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx);
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
-                } else  if let  InputEvent::InputSubmittedWith(ref s) = event {
-                    if s.starts_with("run_command:") {
-                        // Remove the run_command message from chat and show dialog instead
-                        let re = Regex::new(r#"command"\s*:\s*"([^"]+)""#).unwrap();
-                        let command = re.captures(s).and_then(|cap| cap.get(1)).map(|m| m.as_str().to_string()).unwrap_or_else(|| "unknown".to_string());
-                        // Remove last message if it is the run_command message
-                        if let Some(last) = state.messages.last() {
-                            if last.text.trim().starts_with("run_command:") {
-                                state.messages.pop();
-                            }
-                        }
-                        app::update(&mut state, InputEvent::ShowConfirmationDialog(command), 10, 40, &output_tx);
-                        terminal.draw(|f| view::view(f, &state))?;
-                        continue;
-                    }
                 }
-               
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
