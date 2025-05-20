@@ -30,7 +30,7 @@ pub mod code;
 
 use super::flow;
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq)]
 pub enum AgentCommands {
     /// List agent sessions
     List,

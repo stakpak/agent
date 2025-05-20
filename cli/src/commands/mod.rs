@@ -15,7 +15,7 @@ use crate::{
 pub mod agent;
 pub mod flow;
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq)]
 pub enum Commands {
     /// Get CLI Version
     Version,

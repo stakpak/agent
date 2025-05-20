@@ -35,6 +35,7 @@ pub async fn get_next_input_interactive(
     }
 
     match &output.output {
+        AgentOutput::PabloV1 { .. } => Err("PabloV1 is not supported".to_string()),
         AgentOutput::NorbertV1 {
             action_queue,
             action_history,
@@ -96,6 +97,11 @@ pub async fn get_next_input_interactive(
                                 action_history: None,
                                 scratchpad: Box::new(None),
                             },
+                            AgentID::PabloV1 => AgentInput::PabloV1 {
+                                messages: None,
+                                node_history: None,
+                                node_states: None,
+                            },
                         },
                     },
                     Err(e) if e == "re-prompt" => {
@@ -128,6 +134,7 @@ pub async fn get_next_input_interactive(
                             AgentOutput::DaveV2 { action_queue, .. } => action_queue,
                             AgentOutput::KevinV1 { action_queue, .. } => action_queue,
                             AgentOutput::StuartV1 { action_queue, .. } => action_queue,
+                            AgentOutput::PabloV1 { .. } => vec![],
                         };
 
                         let updated_actions = parent_action_queue
@@ -179,6 +186,11 @@ pub async fn get_next_input_interactive(
                                     action_history: None,
                                     scratchpad: Box::new(None),
                                 },
+                                AgentID::PabloV1 => AgentInput::PabloV1 {
+                                    messages: None,
+                                    node_history: None,
+                                    node_states: None,
+                                },
                             },
                         }
                     }
@@ -218,6 +230,7 @@ pub async fn get_next_input(
     }
 
     match &output.output {
+        AgentOutput::PabloV1 { .. } => Err("PabloV1 is not supported".to_string()),
         AgentOutput::NorbertV1 { action_queue, .. }
         | AgentOutput::DaveV1 { action_queue, .. }
         | AgentOutput::DaveV2 { action_queue, .. }
@@ -256,6 +269,11 @@ pub async fn get_next_input(
                             action_queue: Some(updated_actions),
                             action_history: None,
                             scratchpad: Box::new(None),
+                        },
+                        AgentID::PabloV1 => AgentInput::PabloV1 {
+                            messages: None,
+                            node_history: None,
+                            node_states: None,
                         },
                     },
                 },
