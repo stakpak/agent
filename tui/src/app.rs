@@ -4,29 +4,43 @@ use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use serde_json::Value;
 
-#[derive(Clone)]
+pub enum MessageContent {
+    Plain(String, Style),
+    Styled(Line<'static>),
+}
+
 pub struct Message {
-    pub text: String,
-    pub style: Style,
+    pub content: MessageContent,
 }
 
 impl Message {
     pub fn info(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+            ),
         }
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+            ),
         }
     }
     pub fn assistant(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or_default(),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or_default(),
+            ),
+        }
+    }
+    pub fn styled(line: Line<'static>) -> Self {
+        Message {
+            content: MessageContent::Styled(line),
         }
     }
 }
@@ -453,32 +467,40 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line, Style)> {
     let mut all_lines: Vec<(Line, Style)> = Vec::new();
     for msg in messages {
-        for line in msg.text.lines() {
-            let mut current = line;
-            while !current.is_empty() {
-                let take = current
-                    .char_indices()
-                    .scan(0, |acc, (i, c)| {
-                        *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
-                        Some((i, *acc))
-                    })
-                    .take_while(|&(_i, w)| w <= width)
-                    .last()
-                    .map(|(i, _w)| i + 1)
-                    .unwrap_or(current.len());
-                if take == 0 {
-                    let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                    let (part, rest) = current.split_at(ch_len);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
-                } else {
-                    let (part, rest) = current.split_at(take);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
+        match &msg.content {
+            MessageContent::Plain(text, style) => {
+                for line in text.lines() {
+                    let mut current = line;
+                    while !current.is_empty() {
+                        let take = current
+                            .char_indices()
+                            .scan(0, |acc, (i, c)| {
+                                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                                Some((i, *acc))
+                            })
+                            .take_while(|&(_i, w)| w <= width)
+                            .last()
+                            .map(|(i, _w)| i + 1)
+                            .unwrap_or(current.len());
+                        if take == 0 {
+                            let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                            let (part, rest) = current.split_at(ch_len);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        } else {
+                            let (part, rest) = current.split_at(take);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        }
+                    }
                 }
+                all_lines.push((Line::from(""), *style));
+            }
+            MessageContent::Styled(line) => {
+                all_lines.push((line.clone(), Style::default()));
+                all_lines.push((Line::from(""), Style::default()));
             }
         }
-        all_lines.push((Line::from(""), msg.style));
     }
     all_lines
 }
@@ -526,7 +548,6 @@ pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted:
         rendered.push('\n');
     }
     state.messages.push(Message {
-        text: rendered.trim_end().to_string(),
-        style: Style::default(),
+        content: MessageContent::Plain(rendered.trim_end().to_string(), Style::default()),
     });
 }
