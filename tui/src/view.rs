@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::app::{AppState, MessageContent};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
@@ -130,33 +130,45 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
     let mut all_lines: Vec<(Line, Style)> = Vec::new();
     for msg in &state.messages {
-        for line in msg.text.lines() {
-            let mut current = line;
-            while !current.is_empty() {
-                let take = current
-                    .char_indices()
-                    .scan(0, |acc, (i, c)| {
-                        *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
-                        Some((i, *acc))
-                    })
-                    .take_while(|&(_i, w)| w <= width)
-                    .last()
-                    .map(|(i, _w)| i + 1)
-                    .unwrap_or(current.len());
-                if take == 0 {
-                    // fallback: push the first char and advance
-                    let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                    let (part, rest) = current.split_at(ch_len);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
-                } else {
-                    let (part, rest) = current.split_at(take);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
+        match &msg.content {
+            MessageContent::Plain(text, style) => {
+                for line in text.lines() {
+                    let mut current = line;
+                    while !current.is_empty() {
+                        let take = current
+                            .char_indices()
+                            .scan(0, |acc, (i, c)| {
+                                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                                Some((i, *acc))
+                            })
+                            .take_while(|&(_i, w)| w <= width)
+                            .last()
+                            .map(|(i, _w)| i + 1)
+                            .unwrap_or(current.len());
+                        if take == 0 {
+                            let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                            let (part, rest) = current.split_at(ch_len);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        } else {
+                            let (part, rest) = current.split_at(take);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        }
+                    }
+                }
+                all_lines.push((Line::from(""), *style));
+            }
+            MessageContent::Styled(line) => {
+                all_lines.push((line.clone(), Style::default()));
+                all_lines.push((Line::from(""), Style::default()));
+            }
+            MessageContent::StyledBlock(lines) => {
+                for line in lines {
+                    all_lines.push((line.clone(), Style::default()));
                 }
             }
         }
-        all_lines.push((Line::from(""), msg.style));
     }
     // Add loader as a new message line if loading
     if state.loading {

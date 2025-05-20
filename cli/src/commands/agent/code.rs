@@ -154,8 +154,9 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
+                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
                     let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
-
+                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                     if let Some(result) = result {
                         let result_content = result
                             .content
@@ -177,13 +178,14 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                     }
                 }
             }
-
+            send_input_event(&input_tx, InputEvent::Loading(true)).await?;
             let response = match client
                 .chat_completion(messages.clone(), Some(tools.clone()))
                 .await
             {
                 Ok(response) => response,
                 Err(e) => {
+                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                     input_tx
                         .send(InputEvent::Quit)
                         .await
@@ -191,6 +193,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                     return Err(e.to_string());
                 }
             };
+            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
             messages.push(response.choices[0].message.clone());
 
