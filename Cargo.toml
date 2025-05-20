@@ -5,7 +5,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.1.51"
+version = "0.1.52"
 edition = "2024"
 
 
@@ -21,7 +21,7 @@ rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", features = [
     "client",
     "server",
     "transport-io",
-    "transport-child-process"
+    "transport-child-process",
 ], branch = "main" }
 futures = "0.3.31"
 regex = "1.11.1"
