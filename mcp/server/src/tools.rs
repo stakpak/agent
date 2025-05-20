@@ -61,13 +61,14 @@ impl Tools {
         if exit_code != 0 {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
-        if !stdout.is_empty() {
-            let stdout = clip_output(&stdout);
-            result.push_str(&stdout);
-        }
+        // print stderr first, some commands show warnings in stderr
         if !stderr.is_empty() {
             let stderr = clip_output(&stderr);
             result.push_str(&stderr);
+        }
+        if !stdout.is_empty() {
+            let stdout = clip_output(&stdout);
+            result.push_str(&stdout);
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
