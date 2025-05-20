@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use uuid::Uuid;
 
 use super::{SimpleLLMMessage, SimpleLLMRole, dave_v1, kevin_v1, norbert_v1, stuart_v1};
@@ -359,6 +360,8 @@ pub enum AgentID {
     KevinV1,
     #[serde(rename = "stuart:v1")]
     StuartV1,
+    #[serde(rename = "pablo:v1")]
+    PabloV1,
 }
 
 impl std::str::FromStr for AgentID {
@@ -735,6 +738,12 @@ pub enum AgentInput {
         action_history: Option<Vec<Action>>,
         scratchpad: Box<Option<stuart_v1::state::Scratchpad>>,
     },
+    #[serde(rename = "pablo:v1")]
+    PabloV1 {
+        messages: Option<Vec<ChatMessage>>,
+        node_history: Option<Vec<serde_json::Value>>,
+        node_states: Option<serde_json::Value>,
+    },
 }
 
 impl AgentInput {
@@ -770,6 +779,11 @@ impl AgentInput {
                 action_history: None,
                 scratchpad: Box::new(None),
             },
+            AgentID::PabloV1 => AgentInput::PabloV1 {
+                messages: None,
+                node_history: None,
+                node_states: None,
+            },
         }
     }
     pub fn set_user_prompt(&mut self, prompt: Option<String>) {
@@ -788,6 +802,17 @@ impl AgentInput {
                     }]);
                 }
             }
+            AgentInput::PabloV1 { messages, .. } => {
+                if let Some(prompt) = prompt {
+                    *messages = Some(vec![ChatMessage {
+                        role: Role::User,
+                        content: Some(MessageContent::String(prompt)),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    }]);
+                }
+            }
         }
     }
     pub fn get_agent_id(&self) -> AgentID {
@@ -797,6 +822,7 @@ impl AgentInput {
             AgentInput::DaveV2 { .. } => AgentID::DaveV2,
             AgentInput::KevinV1 { .. } => AgentID::KevinV1,
             AgentInput::StuartV1 { .. } => AgentID::StuartV1,
+            AgentInput::PabloV1 { .. } => AgentID::PabloV1,
         }
     }
 }
@@ -842,6 +868,12 @@ pub enum AgentOutput {
         action_history: Vec<Action>,
         scratchpad: Box<stuart_v1::state::Scratchpad>,
     },
+    #[serde(rename = "pablo:v1")]
+    PabloV1 {
+        messages: Vec<ChatMessage>,
+        node_history: Vec<serde_json::Value>,
+        node_states: serde_json::Value,
+    },
 }
 
 impl AgentOutput {
@@ -852,6 +884,7 @@ impl AgentOutput {
             AgentOutput::DaveV2 { .. } => AgentID::DaveV2,
             AgentOutput::KevinV1 { .. } => AgentID::KevinV1,
             AgentOutput::StuartV1 { .. } => AgentID::StuartV1,
+            AgentOutput::PabloV1 { .. } => AgentID::PabloV1,
         }
     }
 }

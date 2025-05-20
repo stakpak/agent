@@ -1,9 +1,10 @@
-use rmcp::model::CallToolRequestParam;
+use rmcp::model::{CallToolRequestParam, CallToolResult};
 use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool,
 };
 use stakpak_tui::{InputEvent, OutputEvent};
+use uuid::Uuid;
 
 use crate::{client::Client, config::AppConfig};
 
@@ -70,6 +71,63 @@ async fn send_tool_calls(
     Ok(())
 }
 
+async fn run_tool_call(
+    client_manager: &ClientManager,
+    tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
+    tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
+) -> Result<Option<CallToolResult>, String> {
+    let tool_name = &tool_call.function.name;
+    let client_name = tools_map
+        .iter()
+        .find(|(_, tools)| tools.iter().any(|tool| tool.name == *tool_name))
+        .map(|(name, _)| name.clone());
+
+    if let Some(client_name) = client_name {
+        let client = client_manager
+            .get_client(&client_name)
+            .await
+            .map_err(|e| e.to_string())?;
+        let result = client
+            .call_tool(CallToolRequestParam {
+                name: tool_name.clone().into(),
+                arguments: Some(
+                    serde_json::from_str(&tool_call.function.arguments)
+                        .map_err(|e| e.to_string())?,
+                ),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+
+        return Ok(Some(result));
+    }
+
+    Ok(None)
+}
+
+pub async fn get_checkpoint_messages(
+    client: &Client,
+    checkpoint_id: &String,
+) -> Result<Vec<ChatMessage>, String> {
+    let checkpoint_uuid = Uuid::parse_str(checkpoint_id).map_err(|_| {
+        format!(
+            "Invalid checkpoint ID '{}' - must be a valid UUID",
+            checkpoint_id
+        )
+    })?;
+
+    let checkpoint = client
+        .get_agent_checkpoint(checkpoint_uuid)
+        .await
+        .map_err(|e| e.to_string())?;
+    let checkpoint_output: crate::client::models::AgentOutput = checkpoint.output;
+
+    if let crate::client::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_output {
+        return Ok(messages.clone());
+    }
+
+    Ok(vec![])
+}
+
 pub async fn run(config: AppConfig) -> Result<(), String> {
     let mut messages: Vec<ChatMessage> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
@@ -96,33 +154,16 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
-                    //find client name from tool call map
-                    let tool_name = tool_call.function.name;
-                    let client_name = tools_map
-                        .iter()
-                        .find(|(_, tools)| tools.iter().any(|tool| tool.name == tool_name))
-                        .map(|(name, _)| name.clone());
+                    let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
 
-                    if let Some(client_name) = client_name {
-                        let client = clients
-                            .get_client(&client_name)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        let result = client
-                            .call_tool(CallToolRequestParam {
-                                name: tool_name.into(),
-                                arguments: Some(
-                                    serde_json::from_str(&tool_call.function.arguments)
-                                        .map_err(|e| e.to_string())?,
-                                ),
-                            })
-                            .await
-                            .map_err(|e| e.to_string())?;
-
+                    if let Some(result) = result {
                         let result_content = result
                             .content
                             .iter()
-                            .map(|c| c.raw.as_text().unwrap().text.clone())
+                            .map(|c| match c.raw.as_text() {
+                                Some(text) => text.text.clone(),
+                                None => String::new(),
+                            })
                             .collect::<Vec<String>>()
                             .join("\n");
 
@@ -174,5 +215,88 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
     // Wait for both tasks to finish
     let (_, client_res) = tokio::try_join!(tui_handle, client_handle).map_err(|e| e.to_string())?;
     client_res?;
+    Ok(())
+}
+
+pub struct RunNonInteractiveConfig {
+    pub prompt: String,
+    pub approve: bool,
+    pub verbose: bool,
+    pub checkpoint_id: Option<String>,
+}
+
+pub async fn run_non_interactive(
+    ctx: AppConfig,
+    config: RunNonInteractiveConfig,
+) -> Result<(), String> {
+    let mut chat_messages: Vec<ChatMessage> = Vec::new();
+
+    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
+    let tools = convert_tools_map(&tools_map);
+
+    let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+
+    println!("[ ▄▀ Stakpaking... ]");
+
+    if let Some(checkpoint_id) = config.checkpoint_id {
+        let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+        chat_messages.extend(checkpoint_messages);
+    }
+
+    if let Some(message) = chat_messages.last() {
+        if config.approve && message.tool_calls.is_some() {
+            // Clone the tool_calls to avoid borrowing message while mutating chat_messages
+            let tool_calls = message.tool_calls.as_ref().unwrap().clone();
+            for tool_call in tool_calls.iter() {
+                let result = run_tool_call(&clients, &tools_map, tool_call).await?;
+                if let Some(result) = result {
+                    println!("----Tool call result----");
+                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    println!("----Tool call result----");
+
+                    let result_content = result
+                        .content
+                        .iter()
+                        .map(|c| match c.raw.as_text() {
+                            Some(text) => text.text.clone(),
+                            None => String::new(),
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n");
+
+                    chat_messages.push(tool_result(tool_call.id.clone(), result_content.clone()));
+                }
+            }
+        }
+    }
+
+    if !config.prompt.is_empty() {
+        chat_messages.push(user_message(config.prompt));
+    }
+
+    println!("[ ▄▀ Stakpaking... ]");
+
+    let response = client
+        .chat_completion(chat_messages.clone(), Some(tools))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    chat_messages.push(response.choices[0].message.clone());
+
+    match config.verbose {
+        true => {
+            println!("----Messages----");
+            println!("{}", serde_json::to_string_pretty(&chat_messages).unwrap());
+        }
+        false => {
+            println!("----Response----");
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.choices[0].message).unwrap()
+            );
+        }
+    }
+
     Ok(())
 }
