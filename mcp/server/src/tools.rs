@@ -57,14 +57,17 @@ impl Tools {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-        let mut result = format!("<exit_code>{}</exit_code>", exit_code);
+        let mut result = String::new();
+        if exit_code != 0 {
+            result.push_str(&format!("Command exited with code {}\n", exit_code));
+        }
         if !stdout.is_empty() {
             let stdout = clip_output(&stdout);
-            result.push_str(&format!("\n<stdout>\n{}\n</stdout>", stdout));
+            result.push_str(&stdout);
         }
         if !stderr.is_empty() {
             let stderr = clip_output(&stderr);
-            result.push_str(&format!("\n<stderr>\n{}\n</stderr>", stderr));
+            result.push_str(&stderr);
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
