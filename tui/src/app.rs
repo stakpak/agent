@@ -1,6 +1,8 @@
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use tokio::sync::mpsc::Sender;
+use serde_json::Value;
 
 #[derive(Clone)]
 pub struct Message {
@@ -42,12 +44,18 @@ pub struct AppState {
     pub helper_selected: usize,
     pub filtered_helpers: Vec<&'static str>,
     pub show_shortcuts: bool,
+    pub is_dialog_open: bool,
+    pub dialog_command: Option<ToolCall>,
+    pub dialog_selected: usize,
+    pub loading: bool,
+    pub spinner_frame: usize,
 }
 
 #[derive(Debug)]
 pub enum InputEvent {
     AssistantMessage(String),
     RunCommand(ToolCall),
+    ToolResult(String),
     InputChanged(char),
     InputBackspace,
     InputChangedNewline,
@@ -59,6 +67,8 @@ pub enum InputEvent {
     PageDown,
     DropdownUp,
     DropdownDown,
+    DialogUp,
+    DialogDown,
     Up,
     Down,
     Quit,
@@ -66,6 +76,10 @@ pub enum InputEvent {
     CursorRight,
     ToggleCursorVisible,
     Resized(u16, u16),
+    ShowConfirmationDialog(ToolCall),
+    DialogConfirm,
+    DialogCancel,
+    Tick,
 }
 
 #[derive(Debug)]
@@ -102,6 +116,11 @@ impl AppState {
             helper_selected: 0,
             filtered_helpers: helpers,
             show_shortcuts: false,
+            is_dialog_open: false,
+            dialog_command: None,
+            dialog_selected: 0,
+            loading: false,
+            spinner_frame: 0,
         }
     }
 }
@@ -111,6 +130,7 @@ pub fn update(
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
+    output_tx: &Sender<OutputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -120,6 +140,8 @@ pub fn update(
                 && state.input.starts_with('/')
             {
                 handle_dropdown_up(state);
+            } else if state.is_dialog_open {
+                handle_dialog_up(state);
             } else {
                 handle_scroll_up(state);
             }
@@ -130,6 +152,8 @@ pub fn update(
                 && state.input.starts_with('/')
             {
                 handle_dropdown_down(state);
+            } else if state.is_dialog_open {
+                handle_dialog_down(state);
             } else {
                 handle_scroll_down(state, message_area_height, message_area_width);
             }
@@ -138,7 +162,7 @@ pub fn update(
         InputEvent::DropdownDown => handle_dropdown_down(state),
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
-        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height),
+        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height, output_tx),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -171,6 +195,16 @@ pub fn update(
             }
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        InputEvent::ShowConfirmationDialog(tool_call) => {
+            state.is_dialog_open = true;
+            state.dialog_command = Some(tool_call);
+            state.dialog_selected = 0;
+        }
+        InputEvent::Tick => {
+            if state.loading {
+                state.spinner_frame = state.spinner_frame.wrapping_add(1);
+            }
+        }
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -193,6 +227,18 @@ fn handle_dropdown_down(state: &mut AppState) {
         && state.helper_selected + 1 < state.filtered_helpers.len()
     {
         state.helper_selected += 1;
+    }
+}
+
+fn handle_dialog_up(state: &mut AppState) {
+    if state.is_dialog_open && state.dialog_selected > 0 {
+        state.dialog_selected -= 1;
+    }
+}
+
+fn handle_dialog_down(state: &mut AppState) {
+    if state.is_dialog_open && state.dialog_selected < 1 {
+        state.dialog_selected += 1;
     }
 }
 
@@ -258,9 +304,28 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_input_submitted(state: &mut AppState, message_area_height: usize) {
+fn handle_input_submitted(
+    state: &mut AppState,
+    message_area_height: usize,
+    output_tx: &Sender<OutputEvent>,
+) {
     let input_height = 3;
-    if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
+    if state.is_dialog_open {
+        state.is_dialog_open = false;
+        state.input.clear();
+        state.cursor_position = 0;
+        if state.dialog_selected == 0 {
+            if let Some(tool_call) = &state.dialog_command {    
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+            }
+        }else {
+            let tool_call = state.dialog_command.clone();
+            let input = state.input.clone();
+            if let Some(tool_call) = tool_call {
+                render_bash_block(&tool_call, &input, false, state);
+            }
+        }
+    } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
@@ -281,6 +346,8 @@ fn handle_input_submitted(state: &mut AppState, message_area_height: usize) {
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
+        state.loading = true;
+        state.spinner_frame = 0;
     } else if !state.input.trim().is_empty() {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -298,6 +365,8 @@ fn handle_input_submitted(state: &mut AppState, message_area_height: usize) {
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
+        state.loading = true;
+        state.spinner_frame = 0;
     }
 }
 
@@ -317,6 +386,7 @@ fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_hei
         state.scroll_to_bottom = true;
         state.stay_at_bottom = true;
     }
+    state.loading = false;
 }
 
 fn handle_scroll_up(state: &mut AppState) {
@@ -411,4 +481,52 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
         all_lines.push((Line::from(""), msg.style));
     }
     all_lines
+}
+
+pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted: bool, state: &mut AppState) {
+    // Extract command name from arguments JSON
+    let command_name = serde_json::from_str::<Value>(&tool_call.function.arguments)
+        .ok()
+        .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "?".to_string());
+
+    // Bash header
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+            Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
+            Span::styled("...\n", Style::default().fg(Color::White)),
+            if !accepted {
+                Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("")
+            }
+        ])
+    ];
+
+    // Output lines
+    let mut output_lines = output.lines();
+    if let Some(first) = output_lines.next() {
+        lines.push(Line::from(vec![
+            Span::styled(" └ ", Style::default().fg(Color::Gray)),
+            Span::styled(first, Style::default()),
+        ]));
+        for line in output_lines {
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default().fg(Color::Gray)),
+                Span::styled(line, Style::default()),
+            ]));
+        }
+    }
+
+    let mut rendered = String::new();
+    for line in &lines {
+        rendered.push_str(&line.to_string());
+        rendered.push('\n');
+    }
+    state.messages.push(Message {
+        text: rendered.trim_end().to_string(),
+        style: Style::default(),
+    });
 }

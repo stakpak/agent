@@ -22,6 +22,11 @@ impl ClientManager {
         })
     }
 
+    pub async fn get_client(&self, client_name: &str) -> Result<&RunningService<RoleClient, ()>> {
+        let client = self.clients.get(client_name).unwrap();
+        Ok(client)
+    }
+
     pub async fn get_clients(&self) -> Result<Vec<&RunningService<RoleClient, ()>>> {
         let clients = self.clients.values().collect();
         Ok(clients)

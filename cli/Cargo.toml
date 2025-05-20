@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 toml = "0.8.19"
 tokio = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }
 chrono = { version = "0.4.38", features = ["serde"] }
 termimad = "0.31.1"
 walkdir = "2"
@@ -27,8 +28,3 @@ tokio-stream = "0.1.17"
 rust_socketio = { version = "0.6.0", features = ["async"] }
 futures-util = "0.3.31"
 notify = "8.0.0"
-regex = "1.11.1"
-
-
-
-
