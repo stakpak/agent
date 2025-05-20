@@ -448,38 +448,76 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let area = ratatui::layout::Rect {
         x: 1,
         y: last_message_y,
-        width: 70.min(screen.width - 4),
-        height: dialog_height,
+        width: screen.width - 2,
+        height: dialog_height as u16,
     };
-    
+
     let command_name = serde_json::from_str::<Value>(&state.dialog_command.as_ref().unwrap().function.arguments)
-        .ok()
-        .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
-        .unwrap_or_else(|| "?".to_string());
+    .ok()
+    .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
+    .unwrap_or_else(|| "?".to_string());
+   
 
-    let title = format!(
-        "Bash({})...",
-        command_name
-    );
-    let desc = ""; // TODO: make this dynamic
-    let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
+    let max_title_width = area.width.saturating_sub(12) as usize; 
+    let mut title_lines = vec![];
+    let mut current = command_name.as_str();
+    while !current.is_empty() {
+        let take = current
+            .char_indices()
+            .scan(0, |acc, (i, c)| {
+                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                Some((i, *acc))
+            })
+            .take_while(|&(_i, w)| w <= max_title_width)
+            .last()
+            .map(|(i, _w)| i + 1)
+            .unwrap_or(current.len());
+        let (part, rest) = current.split_at(take);
+        title_lines.push(part.trim());
+        current = rest;
+    }
+
     let pad = "  "; // 2 spaces of padding
-
-    let mut lines = vec![
-        Line::from(vec![Span::styled(
-            format!("{pad}{}{pad}", title),
+    let mut lines = vec![];
+    for (i, part) in title_lines.iter().enumerate() {
+        let is_last = i == title_lines.len() - 1;
+        let line = if i == 0 {
+            if is_last {
+                // Only one line: put everything on it
+                format!("{pad}Bash({part})...{pad}")
+            } else {
+                format!("{pad}Bash({part}")
+            }
+        } else if is_last {
+            format!("{pad}  {part})...{pad}")
+        } else {
+            format!("{pad}  {part}")
+        };
+        lines.push(Line::from(vec![Span::styled(
+            line,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::styled(
-            format!("{pad}{}{pad}", desc),
-            Style::default().fg(Color::Gray),
-        )]),
-        Line::from(format!("{pad}{pad}")),
-        Line::from(format!("{pad}Do you want to proceed?{pad}")),
-        Line::from(format!("{pad}{pad}")),
-    ];
+        )]));
+    }
+    // Dynamically adjust dialog height
+    let base_height = 9;
+    let dialog_height = base_height + title_lines.len().saturating_sub(1);
+    let area = ratatui::layout::Rect {
+        x: 1,
+        y: last_message_y,
+        width: screen.width - 2,
+        height: dialog_height as u16,
+    };
+    let desc = ""; // TODO: make this dynamic
+    let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
+    lines.push(Line::from(vec![Span::styled(
+        format!("{pad}{}{pad}", desc),
+        Style::default().fg(Color::Gray),
+    )]));
+    lines.push(Line::from(format!("{pad}{pad}")));
+    lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
+    lines.push(Line::from(format!("{pad}{pad}")));
     for (i, opt) in options.iter().enumerate() {
         let style = if state.dialog_selected == i {
             Style::default()
