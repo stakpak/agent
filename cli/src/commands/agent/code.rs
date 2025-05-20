@@ -237,8 +237,6 @@ pub async fn run_non_interactive(
 
     let client = Client::new(&ctx).map_err(|e| e.to_string())?;
 
-    println!("[ ▄▀ Stakpaking... ]");
-
     if let Some(checkpoint_id) = config.checkpoint_id {
         let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
         chat_messages.extend(checkpoint_messages);
@@ -251,9 +249,9 @@ pub async fn run_non_interactive(
             for tool_call in tool_calls.iter() {
                 let result = run_tool_call(&clients, &tools_map, tool_call).await?;
                 if let Some(result) = result {
-                    println!("----Tool call result----");
-                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
-                    println!("----Tool call result----");
+                    if !config.verbose {
+                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    }
 
                     let result_content = result
                         .content
@@ -275,8 +273,6 @@ pub async fn run_non_interactive(
         chat_messages.push(user_message(config.prompt));
     }
 
-    println!("[ ▄▀ Stakpaking... ]");
-
     let response = client
         .chat_completion(chat_messages.clone(), Some(tools))
         .await
@@ -286,11 +282,9 @@ pub async fn run_non_interactive(
 
     match config.verbose {
         true => {
-            println!("----Messages----");
             println!("{}", serde_json::to_string_pretty(&chat_messages).unwrap());
         }
         false => {
-            println!("----Response----");
             println!(
                 "{}",
                 serde_json::to_string_pretty(&response.choices[0].message).unwrap()

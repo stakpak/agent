@@ -22,8 +22,8 @@ struct Cli {
     print: bool,
 
     /// Resume the conversation
-    #[arg(short = 'r', long = "resume", default_value_t = false)]
-    resume: bool,
+    #[arg(short = 'c', long = "checkpoint")]
+    checkpoint_id: Option<String>,
 
     /// Approve the tool call
     #[arg(long = "approve", default_value_t = false)]
@@ -36,10 +36,6 @@ struct Cli {
     /// Positional string argument
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
-
-    /// Checkpoint ID
-    #[clap(required_if_eq("resume", "true"))]
-    checkpoint_id: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
