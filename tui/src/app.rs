@@ -71,6 +71,7 @@ pub enum InputEvent {
     AssistantMessage(String),
     RunCommand(ToolCall),
     ToolResult(String),
+    Loading(bool),
     InputChanged(char),
     InputBackspace,
     InputChangedNewline,
@@ -94,7 +95,6 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
-    Tick,
 }
 
 #[derive(Debug)]
@@ -215,14 +215,13 @@ pub fn update(
             state.dialog_command = Some(tool_call);
             state.dialog_selected = 0;
         }
-        InputEvent::Tick => {
-            if state.loading {
-                state.spinner_frame = state.spinner_frame.wrapping_add(1);
-            }
+     
+        InputEvent::Loading(is_loading) => {
+            state.loading = is_loading;
         }
         _ => {}
     }
-    adjust_scroll(state, message_area_height, message_area_width);
+    adjust_scroll(state, message_area_height, message_area_width);   
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
