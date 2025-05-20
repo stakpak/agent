@@ -4,29 +4,44 @@ use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use serde_json::Value;
 
-#[derive(Clone)]
+pub enum MessageContent {
+    Plain(String, Style),
+    Styled(Line<'static>),
+    StyledBlock(Vec<Line<'static>>),
+}
+
 pub struct Message {
-    pub text: String,
-    pub style: Style,
+    pub content: MessageContent,
 }
 
 impl Message {
     pub fn info(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+            ),
         }
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+            ),
         }
     }
     pub fn assistant(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            text: text.into(),
-            style: style.unwrap_or_default(),
+            content: MessageContent::Plain(
+                text.into(),
+                style.unwrap_or_default(),
+            ),
+        }
+    }
+    pub fn styled(line: Line<'static>) -> Self {
+        Message {
+            content: MessageContent::Styled(line),
         }
     }
 }
@@ -56,6 +71,7 @@ pub enum InputEvent {
     AssistantMessage(String),
     RunCommand(ToolCall),
     ToolResult(String),
+    Loading(bool),
     InputChanged(char),
     InputBackspace,
     InputChangedNewline,
@@ -79,7 +95,6 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
-    Tick,
 }
 
 #[derive(Debug)]
@@ -200,14 +215,13 @@ pub fn update(
             state.dialog_command = Some(tool_call);
             state.dialog_selected = 0;
         }
-        InputEvent::Tick => {
-            if state.loading {
-                state.spinner_frame = state.spinner_frame.wrapping_add(1);
-            }
+     
+        InputEvent::Loading(is_loading) => {
+            state.loading = is_loading;
         }
         _ => {}
     }
-    adjust_scroll(state, message_area_height, message_area_width);
+    adjust_scroll(state, message_area_height, message_area_width);   
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
@@ -453,32 +467,45 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line, Style)> {
     let mut all_lines: Vec<(Line, Style)> = Vec::new();
     for msg in messages {
-        for line in msg.text.lines() {
-            let mut current = line;
-            while !current.is_empty() {
-                let take = current
-                    .char_indices()
-                    .scan(0, |acc, (i, c)| {
-                        *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
-                        Some((i, *acc))
-                    })
-                    .take_while(|&(_i, w)| w <= width)
-                    .last()
-                    .map(|(i, _w)| i + 1)
-                    .unwrap_or(current.len());
-                if take == 0 {
-                    let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                    let (part, rest) = current.split_at(ch_len);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
-                } else {
-                    let (part, rest) = current.split_at(take);
-                    all_lines.push((Line::from(vec![Span::styled(part, msg.style)]), msg.style));
-                    current = rest;
+        match &msg.content {
+            MessageContent::Plain(text, style) => {
+                for line in text.lines() {
+                    let mut current = line;
+                    while !current.is_empty() {
+                        let take = current
+                            .char_indices()
+                            .scan(0, |acc, (i, c)| {
+                                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                                Some((i, *acc))
+                            })
+                            .take_while(|&(_i, w)| w <= width)
+                            .last()
+                            .map(|(i, _w)| i + 1)
+                            .unwrap_or(current.len());
+                        if take == 0 {
+                            let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                            let (part, rest) = current.split_at(ch_len);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        } else {
+                            let (part, rest) = current.split_at(take);
+                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                            current = rest;
+                        }
+                    }
+                }
+                all_lines.push((Line::from(""), *style));
+            }
+            MessageContent::Styled(line) => {
+                all_lines.push((line.clone(), Style::default()));
+                all_lines.push((Line::from(""), Style::default()));
+            }
+            MessageContent::StyledBlock(lines) => {
+                for line in lines {
+                    all_lines.push((line.clone(), Style::default()));
                 }
             }
         }
-        all_lines.push((Line::from(""), msg.style));
     }
     all_lines
 }
@@ -490,43 +517,40 @@ pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted:
         .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
         .unwrap_or_else(|| "?".to_string());
 
-    // Bash header
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
-            Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
-            Span::styled("...\n", Style::default().fg(Color::White)),
-            if !accepted {
-                Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-            } else {
-                Span::raw("")
-            }
-        ])
-    ];
-
-    // Output lines
-    let mut output_lines = output.lines();
-    if let Some(first) = output_lines.next() {
+    let mut lines = Vec::new();
+    // Header
+    lines.push(Line::from(vec![
+        Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+        Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
+        Span::styled("...", Style::default().fg(Color::Gray)),
+    ]));
+    if !accepted {
         lines.push(Line::from(vec![
-            Span::styled(" └ ", Style::default().fg(Color::Gray)),
-            Span::styled(first, Style::default()),
+            Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
         ]));
-        for line in output_lines {
-            lines.push(Line::from(vec![
-                Span::styled("   ", Style::default().fg(Color::Gray)),
-                Span::styled(line, Style::default()),
-            ]));
-        }
     }
-
-    let mut rendered = String::new();
-    for line in &lines {
-        rendered.push_str(&line.to_string());
-        rendered.push('\n');
+    // Output lines
+    let output_pad = "    "; // 4 spaces, adjust as needed
+    for (i, line) in output.lines().enumerate() {
+        let prefix = if i == 0 { "└ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{output_pad}{prefix}"), Style::default().fg(Color::Gray)),
+            Span::styled(line, Style::default().fg(Color::Gray)),
+        ]));
     }
+    let mut owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line.spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+    owned_lines.push(Line::from(vec![Span::styled("  ", Style::default().fg(Color::Gray))]));
     state.messages.push(Message {
-        text: rendered.trim_end().to_string(),
-        style: Style::default(),
+        content: MessageContent::StyledBlock(owned_lines),
     });
 }
