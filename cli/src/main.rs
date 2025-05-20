@@ -13,7 +13,7 @@ use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::check_update;
 
-#[derive(Parser)]
+#[derive(Parser, PartialEq)]
 #[command(name = "stakpak")]
 #[command(about = "Stakpak CLI tool", long_about = None)]
 struct Cli {
@@ -49,7 +49,11 @@ struct Cli {
 async fn main() {
     let cli = Cli::parse();
 
-    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+    if let Some(command) = &cli.command {
+        if command != &Commands::Mcp {
+            let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+        }
+    }
 
     tracing_subscriber::registry()
         .with(
