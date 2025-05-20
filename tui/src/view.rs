@@ -163,6 +163,11 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                 all_lines.push((line.clone(), Style::default()));
                 all_lines.push((Line::from(""), Style::default()));
             }
+            MessageContent::StyledBlock(lines) => {
+                for line in lines {
+                    all_lines.push((line.clone(), Style::default()));
+                }
+            }
         }
     }
     // Add loader as a new message line if loading

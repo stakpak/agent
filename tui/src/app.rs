@@ -7,6 +7,7 @@ use serde_json::Value;
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
+    StyledBlock(Vec<Line<'static>>),
 }
 
 pub struct Message {
@@ -500,6 +501,11 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                 all_lines.push((line.clone(), Style::default()));
                 all_lines.push((Line::from(""), Style::default()));
             }
+            MessageContent::StyledBlock(lines) => {
+                for line in lines {
+                    all_lines.push((line.clone(), Style::default()));
+                }
+            }
         }
     }
     all_lines
@@ -512,42 +518,40 @@ pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted:
         .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
         .unwrap_or_else(|| "?".to_string());
 
-    // Bash header
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
-            Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
-            Span::styled("...\n", Style::default().fg(Color::White)),
-            if !accepted {
-                Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-            } else {
-                Span::raw("")
-            }
-        ])
-    ];
-
-    // Output lines
-    let mut output_lines = output.lines();
-    if let Some(first) = output_lines.next() {
+    let mut lines = Vec::new();
+    // Header
+    lines.push(Line::from(vec![
+        Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+        Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
+        Span::styled("...", Style::default().fg(Color::Gray)),
+    ]));
+    if !accepted {
         lines.push(Line::from(vec![
-            Span::styled(" └ ", Style::default().fg(Color::Gray)),
-            Span::styled(first, Style::default()),
+            Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
         ]));
-        for line in output_lines {
-            lines.push(Line::from(vec![
-                Span::styled("   ", Style::default().fg(Color::Gray)),
-                Span::styled(line, Style::default()),
-            ]));
-        }
     }
-
-    let mut rendered = String::new();
-    for line in &lines {
-        rendered.push_str(&line.to_string());
-        rendered.push('\n');
+    // Output lines
+    let output_pad = "    "; // 4 spaces, adjust as needed
+    for (i, line) in output.lines().enumerate() {
+        let prefix = if i == 0 { "└ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{output_pad}{prefix}"), Style::default().fg(Color::Gray)),
+            Span::styled(line, Style::default().fg(Color::Gray)),
+        ]));
     }
+    let mut owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line.spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+    owned_lines.push(Line::from(vec![Span::styled("  ", Style::default().fg(Color::Gray))]));
     state.messages.push(Message {
-        content: MessageContent::Plain(rendered.trim_end().to_string(), Style::default()),
+        content: MessageContent::StyledBlock(owned_lines),
     });
 }
