@@ -37,6 +37,16 @@ fn user_message(user_input: String) -> ChatMessage {
     }
 }
 
+fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
+    ChatMessage {
+        role: Role::Tool,
+        content: Some(MessageContent::String(result)),
+        name: None,
+        tool_calls: None,
+        tool_call_id: Some(tool_call_id),
+    }
+}
+
 // Helper to send a message to the TUI
 async fn send_input_event(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
@@ -82,36 +92,6 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
             match output_event {
                 OutputEvent::UserMessage(user_input) => {
                     messages.push(user_message(user_input));
-
-                    let response = match client
-                        .chat_completion(messages.clone(), Some(tools.clone()))
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(e) => {
-                            input_tx
-                                .send(InputEvent::Quit)
-                                .await
-                                .map_err(|e| e.to_string())?;
-                            return Err(e.to_string());
-                        }
-                    };
-
-                    messages.push(response.choices[0].message.clone());
-
-                    // Send main response content to TUI
-                    let content = response.choices[0]
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or(MessageContent::String("".to_string()))
-                        .to_string();
-                    send_input_event(&input_tx, InputEvent::InputSubmittedWith(content)).await?;
-
-                    // Send tool calls to TUI if present
-                    if let Some(tool_calls) = &response.choices[0].message.tool_calls {
-                        send_tool_calls(&input_tx, tool_calls).await?;
-                    }
                 }
                 OutputEvent::AcceptTool(tool_call) => {
                     //find client name from tool call map
@@ -120,6 +100,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                         .iter()
                         .find(|(_, tools)| tools.iter().any(|tool| tool.name == tool_name))
                         .map(|(name, _)| name.clone());
+
                     if let Some(client_name) = client_name {
                         let client = clients
                             .get_client(&client_name)
@@ -136,20 +117,49 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                             .await
                             .map_err(|e| e.to_string())?;
 
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::ToolResult(
-                                result
-                                    .content
-                                    .iter()
-                                    .map(|c| c.raw.as_text().unwrap().text.clone())
-                                    .collect::<Vec<String>>()
-                                    .join("\n"),
-                            ),
-                        )
-                        .await?;
+                        let result_content = result
+                            .content
+                            .iter()
+                            .map(|c| c.raw.as_text().unwrap().text.clone())
+                            .collect::<Vec<String>>()
+                            .join("\n");
+
+                        messages.push(tool_result(tool_call.id, result_content.clone()));
+
+                        send_input_event(&input_tx, InputEvent::ToolResult(result_content)).await?;
                     }
                 }
+            }
+
+            let response = match client
+                .chat_completion(messages.clone(), Some(tools.clone()))
+                .await
+            {
+                Ok(response) => response,
+                Err(e) => {
+                    input_tx
+                        .send(InputEvent::Quit)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    return Err(e.to_string());
+                }
+            };
+
+            messages.push(response.choices[0].message.clone());
+
+            // Send main response content to TUI
+            let content = response.choices[0]
+                .message
+                .content
+                .clone()
+                .unwrap_or(MessageContent::String("".to_string()))
+                .to_string();
+
+            send_input_event(&input_tx, InputEvent::InputSubmittedWith(content)).await?;
+
+            // Send tool calls to TUI if present
+            if let Some(tool_calls) = &response.choices[0].message.tool_calls {
+                send_tool_calls(&input_tx, tool_calls).await?;
             }
         }
         Ok(())
