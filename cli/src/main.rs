@@ -5,7 +5,7 @@ mod commands;
 mod config;
 mod utils;
 
-use commands::Commands;
+use commands::{Commands, agent};
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::check_update;
@@ -15,7 +15,7 @@ use utils::check_update::check_update;
 #[command(about = "Stakpak CLI tool", long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[tokio::main]
@@ -33,12 +33,21 @@ async fn main() {
         .init();
 
     match AppConfig::load() {
-        Ok(config) => match Commands::run(cli.command, config).await {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Ops! something went wrong: {}", e);
-                std::process::exit(1);
-            }
+        Ok(config) => match cli.command {
+            Some(command) => match command.run(config).await {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Ops! something went wrong: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            None => match agent::code::run(config).await {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Ops! something went wrong: {}", e);
+                    std::process::exit(1);
+                }
+            },
         },
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
