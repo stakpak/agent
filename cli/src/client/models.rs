@@ -741,7 +741,6 @@ pub enum AgentInput {
     #[serde(rename = "pablo:v1")]
     PabloV1 {
         messages: Option<Vec<ChatMessage>>,
-        node_history: Option<Vec<serde_json::Value>>,
         node_states: Option<serde_json::Value>,
     },
 }
@@ -781,7 +780,6 @@ impl AgentInput {
             },
             AgentID::PabloV1 => AgentInput::PabloV1 {
                 messages: None,
-                node_history: None,
                 node_states: None,
             },
         }
@@ -871,7 +869,6 @@ pub enum AgentOutput {
     #[serde(rename = "pablo:v1")]
     PabloV1 {
         messages: Vec<ChatMessage>,
-        node_history: Vec<serde_json::Value>,
         node_states: serde_json::Value,
     },
 }

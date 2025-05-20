@@ -99,7 +99,6 @@ pub async fn get_next_input_interactive(
                             },
                             AgentID::PabloV1 => AgentInput::PabloV1 {
                                 messages: None,
-                                node_history: None,
                                 node_states: None,
                             },
                         },
@@ -188,7 +187,6 @@ pub async fn get_next_input_interactive(
                                 },
                                 AgentID::PabloV1 => AgentInput::PabloV1 {
                                     messages: None,
-                                    node_history: None,
                                     node_states: None,
                                 },
                             },
@@ -272,7 +270,6 @@ pub async fn get_next_input(
                         },
                         AgentID::PabloV1 => AgentInput::PabloV1 {
                             messages: None,
-                            node_history: None,
                             node_states: None,
                         },
                     },
