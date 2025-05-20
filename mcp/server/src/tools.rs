@@ -2,7 +2,7 @@ use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
 use serde_json::json;
-use std::{fs, process::Command};
+use std::process::Command;
 use tracing::error;
 
 #[derive(Clone)]
@@ -68,26 +68,27 @@ impl Tools {
         )]))
     }
 
-    #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access."
-    )]
-    fn read_file(
-        &self,
-        #[tool(param)]
-        #[schemars(description = "The path to the file to read")]
-        path: String,
-    ) -> Result<CallToolResult, McpError> {
-        let path_clone = path.clone();
-        let content = fs::read_to_string(path).map_err(|e| {
-            error!("Failed to read file: {}", e);
-            McpError::internal_error(
-                "Failed to read file",
-                Some(json!({ "path": path_clone, "error": e.to_string() })),
-            )
-        })?;
+    //TODO: Add after adding widget for file reading
+    // #[tool(
+    //     description = "A system command execution tool that allows running shell commands with full system access."
+    // )]
+    // fn read_file(
+    //     &self,
+    //     #[tool(param)]
+    //     #[schemars(description = "The path to the file to read")]
+    //     path: String,
+    // ) -> Result<CallToolResult, McpError> {
+    //     let path_clone = path.clone();
+    //     let content = fs::read_to_string(path).map_err(|e| {
+    //         error!("Failed to read file: {}", e);
+    //         McpError::internal_error(
+    //             "Failed to read file",
+    //             Some(json!({ "path": path_clone, "error": e.to_string() })),
+    //         )
+    //     })?;
 
-        Ok(CallToolResult::success(vec![Content::text(content)]))
-    }
+    //     Ok(CallToolResult::success(vec![Content::text(content)]))
+    // }
 }
 #[tool(tool_box)]
 impl ServerHandler for Tools {
