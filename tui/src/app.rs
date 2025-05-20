@@ -1,7 +1,8 @@
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
+use serde_json::Value;
 
 #[derive(Clone)]
 pub struct Message {
@@ -313,10 +314,15 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
-
         if state.dialog_selected == 0 {
-            if let Some(tool_call) = &state.dialog_command {
+            if let Some(tool_call) = &state.dialog_command {    
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+            }
+        }else {
+            let tool_call = state.dialog_command.clone();
+            let input = state.input.clone();
+            if let Some(tool_call) = tool_call {
+                render_bash_block(&tool_call, &input, false, state);
             }
         }
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
@@ -475,4 +481,52 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
         all_lines.push((Line::from(""), msg.style));
     }
     all_lines
+}
+
+pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted: bool, state: &mut AppState) {
+    // Extract command name from arguments JSON
+    let command_name = serde_json::from_str::<Value>(&tool_call.function.arguments)
+        .ok()
+        .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "?".to_string());
+
+    // Bash header
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+            Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
+            Span::styled("...\n", Style::default().fg(Color::White)),
+            if !accepted {
+                Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("")
+            }
+        ])
+    ];
+
+    // Output lines
+    let mut output_lines = output.lines();
+    if let Some(first) = output_lines.next() {
+        lines.push(Line::from(vec![
+            Span::styled(" └ ", Style::default().fg(Color::Gray)),
+            Span::styled(first, Style::default()),
+        ]));
+        for line in output_lines {
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default().fg(Color::Gray)),
+                Span::styled(line, Style::default()),
+            ]));
+        }
+    }
+
+    let mut rendered = String::new();
+    for line in &lines {
+        rendered.push_str(&line.to_string());
+        rendered.push('\n');
+    }
+    state.messages.push(Message {
+        text: rendered.trim_end().to_string(),
+        style: Style::default(),
+    });
 }

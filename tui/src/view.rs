@@ -489,3 +489,5 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         .alignment(Alignment::Left);
     f.render_widget(dialog, area);
 }
+
+

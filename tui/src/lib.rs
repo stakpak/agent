@@ -3,7 +3,7 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, Message, OutputEvent, update};
+pub use app::{AppState, InputEvent, Message, OutputEvent, update, render_bash_block};
 pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
@@ -54,13 +54,16 @@ pub async fn run_tui(
     while !should_quit {
         tokio::select! {
             Some(event) = input_rx.recv() => {
-                eprintln!("event: {:?}", event);
                 if let InputEvent::RunCommand(tool_call) = &event {
-                    let command = format!("{:?}", tool_call);
-                    eprintln!("command: {}", command);
                     app::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx);
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
+                }
+                if let InputEvent::ToolResult(ref s) = event {
+                    let tool_call = state.dialog_command.clone();
+                    if let Some(tool_call) = tool_call {
+                        render_bash_block(&tool_call, &s, true, &mut state);
+                    }
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
