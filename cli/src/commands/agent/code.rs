@@ -7,6 +7,8 @@ use stakpak_tui::{InputEvent, OutputEvent};
 
 use crate::{client::Client, config::AppConfig};
 
+use super::truncate_output;
+
 // Helper to convert tools_map to Vec<Tool>
 fn convert_tools_map(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
@@ -126,7 +128,11 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
 
                         messages.push(tool_result(tool_call.id, result_content.clone()));
 
-                        send_input_event(&input_tx, InputEvent::ToolResult(result_content)).await?;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::ToolResult(truncate_output(&result_content)),
+                        )
+                        .await?;
                     }
                 }
             }

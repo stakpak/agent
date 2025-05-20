@@ -1,11 +1,12 @@
 use crate::app::AppState;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use serde_json::Value;
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -24,20 +25,26 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let outer_chunks = Layout::default()
+    let dialog_height = if state.is_dialog_open { 9 } else { 0 }; // adjust as needed
+    let dialog_margin = if state.is_dialog_open { 1 } else { 0 };
+
+    // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
+    let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),
+            Constraint::Min(1), // messages
+            Constraint::Length(dialog_margin),
+            Constraint::Length(dialog_height),
             Constraint::Length(input_height),
             Constraint::Length(dropdown_height),
             Constraint::Length(hint_height),
         ])
         .split(f.size());
 
-    let message_area = outer_chunks[0];
-    let input_area = outer_chunks[1];
-    let dropdown_area = outer_chunks[2];
-    let hint_area = outer_chunks[3];
+    let message_area = chunks[0];
+    let input_area = chunks[3];
+    let dropdown_area = chunks[4];
+    let hint_area = chunks[5];
     let message_area_width = message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
@@ -48,6 +55,11 @@ pub fn view(f: &mut Frame, state: &AppState) {
         message_area_width,
         message_area_height,
     );
+    // Only reserve and render dialog if open
+    if state.is_dialog_open {
+        render_confirmation_dialog(f, state);
+    }
+    // Only render input, dropdown, and hint if dialog is not open
     if !state.is_dialog_open {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
@@ -55,9 +67,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
             render_hint_or_shortcuts(f, state, hint_area);
         }
     }
-    if state.is_dialog_open {
-        render_confirmation_dialog(f, state);
-    }
+    // Loader: still as a message at the end of the message list
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -162,7 +172,12 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     }
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
-    let scroll = state.scroll.min(max_scroll);
+    // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
+    let scroll = if state.stay_at_bottom {
+        max_scroll
+    } else {
+        state.scroll.min(max_scroll)
+    };
     let mut visible_lines = Vec::new();
     for i in 0..height {
         if let Some((line, _)) = all_lines.get(scroll + i) {
@@ -428,44 +443,81 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     // Clamp so dialog fits on screen
     let dialog_height = 9;
     if last_message_y + dialog_height > screen.height {
-        last_message_y = screen.height.saturating_sub(dialog_height);
+        last_message_y = screen.height.saturating_sub(dialog_height + 5);
     }
     let area = ratatui::layout::Rect {
         x: 1,
         y: last_message_y,
-        width: 70.min(screen.width - 4),
-        height: dialog_height,
+        width: screen.width - 2,
+        height: dialog_height as u16,
     };
 
-    let title = format!(
-        "Bash({})...",
-        state.dialog_command.as_ref().map_or("".to_string(), |cmd| {
-            cmd.function
-                .arguments
-                .parse::<serde_json::Value>()
-                .unwrap_or_default()
-                .to_string()
-        })
-    );
-    let desc = ""; // TODO: make this dynamic
-    let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
-    let pad = "  "; // 2 spaces of padding
+    let command_name = serde_json::from_str::<Value>(&state.dialog_command.as_ref().unwrap().function.arguments)
+    .ok()
+    .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
+    .unwrap_or_else(|| "?".to_string());
+   
 
-    let mut lines = vec![
-        Line::from(vec![Span::styled(
-            format!("{pad}{}{pad}", title),
+    let max_title_width = area.width.saturating_sub(12) as usize; 
+    let mut title_lines = vec![];
+    let mut current = command_name.as_str();
+    while !current.is_empty() {
+        let take = current
+            .char_indices()
+            .scan(0, |acc, (i, c)| {
+                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+                Some((i, *acc))
+            })
+            .take_while(|&(_i, w)| w <= max_title_width)
+            .last()
+            .map(|(i, _w)| i + 1)
+            .unwrap_or(current.len());
+        let (part, rest) = current.split_at(take);
+        title_lines.push(part.trim());
+        current = rest;
+    }
+
+    let pad = "  "; // 2 spaces of padding
+    let mut lines = vec![];
+    for (i, part) in title_lines.iter().enumerate() {
+        let is_last = i == title_lines.len() - 1;
+        let line = if i == 0 {
+            if is_last {
+                // Only one line: put everything on it
+                format!("{pad}Bash({part})...{pad}")
+            } else {
+                format!("{pad}Bash({part}")
+            }
+        } else if is_last {
+            format!("{pad}  {part})...{pad}")
+        } else {
+            format!("{pad}  {part}")
+        };
+        lines.push(Line::from(vec![Span::styled(
+            line,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::styled(
-            format!("{pad}{}{pad}", desc),
-            Style::default().fg(Color::Gray),
-        )]),
-        Line::from(format!("{pad}{pad}")),
-        Line::from(format!("{pad}Do you want to proceed?{pad}")),
-        Line::from(format!("{pad}{pad}")),
-    ];
+        )]));
+    }
+    // Dynamically adjust dialog height
+    let base_height = 9;
+    let dialog_height = base_height + title_lines.len().saturating_sub(1);
+    let area = ratatui::layout::Rect {
+        x: 1,
+        y: last_message_y,
+        width: screen.width - 2,
+        height: dialog_height as u16,
+    };
+    let desc = ""; // TODO: make this dynamic
+    let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
+    lines.push(Line::from(vec![Span::styled(
+        format!("{pad}{}{pad}", desc),
+        Style::default().fg(Color::Gray),
+    )]));
+    lines.push(Line::from(format!("{pad}{pad}")));
+    lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
+    lines.push(Line::from(format!("{pad}{pad}")));
     for (i, opt) in options.iter().enumerate() {
         let style = if state.dialog_selected == i {
             Style::default()
