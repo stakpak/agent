@@ -53,19 +53,21 @@ impl Tools {
                 )
             })?;
 
-        if !output.stderr.is_empty() {
-            error!("Command error: {}", String::from_utf8_lossy(&output.stderr));
-            return Err(McpError::internal_error(
-                String::from_utf8_lossy(&output.stderr).to_string(),
-                Some(
-                    json!({ "command": command_clone, "error": String::from_utf8_lossy(&output.stderr) }),
-                ),
-            ));
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        let mut result = format!("<exit_code>{}</exit_code>", exit_code);
+        if !stdout.is_empty() {
+            let stdout = clip_output(&stdout);
+            result.push_str(&format!("\n<stdout>\n{}\n</stdout>", stdout));
+        }
+        if !stderr.is_empty() {
+            let stderr = clip_output(&stderr);
+            result.push_str(&format!("\n<stderr>\n{}\n</stderr>", stderr));
         }
 
-        Ok(CallToolResult::success(vec![Content::text(
-            String::from_utf8_lossy(&output.stdout).to_string(),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     //TODO: Add after adding widget for file reading
@@ -109,5 +111,18 @@ impl ServerHandler for Tools {
         _context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, McpError> {
         Ok(self.get_info())
+    }
+}
+
+fn clip_output(output: &str) -> String {
+    if output.len() > 4000 {
+        let half = 2000;
+        format!(
+            "{}\n[clipped]\n{}",
+            &output[..half],
+            &output[output.len() - half..]
+        )
+    } else {
+        output.to_string()
     }
 }
