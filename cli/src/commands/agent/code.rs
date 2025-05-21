@@ -247,7 +247,6 @@ pub async fn process_responses_stream(
         }
         send_input_event(input_tx, InputEvent::Loading(true)).await?;
     }
-    send_input_event(input_tx, InputEvent::Loading(false)).await?;
 
     // filter out empty tool calls
     chat_message.tool_calls = Some(
@@ -338,6 +337,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                     return Err(e.to_string());
                 }
             };
+            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
             messages.push(response.choices[0].message.clone());
 
