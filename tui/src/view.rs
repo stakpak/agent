@@ -642,7 +642,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
         Span::styled(
             " System",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
     ]));

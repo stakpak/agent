@@ -880,6 +880,7 @@ pub fn push_help_message(state: &mut AppState) {
             Span::raw(desc),
         ]));
     }
+    lines.push(Line::from(""));
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
