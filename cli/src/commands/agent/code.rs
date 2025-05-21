@@ -331,6 +331,10 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                 Ok(response) => response,
                 Err(e) => {
                     send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                    input_tx
+                        .send(InputEvent::Quit)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     return Err(e.to_string());
                 }
             };
