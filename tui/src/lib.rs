@@ -8,7 +8,7 @@ pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
 
-use crossterm::{execute, terminal::EnterAlternateScreen, event::EnableMouseCapture};
+use crossterm::{execute, terminal::EnterAlternateScreen, event::{EnableMouseCapture, DisableMouseCapture}};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -133,5 +133,6 @@ pub async fn run_tui(
     }
 
     println!("Quitting...");
+    execute!(std::io::stdout(), DisableMouseCapture)?;
     Ok(())
 }
