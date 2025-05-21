@@ -335,11 +335,6 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                 }
             };
 
-            //write response to file
-            let response_file =
-                std::fs::File::create("response.json").map_err(|e| e.to_string())?;
-            serde_json::to_writer(response_file, &response).map_err(|e| e.to_string())?;
-
             messages.push(response.choices[0].message.clone());
 
             // Send main response content to TUI
