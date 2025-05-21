@@ -1,8 +1,9 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use serde_json::Value;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
-use serde_json::Value;
+use uuid::Uuid;
 
 pub enum MessageContent {
     Plain(String, Style),
@@ -11,12 +12,14 @@ pub enum MessageContent {
 }
 
 pub struct Message {
+    pub id: Uuid,
     pub content: MessageContent,
 }
 
 impl Message {
     pub fn info(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
+            id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 text.into(),
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
@@ -25,22 +28,22 @@ impl Message {
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
+            id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 text.into(),
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
             ),
         }
     }
-    pub fn assistant(text: impl Into<String>, style: Option<Style>) -> Self {
+    pub fn assistant(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
-            content: MessageContent::Plain(
-                text.into(),
-                style.unwrap_or_default(),
-            ),
+            id: id.unwrap_or(Uuid::new_v4()),
+            content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
         }
     }
     pub fn styled(line: Line<'static>) -> Self {
         Message {
+            id: Uuid::new_v4(),
             content: MessageContent::Styled(line),
         }
     }
@@ -69,6 +72,7 @@ pub struct AppState {
 #[derive(Debug)]
 pub enum InputEvent {
     AssistantMessage(String),
+    StreamAssistantMessage(Uuid, String),
     RunCommand(ToolCall),
     ToolResult(String),
     Loading(bool),
@@ -182,6 +186,9 @@ pub fn update(
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
         }
+        InputEvent::StreamAssistantMessage(id, s) => {
+            handle_stream_message(state, id, s, message_area_height)
+        }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
             handle_scroll_down(state, message_area_height, message_area_width)
@@ -215,13 +222,13 @@ pub fn update(
             state.dialog_command = Some(tool_call);
             state.dialog_selected = 0;
         }
-     
+
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
         _ => {}
     }
-    adjust_scroll(state, message_area_height, message_area_width);   
+    adjust_scroll(state, message_area_height, message_area_width);
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
@@ -329,10 +336,10 @@ fn handle_input_submitted(
         state.input.clear();
         state.cursor_position = 0;
         if state.dialog_selected == 0 {
-            if let Some(tool_call) = &state.dialog_command {    
+            if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
-        }else {
+        } else {
             let tool_call = state.dialog_command.clone();
             let input = state.input.clone();
             if let Some(tool_call) = tool_call {
@@ -390,7 +397,9 @@ fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_hei
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.scroll == max_scroll;
-    state.messages.push(Message::assistant(s.clone(), None));
+    state
+        .messages
+        .push(Message::assistant(None, s.clone(), None));
     state.input.clear();
     state.cursor_position = 0;
     let total_lines = state.messages.len() * 2;
@@ -401,6 +410,33 @@ fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_hei
         state.stay_at_bottom = true;
     }
     state.loading = false;
+}
+
+fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area_height: usize) {
+    if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
+        if let MessageContent::Plain(text, _) = &mut message.content {
+            text.push_str(&s);
+        }
+    } else {
+        let input_height = 3;
+        let total_lines = state.messages.len() * 2;
+        let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
+        let max_scroll = total_lines.saturating_sub(max_visible_lines);
+        let was_at_bottom = state.scroll == max_scroll;
+        state
+            .messages
+            .push(Message::assistant(Some(id), s.clone(), None));
+        state.input.clear();
+        state.cursor_position = 0;
+        let total_lines = state.messages.len() * 2;
+        let max_scroll = total_lines.saturating_sub(max_visible_lines);
+        if was_at_bottom {
+            state.scroll = max_scroll;
+            state.scroll_to_bottom = true;
+            state.stay_at_bottom = true;
+        }
+        state.loading = false;
+    }
 }
 
 fn handle_scroll_up(state: &mut AppState) {
@@ -510,47 +546,78 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
     all_lines
 }
 
-pub fn render_bash_block<'a>(tool_call: &'a ToolCall, output: &'a str, accepted: bool, state: &mut AppState) {
+pub fn render_bash_block<'a>(
+    tool_call: &'a ToolCall,
+    output: &'a str,
+    accepted: bool,
+    state: &mut AppState,
+) {
     // Extract command name from arguments JSON
     let command_name = serde_json::from_str::<Value>(&tool_call.function.arguments)
         .ok()
-        .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
+        .and_then(|v| {
+            v.get("command")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_else(|| "?".to_string());
 
     let mut lines = Vec::new();
     // Header
     lines.push(Line::from(vec![
-        Span::styled("● ", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
-        Span::styled("Bash", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" ({})", command_name), Style::default().fg(Color::Gray)),
+        Span::styled(
+            "● ",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Bash",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" ({})", command_name),
+            Style::default().fg(Color::Gray),
+        ),
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
     if !accepted {
-        lines.push(Line::from(vec![
-            Span::styled("  L No (tell Stakpak what to do differently)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "  L No (tell Stakpak what to do differently)",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )]));
     }
     // Output lines
     let output_pad = "    "; // 4 spaces, adjust as needed
     for (i, line) in output.lines().enumerate() {
         let prefix = if i == 0 { "└ " } else { "  " };
         lines.push(Line::from(vec![
-            Span::styled(format!("{output_pad}{prefix}"), Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{output_pad}{prefix}"),
+                Style::default().fg(Color::Gray),
+            ),
             Span::styled(line, Style::default().fg(Color::Gray)),
         ]));
     }
     let mut owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
-            let owned_spans: Vec<Span<'static>> = line.spans
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
                 .into_iter()
                 .map(|span| Span::styled(span.content.into_owned(), span.style))
                 .collect();
             Line::from(owned_spans)
         })
         .collect();
-    owned_lines.push(Line::from(vec![Span::styled("  ", Style::default().fg(Color::Gray))]));
+    owned_lines.push(Line::from(vec![Span::styled(
+        "  ",
+        Style::default().fg(Color::Gray),
+    )]));
     state.messages.push(Message {
+        id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
     });
 }

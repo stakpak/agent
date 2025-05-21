@@ -158,6 +158,7 @@ pub async fn process_responses_stream(
         tool_calls: None,
         tool_call_id: None,
     };
+    let message_id = Uuid::new_v4();
 
     while let Some(response) = stream.next().await {
         send_input_event(input_tx, InputEvent::Loading(false)).await?;
@@ -185,8 +186,11 @@ pub async fn process_responses_stream(
                             Some(MessageContent::String(old_content)) => old_content + content,
                             _ => content.clone(),
                         }));
-                    send_input_event(input_tx, InputEvent::InputSubmittedWith(content.clone()))
-                        .await?;
+                    send_input_event(
+                        input_tx,
+                        InputEvent::StreamAssistantMessage(message_id, content.clone()),
+                    )
+                    .await?;
                 }
 
                 if let Some(tool_calls) = &delta.tool_calls {

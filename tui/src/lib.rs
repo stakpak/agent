@@ -3,7 +3,7 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, Message, OutputEvent, update, render_bash_block};
+pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, update};
 pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
@@ -12,7 +12,7 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
@@ -40,8 +40,6 @@ pub async fn run_tui(
         }
     });
 
-
-
     let mut spinner_interval = interval(Duration::from_millis(100));
     // Main async update/view loop
     terminal.draw(|f| view::view(f, &state))?;
@@ -57,7 +55,7 @@ pub async fn run_tui(
                 if let InputEvent::ToolResult(ref s) = event {
                     let tool_call = state.dialog_command.clone();
                     if let Some(tool_call) = tool_call {
-                        render_bash_block(&tool_call, &s, true, &mut state);
+                        render_bash_block(&tool_call, s, true, &mut state);
                     }
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
@@ -127,7 +125,9 @@ pub async fn run_tui(
                 terminal.draw(|f| view::view(f, &state))?;
             }
         }
-        if should_quit { break; }
+        if should_quit {
+            break;
+        }
         terminal.draw(|f| view::view(f, &state))?;
     }
 
