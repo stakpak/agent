@@ -23,7 +23,7 @@ pub async fn run_tui(
     execute!(std::io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let all_helpers = vec!["/help", "/status", "/clear", "/about", "/quit"];
+    let all_helpers = vec!["/help", "/status", "/sessions", "/quit"];
     let mut state = AppState::new(all_helpers.clone());
 
     // Internal channel for event handling
@@ -113,7 +113,8 @@ pub async fn run_tui(
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::InputSubmitted = event {
-                        if !state.input.trim().is_empty() {
+                        // if input starts with / don't submit output event
+                        if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
                         }
                     }

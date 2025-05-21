@@ -4,11 +4,58 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-
+use crate::view::render_system_message;
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
+}
+
+pub fn test_sessions() -> Vec<SessionInfo> {
+    vec![
+        SessionInfo {
+            title: "Create nodejs docker image that downloads the latest version of node".to_string(),
+            id: "1".to_string(),
+            created_at: "21/5/25, 12:38 pm".to_string(),
+            info: "1 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "ls".to_string(),
+            id: "2".to_string(),
+            created_at: "20/5/25, 10:38 pm".to_string(),
+            info: "3 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "ls".to_string(),
+            id: "3".to_string(),
+            created_at: "20/5/25, 3:30 pm".to_string(),
+            info: "3 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "Create a fastify server".to_string(),
+            id: "4".to_string(),
+            created_at: "21/5/25, 12:38 pm".to_string(),
+            info: "1 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "nextjs app".to_string(),
+            id: "5".to_string(),
+            created_at: "20/5/25, 10:38 pm".to_string(),
+            info: "3 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "terraform create s3 bucket".to_string(),
+            id: "6".to_string(),
+            created_at: "20/5/25, 3:30 pm".to_string(),
+            info: "3 msgs/0 tools".to_string(),
+        },
+        SessionInfo {
+            title: "ls -la".to_string(),
+            id: "7".to_string(),
+            created_at: "20/5/25, 3:30 pm".to_string(),
+            info: "3 msgs/0 tools".to_string(),
+        },
+    ]
 }
 
 pub struct Message {
@@ -49,6 +96,13 @@ impl Message {
     }
 }
 
+pub struct SessionInfo {
+    pub title: String,
+    pub id: String,
+    pub created_at: String,
+    pub info: String,
+}
+
 pub struct AppState {
     pub input: String,
     pub cursor_position: usize,
@@ -67,6 +121,9 @@ pub struct AppState {
     pub dialog_selected: usize,
     pub loading: bool,
     pub spinner_frame: usize,
+    pub sessions: Vec<SessionInfo>,
+    pub show_sessions_dialog: bool,
+    pub session_selected: usize,
 }
 
 #[derive(Debug)]
@@ -92,6 +149,7 @@ pub enum InputEvent {
     Up,
     Down,
     Quit,
+    HandleEsc,
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -140,6 +198,9 @@ impl AppState {
             dialog_selected: 0,
             loading: false,
             spinner_frame: 0,
+            sessions: test_sessions(),
+            show_sessions_dialog: false,
+            session_selected: 0,
         }
     }
 }
@@ -154,7 +215,11 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
-            if state.show_helper_dropdown
+            if state.show_sessions_dialog {
+                if state.session_selected > 0 {
+                    state.session_selected -= 1;
+                }
+            } else if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
             {
@@ -166,7 +231,11 @@ pub fn update(
             }
         }
         InputEvent::Down => {
-            if state.show_helper_dropdown
+            if state.show_sessions_dialog {
+                if state.session_selected + 1 < state.sessions.len() {
+                    state.session_selected += 1;
+                }
+            } else if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
             {
@@ -181,7 +250,16 @@ pub fn update(
         InputEvent::DropdownDown => handle_dropdown_down(state),
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
-        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height, output_tx),
+        InputEvent::InputSubmitted => {
+            if state.show_sessions_dialog {
+                let selected = &state.sessions[state.session_selected];
+                render_system_message(state, &format!("Switching to session . {}", selected.title));
+                state.show_sessions_dialog = false;
+                // input box and helper will show again automatically
+            } else {
+                handle_input_submitted(state, message_area_height, output_tx);
+            }
+        }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -226,6 +304,7 @@ pub fn update(
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
+        InputEvent::HandleEsc => handle_esc(state),
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -325,6 +404,24 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
+fn handle_esc(state: &mut AppState) {
+    state.input.clear();
+    state.cursor_position = 0;
+    if state.show_sessions_dialog {
+        state.show_sessions_dialog = false;
+    } else if state.show_helper_dropdown {
+        state.show_helper_dropdown = false;
+    } else if state.is_dialog_open {
+        state.is_dialog_open = false;
+        if let Some(tool_call) = state.dialog_command.take() {
+            let input = state.input.clone();
+            render_bash_block(&tool_call, &input, false, state);
+        }
+    }else {
+        return;
+    }
+}
+
 fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
@@ -347,10 +444,41 @@ fn handle_input_submitted(
             }
         }
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
+        let selected = state.filtered_helpers[state.helper_selected];
+        
+        match selected {
+            "/sessions" => {
+                state.show_sessions_dialog = true;
+                state.session_selected = 0;
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/help" => {
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/status" => {
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/quit" => {
+                state.show_helper_dropdown = false;
+                state.input.clear();
+                state.cursor_position = 0;
+                std::process::exit(0);
+            }
+            _ => { }
+        }
+        
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        let selected = state.filtered_helpers[state.helper_selected];
         let was_at_bottom = state.scroll == max_scroll;
         state
             .messages
@@ -369,7 +497,8 @@ fn handle_input_submitted(
         }
         state.loading = true;
         state.spinner_frame = 0;
-    } else if !state.input.trim().is_empty() {
+    
+    } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
