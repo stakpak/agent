@@ -296,6 +296,9 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
     // Spawn client task
     let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
         let client = Client::new(&config).map_err(|e| e.to_string())?;
+        let data = client.get_my_account().await?;
+        send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+        
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
                 OutputEvent::UserMessage(user_input) => {
@@ -351,6 +354,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
             if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                 send_tool_calls(&input_tx, tool_calls).await?;
             }
+            
         }
         Ok(())
     });

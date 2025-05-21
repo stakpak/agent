@@ -124,6 +124,7 @@ pub struct AppState {
     pub sessions: Vec<SessionInfo>,
     pub show_sessions_dialog: bool,
     pub session_selected: usize,
+    pub account_info: String,
 }
 
 #[derive(Debug)]
@@ -134,6 +135,7 @@ pub enum InputEvent {
     ToolResult(String),
     Loading(bool),
     InputChanged(char),
+    GetStatus(String),
     InputBackspace,
     InputChangedNewline,
     InputSubmitted,
@@ -201,6 +203,7 @@ impl AppState {
             sessions: test_sessions(),
             show_sessions_dialog: false,
             session_selected: 0,
+            account_info: String::new(),
         }
     }
 }
@@ -305,6 +308,10 @@ pub fn update(
             state.loading = is_loading;
         }
         InputEvent::HandleEsc => handle_esc(state),
+        
+        InputEvent::GetStatus(account_info) => {
+            state.account_info = account_info;
+        }
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -462,6 +469,7 @@ fn handle_input_submitted(
                 return;
             }
             "/status" => {
+                push_status_message(state);
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;
@@ -748,5 +756,47 @@ pub fn render_bash_block<'a>(
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
+    });
+}
+
+pub fn get_stakpak_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+pub fn push_status_message(state: &mut AppState) {
+    let status_text = state.account_info.clone();
+    let version = get_stakpak_version();
+    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "?".to_string());
+
+    // Default values
+    let mut id = "unknown".to_string();
+    let mut username = "unknown".to_string();
+    let mut name = "unknown".to_string();
+
+    for line in status_text.lines() {
+        if let Some(rest) = line.strip_prefix("ID: ") {
+            id = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("Username: ") {
+            username = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("Name: ") {
+            name = rest.trim().to_string();
+        }
+    }
+
+    let lines = vec![
+        Line::from(vec![Span::styled(format!("Stakpak Code Status v{}", version), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]),
+        Line::from(""),
+        Line::from(vec![Span::styled("Working Directory", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(format!("  L {}", cwd)),
+        Line::from(""),
+        Line::from(vec![Span::styled("Account", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(format!("  L Username: {}", username)),
+        Line::from(format!("  L ID: {}", id)),
+        Line::from(format!("  L Name: {}", name)),
+        Line::from(""),
+    ];
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
     });
 }
