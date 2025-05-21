@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
 use serde::{Deserialize, Serialize};
-
 pub mod models;
+use futures_util::Stream;
+use futures_util::StreamExt;
 use models::*;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, Tool,
+    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
 };
 use uuid::Uuid;
 pub mod dave_v1;
@@ -515,7 +516,7 @@ impl Client {
     ) -> Result<ChatCompletionResponse, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(messages, tools);
+        let input = ChatCompletionRequest::new(messages, tools, None);
 
         let response = self
             .client
@@ -540,6 +541,53 @@ impl Client {
                 Err("Failed to deserialize response:".into())
             }
         }
+    }
+
+    pub async fn chat_completion_stream(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+    ) -> Result<impl Stream<Item = Result<Vec<ChatCompletionStreamResponse>, String>>, String> {
+        let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
+
+        let input = ChatCompletionRequest::new(messages, tools, Some(true));
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let stream = response.bytes_stream().map(|chunk| {
+            chunk
+                .map_err(|_| "Failed to read response".to_string())
+                .and_then(|bytes| {
+                    std::str::from_utf8(&bytes)
+                        .map_err(|_| "Failed to parse UTF-8 from Anthropic response".to_string())
+                        .map(|text| {
+                            text.split("\n\n")
+                                .filter(|event| event.starts_with("data: "))
+                                .filter_map(|event| {
+                                    event.strip_prefix("data: ").and_then(|json_str| {
+                                        serde_json::from_str::<ChatCompletionStreamResponse>(
+                                            json_str,
+                                        )
+                                        .ok()
+                                    })
+                                })
+                                .collect::<Vec<ChatCompletionStreamResponse>>()
+                        })
+                })
+        });
+
+        Ok(stream)
     }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
