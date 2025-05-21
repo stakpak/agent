@@ -461,16 +461,20 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         x: 1,
         y: last_message_y,
         width: screen.width - 2,
-        height: dialog_height as u16,
+        height: dialog_height,
     };
 
-    let command_name = serde_json::from_str::<Value>(&state.dialog_command.as_ref().unwrap().function.arguments)
-    .ok()
-    .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()))
-    .unwrap_or_else(|| "?".to_string());
-   
+    let command_name =
+        serde_json::from_str::<Value>(&state.dialog_command.as_ref().unwrap().function.arguments)
+            .ok()
+            .and_then(|v| {
+                v.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "?".to_string());
 
-    let max_title_width = area.width.saturating_sub(12) as usize; 
+    let max_title_width = area.width.saturating_sub(12) as usize;
     let mut title_lines = vec![];
     let mut current = command_name.as_str();
     while !current.is_empty() {
@@ -553,5 +557,3 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         .alignment(Alignment::Left);
     f.render_widget(dialog, area);
 }
-
-
