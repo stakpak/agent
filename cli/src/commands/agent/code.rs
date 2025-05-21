@@ -186,11 +186,14 @@ pub async fn process_responses_stream(
                             Some(MessageContent::String(old_content)) => old_content + content,
                             _ => content.clone(),
                         }));
-                    send_input_event(
-                        input_tx,
-                        InputEvent::StreamAssistantMessage(message_id, content.clone()),
-                    )
-                    .await?;
+                    for letter in content.chars() {
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        send_input_event(
+                            input_tx,
+                            InputEvent::StreamAssistantMessage(message_id, letter.to_string()),
+                        )
+                        .await?;
+                    }
                 }
 
                 if let Some(tool_calls) = &delta.tool_calls {
@@ -249,7 +252,6 @@ pub async fn process_responses_stream(
                 }
             }
         }
-        send_input_event(input_tx, InputEvent::Loading(true)).await?;
     }
 
     // filter out empty tool calls
@@ -344,16 +346,6 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
             messages.push(response.choices[0].message.clone());
-
-            // Send main response content to TUI
-            let content = response.choices[0]
-                .message
-                .content
-                .clone()
-                .unwrap_or(MessageContent::String("".to_string()))
-                .to_string();
-
-            send_input_event(&input_tx, InputEvent::InputSubmittedWith(content)).await?;
 
             // Send tool calls to TUI if present
             if let Some(tool_calls) = &response.choices[0].message.tool_calls {
