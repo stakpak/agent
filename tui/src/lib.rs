@@ -8,7 +8,7 @@ pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
 
-use crossterm::{execute, terminal::EnterAlternateScreen};
+use crossterm::{execute, terminal::EnterAlternateScreen, event::EnableMouseCapture};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -21,6 +21,7 @@ pub async fn run_tui(
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
     execute!(std::io::stdout(), EnterAlternateScreen)?;
+    execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let all_helpers = vec!["/help", "/status", "/sessions", "/quit"];
