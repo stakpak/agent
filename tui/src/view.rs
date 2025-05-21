@@ -438,10 +438,10 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shortcuts {
         let shortcuts = vec![
             Line::from(
-                "! for bash mode    double tap esc to undo    / for commands     # to memorize",
+                "/ for commands       shift + enter or ctrl + j to insert newline",
             ),
             Line::from(
-                "↵ for newline      @ for file paths          shift + tab to auto-accept edits",
+                "↵ to send message    ctrl + c to quit",
             ),
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));

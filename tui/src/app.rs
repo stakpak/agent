@@ -463,6 +463,7 @@ fn handle_input_submitted(
                 return;
             }
             "/help" => {
+                push_help_message(state);
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;
@@ -795,6 +796,90 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(format!("  L Name: {}", name)),
         Line::from(""),
     ];
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+    });
+}
+
+pub fn push_help_message(state: &mut AppState) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    let mut lines = Vec::new();
+    // usage mode
+    lines.push(Line::from(vec![Span::styled(
+        "Usage Mode",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )]));
+
+    let usage_modes = vec![
+        ("REPL", "stakpak (interactive session)", Color::White),
+        ("Non-interactive", "stakpak -p  \"prompt\" -c <checkpoint_id>", Color::White),
+    ];
+    for (mode, desc, color) in usage_modes {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(mode),
+            Span::raw(" – "),
+            Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::raw("Run"),Span::styled(" stakpak --help ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),Span::styled("to see all commands", Style::default().fg(Color::Gray))]));
+    lines.push(Line::from(""));
+    // Section header
+    lines.push(Line::from(vec![Span::styled(
+        "Available commands",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+    // Slash-commands header
+    lines.push(Line::from(vec![Span::styled(
+        "Slash-commands",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    )]));
+
+    // Slash-commands list
+    let commands = vec![
+        ("/help", "show this help overlay"),
+        ("/status", "show account status"),
+        ("/sessions", "show list ofsessions"),
+        ("/quit", "quit the app"),
+    ];
+    for (cmd, desc) in commands {
+        lines.push(Line::from(vec![
+            Span::styled(cmd, Style::default().fg(Color::Cyan)),
+            Span::raw(" – "),
+            Span::raw(desc),
+        ]));
+    }
+    lines.push(Line::from(""));
+
+    // Keyboard shortcuts header
+    lines.push(Line::from(vec![Span::styled(
+        "Keyboard shortcuts",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    )]));
+    // Shortcuts list
+    let shortcuts = vec![
+        ("Enter", "send message", Color::Yellow),
+        ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
+        ("Up/Down", "scroll prompt history", Color::Yellow),
+        ("Esc", "Closes any open dialog", Color::Yellow),
+        ("Ctrl+C", "quit Codex", Color::Yellow),
+    ];
+    for (key, desc, color) in shortcuts {
+        lines.push(Line::from(vec![
+            Span::styled(key, Style::default().fg(color)),
+            Span::raw(" – "),
+            Span::raw(desc),
+        ]));
+    }
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
