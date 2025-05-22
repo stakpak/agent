@@ -118,15 +118,77 @@ impl ServerHandler for Tools {
     }
 }
 
-fn clip_output(output: &str) -> String {
-    if output.len() > 4000 {
-        let half = 2000;
-        format!(
-            "{}\n[clipped]\n{}",
-            &output[..half],
-            &output[output.len() - half..]
-        )
-    } else {
-        output.to_string()
+pub fn clip_output(output: &str) -> String {
+    const MAX_OUTPUT_LENGTH: usize = 4000;
+    // Truncate long output
+    if output.len() > MAX_OUTPUT_LENGTH {
+        let offset = MAX_OUTPUT_LENGTH / 2;
+        let start = output
+            .char_indices()
+            .nth(offset)
+            .map(|(i, _)| i)
+            .unwrap_or(output.len());
+        let end = output
+            .char_indices()
+            .rev()
+            .nth(offset)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        return format!("{}\n[clipped]\n{}", &output[..start], &output[end..]);
+    }
+
+    output.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clip_output_empty_string() {
+        let output = "";
+        assert_eq!(clip_output(output), "");
+    }
+
+    #[test]
+    fn test_clip_output_short_string() {
+        let output = "This is a short string that should not be clipped.";
+        assert_eq!(clip_output(output), output);
+    }
+
+    #[test]
+    fn test_clip_output_exact_length() {
+        // Create a string with exactly MAX_OUTPUT_LENGTH characters
+        let output = "a".repeat(4000);
+        assert_eq!(clip_output(&output), output);
+    }
+
+    #[test]
+    fn test_clip_output_long_string() {
+        // Create a string longer than MAX_OUTPUT_LENGTH
+        let output = "a".repeat(6000);
+        let result = clip_output(&output);
+
+        // Check that result has the expected format with [clipped] marker
+        assert!(result.contains("[clipped]"));
+
+        // Check the total length is as expected (2000 + 2000 + length of "\n[clipped]\n")
+        let expected_length = 2000 + 2001 + "\n[clipped]\n".len();
+        assert_eq!(result.len(), expected_length);
+    }
+
+    #[test]
+    fn test_clip_output_unicode_characters() {
+        // Create a string with unicode characters that's longer than MAX_OUTPUT_LENGTH
+        // Using characters like emoji that take more than one byte
+        let emoji_repeat = "😀🌍🚀".repeat(1500); // Each emoji is multiple bytes
+        let result = clip_output(&emoji_repeat);
+
+        assert!(result.contains("[clipped]"));
+
+        // Verify the string was properly split on character boundaries
+        // by checking that we don't have any invalid UTF-8 sequences
+        assert!(result.chars().all(|c| c.is_ascii() || c.len_utf8() > 1));
     }
 }

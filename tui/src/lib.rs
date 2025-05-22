@@ -7,8 +7,7 @@ pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, upd
 pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
-
-use crossterm::{execute, terminal::EnterAlternateScreen, event::EnableMouseCapture, event::DisableMouseCapture};
+use crossterm::{execute, terminal::EnterAlternateScreen, event::{EnableMouseCapture, DisableMouseCapture}};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
