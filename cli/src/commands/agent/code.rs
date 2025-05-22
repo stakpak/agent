@@ -298,7 +298,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
         let client = Client::new(&config).map_err(|e| e.to_string())?;
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
-        
+
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
                 OutputEvent::UserMessage(user_input) => {
@@ -354,7 +354,6 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
             if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                 send_tool_calls(&input_tx, tool_calls).await?;
             }
-            
         }
         Ok(())
     });
@@ -385,7 +384,26 @@ pub async fn run_non_interactive(
     let client = Client::new(&ctx).map_err(|e| e.to_string())?;
 
     if let Some(checkpoint_id) = config.checkpoint_id {
-        let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+        let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+
+        // Append checkpoint_id to the last assistant message if present
+        if let Some(last_message) = checkpoint_messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.role != Role::User && message.role != Role::Tool)
+        {
+            if last_message.role == Role::Assistant {
+                last_message.content = Some(MessageContent::String(format!(
+                    "{}\n<checkpoint_id>{}</checkpoint_id>",
+                    last_message
+                        .content
+                        .as_ref()
+                        .unwrap_or(&MessageContent::String(String::new()))
+                        .to_string(),
+                    checkpoint_id
+                )));
+            }
+        }
         chat_messages.extend(checkpoint_messages);
     }
 
