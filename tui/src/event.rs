@@ -15,7 +15,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
             KeyCode::Backspace => Some(InputEvent::InputBackspace),
             KeyCode::Enter => Some(InputEvent::InputSubmitted),
-            KeyCode::Esc => Some(InputEvent::Quit),
+            KeyCode::Esc => Some(InputEvent::HandleEsc),
             KeyCode::Up => Some(InputEvent::Up),
             KeyCode::Down => Some(InputEvent::Down),
             KeyCode::Left => Some(InputEvent::CursorLeft),

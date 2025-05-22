@@ -1,12 +1,14 @@
 use crate::app::{AppState, MessageContent};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Rect},
+    layout::{Constraint, Direction, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, List, ListItem, ListState},
 };
+use crate::app::{Message, get_wrapped_message_lines};
 use serde_json::Value;
+use uuid::Uuid;
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -25,26 +27,34 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.is_dialog_open { 9 } else { 0 }; // adjust as needed
-    let dialog_margin = if state.is_dialog_open { 1 } else { 0 };
+    let dialog_height = if state.is_dialog_open { 9 } else if state.show_sessions_dialog { 11 } else { 0 }; 
+    let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog { 1 } else { 0 };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
+    let mut constraints = vec![
+        Constraint::Min(1), // messages
+        Constraint::Length(dialog_margin),
+        Constraint::Length(dialog_height),
+    ];
+    if !state.show_sessions_dialog {
+        constraints.push(Constraint::Length(input_height));
+        constraints.push(Constraint::Length(dropdown_height));
+        constraints.push(Constraint::Length(hint_height));
+    }
     let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1), // messages
-            Constraint::Length(dialog_margin),
-            Constraint::Length(dialog_height),
-            Constraint::Length(input_height),
-            Constraint::Length(dropdown_height),
-            Constraint::Length(hint_height),
-        ])
+        .constraints(constraints)
         .split(f.size());
 
     let message_area = chunks[0];
-    let input_area = chunks[3];
-    let dropdown_area = chunks[4];
-    let hint_area = chunks[5];
+    let mut input_area = Rect { x: 0, y: 0, width: 0, height: 0 };
+    let mut dropdown_area = Rect { x: 0, y: 0, width: 0, height: 0 };
+    let mut hint_area = Rect { x: 0, y: 0, width: 0, height: 0 };
+    if !state.show_sessions_dialog {
+        input_area = chunks[3];
+        dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
+        hint_area = chunks.get(5).copied().unwrap_or(input_area);
+    }
     let message_area_width = message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
@@ -59,8 +69,8 @@ pub fn view(f: &mut Frame, state: &AppState) {
     if state.is_dialog_open {
         render_confirmation_dialog(f, state);
     }
-    // Only render input, dropdown, and hint if dialog is not open
-    if !state.is_dialog_open {
+    // Only render input, dropdown, and hint if dialog is not open and sessions dialog is not open
+    if !state.is_dialog_open && !state.show_sessions_dialog {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         if !dropdown_showing {
@@ -68,6 +78,9 @@ pub fn view(f: &mut Frame, state: &AppState) {
         }
     }
     // Loader: still as a message at the end of the message list
+    if state.show_sessions_dialog {
+        render_sessions_dialog(f, state, message_area);
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -425,10 +438,10 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shortcuts {
         let shortcuts = vec![
             Line::from(
-                "! for bash mode    double tap esc to undo    / for commands     # to memorize",
+                "/ for commands       shift + enter or ctrl + j to insert newline",
             ),
             Line::from(
-                "↵ for newline      @ for file paths          shift + tab to auto-accept edits",
+                "↵ to send message    ctrl + c to quit",
             ),
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
@@ -443,14 +456,9 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
-    use ratatui::layout::Alignment;
-    use ratatui::style::{Color, Modifier, Style};
-    use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Paragraph};
     let screen = f.size();
-    // Calculate the number of visible message lines
     let message_lines =
-        crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
+    get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
     // Clamp so dialog fits on screen
     let dialog_height = 9;
@@ -556,4 +564,94 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         )
         .alignment(Alignment::Left);
     f.render_widget(dialog, area);
+}
+
+fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
+    let screen = f.size();
+    let max_height = message_area.height.saturating_sub(2).min(20);
+    let session_count = state.sessions.len() as u16;
+    let dialog_height = (session_count + 3).min(max_height);
+
+    let message_lines = crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
+    if last_message_y + dialog_height > screen.height {
+        last_message_y = screen.height.saturating_sub(dialog_height + 1);
+    }
+
+    let area = Rect {
+        x: 1,
+        y: last_message_y,
+        width: screen.width - 2,
+        height: dialog_height,
+    };
+
+    // Outer block with title
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::LightYellow))
+        .title(Span::styled(
+            "View session",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ));
+    f.render_widget(block, area);
+    // Help text
+    let help = "press enter to choose · esc to cancel";
+    let help_area = Rect {
+        x: area.x + 2,
+        y: area.y + 1,
+        width: area.width - 4,
+        height: 1,
+    };
+    let help_widget = Paragraph::new(help)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Left);
+    f.render_widget(help_widget, help_area);
+    // Session list area
+    let list_area = Rect {
+        x: area.x + 2,
+        y: area.y + 3,
+        width: area.width - 4,
+        height: area.height.saturating_sub(4),
+    };
+    let items: Vec<ListItem> = state
+        .sessions
+        .iter()
+        .map(|s| {
+            let text = format!("{} . {}", s.updated_at, s.title);
+            ListItem::new(Line::from(vec![Span::raw(text)]))
+        })
+        .collect();
+    let mut list_state = ListState::default();
+    list_state.select(Some(state.session_selected));
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default());
+    f.render_stateful_widget(list, list_area, &mut list_state);
+}
+
+pub fn render_system_message(state: &mut AppState, msg: &str) {
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("🤖", Style::default()),
+        Span::styled(
+            " System",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    let message = Line::from(vec![Span::raw(format!("{pad} - {msg}", pad = " ".repeat(2)))]);
+    lines.push(message);  
+    lines.push(Line::from(vec![Span::raw(" ")]));  
+    
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+    });
 }

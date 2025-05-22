@@ -4,12 +4,21 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-
+use crate::view::render_system_message;
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
 }
+
+pub struct SessionInfo {
+    pub title: String,
+    pub id: String,
+    pub updated_at: String,
+}
+
+// TODO: add user list sessions
+pub fn list_sessions() -> Vec<SessionInfo> {vec![]}
 
 pub struct Message {
     pub id: Uuid,
@@ -49,6 +58,8 @@ impl Message {
     }
 }
 
+
+
 pub struct AppState {
     pub input: String,
     pub cursor_position: usize,
@@ -67,6 +78,10 @@ pub struct AppState {
     pub dialog_selected: usize,
     pub loading: bool,
     pub spinner_frame: usize,
+    pub sessions: Vec<SessionInfo>,
+    pub show_sessions_dialog: bool,
+    pub session_selected: usize,
+    pub account_info: String,
 }
 
 #[derive(Debug)]
@@ -77,6 +92,7 @@ pub enum InputEvent {
     ToolResult(String),
     Loading(bool),
     InputChanged(char),
+    GetStatus(String),
     InputBackspace,
     InputChangedNewline,
     InputSubmitted,
@@ -92,6 +108,7 @@ pub enum InputEvent {
     Up,
     Down,
     Quit,
+    HandleEsc,
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -140,6 +157,10 @@ impl AppState {
             dialog_selected: 0,
             loading: false,
             spinner_frame: 0,
+            sessions: list_sessions(),
+            show_sessions_dialog: false,
+            session_selected: 0,
+            account_info: String::new(),
         }
     }
 }
@@ -154,7 +175,11 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
-            if state.show_helper_dropdown
+            if state.show_sessions_dialog {
+                if state.session_selected > 0 {
+                    state.session_selected -= 1;
+                }
+            } else if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
             {
@@ -166,7 +191,11 @@ pub fn update(
             }
         }
         InputEvent::Down => {
-            if state.show_helper_dropdown
+            if state.show_sessions_dialog {
+                if state.session_selected + 1 < state.sessions.len() {
+                    state.session_selected += 1;
+                }
+            } else if state.show_helper_dropdown
                 && !state.filtered_helpers.is_empty()
                 && state.input.starts_with('/')
             {
@@ -181,7 +210,16 @@ pub fn update(
         InputEvent::DropdownDown => handle_dropdown_down(state),
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
-        InputEvent::InputSubmitted => handle_input_submitted(state, message_area_height, output_tx),
+        InputEvent::InputSubmitted => {
+            if state.show_sessions_dialog {
+                let selected = &state.sessions[state.session_selected];
+                render_system_message(state, &format!("Switching to session . {}", selected.title));
+                state.show_sessions_dialog = false;
+                // input box and helper will show again automatically
+            } else {
+                handle_input_submitted(state, message_area_height, output_tx);
+            }
+        }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -225,6 +263,11 @@ pub fn update(
 
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
+        }
+        InputEvent::HandleEsc => handle_esc(state),
+        
+        InputEvent::GetStatus(account_info) => {
+            state.account_info = account_info;
         }
         _ => {}
     }
@@ -325,6 +368,24 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
+fn handle_esc(state: &mut AppState) {
+    state.input.clear();
+    state.cursor_position = 0;
+    if state.show_sessions_dialog {
+        state.show_sessions_dialog = false;
+    } else if state.show_helper_dropdown {
+        state.show_helper_dropdown = false;
+    } else if state.is_dialog_open {
+        state.is_dialog_open = false;
+        if let Some(tool_call) = state.dialog_command.take() {
+            let input = state.input.clone();
+            render_bash_block(&tool_call, &input, false, state);
+        }
+    }else {
+        return;
+    }
+}
+
 fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
@@ -347,10 +408,43 @@ fn handle_input_submitted(
             }
         }
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
+        let selected = state.filtered_helpers[state.helper_selected];
+        
+        match selected {
+            "/sessions" => {
+                // state.show_sessions_dialog = true;
+                // state.session_selected = 0;
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/help" => {
+                push_help_message(state);
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/status" => {
+                push_status_message(state);
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/quit" => {
+                state.show_helper_dropdown = false;
+                state.input.clear();
+                state.cursor_position = 0;
+                std::process::exit(0);
+            }
+            _ => { }
+        }
+        
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        let selected = state.filtered_helpers[state.helper_selected];
         let was_at_bottom = state.scroll == max_scroll;
         state
             .messages
@@ -369,7 +463,8 @@ fn handle_input_submitted(
         }
         state.loading = true;
         state.spinner_frame = 0;
-    } else if !state.input.trim().is_empty() {
+    
+    } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
@@ -619,5 +714,132 @@ pub fn render_bash_block<'a>(
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
+    });
+}
+
+pub fn get_stakpak_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+pub fn push_status_message(state: &mut AppState) {
+    let status_text = state.account_info.clone();
+    let version = get_stakpak_version();
+    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "?".to_string());
+
+    // Default values
+    let mut id = "unknown".to_string();
+    let mut username = "unknown".to_string();
+    let mut name = "unknown".to_string();
+
+    for line in status_text.lines() {
+        if let Some(rest) = line.strip_prefix("ID: ") {
+            id = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("Username: ") {
+            username = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("Name: ") {
+            name = rest.trim().to_string();
+        }
+    }
+
+    let lines = vec![
+        Line::from(vec![Span::styled(format!("Stakpak Code Status v{}", version), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]),
+        Line::from(""),
+        Line::from(vec![Span::styled("Working Directory", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(format!("  L {}", cwd)),
+        Line::from(""),
+        Line::from(vec![Span::styled("Account", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(format!("  L Username: {}", username)),
+        Line::from(format!("  L ID: {}", id)),
+        Line::from(format!("  L Name: {}", name)),
+        Line::from(""),
+    ];
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+    });
+}
+
+pub fn push_help_message(state: &mut AppState) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    let mut lines = Vec::new();
+    // usage mode
+    lines.push(Line::from(vec![Span::styled(
+        "Usage Mode",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )]));
+
+    let usage_modes = vec![
+        ("REPL", "stakpak (interactive session)", Color::White),
+        ("Non-interactive", "stakpak -p  \"prompt\" -c <checkpoint_id>", Color::White),
+    ];
+    for (mode, desc, color) in usage_modes {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(mode),
+            Span::raw(" – "),
+            Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::raw("Run"),Span::styled(" stakpak --help ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),Span::styled("to see all commands", Style::default().fg(Color::Gray))]));
+    lines.push(Line::from(""));
+    // Section header
+    lines.push(Line::from(vec![Span::styled(
+        "Available commands",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+    // Slash-commands header
+    lines.push(Line::from(vec![Span::styled(
+        "Slash-commands",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    )]));
+
+    // Slash-commands list
+    let commands = vec![
+        ("/help", "show this help overlay"),
+        ("/status", "show account status"),
+        ("/sessions", "show list of sessions"),
+        ("/quit", "quit the app"),
+    ];
+    for (cmd, desc) in commands {
+        lines.push(Line::from(vec![
+            Span::styled(cmd, Style::default().fg(Color::Cyan)),
+            Span::raw(" – "),
+            Span::raw(desc),
+        ]));
+    }
+    lines.push(Line::from(""));
+
+    // Keyboard shortcuts header
+    lines.push(Line::from(vec![Span::styled(
+        "Keyboard shortcuts",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    )]));
+    // Shortcuts list
+    let shortcuts = vec![
+        ("Enter", "send message", Color::Yellow),
+        ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
+        ("Up/Down", "scroll prompt history", Color::Yellow),
+        ("Esc", "Closes any open dialog", Color::Yellow),
+        ("Ctrl+C", "quit Codex", Color::Yellow),
+    ];
+    for (key, desc, color) in shortcuts {
+        lines.push(Line::from(vec![
+            Span::styled(key, Style::default().fg(color)),
+            Span::raw(" – "),
+            Span::raw(desc),
+        ]));
+    }
+    lines.push(Line::from(""));
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
     });
 }

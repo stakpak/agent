@@ -7,7 +7,6 @@ pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, upd
 pub use event::map_crossterm_event_to_input_event;
 pub use terminal::TerminalGuard;
 pub use view::view;
-
 use crossterm::{execute, terminal::EnterAlternateScreen, event::{EnableMouseCapture, DisableMouseCapture}};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -24,7 +23,7 @@ pub async fn run_tui(
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let all_helpers = vec!["/help", "/status", "/clear", "/about", "/quit"];
+    let all_helpers = vec!["/help", "/status", "/sessions", "/quit"];
     let mut state = AppState::new(all_helpers.clone());
 
     // Internal channel for event handling
@@ -114,7 +113,8 @@ pub async fn run_tui(
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::InputSubmitted = event {
-                        if !state.input.trim().is_empty() {
+                        // if input starts with / don't submit output event
+                        if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
                         }
                     }
