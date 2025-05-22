@@ -11,49 +11,19 @@ pub enum MessageContent {
     StyledBlock(Vec<Line<'static>>),
 }
 
+pub struct SessionInfo {
+    pub title: String,
+    pub id: String,
+    pub updated_at: String,
+}
+
+// TODO: remove this
 pub fn test_sessions() -> Vec<SessionInfo> {
     vec![
         SessionInfo {
             title: "Create nodejs docker image that downloads the latest version of node".to_string(),
             id: "1".to_string(),
-            created_at: "21/5/25, 12:38 pm".to_string(),
-            info: "1 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "ls".to_string(),
-            id: "2".to_string(),
-            created_at: "20/5/25, 10:38 pm".to_string(),
-            info: "3 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "ls".to_string(),
-            id: "3".to_string(),
-            created_at: "20/5/25, 3:30 pm".to_string(),
-            info: "3 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "Create a fastify server".to_string(),
-            id: "4".to_string(),
-            created_at: "21/5/25, 12:38 pm".to_string(),
-            info: "1 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "nextjs app".to_string(),
-            id: "5".to_string(),
-            created_at: "20/5/25, 10:38 pm".to_string(),
-            info: "3 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "terraform create s3 bucket".to_string(),
-            id: "6".to_string(),
-            created_at: "20/5/25, 3:30 pm".to_string(),
-            info: "3 msgs/0 tools".to_string(),
-        },
-        SessionInfo {
-            title: "ls -la".to_string(),
-            id: "7".to_string(),
-            created_at: "20/5/25, 3:30 pm".to_string(),
-            info: "3 msgs/0 tools".to_string(),
+            updated_at: "21/5/25, 12:38 pm".to_string(),
         },
     ]
 }
@@ -96,12 +66,7 @@ impl Message {
     }
 }
 
-pub struct SessionInfo {
-    pub title: String,
-    pub id: String,
-    pub created_at: String,
-    pub info: String,
-}
+
 
 pub struct AppState {
     pub input: String,
@@ -455,8 +420,8 @@ fn handle_input_submitted(
         
         match selected {
             "/sessions" => {
-                state.show_sessions_dialog = true;
-                state.session_selected = 0;
+                // state.show_sessions_dialog = true;
+                // state.session_selected = 0;
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;
@@ -848,7 +813,7 @@ pub fn push_help_message(state: &mut AppState) {
     let commands = vec![
         ("/help", "show this help overlay"),
         ("/status", "show account status"),
-        ("/sessions", "show list ofsessions"),
+        ("/sessions", "show list of sessions"),
         ("/quit", "quit the app"),
     ];
     for (cmd, desc) in commands {

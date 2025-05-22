@@ -617,7 +617,7 @@ fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
         .sessions
         .iter()
         .map(|s| {
-            let text = format!("{} {} . {}", s.created_at, s.info, s.title);
+            let text = format!("{} . {}", s.updated_at, s.title);
             ListItem::new(Line::from(vec![Span::raw(text)]))
         })
         .collect();
