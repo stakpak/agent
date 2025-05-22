@@ -17,16 +17,8 @@ pub struct SessionInfo {
     pub updated_at: String,
 }
 
-// TODO: remove this
-pub fn test_sessions() -> Vec<SessionInfo> {
-    vec![
-        SessionInfo {
-            title: "Create nodejs docker image that downloads the latest version of node".to_string(),
-            id: "1".to_string(),
-            updated_at: "21/5/25, 12:38 pm".to_string(),
-        },
-    ]
-}
+// TODO: add user list sessions
+pub fn list_sessions() -> Vec<SessionInfo> {vec![]}
 
 pub struct Message {
     pub id: Uuid,
@@ -165,7 +157,7 @@ impl AppState {
             dialog_selected: 0,
             loading: false,
             spinner_frame: 0,
-            sessions: test_sessions(),
+            sessions: list_sessions(),
             show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
