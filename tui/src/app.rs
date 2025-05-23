@@ -1,10 +1,10 @@
+use crate::view::render_system_message;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-use crate::view::render_system_message;
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
@@ -18,7 +18,9 @@ pub struct SessionInfo {
 }
 
 // TODO: add user list sessions
-pub fn list_sessions() -> Vec<SessionInfo> {vec![]}
+pub fn list_sessions() -> Vec<SessionInfo> {
+    vec![]
+}
 
 pub struct Message {
     pub id: Uuid,
@@ -57,8 +59,6 @@ impl Message {
         }
     }
 }
-
-
 
 pub struct AppState {
     pub input: String,
@@ -265,7 +265,7 @@ pub fn update(
             state.loading = is_loading;
         }
         InputEvent::HandleEsc => handle_esc(state),
-        
+
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
         }
@@ -381,7 +381,7 @@ fn handle_esc(state: &mut AppState) {
             let input = state.input.clone();
             render_bash_block(&tool_call, &input, false, state);
         }
-    }else {
+    } else {
         return;
     }
 }
@@ -409,7 +409,7 @@ fn handle_input_submitted(
         }
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let selected = state.filtered_helpers[state.helper_selected];
-        
+
         match selected {
             "/sessions" => {
                 // state.show_sessions_dialog = true;
@@ -439,9 +439,9 @@ fn handle_input_submitted(
                 state.cursor_position = 0;
                 std::process::exit(0);
             }
-            _ => { }
+            _ => {}
         }
-        
+
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
@@ -463,7 +463,6 @@ fn handle_input_submitted(
         }
         state.loading = true;
         state.spinner_frame = 0;
-    
     } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -614,15 +613,18 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                             .map(|(i, _w)| i + 1)
                             .unwrap_or(current.len());
                         if take == 0 {
-                            let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                            let (part, rest) = current.split_at(ch_len);
-                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
-                            current = rest;
-                        } else {
-                            let (part, rest) = current.split_at(take);
-                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
-                            current = rest;
+                            break;
                         }
+                        let mut safe_take = take;
+                        while safe_take > 0 && !current.is_char_boundary(safe_take) {
+                            safe_take -= 1;
+                        }
+                        if safe_take == 0 {
+                            break;
+                        }
+                        let (part, rest) = current.split_at(safe_take);
+                        all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                        current = rest;
                     }
                 }
                 all_lines.push((Line::from(""), *style));
@@ -724,7 +726,9 @@ pub fn get_stakpak_version() -> String {
 pub fn push_status_message(state: &mut AppState) {
     let status_text = state.account_info.clone();
     let version = get_stakpak_version();
-    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "?".to_string());
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "?".to_string());
 
     // Default values
     let mut id = "unknown".to_string();
@@ -742,12 +746,27 @@ pub fn push_status_message(state: &mut AppState) {
     }
 
     let lines = vec![
-        Line::from(vec![Span::styled(format!("Stakpak Code Status v{}", version), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![Span::styled(
+            format!("Stakpak Code Status v{}", version),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
-        Line::from(vec![Span::styled("Working Directory", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![Span::styled(
+            "Working Directory",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(format!("  L {}", cwd)),
         Line::from(""),
-        Line::from(vec![Span::styled("Account", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![Span::styled(
+            "Account",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(format!("  L Username: {}", username)),
         Line::from(format!("  L ID: {}", id)),
         Line::from(format!("  L Name: {}", name)),
@@ -766,12 +785,18 @@ pub fn push_help_message(state: &mut AppState) {
     // usage mode
     lines.push(Line::from(vec![Span::styled(
         "Usage Mode",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )]));
 
     let usage_modes = vec![
         ("REPL", "stakpak (interactive session)", Color::White),
-        ("Non-interactive", "stakpak -p  \"prompt\" -c <checkpoint_id>", Color::White),
+        (
+            "Non-interactive",
+            "stakpak -p  \"prompt\" -c <checkpoint_id>",
+            Color::White,
+        ),
     ];
     for (mode, desc, color) in usage_modes {
         lines.push(Line::from(vec![
@@ -783,22 +808,38 @@ pub fn push_help_message(state: &mut AppState) {
             ),
             Span::raw(mode),
             Span::raw(" – "),
-            Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                desc,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![Span::raw("Run"),Span::styled(" stakpak --help ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),Span::styled("to see all commands", Style::default().fg(Color::Gray))]));
+    lines.push(Line::from(vec![
+        Span::raw("Run"),
+        Span::styled(
+            " stakpak --help ",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("to see all commands", Style::default().fg(Color::Gray)),
+    ]));
     lines.push(Line::from(""));
     // Section header
     lines.push(Line::from(vec![Span::styled(
         "Available commands",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(""));
     // Slash-commands header
     lines.push(Line::from(vec![Span::styled(
         "Slash-commands",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
     )]));
 
     // Slash-commands list
@@ -820,7 +861,9 @@ pub fn push_help_message(state: &mut AppState) {
     // Keyboard shortcuts header
     lines.push(Line::from(vec![Span::styled(
         "Keyboard shortcuts",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
     )]));
     // Shortcuts list
     let shortcuts = vec![

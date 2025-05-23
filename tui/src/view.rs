@@ -1,12 +1,12 @@
 use crate::app::{AppState, MessageContent};
+use crate::app::{Message, get_wrapped_message_lines};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Rect, Alignment},
+    layout::{Alignment, Constraint, Direction, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, List, ListItem, ListState},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
-use crate::app::{Message, get_wrapped_message_lines};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -27,8 +27,18 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.is_dialog_open { 9 } else if state.show_sessions_dialog { 11 } else { 0 }; 
-    let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog { 1 } else { 0 };
+    let dialog_height = if state.is_dialog_open {
+        9
+    } else if state.show_sessions_dialog {
+        11
+    } else {
+        0
+    };
+    let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
+        1
+    } else {
+        0
+    };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
@@ -47,9 +57,24 @@ pub fn view(f: &mut Frame, state: &AppState) {
         .split(f.size());
 
     let message_area = chunks[0];
-    let mut input_area = Rect { x: 0, y: 0, width: 0, height: 0 };
-    let mut dropdown_area = Rect { x: 0, y: 0, width: 0, height: 0 };
-    let mut hint_area = Rect { x: 0, y: 0, width: 0, height: 0 };
+    let mut input_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+    let mut dropdown_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+    let mut hint_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
     if !state.show_sessions_dialog {
         input_area = chunks[3];
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
@@ -159,15 +184,18 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                             .map(|(i, _w)| i + 1)
                             .unwrap_or(current.len());
                         if take == 0 {
-                            let ch_len = current.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                            let (part, rest) = current.split_at(ch_len);
-                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
-                            current = rest;
-                        } else {
-                            let (part, rest) = current.split_at(take);
-                            all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
-                            current = rest;
+                            break;
                         }
+                        let mut safe_take = take;
+                        while safe_take > 0 && !current.is_char_boundary(safe_take) {
+                            safe_take -= 1;
+                        }
+                        if safe_take == 0 {
+                            break;
+                        }
+                        let (part, rest) = current.split_at(safe_take);
+                        all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
+                        current = rest;
                     }
                 }
                 all_lines.push((Line::from(""), *style));
@@ -437,12 +465,8 @@ fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) 
 fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shortcuts {
         let shortcuts = vec![
-            Line::from(
-                "/ for commands       shift + enter or ctrl + j to insert newline",
-            ),
-            Line::from(
-                "↵ to send message    ctrl + c to quit",
-            ),
+            Line::from("/ for commands       shift + enter or ctrl + j to insert newline"),
+            Line::from("↵ to send message    ctrl + c to quit"),
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
@@ -457,8 +481,7 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
 fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let screen = f.size();
-    let message_lines =
-    get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
     // Clamp so dialog fits on screen
     let dialog_height = 9;
@@ -572,7 +595,8 @@ fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
     let session_count = state.sessions.len() as u16;
     let dialog_height = (session_count + 3).min(max_height);
 
-    let message_lines = crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let message_lines =
+        crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
     if last_message_y + dialog_height > screen.height {
         last_message_y = screen.height.saturating_sub(dialog_height + 1);
@@ -591,7 +615,9 @@ fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
         .border_style(Style::default().fg(Color::LightYellow))
         .title(Span::styled(
             "View session",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ));
     f.render_widget(block, area);
     // Help text
@@ -646,10 +672,13 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
-    let message = Line::from(vec![Span::raw(format!("{pad} - {msg}", pad = " ".repeat(2)))]);
-    lines.push(message);  
-    lines.push(Line::from(vec![Span::raw(" ")]));  
-    
+    let message = Line::from(vec![Span::raw(format!(
+        "{pad} - {msg}",
+        pad = " ".repeat(2)
+    ))]);
+    lines.push(message);
+    lines.push(Line::from(vec![Span::raw(" ")]));
+
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
