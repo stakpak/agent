@@ -116,6 +116,7 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
+    Tab,
 }
 
 #[derive(Debug)]
@@ -201,7 +202,7 @@ pub fn update(
             {
                 handle_dropdown_down(state);
             } else if state.is_dialog_open {
-                handle_dialog_down(state);
+                handle_dialog_down(state, message_area_height, message_area_width);
             } else {
                 handle_scroll_down(state, message_area_height, message_area_width);
             }
@@ -269,9 +270,31 @@ pub fn update(
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
         }
+        InputEvent::Tab => handle_tab(state),
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
+}
+
+
+fn handle_tab(state: &mut AppState) {
+    // state.show_helper_dropdown = true;
+    // state.filtered_helpers = state
+    //     .helpers
+    //     .iter()
+    //     .filter(|h| h.starts_with(&state.input))
+    //     .cloned()
+    //     .collect();
+    // if state.filtered_helpers.is_empty()
+    //     || state.helper_selected >= state.filtered_helpers.len()
+    // {
+    //     state.helper_selected = 0;
+    // }
+
+
+    if state.is_dialog_open {
+        state.dialog_selected = (state.dialog_selected + 1) % 2;
+    }
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
@@ -294,15 +317,36 @@ fn handle_dropdown_down(state: &mut AppState) {
     }
 }
 
+fn can_scroll_up(state: &AppState) -> bool {
+    state.scroll > 0
+}
+
+fn can_scroll_down(state: &AppState, message_area_height: usize, message_area_width: usize) -> bool {
+    let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
+    let total_lines = all_lines.len();
+    let max_scroll = total_lines.saturating_sub(message_area_height);
+    state.scroll < max_scroll
+}
+
 fn handle_dialog_up(state: &mut AppState) {
-    if state.is_dialog_open && state.dialog_selected > 0 {
-        state.dialog_selected -= 1;
+    if state.is_dialog_open {
+        if state.dialog_selected == 0 {
+            if can_scroll_up(state) {
+                handle_scroll_up(state);
+            }
+        } else if state.dialog_selected > 0 {
+            state.dialog_selected -= 1;
+        }
     }
 }
 
-fn handle_dialog_down(state: &mut AppState) {
-    if state.is_dialog_open && state.dialog_selected < 1 {
-        state.dialog_selected += 1;
+fn handle_dialog_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
+    if state.is_dialog_open {
+        if can_scroll_down(state, message_area_height, message_area_width) {
+            handle_scroll_down(state, message_area_height, message_area_width);
+        } else if state.dialog_selected < 1 {
+            state.dialog_selected += 1;
+        }
     }
 }
 
