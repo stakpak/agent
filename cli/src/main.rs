@@ -7,7 +7,10 @@ mod utils;
 
 use commands::{
     Commands,
-    agent::{self, code::RunNonInteractiveConfig},
+    agent::{
+        self,
+        code::{RunInteractiveConfig, RunNonInteractiveConfig},
+    },
 };
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -69,7 +72,14 @@ async fn main() {
                 }
             },
             None => match cli.print || cli.approve {
-                false => match agent::code::run(config).await {
+                false => match agent::code::run(
+                    config,
+                    RunInteractiveConfig {
+                        checkpoint_id: cli.checkpoint_id,
+                    },
+                )
+                .await
+                {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("Ops! something went wrong: {}", e);

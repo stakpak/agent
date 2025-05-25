@@ -4,7 +4,7 @@ use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
     FinishReason, FunctionCall, FunctionCallDelta, FunctionDefinition, MessageContent, Role, Tool,
-    ToolCall, Usage,
+    ToolCall, ToolCallResult, Usage,
 };
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
@@ -276,7 +276,11 @@ pub async fn process_responses_stream(
     Ok(chat_completion_response)
 }
 
-pub async fn run(config: AppConfig) -> Result<(), String> {
+pub struct RunInteractiveConfig {
+    pub checkpoint_id: Option<String>,
+}
+
+pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
     let mut messages: Vec<ChatMessage> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
@@ -295,9 +299,91 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
 
     // Spawn client task
     let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-        let client = Client::new(&config).map_err(|e| e.to_string())?;
+        let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+
+        if let Some(checkpoint_id) = config.checkpoint_id {
+            let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+
+            // Append checkpoint_id to the last assistant message if present
+            if let Some(last_message) = checkpoint_messages
+                .iter_mut()
+                .rev()
+                .find(|message| message.role != Role::User && message.role != Role::Tool)
+            {
+                if last_message.role == Role::Assistant {
+                    last_message.content = Some(MessageContent::String(format!(
+                        "{}\n<checkpoint_id>{}</checkpoint_id>",
+                        last_message
+                            .content
+                            .as_ref()
+                            .unwrap_or(&MessageContent::String(String::new())),
+                        checkpoint_id
+                    )));
+                }
+            }
+
+            for message in &checkpoint_messages {
+                match message.role {
+                    Role::Assistant => {
+                        let _ = input_tx
+                            .send(InputEvent::InputSubmittedWith(
+                                message.content.as_ref().unwrap().to_string(),
+                            ))
+                            .await;
+                    }
+                    Role::User => {
+                        let _ = input_tx
+                            .send(InputEvent::InputSubmittedWith(
+                                message.content.as_ref().unwrap().to_string(),
+                            ))
+                            .await;
+                    }
+                    Role::Tool => {
+                        let tool_call = checkpoint_messages
+                            .iter()
+                            .find(|checkpoint_message| {
+                                checkpoint_message
+                                    .tool_calls
+                                    .as_ref()
+                                    .is_some_and(|tool_calls| {
+                                        message.tool_call_id.as_ref().is_some_and(|tool_call_id| {
+                                            tool_calls
+                                                .iter()
+                                                .any(|tool_call| tool_call.id == *tool_call_id)
+                                        })
+                                    })
+                            })
+                            .and_then(|chat_message| {
+                                chat_message.tool_calls.as_ref().and_then(|tool_calls| {
+                                    message.tool_call_id.as_ref().and_then(|tool_call_id| {
+                                        tool_calls
+                                            .iter()
+                                            .find(|tool_call| tool_call.id == *tool_call_id)
+                                    })
+                                })
+                            });
+
+                        if let Some(tool_call) = tool_call {
+                            let _ = send_input_event(
+                                &input_tx,
+                                InputEvent::ToolResult(ToolCallResult {
+                                    call: tool_call.clone(),
+                                    result: truncate_output(
+                                        &message.content.as_ref().unwrap().to_string(),
+                                    ),
+                                }),
+                            )
+                            .await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            messages.extend(checkpoint_messages);
+        }
 
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
@@ -319,11 +405,14 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
                             .collect::<Vec<String>>()
                             .join("\n");
 
-                        messages.push(tool_result(tool_call.id, result_content.clone()));
+                        messages.push(tool_result(tool_call.clone().id, result_content.clone()));
 
                         send_input_event(
                             &input_tx,
-                            InputEvent::ToolResult(truncate_output(&result_content)),
+                            InputEvent::ToolResult(ToolCallResult {
+                                call: tool_call.clone(),
+                                result: truncate_output(&result_content),
+                            }),
                         )
                         .await?;
                     }
@@ -398,8 +487,7 @@ pub async fn run_non_interactive(
                     last_message
                         .content
                         .as_ref()
-                        .unwrap_or(&MessageContent::String(String::new()))
-                        .to_string(),
+                        .unwrap_or(&MessageContent::String(String::new())),
                     checkpoint_id
                 )));
             }

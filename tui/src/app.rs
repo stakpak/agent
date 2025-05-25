@@ -2,7 +2,7 @@ use crate::view::render_system_message;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 pub enum MessageContent {
@@ -89,7 +89,7 @@ pub enum InputEvent {
     AssistantMessage(String),
     StreamAssistantMessage(Uuid, String),
     RunCommand(ToolCall),
-    ToolResult(String),
+    ToolResult(ToolCallResult),
     Loading(bool),
     InputChanged(char),
     GetStatus(String),
@@ -276,7 +276,6 @@ pub fn update(
     adjust_scroll(state, message_area_height, message_area_width);
 }
 
-
 fn handle_tab(state: &mut AppState) {
     // state.show_helper_dropdown = true;
     // state.filtered_helpers = state
@@ -290,7 +289,6 @@ fn handle_tab(state: &mut AppState) {
     // {
     //     state.helper_selected = 0;
     // }
-
 
     if state.is_dialog_open {
         state.dialog_selected = (state.dialog_selected + 1) % 2;
@@ -321,7 +319,11 @@ fn can_scroll_up(state: &AppState) -> bool {
     state.scroll > 0
 }
 
-fn can_scroll_down(state: &AppState, message_area_height: usize, message_area_width: usize) -> bool {
+fn can_scroll_down(
+    state: &AppState,
+    message_area_height: usize,
+    message_area_width: usize,
+) -> bool {
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
