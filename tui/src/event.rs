@@ -22,6 +22,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             KeyCode::Right => Some(InputEvent::CursorRight),
             KeyCode::PageUp => Some(InputEvent::PageUp),
             KeyCode::PageDown => Some(InputEvent::PageDown),
+            KeyCode::Tab => Some(InputEvent::Tab),
             _ => None,
         },
         Event::Mouse(me) => match me.kind {

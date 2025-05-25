@@ -484,7 +484,7 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
     // Clamp so dialog fits on screen
-    let dialog_height = 9;
+    let dialog_height = 10;
     if last_message_y + dialog_height > screen.height {
         last_message_y = screen.height.saturating_sub(dialog_height + 5);
     }
@@ -504,6 +504,9 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "?".to_string());
+
+    // add a DarkGray line here saying "Press Tab to select" and "Esc to cancel" on the same line
+   
 
     let max_title_width = area.width.saturating_sub(12) as usize;
     let mut title_lines = vec![];
@@ -526,6 +529,14 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
 
     let pad = "  "; // 2 spaces of padding
     let mut lines = vec![];
+
+    let info_line = Line::from(vec![Span::styled(
+        format!("{pad}Press Arrow up/down or Tab to select . Esc to cancel"),
+        Style::default().fg(Color::DarkGray),
+    )]);
+  
+    lines.push(info_line);
+
     for (i, part) in title_lines.iter().enumerate() {
         let is_last = i == title_lines.len() - 1;
         let line = if i == 0 {
@@ -556,12 +567,12 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         width: screen.width - 2,
         height: dialog_height as u16,
     };
-    let desc = ""; // TODO: make this dynamic
+    // let desc = ""; // TODO: make this dynamic
     let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
-    lines.push(Line::from(vec![Span::styled(
-        format!("{pad}{}{pad}", desc),
-        Style::default().fg(Color::Gray),
-    )]));
+    // lines.push(Line::from(vec![Span::styled(
+    //     format!("{pad}{}{pad}", desc),
+    //     Style::default().fg(Color::Gray),
+    // )]));
     lines.push(Line::from(format!("{pad}{pad}")));
     lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
     lines.push(Line::from(format!("{pad}{pad}")));

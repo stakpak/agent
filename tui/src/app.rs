@@ -116,6 +116,7 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
+    Tab,
 }
 
 #[derive(Debug)]
@@ -269,9 +270,31 @@ pub fn update(
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
         }
+        InputEvent::Tab => handle_tab(state),
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
+}
+
+
+fn handle_tab(state: &mut AppState) {
+    // state.show_helper_dropdown = true;
+    // state.filtered_helpers = state
+    //     .helpers
+    //     .iter()
+    //     .filter(|h| h.starts_with(&state.input))
+    //     .cloned()
+    //     .collect();
+    // if state.filtered_helpers.is_empty()
+    //     || state.helper_selected >= state.filtered_helpers.len()
+    // {
+    //     state.helper_selected = 0;
+    // }
+
+
+    if state.is_dialog_open {
+        state.dialog_selected = (state.dialog_selected + 1) % 2;
+    }
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
