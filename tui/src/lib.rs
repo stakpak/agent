@@ -4,14 +4,14 @@ mod terminal;
 mod view;
 
 pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, update};
-pub use event::map_crossterm_event_to_input_event;
-pub use terminal::TerminalGuard;
-pub use view::view;
 use crossterm::{execute, terminal::EnterAlternateScreen};
+pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
+pub use terminal::TerminalGuard;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
+pub use view::view;
 
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
@@ -51,11 +51,10 @@ pub async fn run_tui(
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
                 }
-                if let InputEvent::ToolResult(ref s) = event {
-                    let tool_call = state.dialog_command.clone();
-                    if let Some(tool_call) = tool_call {
-                        render_bash_block(&tool_call, s, true, &mut state);
-                    }
+                if let InputEvent::ToolResult(ref tool_call_result) = event {
+                    let tool_call = tool_call_result.call.clone();
+                    let result = tool_call_result.result.clone();
+                    render_bash_block(&tool_call, &result, true, &mut state);
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {

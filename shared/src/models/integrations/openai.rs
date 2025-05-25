@@ -299,6 +299,12 @@ pub struct ToolCall {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ToolCallResult {
+    pub call: ToolCall,
+    pub result: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
