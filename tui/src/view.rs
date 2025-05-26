@@ -530,11 +530,7 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let mut lines = vec![];
 
     // Info line
-    let info_line = Line::from(vec![Span::styled(
-        format!("{pad}Press Arrow up/down or Tab to select · Esc to cancel"),
-        Style::default().fg(Color::DarkGray),
-    )]);
-    lines.push(info_line);
+ 
 
     // Command line (single line, truncated to 3 words)
     let command_line = Line::from(vec![Span::styled(
@@ -569,6 +565,13 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
             style,
         )]));
     }
+
+    lines.push(Line::from(format!("{pad}")));
+    let info_line = Line::from(vec![Span::styled(
+        format!("{pad}Press ↑ ↓ or Tab to select · Esc to cancel"),
+        Style::default().fg(Color::DarkGray),
+    )]);
+    lines.push(info_line);
 
     let dialog = Paragraph::new(lines)
         .block(
