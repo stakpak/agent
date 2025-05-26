@@ -9,7 +9,7 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
 
-use crate::{client::Client, config::AppConfig};
+use crate::{client::Client, config::AppConfig, utils::local_context::LocalContext};
 
 use super::truncate_output;
 
@@ -278,6 +278,7 @@ pub async fn process_responses_stream(
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
+    pub local_context: Option<LocalContext>,
 }
 
 pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -327,14 +328,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
             for message in &checkpoint_messages {
                 match message.role {
-                    Role::Assistant => {
-                        if let Some(content) = &message.content {
-                            let _ = input_tx
-                                .send(InputEvent::InputSubmittedWith(content.to_string()))
-                                .await;
-                        }
-                    }
-                    Role::User => {
+                    Role::Assistant | Role::User => {
                         if let Some(content) = &message.content {
                             let _ = input_tx
                                 .send(InputEvent::InputSubmittedWith(content.to_string()))
@@ -398,6 +392,15 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
                 OutputEvent::UserMessage(user_input) => {
+                    let (user_input, local_context) =
+                        add_local_context(&messages, &user_input, &config.local_context);
+                    if let Some(local_context) = local_context {
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::InputSubmittedWith(local_context.to_string()),
+                        )
+                        .await?;
+                    }
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
@@ -468,6 +471,7 @@ pub struct RunNonInteractiveConfig {
     pub approve: bool,
     pub verbose: bool,
     pub checkpoint_id: Option<String>,
+    pub local_context: Option<LocalContext>,
 }
 
 pub async fn run_non_interactive(
@@ -533,7 +537,9 @@ pub async fn run_non_interactive(
     }
 
     if !config.prompt.is_empty() {
-        chat_messages.push(user_message(config.prompt));
+        let (user_input, _local_context) =
+            add_local_context(&chat_messages, &config.prompt, &config.local_context);
+        chat_messages.push(user_message(user_input));
     }
 
     let response = client
@@ -556,4 +562,26 @@ pub async fn run_non_interactive(
     }
 
     Ok(())
+}
+
+fn add_local_context<'a>(
+    messages: &'a Vec<ChatMessage>,
+    user_input: &'a str,
+    local_context: &'a Option<LocalContext>,
+) -> (String, Option<&'a LocalContext>) {
+    if let Some(local_context) = local_context {
+        // only add local context if this is the first message
+        if messages.is_empty() {
+            let formatted_input = format!(
+                "{}\n\n<local_context>\n{}\n</local_context>",
+                user_input,
+                local_context.to_string()
+            );
+            (formatted_input, Some(local_context))
+        } else {
+            (user_input.to_string(), None)
+        }
+    } else {
+        (user_input.to_string(), None)
+    }
 }

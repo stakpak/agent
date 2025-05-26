@@ -15,6 +15,7 @@ use commands::{
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::check_update;
+use utils::local_context::analyze_local_context;
 
 #[derive(Parser, PartialEq)]
 #[command(name = "stakpak")]
@@ -71,29 +72,15 @@ async fn main() {
                     std::process::exit(1);
                 }
             },
-            None => match cli.print || cli.approve {
-                false => match agent::code::run(
-                    config,
-                    RunInteractiveConfig {
-                        checkpoint_id: cli.checkpoint_id,
-                    },
-                )
-                .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("Ops! something went wrong: {}", e);
-                        std::process::exit(1);
-                    }
-                },
-                true => {
-                    match agent::code::run_non_interactive(
+            None => {
+                let local_context = analyze_local_context().await.ok();
+
+                match cli.print || cli.approve {
+                    false => match agent::code::run(
                         config,
-                        RunNonInteractiveConfig {
-                            prompt: cli.prompt.unwrap(),
-                            approve: cli.approve,
-                            verbose: cli.verbose,
+                        RunInteractiveConfig {
                             checkpoint_id: cli.checkpoint_id,
+                            local_context,
                         },
                     )
                     .await
@@ -103,9 +90,29 @@ async fn main() {
                             eprintln!("Ops! something went wrong: {}", e);
                             std::process::exit(1);
                         }
+                    },
+                    true => {
+                        match agent::code::run_non_interactive(
+                            config,
+                            RunNonInteractiveConfig {
+                                prompt: cli.prompt.unwrap(),
+                                approve: cli.approve,
+                                verbose: cli.verbose,
+                                checkpoint_id: cli.checkpoint_id,
+                                local_context,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("Ops! something went wrong: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
                     }
                 }
-            },
+            }
         },
         Err(e) => eprintln!("Failed to load config: {}", e),
     }

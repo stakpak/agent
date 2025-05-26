@@ -8,9 +8,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 use serde_json::Value;
+use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
-use stakpak_shared::models::integrations::openai::{ToolCall};
-
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -485,9 +484,12 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 fn extract_and_truncate_command_for_dialog(tool_call: &ToolCall) -> String {
     let command = serde_json::from_str::<Value>(&tool_call.function.arguments)
         .ok()
-        .and_then(|v| v.get("command").and_then(|c| c.as_str().map(|s| s.to_string())))
+        .and_then(|v| {
+            v.get("command")
+                .and_then(|c| c.as_str().map(|s| s.to_string()))
+        })
         .unwrap_or_else(|| "unknown command".to_string());
-    
+
     // Split by whitespace and take first 3 words
     let words: Vec<&str> = command.split_whitespace().take(3).collect();
     if words.is_empty() {
@@ -501,15 +503,15 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let screen = f.size();
     let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
-    
+
     // Fixed dialog height (no longer dynamic based on command length)
     let dialog_height = 10;
-    
+
     // Clamp so dialog fits on screen
     if last_message_y + dialog_height > screen.height {
         last_message_y = screen.height.saturating_sub(dialog_height + 5);
     }
-    
+
     let area = ratatui::layout::Rect {
         x: 1,
         y: last_message_y,
@@ -542,16 +544,16 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
             .add_modifier(Modifier::BOLD),
     )]);
     lines.push(command_line);
-    
+
     // Empty line
     lines.push(Line::from(format!("{pad}{pad}")));
-    
+
     // Question
     lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
-    
+
     // Empty line
     lines.push(Line::from(format!("{pad}{pad}")));
-    
+
     // Options
     let options = ["Yes", "No, and tell Stakpak what to do differently (esc)"];
     for (i, opt) in options.iter().enumerate() {
@@ -567,7 +569,7 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
             style,
         )]));
     }
-    
+
     let dialog = Paragraph::new(lines)
         .block(
             Block::default()

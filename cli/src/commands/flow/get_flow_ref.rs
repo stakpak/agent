@@ -1,4 +1,4 @@
-use crate::client::{models::FlowRef, Client};
+use crate::client::{Client, models::FlowRef};
 
 pub async fn get_flow_ref(client: &Client, flow_ref: String) -> Result<FlowRef, String> {
     let parts: Vec<&str> = flow_ref.split('/').collect();

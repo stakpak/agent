@@ -3,7 +3,9 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, render_bash_result_block, update};
+pub use app::{
+    AppState, InputEvent, Message, OutputEvent, render_bash_block, render_bash_result_block, update,
+};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};

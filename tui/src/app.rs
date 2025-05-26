@@ -172,11 +172,11 @@ impl AppState {
 // Helper function to extract and truncate command name
 fn extract_and_truncate_command(tool_call: &ToolCall) -> String {
     let full_command = extract_full_command(tool_call);
-    
+
     if full_command == "unknown command" {
         return full_command;
     }
-    
+
     // Split by whitespace and take first 3 words
     let words: Vec<&str> = full_command.split_whitespace().take(3).collect();
     if words.is_empty() {
@@ -194,13 +194,13 @@ fn extract_full_command(tool_call: &ToolCall) -> String {
             return command.to_string();
         }
     }
-    
+
     // If JSON parsing fails, try to extract the command manually
     // Look for the pattern: "command": "..."
     let args = &tool_call.function.arguments;
     if let Some(start_pos) = args.find("\"command\":") {
         let after_command = &args[start_pos + 10..]; // Skip past "command":
-        
+
         // Skip whitespace and opening quote
         let trimmed = after_command.trim_start();
         if let Some(content_start) = trimmed.strip_prefix('"') {
@@ -208,7 +208,7 @@ fn extract_full_command(tool_call: &ToolCall) -> String {
             let mut end_pos = 0;
             let mut chars = content_start.chars();
             let mut escaped = false;
-            
+
             while let Some(ch) = chars.next() {
                 if escaped {
                     escaped = false;
@@ -220,39 +220,42 @@ fn extract_full_command(tool_call: &ToolCall) -> String {
                 }
                 end_pos += ch.len_utf8();
             }
-            
+
             if end_pos > 0 {
                 let command = &content_start[..end_pos];
                 // Unescape the string
-                let unescaped = command.replace("\\\"", "\"").replace("\\n", "\n").replace("\\\\", "\\");
+                let unescaped = command
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n")
+                    .replace("\\\\", "\\");
                 return unescaped;
             }
         }
     }
-    
+
     "unknown command".to_string()
 }
 
 // Helper function to format command content properly
 fn format_command_content(command: &str) -> Vec<String> {
     let mut formatted_lines = Vec::new();
-    
+
     // Handle heredoc commands specially
     if command.contains("<<") {
         let parts: Vec<&str> = command.split("<<").collect();
         if parts.len() >= 2 {
             // Add the command part before heredoc
             formatted_lines.push(parts[0].trim().to_string());
-            
+
             // Find the heredoc delimiter
             let heredoc_part = parts[1];
             if let Some(delimiter_end) = heredoc_part.find('\n') {
                 let delimiter_line = &heredoc_part[..delimiter_end];
                 formatted_lines.push(format!("<< {}", delimiter_line.trim()));
-                
+
                 // Add the content after the first newline
                 let content = &heredoc_part[delimiter_end + 1..];
-                
+
                 // Split content by literal \n sequences and actual newlines
                 let content_lines: Vec<&str> = content.split("\\n").collect();
                 for (i, line) in content_lines.iter().enumerate() {
@@ -276,7 +279,7 @@ fn format_command_content(command: &str) -> Vec<String> {
             }
         }
     }
-    
+
     formatted_lines
 }
 
@@ -411,7 +414,7 @@ pub fn update(
             state.is_dialog_open = true;
             state.dialog_command = Some(tool_call.clone());
             state.dialog_selected = 0;
-            
+
             // Create and add the pending bash message (info mode) with FULL command
             let full_command = extract_full_command(&tool_call);
             let message_id = render_bash_block(&tool_call, &full_command, false, state, true);
@@ -564,15 +567,15 @@ fn handle_esc(state: &mut AppState) {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
         state.is_dialog_open = false;
-        
+
         // Remove the pending bash message when dialog is cancelled
         if let Some(pending_id) = state.pending_bash_message_id.take() {
             state.messages.retain(|msg| msg.id != pending_id);
         }
-        
+
         state.dialog_command = None;
     }
-    
+
     state.input.clear();
     state.cursor_position = 0;
 }
@@ -587,14 +590,14 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
-        
+
         if state.dialog_selected == 0 {
             // User selected "Yes" - just remove the pending message and send command
             // Don't create any new message here, let ToolResult handle it
             if let Some(pending_id) = state.pending_bash_message_id.take() {
                 state.messages.retain(|msg| msg.id != pending_id);
             }
-            
+
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
@@ -602,7 +605,7 @@ fn handle_input_submitted(
             // User selected "No" - remove the pending message and create rejection message
             if let Some(pending_id) = state.pending_bash_message_id.take() {
                 state.messages.retain(|msg| msg.id != pending_id);
-                
+
                 // Clone dialog_command before mutating state
                 let tool_call_opt = state.dialog_command.clone();
                 if let Some(tool_call) = &tool_call_opt {
@@ -611,7 +614,7 @@ fn handle_input_submitted(
                 }
             }
         }
-        
+
         state.dialog_command = None;
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let selected = state.filtered_helpers[state.helper_selected];
@@ -855,32 +858,30 @@ pub fn render_bash_block<'a>(
     is_info: bool, // New parameter to indicate if this is an info message
 ) -> Uuid {
     let mut lines = Vec::new();
-    
+
     // Choose color based on mode
     let main_color = if is_info {
-        Color::DarkGray  // Info mode (pending approval)
+        Color::DarkGray // Info mode (pending approval)
     } else {
-        Color::LightGreen  // Regular mode (approved/executed)
+        Color::LightGreen // Regular mode (approved/executed)
     };
-    
+
     let title_color = if is_info {
-        Color::DarkGray  // Info mode (pending approval)
+        Color::DarkGray // Info mode (pending approval)
     } else {
-        Color::White  // Regular mode (approved/executed)
+        Color::White // Regular mode (approved/executed)
     };
-    
+
     if is_info {
         // For info messages, create a nice header with file detection
         let full_command = output;
         let file_info = extract_file_info(full_command);
-        
+
         // Header line
         lines.push(Line::from(vec![
             Span::styled(
                 "● ",
-                Style::default()
-                    .fg(main_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(main_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Bash",
@@ -889,22 +890,16 @@ pub fn render_bash_block<'a>(
                     .add_modifier(Modifier::BOLD),
             ),
             if let Some(file_desc) = file_info {
-                Span::styled(
-                    format!(" ({})", file_desc),
-                    Style::default().fg(main_color),
-                )
+                Span::styled(format!(" ({})", file_desc), Style::default().fg(main_color))
             } else {
-                Span::styled(
-                    "",
-                    Style::default().fg(main_color),
-                )
+                Span::styled("", Style::default().fg(main_color))
             },
         ]));
-        
+
         // Format and show the command content properly
         let formatted_lines = format_command_content(full_command);
         let output_pad = "    "; // 4 spaces for indentation
-        
+
         for (i, formatted_line) in formatted_lines.iter().enumerate() {
             let prefix = if i == 0 { "└ " } else { "  " };
             lines.push(Line::from(vec![
@@ -925,14 +920,12 @@ pub fn render_bash_block<'a>(
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "unknown command".to_string());
-            
+
         // Header
         lines.push(Line::from(vec![
             Span::styled(
                 "● ",
-                Style::default()
-                    .fg(main_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(main_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Bash",
@@ -946,14 +939,14 @@ pub fn render_bash_block<'a>(
             ),
             Span::styled("...", Style::default().fg(Color::Gray)),
         ]));
-        
+
         if !accepted {
             lines.push(Line::from(vec![Span::styled(
                 "  L No (tell Stakpak what to do differently)",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )]));
         }
-        
+
         // Output lines for regular (non-info) messages
         let output_pad = "    "; // 4 spaces, adjust as needed
         for (i, line) in output.lines().enumerate() {
@@ -967,7 +960,7 @@ pub fn render_bash_block<'a>(
             ]));
         }
     }
-    
+
     let mut owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
@@ -983,27 +976,23 @@ pub fn render_bash_block<'a>(
         "  ",
         Style::default().fg(Color::Gray),
     )]));
-    
+
     let message_id = Uuid::new_v4();
     state.messages.push(Message {
         id: message_id,
         content: MessageContent::StyledBlock(owned_lines),
     });
-    
+
     message_id
 }
 
-pub fn render_bash_result_block(
-    tool_call: &ToolCall,
-    result: &str,
-    state: &mut AppState,
-) {
+pub fn render_bash_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
     let mut lines = Vec::new();
-    
+
     // Extract the actual command that was executed
     let full_command = extract_full_command(tool_call);
     let file_info = extract_file_info(&full_command);
-    
+
     // Header line with approved colors (green bullet, white text)
     lines.push(Line::from(vec![
         Span::styled(
@@ -1031,7 +1020,7 @@ pub fn render_bash_result_block(
         },
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
-    
+
     // Show the command output
     let output_pad = "    "; // 4 spaces for indentation
     for (i, line) in result.lines().enumerate() {
@@ -1044,7 +1033,7 @@ pub fn render_bash_result_block(
             Span::styled(line, Style::default().fg(Color::Gray)),
         ]));
     }
-    
+
     let mut owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
@@ -1060,7 +1049,7 @@ pub fn render_bash_result_block(
         "  ",
         Style::default().fg(Color::Gray),
     )]));
-    
+
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
@@ -1068,12 +1057,9 @@ pub fn render_bash_result_block(
 }
 
 // Function to render a rejected bash command (when user selects "No")
-pub fn render_bash_block_rejected(
-    command_name: &str,
-    state: &mut AppState,
-) {
+pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
     let mut lines = Vec::new();
-    
+
     // Header - similar to regular bash block
     lines.push(Line::from(vec![
         Span::styled(
@@ -1094,13 +1080,13 @@ pub fn render_bash_block_rejected(
         ),
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
-    
+
     // Add the rejection line
     lines.push(Line::from(vec![Span::styled(
         "  L No (tell Stakpak what to do differently)",
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     )]));
-    
+
     let mut owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
@@ -1116,7 +1102,7 @@ pub fn render_bash_block_rejected(
         "  ",
         Style::default().fg(Color::Gray),
     )]));
-    
+
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
