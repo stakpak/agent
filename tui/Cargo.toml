@@ -7,9 +7,9 @@ edition = "2024"
 stakpak-shared = { path = "../shared" }
 regex = { workspace = true }
 serde_json = { workspace = true }
-ratatui = "0.26"
-crossterm = "0.27"
+ratatui = "0.29"
+crossterm = "0.29"
 tokio = { version = "1.39", features = ["full"] }
 unicode-width = "0.2.0"
 uuid = { workspace = true }
-
+tui-markdown = "0.3.5"
