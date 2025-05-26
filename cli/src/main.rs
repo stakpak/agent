@@ -15,7 +15,7 @@ use commands::{
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::check_update;
-use utils::system_context::get_environment_details;
+use utils::local_context::analyze_local_context;
 
 #[derive(Parser, PartialEq)]
 #[command(name = "stakpak")]
@@ -73,14 +73,14 @@ async fn main() {
                 }
             },
             None => {
-                let environment_details = get_environment_details(config.clone()).await.ok();
+                let local_context = analyze_local_context().await.ok();
 
                 match cli.print || cli.approve {
                     false => match agent::code::run(
                         config,
                         RunInteractiveConfig {
                             checkpoint_id: cli.checkpoint_id,
-                            environment_details,
+                            local_context,
                         },
                     )
                     .await
@@ -99,7 +99,7 @@ async fn main() {
                                 approve: cli.approve,
                                 verbose: cli.verbose,
                                 checkpoint_id: cli.checkpoint_id,
-                                environment_details,
+                                local_context,
                             },
                         )
                         .await

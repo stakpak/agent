@@ -1,4 +1,3 @@
-use crate::config::AppConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -8,12 +7,13 @@ use std::path::Path;
 use std::process::Command;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EnvironmentDetails {
+pub struct LocalContext {
     pub operating_system: String,
     pub shell_type: String,
     pub is_container: bool,
     pub working_directory: String,
     pub file_structure: HashMap<String, FileInfo>,
+    pub git_info: Option<GitInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -23,20 +23,52 @@ pub struct FileInfo {
     pub children: Option<Vec<String>>,
 }
 
-impl fmt::Display for EnvironmentDetails {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitInfo {
+    pub is_git_repo: bool,
+    pub current_branch: Option<String>,
+    pub has_uncommitted_changes: Option<bool>,
+    pub remote_url: Option<String>,
+}
+
+impl fmt::Display for LocalContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "# System Environment Details")?;
+        writeln!(f, "# System Details")?;
         writeln!(f, "Operating System: {}", self.operating_system)?;
         writeln!(f, "Shell Type: {}", self.shell_type)?;
         writeln!(
             f,
-            "Container Environment: {}",
+            "Running in Container Environment: {}",
             if self.is_container { "yes" } else { "no" }
         )?;
-        writeln!(f)?;
+
+        // Display git information
+        if let Some(git_info) = &self.git_info {
+            if git_info.is_git_repo {
+                writeln!(f, "Git Repository: yes")?;
+                if let Some(branch) = &git_info.current_branch {
+                    writeln!(f, "Current Branch: {}", branch)?;
+                }
+                if let Some(has_changes) = git_info.has_uncommitted_changes {
+                    writeln!(
+                        f,
+                        "Uncommitted Changes: {}",
+                        if has_changes { "yes" } else { "no" }
+                    )?;
+                } else {
+                    writeln!(f, "Uncommitted Changes: no")?;
+                }
+                if let Some(remote) = &git_info.remote_url {
+                    writeln!(f, "Remote URL: {}", remote)?;
+                }
+            } else {
+                writeln!(f, "Git Repository: no")?;
+            }
+        }
+
         writeln!(
             f,
-            "# Current Working Directory ({}) Contents",
+            "# Current Working Directory ({})",
             self.working_directory
         )?;
         if self.file_structure.is_empty() {
@@ -46,48 +78,29 @@ impl fmt::Display for EnvironmentDetails {
             let mut entries: Vec<_> = self.file_structure.iter().collect();
             entries.sort_by_key(|(name, info)| (info.is_directory, name.to_lowercase()));
 
-            // First show directories
-            let directories: Vec<_> = entries
-                .iter()
-                .filter(|(_, info)| info.is_directory)
-                .collect();
-            if !directories.is_empty() {
-                for (name, info) in directories {
+            // Display as tree structure like ls output
+            for (i, (name, info)) in entries.iter().enumerate() {
+                let is_last = i == entries.len() - 1;
+                let prefix = if is_last { "└── " } else { "├── " };
+
+                write!(f, "{}", prefix)?;
+
+                if info.is_directory {
                     write!(f, "{}/", name)?;
                     if let Some(children) = &info.children {
                         if !children.is_empty() {
-                            write!(f, " ({} items", children.len())?;
-                            if children.len() <= 5 {
-                                write!(f, ": {})", children.join(", "))?;
-                            } else {
-                                let first_few: Vec<_> = children.iter().take(3).cloned().collect();
-                                write!(
-                                    f,
-                                    ": {}, ... and {} more)",
-                                    first_few.join(", "),
-                                    children.len() - 3
-                                )?;
-                            }
+                            write!(f, " ({} items)", children.len())?;
                         } else {
                             write!(f, " (empty)")?;
                         }
                     }
-                    writeln!(f)?;
-                }
-            }
-            // Then show files
-            let files: Vec<_> = entries
-                .iter()
-                .filter(|(_, info)| !info.is_directory)
-                .collect();
-            if !files.is_empty() {
-                for (name, info) in files {
+                } else {
                     write!(f, "{}", name)?;
                     if let Some(size) = info.size {
                         write!(f, " ({})", format_file_size(size))?;
                     }
-                    writeln!(f)?;
                 }
+                writeln!(f)?;
             }
         }
 
@@ -112,21 +125,21 @@ fn format_file_size(size: u64) -> String {
     }
 }
 
-pub async fn get_environment_details(
-    _config: AppConfig,
-) -> Result<EnvironmentDetails, Box<dyn std::error::Error>> {
+pub async fn analyze_local_context() -> Result<LocalContext, Box<dyn std::error::Error>> {
     let operating_system = get_operating_system();
     let shell_type = get_shell_type();
     let is_container = detect_container_environment();
     let working_directory = get_working_directory()?;
     let file_structure = get_file_structure(&working_directory)?;
+    let git_info = Some(get_git_info(&working_directory));
 
-    Ok(EnvironmentDetails {
+    Ok(LocalContext {
         operating_system,
         shell_type,
         is_container,
         working_directory,
         file_structure,
+        git_info,
     })
 }
 
@@ -368,4 +381,95 @@ fn get_file_structure(
     }
 
     Ok(file_structure)
+}
+
+fn get_git_info(dir_path: &str) -> GitInfo {
+    let path = Path::new(dir_path);
+
+    // Check if .git directory exists
+    let git_dir = path.join(".git");
+    if !git_dir.exists() {
+        return GitInfo {
+            is_git_repo: false,
+            current_branch: None,
+            has_uncommitted_changes: None,
+            remote_url: None,
+        };
+    }
+
+    let mut git_info = GitInfo {
+        is_git_repo: true,
+        current_branch: None,
+        has_uncommitted_changes: None,
+        remote_url: None,
+    };
+
+    // Get current branch
+    if let Ok(output) = Command::new("git")
+        .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(path)
+        .output()
+    {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !branch.is_empty() && branch != "HEAD" {
+                git_info.current_branch = Some(branch);
+            }
+        }
+    }
+
+    // Check for uncommitted changes
+    if let Ok(output) = Command::new("git")
+        .args(&["status", "--porcelain"])
+        .current_dir(path)
+        .output()
+    {
+        if output.status.success() {
+            let status_output = String::from_utf8_lossy(&output.stdout);
+            git_info.has_uncommitted_changes = Some(!status_output.trim().is_empty());
+        }
+    }
+
+    // Get remote URL (try origin first, then any remote)
+    if let Ok(output) = Command::new("git")
+        .args(&["remote", "get-url", "origin"])
+        .current_dir(path)
+        .output()
+    {
+        if output.status.success() {
+            let remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !remote_url.is_empty() {
+                git_info.remote_url = Some(remote_url);
+            }
+        }
+    } else {
+        // If origin doesn't exist, try to get any remote
+        if let Ok(output) = Command::new("git")
+            .args(&["remote"])
+            .current_dir(path)
+            .output()
+        {
+            if output.status.success() {
+                let remotes = String::from_utf8_lossy(&output.stdout);
+                if let Some(first_remote) = remotes.lines().next() {
+                    if let Ok(url_output) = Command::new("git")
+                        .args(&["remote", "get-url", first_remote])
+                        .current_dir(path)
+                        .output()
+                    {
+                        if url_output.status.success() {
+                            let remote_url = String::from_utf8_lossy(&url_output.stdout)
+                                .trim()
+                                .to_string();
+                            if !remote_url.is_empty() {
+                                git_info.remote_url = Some(remote_url);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    git_info
 }
