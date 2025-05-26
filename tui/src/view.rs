@@ -9,6 +9,8 @@ use ratatui::{
 };
 use serde_json::Value;
 use uuid::Uuid;
+use stakpak_shared::models::integrations::openai::{ToolCall};
+
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -479,15 +481,35 @@ fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     }
 }
 
+// Helper function to extract and truncate command name for dialog display
+fn extract_and_truncate_command_for_dialog(tool_call: &ToolCall) -> String {
+    let command = serde_json::from_str::<Value>(&tool_call.function.arguments)
+        .ok()
+        .and_then(|v| v.get("command").and_then(|c| c.as_str().map(|s| s.to_string())))
+        .unwrap_or_else(|| "unknown command".to_string());
+    
+    // Split by whitespace and take first 3 words
+    let words: Vec<&str> = command.split_whitespace().take(3).collect();
+    if words.is_empty() {
+        "unknown command".to_string()
+    } else {
+        words.join(" ")
+    }
+}
+
 fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let screen = f.size();
     let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
-    // Clamp so dialog fits on screen
+    
+    // Fixed dialog height (no longer dynamic based on command length)
     let dialog_height = 10;
+    
+    // Clamp so dialog fits on screen
     if last_message_y + dialog_height > screen.height {
         last_message_y = screen.height.saturating_sub(dialog_height + 5);
     }
+    
     let area = ratatui::layout::Rect {
         x: 1,
         y: last_message_y,
@@ -495,87 +517,43 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         height: dialog_height,
     };
 
-    let command_name =
-        serde_json::from_str::<Value>(&state.dialog_command.as_ref().unwrap().function.arguments)
-            .ok()
-            .and_then(|v| {
-                v.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "?".to_string());
-
-    // add a DarkGray line here saying "Press Tab to select" and "Esc to cancel" on the same line
-   
-
-    let max_title_width = area.width.saturating_sub(12) as usize;
-    let mut title_lines = vec![];
-    let mut current = command_name.as_str();
-    while !current.is_empty() {
-        let take = current
-            .char_indices()
-            .scan(0, |acc, (i, c)| {
-                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
-                Some((i, *acc))
-            })
-            .take_while(|&(_i, w)| w <= max_title_width)
-            .last()
-            .map(|(i, _w)| i + 1)
-            .unwrap_or(current.len());
-        let (part, rest) = current.split_at(take);
-        title_lines.push(part.trim());
-        current = rest;
-    }
+    // Extract and truncate command name to 3 words
+    let command_name = if let Some(tool_call) = &state.dialog_command {
+        extract_and_truncate_command_for_dialog(tool_call)
+    } else {
+        "unknown command".to_string()
+    };
 
     let pad = "  "; // 2 spaces of padding
     let mut lines = vec![];
 
+    // Info line
     let info_line = Line::from(vec![Span::styled(
-        format!("{pad}Press Arrow up/down or Tab to select . Esc to cancel"),
+        format!("{pad}Press Arrow up/down or Tab to select · Esc to cancel"),
         Style::default().fg(Color::DarkGray),
     )]);
-  
     lines.push(info_line);
 
-    for (i, part) in title_lines.iter().enumerate() {
-        let is_last = i == title_lines.len() - 1;
-        let line = if i == 0 {
-            if is_last {
-                // Only one line: put everything on it
-                format!("{pad}Bash({part})...{pad}")
-            } else {
-                format!("{pad}Bash({part}")
-            }
-        } else if is_last {
-            format!("{pad}  {part})...{pad}")
-        } else {
-            format!("{pad}  {part}")
-        };
-        lines.push(Line::from(vec![Span::styled(
-            line,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )]));
-    }
-    // Dynamically adjust dialog height
-    let base_height = 9;
-    let dialog_height = base_height + title_lines.len().saturating_sub(1);
-    let area = ratatui::layout::Rect {
-        x: 1,
-        y: last_message_y,
-        width: screen.width - 2,
-        height: dialog_height as u16,
-    };
-    // let desc = ""; // TODO: make this dynamic
-    let options = ["Yes", "No, and tell Stapak what to do differently (esc)"];
-    // lines.push(Line::from(vec![Span::styled(
-    //     format!("{pad}{}{pad}", desc),
-    //     Style::default().fg(Color::Gray),
-    // )]));
+    // Command line (single line, truncated to 3 words)
+    let command_line = Line::from(vec![Span::styled(
+        format!("{pad}Bash({command_name})...{pad}"),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]);
+    lines.push(command_line);
+    
+    // Empty line
     lines.push(Line::from(format!("{pad}{pad}")));
+    
+    // Question
     lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
+    
+    // Empty line
     lines.push(Line::from(format!("{pad}{pad}")));
+    
+    // Options
+    let options = ["Yes", "No, and tell Stakpak what to do differently (esc)"];
     for (i, opt) in options.iter().enumerate() {
         let style = if state.dialog_selected == i {
             Style::default()
@@ -589,6 +567,7 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
             style,
         )]));
     }
+    
     let dialog = Paragraph::new(lines)
         .block(
             Block::default()
