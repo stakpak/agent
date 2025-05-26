@@ -5,6 +5,7 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+use regex::Regex;
 
 pub enum MessageContent {
     Plain(String, Style),
@@ -195,44 +196,22 @@ fn extract_full_command(tool_call: &ToolCall) -> String {
         }
     }
 
-    // If JSON parsing fails, try to extract the command manually
-    // Look for the pattern: "command": "..."
-    let args = &tool_call.function.arguments;
-    if let Some(start_pos) = args.find("\"command\":") {
-        let after_command = &args[start_pos + 10..]; // Skip past "command":
-
-        // Skip whitespace and opening quote
-        let trimmed = after_command.trim_start();
-        if let Some(content_start) = trimmed.strip_prefix('"') {
-            // Find the end of the command string, handling escaped quotes
-            let mut end_pos = 0;
-            let mut chars = content_start.chars();
-            let mut escaped = false;
-
-            while let Some(ch) = chars.next() {
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    // Found unescaped quote - this is the end
-                    break;
-                }
-                end_pos += ch.len_utf8();
-            }
-
-            if end_pos > 0 {
-                let command = &content_start[..end_pos];
-                // Unescape the string
-                let unescaped = command
-                    .replace("\\\"", "\"")
-                    .replace("\\n", "\n")
-                    .replace("\\\\", "\\");
-                return unescaped;
-            }
+    // If JSON parsing fails, try regex
+    let re = Regex::new(r#"command"\s*:\s*"([^"]*)"#).unwrap();
+    if let Some(caps) = re.captures(&tool_call.function.arguments) {
+        if let Some(command) = caps.get(1) {
+            return command.as_str().to_string();
         }
     }
 
+    // If the arguments look like a raw command, return it
+    let trimmed = tool_call.function.arguments.trim();
+    if !trimmed.is_empty() && !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+        return trimmed.to_string();
+    }
+
+    // Log and return unknown
+    eprintln!("Failed to extract command from arguments: {:?}", tool_call.function.arguments);
     "unknown command".to_string()
 }
 
@@ -567,12 +546,6 @@ fn handle_esc(state: &mut AppState) {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
         state.is_dialog_open = false;
-
-        // Remove the pending bash message when dialog is cancelled
-        if let Some(pending_id) = state.pending_bash_message_id.take() {
-            state.messages.retain(|msg| msg.id != pending_id);
-        }
-
         state.dialog_command = None;
     }
 
@@ -592,19 +565,12 @@ fn handle_input_submitted(
         state.cursor_position = 0;
 
         if state.dialog_selected == 0 {
-            // User selected "Yes" - just remove the pending message and send command
-            // Don't create any new message here, let ToolResult handle it
-            if let Some(pending_id) = state.pending_bash_message_id.take() {
-                state.messages.retain(|msg| msg.id != pending_id);
-            }
-
+            
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
         } else {
-            // User selected "No" - remove the pending message and create rejection message
-            if let Some(pending_id) = state.pending_bash_message_id.take() {
-                state.messages.retain(|msg| msg.id != pending_id);
+          
 
                 // Clone dialog_command before mutating state
                 let tool_call_opt = state.dialog_command.clone();
@@ -612,7 +578,7 @@ fn handle_input_submitted(
                     let truncated_command = extract_and_truncate_command(tool_call);
                     render_bash_block_rejected(&truncated_command, state);
                 }
-            }
+            
         }
 
         state.dialog_command = None;
@@ -861,15 +827,21 @@ pub fn render_bash_block<'a>(
 
     // Choose color based on mode
     let main_color = if is_info {
-        Color::DarkGray // Info mode (pending approval)
+        Color::Gray // Info mode (pending approval)
     } else {
         Color::LightGreen // Regular mode (approved/executed)
     };
 
     let title_color = if is_info {
-        Color::DarkGray // Info mode (pending approval)
+        Color::Cyan // Info mode (pending approval)
     } else {
         Color::White // Regular mode (approved/executed)
+    };
+
+    let bash_name = if is_info {
+        "Run Command"
+    } else {
+        "Bash"
     };
 
     if is_info {
@@ -884,7 +856,7 @@ pub fn render_bash_block<'a>(
                 Style::default().fg(main_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Bash",
+                bash_name,
                 Style::default()
                     .fg(title_color)
                     .add_modifier(Modifier::BOLD),
