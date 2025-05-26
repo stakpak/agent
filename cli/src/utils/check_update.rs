@@ -28,7 +28,9 @@ pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
     if current_version != release.tag_name {
         let sep = "\x1b[1;34m═\x1b[0m".repeat(40); // Half-length for better proportions
         println!("\n\x1b[1;34m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
-        println!("\x1b[1;34m┃\x1b[0m\x1b[1;36m⮕ \x1b[1;37m Version Update Available!\x1b[0m\x1b[1;34m ┃\x1b[0m");
+        println!(
+            "\x1b[1;34m┃\x1b[0m\x1b[1;36m⮕ \x1b[1;37m Version Update Available!\x1b[0m\x1b[1;34m ┃\x1b[0m"
+        );
         println!("\x1b[1;34m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m");
         println!(
             "\x1b[1;37m \x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m",

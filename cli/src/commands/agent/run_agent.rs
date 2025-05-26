@@ -4,11 +4,11 @@ use uuid::Uuid;
 
 use crate::{
     client::{
+        Client,
         models::{
             AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentStatus,
             RunAgentInput,
         },
-        Client,
     },
     commands::agent::get_next_input,
     config::AppConfig,

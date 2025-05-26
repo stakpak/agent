@@ -4,8 +4,8 @@ use chrono::Utc;
 use walkdir::WalkDir;
 
 use crate::client::{
-    models::{Document, FlowRef},
     Client, Edit, SaveEditsResponse,
+    models::{Document, FlowRef},
 };
 
 pub async fn push(
