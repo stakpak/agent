@@ -9,7 +9,7 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
 
-use crate::{client::Client, config::AppConfig};
+use crate::{client::Client, config::AppConfig, utils::system_context::EnvironmentDetails};
 
 use super::truncate_output;
 
@@ -278,6 +278,7 @@ pub async fn process_responses_stream(
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
+    pub environment_details: Option<EnvironmentDetails>,
 }
 
 pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -458,6 +459,7 @@ pub struct RunNonInteractiveConfig {
     pub approve: bool,
     pub verbose: bool,
     pub checkpoint_id: Option<String>,
+    pub environment_details: Option<EnvironmentDetails>,
 }
 
 pub async fn run_non_interactive(
