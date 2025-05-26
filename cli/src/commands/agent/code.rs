@@ -328,18 +328,18 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
             for message in &checkpoint_messages {
                 match message.role {
                     Role::Assistant => {
-                        let _ = input_tx
-                            .send(InputEvent::InputSubmittedWith(
-                                message.content.as_ref().unwrap().to_string(),
-                            ))
-                            .await;
+                        if let Some(content) = &message.content {
+                            let _ = input_tx
+                                .send(InputEvent::InputSubmittedWith(content.to_string()))
+                                .await;
+                        }
                     }
                     Role::User => {
-                        let _ = input_tx
-                            .send(InputEvent::InputSubmittedWith(
-                                message.content.as_ref().unwrap().to_string(),
-                            ))
-                            .await;
+                        if let Some(content) = &message.content {
+                            let _ = input_tx
+                                .send(InputEvent::InputSubmittedWith(content.to_string()))
+                                .await;
+                        }
                     }
                     Role::Tool => {
                         let tool_call = checkpoint_messages
@@ -382,6 +382,16 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     _ => {}
                 }
             }
+
+            let tool_calls = checkpoint_messages
+                .last()
+                .filter(|msg| msg.role == Role::Assistant)
+                .and_then(|msg| msg.tool_calls.as_ref());
+
+            if let Some(tool_calls) = tool_calls {
+                send_tool_calls(&input_tx, tool_calls).await?;
+            }
+
             messages.extend(checkpoint_messages);
         }
 
