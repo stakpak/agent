@@ -1,5 +1,6 @@
 mod app;
 mod event;
+mod markdown;
 mod terminal;
 mod view;
 
@@ -62,6 +63,7 @@ pub async fn run_tui(
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
+                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                     let input_height = 3;
                     let margin_height = 2;
                     let dropdown_showing = state.show_helper_dropdown
@@ -81,7 +83,7 @@ pub async fn run_tui(
                             ratatui::layout::Constraint::Length(dropdown_height),
                             ratatui::layout::Constraint::Length(hint_height),
                         ])
-                        .split(term_size);
+                        .split(term_rect);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
@@ -91,6 +93,7 @@ pub async fn run_tui(
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
+                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                     let input_height = 3;
                     let margin_height = 2;
                     let dropdown_showing = state.show_helper_dropdown
@@ -110,7 +113,7 @@ pub async fn run_tui(
                             ratatui::layout::Constraint::Length(dropdown_height),
                             ratatui::layout::Constraint::Length(hint_height),
                         ])
-                        .split(term_size);
+                        .split(term_rect);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::InputSubmitted = event {

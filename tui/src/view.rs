@@ -1,5 +1,6 @@
 use crate::app::{AppState, MessageContent};
 use crate::app::{Message, get_wrapped_message_lines};
+use crate::markdown::render_markdown_to_lines;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Rect},
@@ -13,7 +14,7 @@ use uuid::Uuid;
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
-    let input_area_width = f.size().width.saturating_sub(4) as usize;
+    let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16; // +2 for border
 
@@ -55,7 +56,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.size());
+        .split(f.area());
 
     let message_area = chunks[0];
     let mut input_area = Rect {
@@ -209,6 +210,13 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                 for line in lines {
                     all_lines.push((line.clone(), Style::default()));
                 }
+            }
+            MessageContent::Markdown(markdown) => {
+                let rendered_lines = render_markdown_to_lines(markdown, width);
+                for line in rendered_lines {
+                    all_lines.push((line, Style::default()));
+                }
+                all_lines.push((Line::from(""), Style::default()));
             }
         }
     }
@@ -500,7 +508,7 @@ fn extract_and_truncate_command_for_dialog(tool_call: &ToolCall) -> String {
 }
 
 fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
-    let screen = f.size();
+    let screen = f.area();
     let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
 
@@ -585,7 +593,7 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
 }
 
 fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
-    let screen = f.size();
+    let screen = f.area();
     let max_height = message_area.height.saturating_sub(2).min(20);
     let session_count = state.sessions.len() as u16;
     let dialog_height = (session_count + 3).min(max_height);

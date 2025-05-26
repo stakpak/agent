@@ -1,3 +1,4 @@
+use crate::markdown::render_markdown_to_lines;
 use crate::view::render_system_message;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,6 +12,7 @@ pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
+    Markdown(String),
 }
 
 pub struct SessionInfo {
@@ -58,6 +60,12 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::Styled(line),
+        }
+    }
+    pub fn markdown(text: impl Into<String>) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::Markdown(text.into()),
         }
     }
 }
@@ -136,7 +144,11 @@ impl AppState {
             cursor_visible: true,
             messages: vec![
                 Message::info(
-                    "* Welcome to Stakpak!",
+                    r"
+    ████████   ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖                    
+    ████████  ▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █           
+████████       ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █             
+████████      ▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █ ",
                     Some(Style::default().fg(ratatui::style::Color::Cyan)),
                 ),
                 Message::info("/help for help, /status for your current setup", None),
@@ -810,6 +822,13 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                 for line in lines {
                     all_lines.push((line.clone(), Style::default()));
                 }
+            }
+            MessageContent::Markdown(markdown) => {
+                let rendered_lines = render_markdown_to_lines(markdown, width);
+                for line in rendered_lines {
+                    all_lines.push((line, Style::default()));
+                }
+                all_lines.push((Line::from(""), Style::default()));
             }
         }
     }
