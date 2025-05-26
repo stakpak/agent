@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::client::{
-    models::{FlowRef, ProvisionerType},
+use stakpak_api::{
     Client,
+    models::{FlowRef, ProvisionerType},
 };
 
 pub async fn clone(

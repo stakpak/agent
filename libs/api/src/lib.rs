@@ -14,11 +14,16 @@ pub mod kevin_v1;
 pub mod norbert_v1;
 pub mod stuart_v1;
 
-use crate::config::AppConfig;
-
 pub struct Client {
     client: ReqwestClient,
     base_url: String,
+}
+
+#[derive(Clone, Debug)]
+
+pub struct ClientConfig {
+    pub api_key: Option<String>,
+    pub api_endpoint: String,
 }
 
 #[derive(Deserialize)]
@@ -33,7 +38,7 @@ struct ApiErrorDetail {
 }
 
 impl Client {
-    pub fn new(config: &AppConfig) -> Result<Self, String> {
+    pub fn new(config: &ClientConfig) -> Result<Self, String> {
         if config.api_key.is_none() {
             return Err("API Key not found, please login".into());
         }
@@ -589,6 +594,39 @@ impl Client {
 
         Ok(stream)
     }
+
+    pub async fn generate_code(
+        &self,
+        input: &GenerateCodeInput,
+    ) -> Result<GenerateCodeOutput, String> {
+        let url = format!(
+            "{}/v1/commands/{}/generate",
+            self.base_url, input.provisioner
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<GenerateCodeOutput>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
@@ -813,4 +851,29 @@ impl std::fmt::Display for SimpleLLMRole {
             SimpleLLMRole::Assistant => write!(f, "assistant"),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GenerateCodeInput {
+    pub prompt: String,
+    pub provisioner: ProvisionerType,
+    pub resolve_validation_errors: bool,
+    pub stream: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GenerateCodeOutput {
+    pub prompt: String,
+    pub result: GenerationResult,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GenerationResult {
+    pub created_blocks: Vec<Block>,
+    pub modified_blocks: Vec<Block>,
+    pub removed_blocks: Vec<Block>,
+    pub score: i32,
+    pub selected_blocks: Vec<Block>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub delta: Option<GenerationDelta>,
 }

@@ -2377,6 +2377,7 @@ dependencies = [
  "rust_socketio",
  "serde",
  "serde_json",
+ "stakpak-api",
  "stakpak-mcp-client",
  "stakpak-mcp-server",
  "stakpak-shared",
@@ -2390,6 +2391,20 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "stakpak-api"
+version = "0.1.62"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "stakpak-shared",
+ "uuid",
 ]
 
 [[package]]
@@ -2413,8 +2428,10 @@ version = "0.1.62"
 dependencies = [
  "anyhow",
  "rmcp",
+ "schemars",
  "serde",
  "serde_json",
+ "stakpak-api",
  "stakpak-shared",
  "tokio",
  "tracing",

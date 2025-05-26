@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["cli", "tui", "mcp/client", "mcp/server"]
+members = ["cli", "tui", "libs/shared", "libs/api", "libs/mcp/client", "libs/mcp/server"]
 default-members = ["cli"]
 
 
@@ -24,4 +24,7 @@ rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", features = [
     "transport-child-process",
 ], branch = "main" }
 futures = "0.3.31"
+futures-util = "0.3.31"
 regex = "1.11.1"
+chrono = { version = "0.4.38", features = ["serde"] }
+reqwest = { version = "0.12.9", features = ["json"] }

@@ -1,19 +1,16 @@
 use std::vec;
 
-use uuid::Uuid;
-
 use crate::{
-    client::{
-        models::{
-            AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentStatus,
-            RunAgentInput,
-        },
-        Client,
-    },
-    commands::agent::get_next_input,
-    config::AppConfig,
-    utils::output::setup_output_handler,
+    commands::agent::get_next_input, config::AppConfig, utils::output::setup_output_handler,
 };
+use stakpak_api::{
+    Client,
+    models::{
+        AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentStatus,
+        RunAgentInput,
+    },
+};
+use uuid::Uuid;
 
 use super::get_next_input_interactive;
 
@@ -83,7 +80,7 @@ pub async fn run_agent(
                 println!("\x1b[1;34m{}\x1b[0m", "━".repeat(80));
             }
 
-            let mut processed_outputs: Vec<crate::client::models::RunAgentOutput> = vec![];
+            let mut processed_outputs: Vec<stakpak_api::models::RunAgentOutput> = vec![];
             let mut input = input.clone();
 
             loop {

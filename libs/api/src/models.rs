@@ -100,6 +100,15 @@ pub struct Block {
     pub generated_summary: Option<String>,
 }
 
+impl Block {
+    pub fn get_uri(&self) -> String {
+        format!(
+            "{}#L{}-L{}",
+            self.document_uri, self.start_point.row, self.end_point.row
+        )
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ProvisionerType {
     #[serde(rename = "Terraform")]

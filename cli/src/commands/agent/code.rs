@@ -1,5 +1,7 @@
+use crate::config::AppConfig;
 use futures_util::{Stream, StreamExt};
 use rmcp::model::{CallToolRequestParam, CallToolResult};
+use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
@@ -8,8 +10,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
-
-use crate::{client::Client, config::AppConfig};
 
 use super::truncate_output;
 
@@ -122,9 +122,9 @@ pub async fn get_checkpoint_messages(
         .get_agent_checkpoint(checkpoint_uuid)
         .await
         .map_err(|e| e.to_string())?;
-    let checkpoint_output: crate::client::models::AgentOutput = checkpoint.output;
+    let checkpoint_output: stakpak_api::models::AgentOutput = checkpoint.output;
 
-    if let crate::client::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_output {
+    if let stakpak_api::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_output {
         return Ok(messages.clone());
     }
 
@@ -299,7 +299,11 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
     // Spawn client task
     let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-        let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+        let client = Client::new(&ClientConfig {
+            api_key: ctx.api_key,
+            api_endpoint: ctx.api_endpoint,
+        })
+        .map_err(|e| e.to_string())?;
 
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
@@ -470,7 +474,11 @@ pub async fn run_non_interactive(
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
-    let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+    let client = Client::new(&ClientConfig {
+        api_key: ctx.api_key,
+        api_endpoint: ctx.api_endpoint,
+    })
+    .map_err(|e| e.to_string())?;
 
     if let Some(checkpoint_id) = config.checkpoint_id {
         let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;

@@ -1,23 +1,48 @@
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use stakpak_api::{Client, ClientConfig, GenerateCodeInput, models::ProvisionerType};
 use std::process::Command;
 use tracing::error;
 
 #[derive(Clone)]
-pub struct Tools {}
+pub struct Tools {
+    api_config: ClientConfig,
+}
 
-impl Default for Tools {
-    fn default() -> Self {
-        Self::new()
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
+pub enum Provisioner {
+    #[serde(rename = "Terraform")]
+    Terraform,
+    #[serde(rename = "Kubernetes")]
+    Kubernetes,
+    #[serde(rename = "Dockerfile")]
+    Dockerfile,
+    #[serde(rename = "GithubActions")]
+    GithubActions,
+    #[serde(rename = "None")]
+    None,
+}
+
+impl From<Provisioner> for ProvisionerType {
+    fn from(provisioner: Provisioner) -> Self {
+        match provisioner {
+            Provisioner::Terraform => ProvisionerType::Terraform,
+            Provisioner::Kubernetes => ProvisionerType::Kubernetes,
+            Provisioner::Dockerfile => ProvisionerType::Dockerfile,
+            Provisioner::GithubActions => ProvisionerType::GithubActions,
+            Provisioner::None => ProvisionerType::None,
+        }
     }
 }
 
 #[tool(tool_box)]
 impl Tools {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(api_config: ClientConfig) -> Self {
+        Self { api_config }
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -72,6 +97,91 @@ impl Tools {
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "A tool used to generate code using a given prompt and provisioner")]
+    async fn generate_code(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The prompt to use to generate the code")]
+        prompt: String,
+        #[tool(param)]
+        #[schemars(description = "The provisioner to use to generate the code")]
+        provisioner: Provisioner,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let response = client
+            .generate_code(&GenerateCodeInput {
+                prompt,
+                provisioner: provisioner.into(),
+                resolve_validation_errors: true,
+                stream: false,
+            })
+            .await
+            .map_err(|e| {
+                error!("Failed to generate code: {}", e);
+                McpError::internal_error(
+                    "Failed to generate code",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        fn block_to_markdown(block: &stakpak_api::models::Block) -> String {
+            format!(
+                "### `{}`\n**Location:** `{}`\n```{lang}\n{code}\n```\n",
+                block.name.as_deref().unwrap_or("Unnamed Block"),
+                block.get_uri(),
+                lang = block.language,
+                code = block.code
+            )
+        }
+
+        let result = response.result;
+
+        let created_md = if !result.created_blocks.is_empty() {
+            let blocks = result
+                .created_blocks
+                .iter()
+                .map(block_to_markdown)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("## Created Blocks\n{}", blocks)
+        } else {
+            String::new()
+        };
+        let modified_md = if !result.modified_blocks.is_empty() {
+            let blocks = result
+                .modified_blocks
+                .iter()
+                .map(block_to_markdown)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("## Modified Blocks\n{}", blocks)
+        } else {
+            String::new()
+        };
+        let removed_md = if !result.removed_blocks.is_empty() {
+            let blocks = result
+                .removed_blocks
+                .iter()
+                .map(block_to_markdown)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("## Removed Blocks\n{}", blocks)
+        } else {
+            String::new()
+        };
+
+        let markdown = format!("{}\n{}\n{}", created_md, modified_md, removed_md);
+
+        Ok(CallToolResult::success(vec![Content::text(markdown)]))
     }
 
     //TODO: Add after adding widget for file reading

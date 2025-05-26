@@ -1,10 +1,10 @@
 use uuid::Uuid;
 
-use crate::client::{
+use stakpak_api::{
+    Client,
     models::{
         AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentSessionVisibility,
     },
-    Client,
 };
 
 pub async fn get_or_create_session(

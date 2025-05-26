@@ -3,17 +3,17 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use futures_util::future::BoxFuture;
-use notify::{event::ModifyKind, Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
 use rust_socketio::{
-    asynchronous::{Client as SocketClient, ClientBuilder},
     Payload,
+    asynchronous::{Client as SocketClient, ClientBuilder},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -21,12 +21,12 @@ use tokio::{sync::mpsc, time::sleep};
 use walkdir::WalkDir;
 
 use crate::{
-    client::{
-        models::{Document, FlowRef},
-        Client, Edit,
-    },
     commands::flow::{clone, create_edit, is_supported_file},
     config::AppConfig,
+};
+use stakpak_api::{
+    Client, Edit,
+    models::{Document, FlowRef},
 };
 
 #[derive(Deserialize, Serialize, Debug)]

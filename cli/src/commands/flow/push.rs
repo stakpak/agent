@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use chrono::Utc;
 use walkdir::WalkDir;
 
-use crate::client::{
-    models::{Document, FlowRef},
+use stakpak_api::{
     Client, Edit, SaveEditsResponse,
+    models::{Document, FlowRef},
 };
 
 pub async fn push(
