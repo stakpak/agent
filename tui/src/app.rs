@@ -557,8 +557,15 @@ fn handle_esc(state: &mut AppState) {
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
+        
+        let tool_call_opt = state.dialog_command.clone();
+        if let Some(tool_call) = &tool_call_opt {
+            let truncated_command = extract_and_truncate_command(tool_call);
+            render_bash_block_rejected(&truncated_command, state);
+        }
         state.is_dialog_open = false;
         state.dialog_command = None;
+        
     }
 
     state.input.clear();
@@ -846,7 +853,7 @@ pub fn render_bash_block<'a>(
 
     // Choose color based on mode
     let main_color = if is_info {
-        Color::Gray // Info mode (pending approval)
+        Color::LightBlue // Info mode (pending approval)
     } else {
         Color::LightGreen // Regular mode (approved/executed)
     };
