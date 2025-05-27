@@ -2,11 +2,11 @@ use crate::markdown::render_markdown_to_lines;
 use crate::view::render_system_message;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use regex::Regex;
 use serde_json::Value;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-use regex::Regex;
 
 pub enum MessageContent {
     Plain(String, Style),
@@ -145,10 +145,10 @@ impl AppState {
             messages: vec![
                 Message::info(
                     r"
-    ████████   ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖                    
-    ████████  ▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █           
-████████       ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █             
-████████      ▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █ ",
+ ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
+▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  
+ ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  
+▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
                     Some(Style::default().fg(ratatui::style::Color::Cyan)),
                 ),
                 Message::info("/help for help, /status for your current setup", None),
@@ -223,7 +223,10 @@ fn extract_full_command(tool_call: &ToolCall) -> String {
     }
 
     // Log and return unknown
-    eprintln!("Failed to extract command from arguments: {:?}", tool_call.function.arguments);
+    eprintln!(
+        "Failed to extract command from arguments: {:?}",
+        tool_call.function.arguments
+    );
     "unknown command".to_string()
 }
 
@@ -557,7 +560,6 @@ fn handle_esc(state: &mut AppState) {
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
-        
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let truncated_command = extract_and_truncate_command(tool_call);
@@ -565,7 +567,6 @@ fn handle_esc(state: &mut AppState) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
-        
     }
 
     state.input.clear();
@@ -584,20 +585,16 @@ fn handle_input_submitted(
         state.cursor_position = 0;
 
         if state.dialog_selected == 0 {
-            
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
         } else {
-          
-
-                // Clone dialog_command before mutating state
-                let tool_call_opt = state.dialog_command.clone();
-                if let Some(tool_call) = &tool_call_opt {
-                    let truncated_command = extract_and_truncate_command(tool_call);
-                    render_bash_block_rejected(&truncated_command, state);
-                }
-            
+            // Clone dialog_command before mutating state
+            let tool_call_opt = state.dialog_command.clone();
+            if let Some(tool_call) = &tool_call_opt {
+                let truncated_command = extract_and_truncate_command(tool_call);
+                render_bash_block_rejected(&truncated_command, state);
+            }
         }
 
         state.dialog_command = None;
@@ -864,11 +861,7 @@ pub fn render_bash_block<'a>(
         Color::White // Regular mode (approved/executed)
     };
 
-    let bash_name = if is_info {
-        "Run Command"
-    } else {
-        "Bash"
-    };
+    let bash_name = if is_info { "Run Command" } else { "Bash" };
 
     if is_info {
         // For info messages, create a nice header with file detection

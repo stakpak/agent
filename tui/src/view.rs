@@ -301,8 +301,6 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 word_segments.push((c.to_string(), true));
                 cursor_rendered = true;
                 in_word = !c.is_whitespace();
-
-
             } else if c.is_whitespace() {
                 // End current word if any
                 if in_word && !current_word.is_empty() {
@@ -536,7 +534,6 @@ fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let mut lines = vec![];
 
     // Info line
- 
 
     // Command line (single line, truncated to 3 words)
     let command_line = Line::from(vec![Span::styled(
