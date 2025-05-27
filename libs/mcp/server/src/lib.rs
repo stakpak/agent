@@ -24,11 +24,6 @@ pub async fn start_server(config: MCPServerConfig) -> Result<()> {
     let router = axum::Router::new().nest_service("/mcp", service);
     let tcp_listener = tokio::net::TcpListener::bind(BIND_ADDRESS).await?;
     println!("MCP Server started on {}", BIND_ADDRESS);
-    axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.unwrap();
-        })
-        .await
-        .unwrap();
+    axum::serve(tcp_listener, router).await.unwrap();
     Ok(())
 }

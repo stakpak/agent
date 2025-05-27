@@ -12,5 +12,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 rmcp = { workspace = true }
-schemars = "0.8.22"
 axum = "0.8.4"

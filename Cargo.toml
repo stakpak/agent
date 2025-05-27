@@ -17,7 +17,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { git = "https://github.com/4t145/rust-sdk", features = [
+rmcp = { git = "https://github.com/stakpak/rust-sdk", features = [
     "client",
     "server",
     "reqwest",
@@ -27,9 +27,9 @@ rmcp = { git = "https://github.com/4t145/rust-sdk", features = [
     "transport-streamable-http-server",
     "transport-streamable-http-server-session",
     "transport-worker"
-], branch = "stateless-streamable-http-server" }
+], branch = "schema" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
-reqwest = { version = "0.12.9", features = ["json"] }
+reqwest = { version = "=0.12.15", features = ["json","stream"] }

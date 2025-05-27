@@ -138,10 +138,10 @@ impl std::str::FromStr for ProvisionerType {
 impl std::fmt::Display for ProvisionerType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            ProvisionerType::Terraform => write!(f, "terraform"),
-            ProvisionerType::Kubernetes => write!(f, "kubernetes"),
-            ProvisionerType::Dockerfile => write!(f, "dockerfile"),
-            ProvisionerType::GithubActions => write!(f, "github-actions"),
+            ProvisionerType::Terraform => write!(f, "Terraform"),
+            ProvisionerType::Kubernetes => write!(f, "Kubernetes"),
+            ProvisionerType::Dockerfile => write!(f, "Dockerfile"),
+            ProvisionerType::GithubActions => write!(f, "GithubActions"),
             ProvisionerType::None => write!(f, "none"),
         }
     }

@@ -599,10 +599,7 @@ impl Client {
         &self,
         input: &GenerateCodeInput,
     ) -> Result<GenerateCodeOutput, String> {
-        let url = format!(
-            "{}/v1/commands/{}/generate",
-            self.base_url, input.provisioner
-        );
+        let url = format!("{}/commands/{}/generate", self.base_url, input.provisioner);
 
         let response = self
             .client
