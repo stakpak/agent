@@ -222,7 +222,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     }
     // Add loader as a new message line if loading
     if state.loading {
-        let spinner_chars = ["|", "/", "-", "\\"];
+        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
         let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
         let loading_line = Line::from(vec![Span::styled(
             format!("{} Stakpaking...", spinner),
