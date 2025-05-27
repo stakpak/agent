@@ -1,6 +1,5 @@
 use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
-use schemars::r#gen::SchemaSettings;
 use stakpak_api::ClientConfig;
 use tools::Tools;
 

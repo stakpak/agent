@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::utils::local_context::LocalContext;
 use futures_util::{Stream, StreamExt};
 use rmcp::model::{CallToolRequestParam, CallToolResult};
 use stakpak_api::{Client, ClientConfig};
@@ -278,6 +279,7 @@ pub async fn process_responses_stream(
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
+    pub local_context: Option<LocalContext>,
 }
 
 pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -331,19 +333,12 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
             for message in &checkpoint_messages {
                 match message.role {
-                    Role::Assistant => {
-                        let _ = input_tx
-                            .send(InputEvent::InputSubmittedWith(
-                                message.content.as_ref().unwrap().to_string(),
-                            ))
-                            .await;
-                    }
-                    Role::User => {
-                        let _ = input_tx
-                            .send(InputEvent::InputSubmittedWith(
-                                message.content.as_ref().unwrap().to_string(),
-                            ))
-                            .await;
+                    Role::Assistant | Role::User => {
+                        if let Some(content) = &message.content {
+                            let _ = input_tx
+                                .send(InputEvent::InputSubmittedWith(content.to_string()))
+                                .await;
+                        }
                     }
                     Role::Tool => {
                         let tool_call = checkpoint_messages
@@ -386,12 +381,31 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     _ => {}
                 }
             }
+
+            let tool_calls = checkpoint_messages
+                .last()
+                .filter(|msg| msg.role == Role::Assistant)
+                .and_then(|msg| msg.tool_calls.as_ref());
+
+            if let Some(tool_calls) = tool_calls {
+                send_tool_calls(&input_tx, tool_calls).await?;
+            }
+
             messages.extend(checkpoint_messages);
         }
 
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
                 OutputEvent::UserMessage(user_input) => {
+                    let (user_input, local_context) =
+                        add_local_context(&messages, &user_input, &config.local_context);
+                    if let Some(local_context) = local_context {
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::InputSubmittedWith(local_context.to_string()),
+                        )
+                        .await?;
+                    }
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
@@ -462,6 +476,7 @@ pub struct RunNonInteractiveConfig {
     pub approve: bool,
     pub verbose: bool,
     pub checkpoint_id: Option<String>,
+    pub local_context: Option<LocalContext>,
 }
 
 pub async fn run_non_interactive(
@@ -531,7 +546,9 @@ pub async fn run_non_interactive(
     }
 
     if !config.prompt.is_empty() {
-        chat_messages.push(user_message(config.prompt));
+        let (user_input, _local_context) =
+            add_local_context(&chat_messages, &config.prompt, &config.local_context);
+        chat_messages.push(user_message(user_input));
     }
 
     let response = client
@@ -554,4 +571,26 @@ pub async fn run_non_interactive(
     }
 
     Ok(())
+}
+
+fn add_local_context<'a>(
+    messages: &'a Vec<ChatMessage>,
+    user_input: &'a str,
+    local_context: &'a Option<LocalContext>,
+) -> (String, Option<&'a LocalContext>) {
+    if let Some(local_context) = local_context {
+        // only add local context if this is the first message
+        if messages.is_empty() {
+            let formatted_input = format!(
+                "{}\n\n<local_context>\n{}\n</local_context>",
+                user_input,
+                local_context.to_string()
+            );
+            (formatted_input, Some(local_context))
+        } else {
+            (user_input.to_string(), None)
+        }
+    } else {
+        (user_input.to_string(), None)
+    }
 }

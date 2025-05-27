@@ -1,9 +1,12 @@
 mod app;
 mod event;
+mod markdown;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, Message, OutputEvent, render_bash_block, update};
+pub use app::{
+    AppState, InputEvent, Message, OutputEvent, render_bash_block, render_bash_result_block, update,
+};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -54,11 +57,13 @@ pub async fn run_tui(
                 if let InputEvent::ToolResult(ref tool_call_result) = event {
                     let tool_call = tool_call_result.call.clone();
                     let result = tool_call_result.result.clone();
-                    render_bash_block(&tool_call, &result, true, &mut state);
+                    // Use the new render_bash_result_block function for ToolResults
+                    render_bash_result_block(&tool_call, &result, &mut state);
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
+                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                     let input_height = 3;
                     let margin_height = 2;
                     let dropdown_showing = state.show_helper_dropdown
@@ -78,7 +83,7 @@ pub async fn run_tui(
                             ratatui::layout::Constraint::Length(dropdown_height),
                             ratatui::layout::Constraint::Length(hint_height),
                         ])
-                        .split(term_size);
+                        .split(term_rect);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
@@ -88,6 +93,7 @@ pub async fn run_tui(
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
                     let term_size = terminal.size()?;
+                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                     let input_height = 3;
                     let margin_height = 2;
                     let dropdown_showing = state.show_helper_dropdown
@@ -107,7 +113,7 @@ pub async fn run_tui(
                             ratatui::layout::Constraint::Length(dropdown_height),
                             ratatui::layout::Constraint::Length(hint_height),
                         ])
-                        .split(term_size);
+                        .split(term_rect);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::InputSubmitted = event {
@@ -131,5 +137,7 @@ pub async fn run_tui(
     }
 
     println!("Quitting...");
+    crossterm::terminal::disable_raw_mode()?;
+    execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
 }

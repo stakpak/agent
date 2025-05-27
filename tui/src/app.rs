@@ -1,14 +1,18 @@
+use crate::markdown::render_markdown_to_lines;
 use crate::view::render_system_message;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use regex::Regex;
 use serde_json::Value;
 use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
+    Markdown(String),
 }
 
 pub struct SessionInfo {
@@ -58,6 +62,12 @@ impl Message {
             content: MessageContent::Styled(line),
         }
     }
+    pub fn markdown(text: impl Into<String>) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::Markdown(text.into()),
+        }
+    }
 }
 
 pub struct AppState {
@@ -82,6 +92,7 @@ pub struct AppState {
     pub show_sessions_dialog: bool,
     pub session_selected: usize,
     pub account_info: String,
+    pub pending_bash_message_id: Option<Uuid>, // New field to track pending bash message
 }
 
 #[derive(Debug)]
@@ -133,7 +144,11 @@ impl AppState {
             cursor_visible: true,
             messages: vec![
                 Message::info(
-                    "* Welcome to Stakpak!",
+                    r"
+ ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
+▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  
+ ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  
+▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
                     Some(Style::default().fg(ratatui::style::Color::Cyan)),
                 ),
                 Message::info("/help for help, /status for your current setup", None),
@@ -162,8 +177,141 @@ impl AppState {
             show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
+            pending_bash_message_id: None, // Initialize new field
         }
     }
+}
+
+// Helper function to extract and truncate command name
+fn extract_and_truncate_command(tool_call: &ToolCall) -> String {
+    let full_command = extract_full_command(tool_call);
+
+    if full_command == "unknown command" {
+        return full_command;
+    }
+
+    // Split by whitespace and take first 3 words
+    let words: Vec<&str> = full_command.split_whitespace().take(3).collect();
+    if words.is_empty() {
+        "unknown command".to_string()
+    } else {
+        words.join(" ")
+    }
+}
+
+// Helper function to extract full command
+fn extract_full_command(tool_call: &ToolCall) -> String {
+    // First try normal JSON parsing
+    if let Ok(v) = serde_json::from_str::<Value>(&tool_call.function.arguments) {
+        if let Some(command) = v.get("command").and_then(|c| c.as_str()) {
+            return command.to_string();
+        }
+    }
+
+    // If JSON parsing fails, try regex
+    let re = Regex::new(r#"command"\s*:\s*"([^"]*)"#).unwrap();
+    if let Some(caps) = re.captures(&tool_call.function.arguments) {
+        if let Some(command) = caps.get(1) {
+            return command.as_str().to_string();
+        }
+    }
+
+    // If the arguments look like a raw command, return it
+    let trimmed = tool_call.function.arguments.trim();
+    if !trimmed.is_empty() && !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+        return trimmed.to_string();
+    }
+
+    // Log and return unknown
+    eprintln!(
+        "Failed to extract command from arguments: {:?}",
+        tool_call.function.arguments
+    );
+    "unknown command".to_string()
+}
+
+// Helper function to format command content properly
+fn format_command_content(command: &str) -> Vec<String> {
+    let mut formatted_lines = Vec::new();
+
+    // Handle heredoc commands specially
+    if command.contains("<<") {
+        let parts: Vec<&str> = command.split("<<").collect();
+        if parts.len() >= 2 {
+            // Add the command part before heredoc
+            formatted_lines.push(parts[0].trim().to_string());
+
+            // Find the heredoc delimiter
+            let heredoc_part = parts[1];
+            if let Some(delimiter_end) = heredoc_part.find('\n') {
+                let delimiter_line = &heredoc_part[..delimiter_end];
+                formatted_lines.push(format!("<< {}", delimiter_line.trim()));
+
+                // Add the content after the first newline
+                let content = &heredoc_part[delimiter_end + 1..];
+
+                // Split content by literal \n sequences and actual newlines
+                let content_lines: Vec<&str> = content.split("\\n").collect();
+                for (i, line) in content_lines.iter().enumerate() {
+                    // Also handle actual newlines within each part
+                    for actual_line in line.split('\n') {
+                        if !actual_line.trim().is_empty() || i == content_lines.len() - 1 {
+                            formatted_lines.push(actual_line.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // For regular commands, split by && and format nicely
+        let parts: Vec<&str> = command.split(" && ").collect();
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 {
+                formatted_lines.push(part.trim().to_string());
+            } else {
+                formatted_lines.push(format!("&& {}", part.trim()));
+            }
+        }
+    }
+
+    formatted_lines
+}
+
+// Helper function to detect file creation and extract filename
+fn extract_file_info(command: &str) -> Option<String> {
+    // Look for common file creation patterns
+    if let Some(pos) = command.find(" > ") {
+        // Pattern: command > filename
+        let after_redirect = &command[pos + 3..];
+        if let Some(filename) = after_redirect.split_whitespace().next() {
+            return Some(format!("Creating file {}", filename));
+        }
+    } else if command.contains("cat >") {
+        // Pattern: cat > filename
+        if let Some(pos) = command.find("cat >") {
+            let after_cat = &command[pos + 5..].trim();
+            if let Some(filename) = after_cat.split_whitespace().next() {
+                return Some(format!("Creating file {}", filename));
+            }
+        }
+    } else if command.contains("echo") && command.contains(" > ") {
+        // Pattern: echo ... > filename
+        if let Some(pos) = command.find(" > ") {
+            let after_redirect = &command[pos + 3..];
+            if let Some(filename) = after_redirect.split_whitespace().next() {
+                return Some(format!("Creating file {}", filename));
+            }
+        }
+    } else if command.contains("touch ") {
+        // Pattern: touch filename
+        if let Some(pos) = command.find("touch ") {
+            let after_touch = &command[pos + 6..];
+            if let Some(filename) = after_touch.split_whitespace().next() {
+                return Some(format!("Creating file {}", filename));
+            }
+        }
+    }
+    None
 }
 
 pub fn update(
@@ -258,8 +406,13 @@ pub fn update(
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ShowConfirmationDialog(tool_call) => {
             state.is_dialog_open = true;
-            state.dialog_command = Some(tool_call);
+            state.dialog_command = Some(tool_call.clone());
             state.dialog_selected = 0;
+
+            // Create and add the pending bash message (info mode) with FULL command
+            let full_command = extract_full_command(&tool_call);
+            let message_id = render_bash_block(&tool_call, &full_command, false, state, true);
+            state.pending_bash_message_id = Some(message_id);
         }
 
         InputEvent::Loading(is_loading) => {
@@ -277,19 +430,6 @@ pub fn update(
 }
 
 fn handle_tab(state: &mut AppState) {
-    // state.show_helper_dropdown = true;
-    // state.filtered_helpers = state
-    //     .helpers
-    //     .iter()
-    //     .filter(|h| h.starts_with(&state.input))
-    //     .cloned()
-    //     .collect();
-    // if state.filtered_helpers.is_empty()
-    //     || state.helper_selected >= state.filtered_helpers.len()
-    // {
-    //     state.helper_selected = 0;
-    // }
-
     if state.is_dialog_open {
         state.dialog_selected = (state.dialog_selected + 1) % 2;
     }
@@ -415,21 +555,22 @@ fn handle_input_backspace(state: &mut AppState) {
 }
 
 fn handle_esc(state: &mut AppState) {
-    state.input.clear();
-    state.cursor_position = 0;
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
-        state.is_dialog_open = false;
-        if let Some(tool_call) = state.dialog_command.take() {
-            let input = state.input.clone();
-            render_bash_block(&tool_call, &input, false, state);
+        let tool_call_opt = state.dialog_command.clone();
+        if let Some(tool_call) = &tool_call_opt {
+            let truncated_command = extract_and_truncate_command(tool_call);
+            render_bash_block_rejected(&truncated_command, state);
         }
-    } else {
-        return;
+        state.is_dialog_open = false;
+        state.dialog_command = None;
     }
+
+    state.input.clear();
+    state.cursor_position = 0;
 }
 
 fn handle_input_submitted(
@@ -442,24 +583,26 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
+
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             }
         } else {
-            let tool_call = state.dialog_command.clone();
-            let input = state.input.clone();
-            if let Some(tool_call) = tool_call {
-                render_bash_block(&tool_call, &input, false, state);
+            // Clone dialog_command before mutating state
+            let tool_call_opt = state.dialog_command.clone();
+            if let Some(tool_call) = &tool_call_opt {
+                let truncated_command = extract_and_truncate_command(tool_call);
+                render_bash_block_rejected(&truncated_command, state);
             }
         }
+
+        state.dialog_command = None;
     } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
         let selected = state.filtered_helpers[state.helper_selected];
 
         match selected {
             "/sessions" => {
-                // state.show_sessions_dialog = true;
-                // state.session_selected = 0;
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;
@@ -684,6 +827,13 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                     all_lines.push((line.clone(), Style::default()));
                 }
             }
+            MessageContent::Markdown(markdown) => {
+                let rendered_lines = render_markdown_to_lines(markdown, width);
+                for line in rendered_lines {
+                    all_lines.push((line, Style::default()));
+                }
+                all_lines.push((Line::from(""), Style::default()));
+            }
         }
     }
     all_lines
@@ -694,19 +844,214 @@ pub fn render_bash_block<'a>(
     output: &'a str,
     accepted: bool,
     state: &mut AppState,
-) {
-    // Extract command name from arguments JSON
-    let command_name = serde_json::from_str::<Value>(&tool_call.function.arguments)
-        .ok()
-        .and_then(|v| {
-            v.get("command")
-                .and_then(|c| c.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "?".to_string());
-
+    is_info: bool, // New parameter to indicate if this is an info message
+) -> Uuid {
     let mut lines = Vec::new();
-    // Header
+
+    // Choose color based on mode
+    let main_color = if is_info {
+        Color::LightBlue // Info mode (pending approval)
+    } else {
+        Color::LightGreen // Regular mode (approved/executed)
+    };
+
+    let title_color = if is_info {
+        Color::Cyan // Info mode (pending approval)
+    } else {
+        Color::White // Regular mode (approved/executed)
+    };
+
+    let bash_name = if is_info { "Run Command" } else { "Bash" };
+
+    if is_info {
+        // For info messages, create a nice header with file detection
+        let full_command = output;
+        let file_info = extract_file_info(full_command);
+
+        // Header line
+        lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                bash_name,
+                Style::default()
+                    .fg(title_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            if let Some(file_desc) = file_info {
+                Span::styled(format!(" ({})", file_desc), Style::default().fg(main_color))
+            } else {
+                Span::styled("", Style::default().fg(main_color))
+            },
+        ]));
+
+        // Format and show the command content properly
+        let formatted_lines = format_command_content(full_command);
+        let output_pad = "    "; // 4 spaces for indentation
+
+        for (i, formatted_line) in formatted_lines.iter().enumerate() {
+            let prefix = if i == 0 { "└ " } else { "  " };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{output_pad}{prefix}"),
+                    Style::default().fg(main_color),
+                ),
+                Span::styled(formatted_line.clone(), Style::default().fg(main_color)), // Clone the string
+            ]));
+        }
+    } else {
+        // For regular messages, use the original logic
+        let command_name = serde_json::from_str::<Value>(&tool_call.function.arguments)
+            .ok()
+            .and_then(|v| {
+                v.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "unknown command".to_string());
+
+        // Header
+        lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Bash",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({})", command_name),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled("...", Style::default().fg(Color::Gray)),
+        ]));
+
+        if !accepted {
+            lines.push(Line::from(vec![Span::styled(
+                "  L No (tell Stakpak what to do differently)",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )]));
+        }
+
+        // Output lines for regular (non-info) messages
+        let output_pad = "    "; // 4 spaces, adjust as needed
+        for (i, line) in output.lines().enumerate() {
+            let prefix = if i == 0 { "└ " } else { "  " };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{output_pad}{prefix}"),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled(line, Style::default().fg(Color::Gray)),
+            ]));
+        }
+    }
+
+    let mut owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+    owned_lines.push(Line::from(vec![Span::styled(
+        "  ",
+        Style::default().fg(Color::Gray),
+    )]));
+
+    let message_id = Uuid::new_v4();
+    state.messages.push(Message {
+        id: message_id,
+        content: MessageContent::StyledBlock(owned_lines),
+    });
+
+    message_id
+}
+
+pub fn render_bash_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
+    let mut lines = Vec::new();
+
+    // Extract the actual command that was executed
+    let full_command = extract_full_command(tool_call);
+    let file_info = extract_file_info(&full_command);
+
+    // Header line with approved colors (green bullet, white text)
+    lines.push(Line::from(vec![
+        Span::styled(
+            "● ",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Bash",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        if let Some(file_desc) = file_info {
+            Span::styled(
+                format!(" ({})", file_desc),
+                Style::default().fg(Color::White),
+            )
+        } else {
+            Span::styled(
+                format!(" ({})", extract_and_truncate_command(tool_call)),
+                Style::default().fg(Color::Gray),
+            )
+        },
+        Span::styled("...", Style::default().fg(Color::Gray)),
+    ]));
+
+    // Show the command output
+    let output_pad = "    "; // 4 spaces for indentation
+    for (i, line) in result.lines().enumerate() {
+        let prefix = if i == 0 { "└ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{output_pad}{prefix}"),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(line, Style::default().fg(Color::Gray)),
+        ]));
+    }
+
+    let mut owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+    owned_lines.push(Line::from(vec![Span::styled(
+        "  ",
+        Style::default().fg(Color::Gray),
+    )]));
+
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(owned_lines),
+    });
+}
+
+// Function to render a rejected bash command (when user selects "No")
+pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
+    let mut lines = Vec::new();
+
+    // Header - similar to regular bash block
     lines.push(Line::from(vec![
         Span::styled(
             "● ",
@@ -726,24 +1071,13 @@ pub fn render_bash_block<'a>(
         ),
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
-    if !accepted {
-        lines.push(Line::from(vec![Span::styled(
-            "  L No (tell Stakpak what to do differently)",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        )]));
-    }
-    // Output lines
-    let output_pad = "    "; // 4 spaces, adjust as needed
-    for (i, line) in output.lines().enumerate() {
-        let prefix = if i == 0 { "└ " } else { "  " };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{output_pad}{prefix}"),
-                Style::default().fg(Color::Gray),
-            ),
-            Span::styled(line, Style::default().fg(Color::Gray)),
-        ]));
-    }
+
+    // Add the rejection line
+    lines.push(Line::from(vec![Span::styled(
+        "  L No (tell Stakpak what to do differently)",
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+    )]));
+
     let mut owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
@@ -759,6 +1093,7 @@ pub fn render_bash_block<'a>(
         "  ",
         Style::default().fg(Color::Gray),
     )]));
+
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
@@ -916,8 +1251,7 @@ pub fn push_help_message(state: &mut AppState) {
         ("Enter", "send message", Color::Yellow),
         ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
         ("Up/Down", "scroll prompt history", Color::Yellow),
-        ("Esc", "Closes any open dialog", Color::Yellow),
-        ("Ctrl+C", "quit Codex", Color::Yellow),
+        ("Ctrl+C", "quit Stakpak", Color::Yellow),
     ];
     for (key, desc, color) in shortcuts {
         lines.push(Line::from(vec![

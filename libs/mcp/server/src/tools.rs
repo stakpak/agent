@@ -5,6 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::{Client, ClientConfig, GenerateCodeInput, models::ProvisionerType};
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 use tracing::error;
 
@@ -202,9 +204,336 @@ impl Tools {
     //             Some(json!({ "path": path_clone, "error": e.to_string() })),
     //         )
     //     })?;
+    #[tool(
+        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges."
+    )]
+    fn view(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The path to the file or directory to view")]
+        path: String,
+        #[tool(param)]
+        #[schemars(
+            description = "Optional line range to view [start_line, end_line]. Line numbers are 1-indexed. Use -1 for end_line to read to end of file."
+        )]
+        view_range: Option<[i32; 2]>,
+    ) -> Result<CallToolResult, McpError> {
+        let path_obj = Path::new(&path);
 
-    //     Ok(CallToolResult::success(vec![Content::text(content)]))
-    // }
+        if !path_obj.exists() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_NOT_FOUND"),
+                Content::text(format!("File or directory not found: {}", path)),
+            ]));
+        }
+
+        if path_obj.is_dir() {
+            // List directory contents
+            match fs::read_dir(&path) {
+                Ok(entries) => {
+                    let mut result = format!("Directory listing for {}:\n", path);
+                    let mut items: Vec<_> = entries.collect();
+                    items.sort_by(|a, b| match (a, b) {
+                        (Ok(a_entry), Ok(b_entry)) => {
+                            match (
+                                a_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
+                                b_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
+                            ) {
+                                (true, false) => std::cmp::Ordering::Less,
+                                (false, true) => std::cmp::Ordering::Greater,
+                                _ => a_entry.file_name().cmp(&b_entry.file_name()),
+                            }
+                        }
+                        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                        (Err(_), Err(_)) => std::cmp::Ordering::Equal,
+                    });
+
+                    for entry in items {
+                        match entry {
+                            Ok(entry) => {
+                                let file_type = match entry.file_type() {
+                                    Ok(ft) if ft.is_dir() => "📁",
+                                    Ok(_) => "📄",
+                                    Err(_) => "❓",
+                                };
+                                result.push_str(&format!(
+                                    "{} {}\n",
+                                    file_type,
+                                    entry.file_name().to_string_lossy()
+                                ));
+                            }
+                            Err(e) => {
+                                result.push_str(&format!("Error reading entry: {}\n", e));
+                            }
+                        }
+                    }
+                    Ok(CallToolResult::success(vec![Content::text(result)]))
+                }
+                Err(e) => Ok(CallToolResult::error(vec![
+                    Content::text("READ_ERROR"),
+                    Content::text(format!("Cannot read directory: {}", e)),
+                ])),
+            }
+        } else {
+            // Read file contents
+            match fs::read_to_string(&path) {
+                Ok(content) => {
+                    let result = if let Some([start, end]) = view_range {
+                        let lines: Vec<&str> = content.lines().collect();
+                        let start_idx = if start <= 0 { 0 } else { (start - 1) as usize };
+                        let end_idx = if end == -1 {
+                            lines.len()
+                        } else {
+                            std::cmp::min(end as usize, lines.len())
+                        };
+
+                        if start_idx >= lines.len() {
+                            return Ok(CallToolResult::error(vec![
+                                Content::text("INVALID_RANGE"),
+                                Content::text(format!(
+                                    "Start line {} is beyond file length {}",
+                                    start,
+                                    lines.len()
+                                )),
+                            ]));
+                        }
+
+                        let selected_lines = &lines[start_idx..end_idx];
+                        let mut result =
+                            format!("File: {} (lines {}-{})\n", path, start_idx + 1, end_idx);
+                        for (i, line) in selected_lines.iter().enumerate() {
+                            result.push_str(&format!("{:4}: {}\n", start_idx + i + 1, line));
+                        }
+                        result
+                    } else {
+                        let lines: Vec<&str> = content.lines().collect();
+                        let mut result = format!("File: {} ({} lines)\n", path, lines.len());
+                        for (i, line) in lines.iter().enumerate() {
+                            result.push_str(&format!("{:4}: {}\n", i + 1, line));
+                        }
+                        result
+                    };
+
+                    Ok(CallToolResult::success(vec![Content::text(clip_output(
+                        &result,
+                    ))]))
+                }
+                Err(e) => Ok(CallToolResult::error(vec![
+                    Content::text("READ_ERROR"),
+                    Content::text(format!("Cannot read file: {}", e)),
+                ])),
+            }
+        }
+    }
+
+    #[tool(
+        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation."
+    )]
+    fn str_replace(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The path to the file to modify")]
+        path: String,
+        #[tool(param)]
+        #[schemars(
+            description = "The exact text to replace (must match exactly, including whitespace and indentation)"
+        )]
+        old_str: String,
+        #[tool(param)]
+        #[schemars(description = "The new text to insert in place of the old text")]
+        new_str: String,
+    ) -> Result<CallToolResult, McpError> {
+        let path_obj = Path::new(&path);
+
+        if !path_obj.exists() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_NOT_FOUND"),
+                Content::text(format!("File not found: {}", path)),
+            ]));
+        }
+
+        if path_obj.is_dir() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("IS_DIRECTORY"),
+                Content::text(format!("Cannot edit directory: {}", path)),
+            ]));
+        }
+
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let matches: Vec<_> = content.match_indices(&old_str).collect();
+
+                match matches.len() {
+                    0 => Ok(CallToolResult::error(vec![
+                        Content::text("NO_MATCH"),
+                        Content::text(
+                            "No match found for replacement text. Please check your text and try again.",
+                        ),
+                    ])),
+                    1 => {
+                        let new_content = content.replace(&old_str, &new_str);
+                        match fs::write(&path, new_content) {
+                            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+                                "Successfully replaced text in {}",
+                                path
+                            ))])),
+                            Err(e) => Ok(CallToolResult::error(vec![
+                                Content::text("WRITE_ERROR"),
+                                Content::text(format!("Cannot write to file: {}", e)),
+                            ])),
+                        }
+                    }
+                    n => Ok(CallToolResult::error(vec![
+                        Content::text("MULTIPLE_MATCHES"),
+                        Content::text(format!(
+                            "Found {} matches for replacement text. Please provide more context to make a unique match.",
+                            n
+                        )),
+                    ])),
+                }
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("READ_ERROR"),
+                Content::text(format!("Cannot read file: {}", e)),
+            ])),
+        }
+    }
+
+    #[tool(
+        description = "Create a new file with the specified content. Will fail if file already exists."
+    )]
+    fn create(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The path where the new file should be created")]
+        path: String,
+        #[tool(param)]
+        #[schemars(description = "The content to write to the new file")]
+        file_text: String,
+    ) -> Result<CallToolResult, McpError> {
+        let path_obj = Path::new(&path);
+
+        if path_obj.exists() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_EXISTS"),
+                Content::text(format!("File already exists: {}", path)),
+            ]));
+        }
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path_obj.parent() {
+            if !parent.exists() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("CREATE_DIR_ERROR"),
+                        Content::text(format!("Cannot create parent directories: {}", e)),
+                    ]));
+                }
+            }
+        }
+
+        match fs::write(&path, file_text) {
+            Ok(_) => {
+                let lines = fs::read_to_string(&path)
+                    .map(|content| content.lines().count())
+                    .unwrap_or(0);
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Successfully created file {} with {} lines",
+                    path, lines
+                ))]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("WRITE_ERROR"),
+                Content::text(format!("Cannot create file: {}", e)),
+            ])),
+        }
+    }
+
+    #[tool(
+        description = "Insert text at a specific line number in a file. Line numbers are 1-indexed."
+    )]
+    fn insert(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The path to the file to modify")]
+        path: String,
+        #[tool(param)]
+        #[schemars(description = "The line number where text should be inserted (1-indexed)")]
+        insert_line: u32,
+        #[tool(param)]
+        #[schemars(description = "The text to insert")]
+        new_str: String,
+    ) -> Result<CallToolResult, McpError> {
+        let path_obj = Path::new(&path);
+
+        if !path_obj.exists() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_NOT_FOUND"),
+                Content::text(format!("File not found: {}", path)),
+            ]));
+        }
+
+        if path_obj.is_dir() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("IS_DIRECTORY"),
+                Content::text(format!("Cannot edit directory: {}", path)),
+            ]));
+        }
+
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let mut lines: Vec<&str> = content.lines().collect();
+                let insert_idx = if insert_line == 0 {
+                    0
+                } else {
+                    (insert_line - 1) as usize
+                };
+
+                if insert_idx > lines.len() {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("INVALID_LINE"),
+                        Content::text(format!(
+                            "Line number {} is beyond file length {}",
+                            insert_line,
+                            lines.len()
+                        )),
+                    ]));
+                }
+
+                // Split new_str by lines and insert each line
+                let new_lines: Vec<&str> = new_str.lines().collect();
+                for (i, line) in new_lines.iter().enumerate() {
+                    lines.insert(insert_idx + i, line);
+                }
+
+                let new_content = lines.join("\n");
+                // Preserve original file ending (with or without final newline)
+                let final_content = if content.ends_with('\n') && !new_content.ends_with('\n') {
+                    format!("{}\n", new_content)
+                } else {
+                    new_content
+                };
+
+                match fs::write(&path, final_content) {
+                    Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+                        "Successfully inserted {} lines at line {} in {}",
+                        new_lines.len(),
+                        insert_line,
+                        path
+                    ))])),
+                    Err(e) => Ok(CallToolResult::error(vec![
+                        Content::text("WRITE_ERROR"),
+                        Content::text(format!("Cannot write to file: {}", e)),
+                    ])),
+                }
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("READ_ERROR"),
+                Content::text(format!("Cannot read file: {}", e)),
+            ])),
+        }
+    }
 }
 #[tool(tool_box)]
 impl ServerHandler for Tools {
