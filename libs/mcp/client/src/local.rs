@@ -1,29 +1,29 @@
 use anyhow::Result;
 use rmcp::{
-    RoleClient, serve_client,
+    RoleClient, ServiceExt,
+    model::{ClientCapabilities, ClientInfo, Implementation},
     service::RunningService,
-    transport::{ConfigureCommandExt, TokioChildProcess},
+    transport::StreamableHttpClientTransport,
 };
 
-use tokio::process::Command;
+pub async fn local_client()
+-> Result<RunningService<RoleClient, rmcp::model::InitializeRequestParam>> {
+    let transport = StreamableHttpClientTransport::from_uri("http://localhost:65535/mcp");
+    let client_info = ClientInfo {
+        protocol_version: Default::default(),
+        capabilities: ClientCapabilities::default(),
+        client_info: Implementation {
+            name: "Stakpak Client".to_string(),
+            version: "0.0.1".to_string(),
+        },
+    };
 
-pub async fn local_client() -> Result<RunningService<RoleClient, ()>> {
-    // Run in dev mode
-    let process = match cfg!(debug_assertions) {
-        true => TokioChildProcess::new(Command::new("cargo").configure(|cmd| {
-            cmd.arg("run");
-            cmd.arg("mcp");
-        })),
-        false => TokioChildProcess::new(Command::new("stakpak").configure(|cmd| {
-            cmd.arg("mcp");
-        })),
-    }?;
+    let client: RunningService<RoleClient, rmcp::model::InitializeRequestParam> =
+        client_info.serve(transport).await.inspect_err(|e| {
+            tracing::error!("client error: {:?}", e);
+        })?;
 
-    let service = serve_client((), process).await.inspect_err(|e| {
-        tracing::error!("serving error: {:?}", e);
-    })?;
+    client.peer_info();
 
-    service.peer_info();
-
-    Ok(service)
+    Ok(client)
 }

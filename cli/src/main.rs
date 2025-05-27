@@ -47,12 +47,7 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-
-    if let Some(command) = &cli.command {
-        if command != &Commands::Mcp {
-            let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
-        }
-    }
+    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
 
     tracing_subscriber::registry()
         .with(

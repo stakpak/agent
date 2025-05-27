@@ -4,6 +4,7 @@ use futures_util::{Stream, StreamExt};
 use rmcp::model::{CallToolRequestParam, CallToolResult};
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
+use stakpak_mcp_server::MCPServerConfig;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
     FinishReason, FunctionCall, FunctionCallDelta, FunctionDefinition, MessageContent, Role, Tool,
@@ -287,6 +288,17 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
 
+    let ctx_clone = ctx.clone();
+    tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
+            api: ClientConfig {
+                api_key: ctx_clone.api_key,
+                api_endpoint: ctx_clone.api_endpoint,
+            },
+        })
+        .await;
+    });
+
     // Initialize clients and tools
     let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
@@ -484,10 +496,20 @@ pub async fn run_non_interactive(
     config: RunNonInteractiveConfig,
 ) -> Result<(), String> {
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
-
     let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
+
+    let ctx_clone = ctx.clone();
+    tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
+            api: ClientConfig {
+                api_key: ctx_clone.api_key,
+                api_endpoint: ctx_clone.api_endpoint,
+            },
+        })
+        .await;
+    });
 
     let client = Client::new(&ClientConfig {
         api_key: ctx.api_key,
@@ -574,7 +596,7 @@ pub async fn run_non_interactive(
 }
 
 fn add_local_context<'a>(
-    messages: &'a Vec<ChatMessage>,
+    messages: &'a [ChatMessage],
     user_input: &'a str,
     local_context: &'a Option<LocalContext>,
 ) -> (String, Option<&'a LocalContext>) {
@@ -583,8 +605,7 @@ fn add_local_context<'a>(
         if messages.is_empty() {
             let formatted_input = format!(
                 "{}\n\n<local_context>\n{}\n</local_context>",
-                user_input,
-                local_context.to_string()
+                user_input, local_context
             );
             (formatted_input, Some(local_context))
         } else {

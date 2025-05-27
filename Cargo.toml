@@ -17,12 +17,17 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", features = [
+rmcp = { git = "https://github.com/4t145/rust-sdk", features = [
     "client",
     "server",
+    "reqwest",
     "transport-io",
     "transport-child-process",
-], branch = "main" }
+    "transport-streamable-http-client",
+    "transport-streamable-http-server",
+    "transport-streamable-http-server-session",
+    "transport-worker"
+], branch = "stateless-streamable-http-server" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"

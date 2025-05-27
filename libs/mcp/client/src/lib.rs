@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use rmcp::{
     RoleClient,
-    model::{CallToolRequestParam, Tool},
+    model::{CallToolRequestParam, InitializeRequestParam, Tool},
     service::RunningService,
 };
 
@@ -11,7 +11,7 @@ mod local;
 use crate::local::local_client;
 
 pub struct ClientManager {
-    clients: HashMap<String, RunningService<RoleClient, ()>>,
+    clients: HashMap<String, RunningService<RoleClient, InitializeRequestParam>>,
 }
 
 impl ClientManager {
@@ -22,12 +22,17 @@ impl ClientManager {
         })
     }
 
-    pub async fn get_client(&self, client_name: &str) -> Result<&RunningService<RoleClient, ()>> {
+    pub async fn get_client(
+        &self,
+        client_name: &str,
+    ) -> Result<&RunningService<RoleClient, InitializeRequestParam>> {
         let client = self.clients.get(client_name).unwrap();
         Ok(client)
     }
 
-    pub async fn get_clients(&self) -> Result<Vec<&RunningService<RoleClient, ()>>> {
+    pub async fn get_clients(
+        &self,
+    ) -> Result<Vec<&RunningService<RoleClient, InitializeRequestParam>>> {
         let clients = self.clients.values().collect();
         Ok(clients)
     }

@@ -241,13 +241,13 @@ fn get_shell_type() -> String {
         // Try to get parent process shell
         let current_pid = std::process::id().to_string();
         if let Ok(output) = Command::new("ps")
-            .args(&["-p", &current_pid, "-o", "ppid="])
+            .args(["-p", &current_pid, "-o", "ppid="])
             .output()
         {
             if output.status.success() {
                 let ppid = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if let Ok(parent_output) = Command::new("ps")
-                    .args(&["-p", &ppid, "-o", "comm="])
+                    .args(["-p", &ppid, "-o", "comm="])
                     .output()
                 {
                     if parent_output.status.success() {
@@ -359,10 +359,7 @@ fn get_file_structure(
                     let child_names: Result<Vec<String>, _> = dir_entries
                         .map(|entry| entry.map(|e| e.file_name().to_string_lossy().to_string()))
                         .collect();
-                    match child_names {
-                        Ok(names) => Some(names),
-                        Err(_) => None,
-                    }
+                    child_names.ok()
                 }
                 Err(_) => None,
             }
@@ -406,7 +403,7 @@ fn get_git_info(dir_path: &str) -> GitInfo {
 
     // Get current branch
     if let Ok(output) = Command::new("git")
-        .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(path)
         .output()
     {
@@ -420,7 +417,7 @@ fn get_git_info(dir_path: &str) -> GitInfo {
 
     // Check for uncommitted changes
     if let Ok(output) = Command::new("git")
-        .args(&["status", "--porcelain"])
+        .args(["status", "--porcelain"])
         .current_dir(path)
         .output()
     {
@@ -432,7 +429,7 @@ fn get_git_info(dir_path: &str) -> GitInfo {
 
     // Get remote URL (try origin first, then any remote)
     if let Ok(output) = Command::new("git")
-        .args(&["remote", "get-url", "origin"])
+        .args(["remote", "get-url", "origin"])
         .current_dir(path)
         .output()
     {
@@ -445,7 +442,7 @@ fn get_git_info(dir_path: &str) -> GitInfo {
     } else {
         // If origin doesn't exist, try to get any remote
         if let Ok(output) = Command::new("git")
-            .args(&["remote"])
+            .args(["remote"])
             .current_dir(path)
             .output()
         {
@@ -453,7 +450,7 @@ fn get_git_info(dir_path: &str) -> GitInfo {
                 let remotes = String::from_utf8_lossy(&output.stdout);
                 if let Some(first_remote) = remotes.lines().next() {
                     if let Ok(url_output) = Command::new("git")
-                        .args(&["remote", "get-url", first_remote])
+                        .args(["remote", "get-url", first_remote])
                         .current_dir(path)
                         .output()
                     {
