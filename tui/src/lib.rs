@@ -137,5 +137,7 @@ pub async fn run_tui(
     }
 
     println!("Quitting...");
+    crossterm::terminal::disable_raw_mode()?;
+    execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
 }

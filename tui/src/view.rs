@@ -302,9 +302,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 cursor_rendered = true;
                 in_word = !c.is_whitespace();
 
-                if in_word {
-                    current_word.push(c);
-                }
+
             } else if c.is_whitespace() {
                 // End current word if any
                 if in_word && !current_word.is_empty() {
