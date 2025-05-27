@@ -1251,8 +1251,7 @@ pub fn push_help_message(state: &mut AppState) {
         ("Enter", "send message", Color::Yellow),
         ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
         ("Up/Down", "scroll prompt history", Color::Yellow),
-        ("Esc", "Closes any open dialog", Color::Yellow),
-        ("Ctrl+C", "quit Codex", Color::Yellow),
+        ("Ctrl+C", "quit Stakpak", Color::Yellow),
     ];
     for (key, desc, color) in shortcuts {
         lines.push(Line::from(vec![
