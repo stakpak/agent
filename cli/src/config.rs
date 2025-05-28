@@ -1,5 +1,6 @@
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
+use stakpak_api::ClientConfig;
 use std::fs::{create_dir_all, write};
 use std::path::Path;
 
@@ -7,6 +8,15 @@ use std::path::Path;
 pub struct AppConfig {
     pub api_endpoint: String,
     pub api_key: Option<String>,
+}
+
+impl From<AppConfig> for ClientConfig {
+    fn from(config: AppConfig) -> Self {
+        ClientConfig {
+            api_key: config.api_key.clone(),
+            api_endpoint: config.api_endpoint.clone(),
+        }
+    }
 }
 
 fn get_config_path() -> String {

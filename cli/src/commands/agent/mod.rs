@@ -1,18 +1,15 @@
+use crate::config::AppConfig;
 use clap::Subcommand;
 use regex::Regex;
+use stakpak_api::{
+    Client, ClientConfig,
+    models::{Action, ActionStatus, AgentID, AgentInput},
+};
 use std::str::FromStr;
 use tokio::process;
 use tokio_process_stream::{Item, ProcessLineStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
-
-use crate::{
-    client::{
-        Client,
-        models::{Action, ActionStatus, AgentID, AgentInput},
-    },
-    config::AppConfig,
-};
 
 mod get_next_input;
 pub use get_next_input::*;
@@ -79,7 +76,11 @@ impl AgentCommands {
                 println!();
             }
             AgentCommands::List => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&ClientConfig {
+                    api_key: config.api_key,
+                    api_endpoint: config.api_endpoint,
+                })
+                .map_err(|e| e.to_string())?;
                 let sessions = client.list_agent_sessions().await?;
                 for session in sessions {
                     println!("Session ID: {}", session.id);
@@ -105,7 +106,7 @@ impl AgentCommands {
                 checkpoint_id,
                 interactive,
             } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
 
                 let agent_id = match (checkpoint_id.clone(), agent_id) {
                     (Some(checkpoint_id), _) => {
@@ -129,7 +130,8 @@ impl AgentCommands {
 
                 if let Some(flow_ref) = &session.flow_ref {
                     let config_clone = config.clone();
-                    let client_clone = Client::new(&config_clone).map_err(|e| e.to_string())?;
+                    let client_clone =
+                        Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
                     let flow_ref = flow_ref.clone();
                     tokio::spawn(async move {
                         flow::sync(&config_clone, &client_clone, &flow_ref, None).await
@@ -149,7 +151,11 @@ impl AgentCommands {
                 .await?;
             }
             AgentCommands::Get { checkpoint_id } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&ClientConfig {
+                    api_key: config.api_key,
+                    api_endpoint: config.api_endpoint,
+                })
+                .map_err(|e| e.to_string())?;
                 let checkpoint_uuid = Uuid::from_str(&checkpoint_id).map_err(|e| e.to_string())?;
                 let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
                 println!("{}", serde_json::to_string_pretty(&output).unwrap());
@@ -159,8 +165,13 @@ impl AgentCommands {
     }
 }
 
-impl Action {
-    pub async fn run_interactive(self) -> Result<Action, String> {
+pub trait ActionExt {
+    async fn run_interactive(self) -> Result<Action, String>;
+    async fn run(self, print: &impl Fn(&str)) -> Result<Action, String>;
+}
+
+impl ActionExt for Action {
+    async fn run_interactive(self) -> Result<Action, String> {
         match self {
             Action::AskUser { id, args, .. } => {
                 println!(
@@ -313,7 +324,7 @@ impl Action {
             _ => Ok(self),
         }
     }
-    pub async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
+    async fn run(self, print: &impl Fn(&str)) -> Result<Action, String> {
         match self.clone() {
             Action::RunCommand {
                 id, args, status, ..

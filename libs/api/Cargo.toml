@@ -1,0 +1,14 @@
+[package]
+name = "stakpak-api"
+version = { workspace = true }
+edition = "2024"
+
+[dependencies]
+stakpak-shared = { path = "../../libs/shared" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+futures-util = {workspace = true}
+chrono = { workspace = true }
+reqwest = { workspace = true }
+rmcp = { workspace = true }

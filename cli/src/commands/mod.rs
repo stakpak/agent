@@ -1,16 +1,14 @@
+use crate::config::AppConfig;
 use agent::{AgentCommands, get_or_create_session, run_agent};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
+use stakpak_api::{
+    Client,
+    models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
+};
+use stakpak_mcp_server::MCPServerConfig;
 use termimad::MadSkin;
 use walkdir::WalkDir;
-
-use crate::{
-    client::{
-        Client,
-        models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
-    },
-    config::AppConfig,
-};
 
 pub mod agent;
 pub mod flow;
@@ -137,7 +135,7 @@ impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
             Commands::Mcp => {
-                stakpak_mcp_server::start_server()
+                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() })
                     .await
                     .map_err(|e| e.to_string())?;
             }
@@ -158,18 +156,18 @@ impl Commands {
                     .map_err(|e| format!("Failed to save config: {}", e))?;
             }
             Commands::Account => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }
             Commands::List => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
                 let owner_name = client.get_my_account().await?.username;
                 let data = client.list_flows(&owner_name).await?;
                 println!("{}", data.to_text(&owner_name));
             }
             Commands::Get { flow_ref } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
                 let parts: Vec<&str> = flow_ref.split('/').collect();
 
                 let (owner_name, flow_name) = if parts.len() == 2 {
@@ -182,7 +180,7 @@ impl Commands {
                 println!("{}", data.to_text(owner_name));
             }
             Commands::Clone { flow_ref, dir } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
                 let flow_ref = get_flow_ref(&client, flow_ref).await?;
                 clone(&client, &flow_ref, dir.as_deref()).await?;
             }
@@ -192,7 +190,7 @@ impl Commands {
                 generate_query,
                 synthesize_output,
             } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
                 let data = client
                     .query_blocks(
                         &query,
@@ -206,7 +204,7 @@ impl Commands {
                 println!("{}", skin.inline(&data.to_text(synthesize_output)));
             }
             Commands::Sync { flow_ref, dir } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
                 let flow_ref = get_flow_ref(&client, flow_ref).await?;
                 sync(&config, &client, &flow_ref, dir.as_deref()).await?;
             }
@@ -217,7 +215,7 @@ impl Commands {
                 ignore_delete,
                 auto_approve,
             } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
 
                 let save_result =
                     push(&client, flow_ref, create, dir, ignore_delete, auto_approve).await?;
@@ -258,7 +256,7 @@ impl Commands {
                     return Err("Currently only terraform is supported as a source DSL".into());
                 }
 
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
                 let base_dir = dir.unwrap_or_else(|| ".".into());
 
                 let mut documents = Vec::new();
@@ -360,7 +358,7 @@ impl Commands {
                 provisioner,
                 // no_clone,
             } => {
-                let client = Client::new(&config).map_err(|e| e.to_string())?;
+                let client = Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
 
                 let flow_ref = get_flow_ref(&client, flow_ref).await?;
                 let path_map = clone(&client, &flow_ref, dir.as_deref()).await?;
@@ -370,7 +368,8 @@ impl Commands {
                 }
 
                 let config_clone = config.clone();
-                let client_clone = Client::new(&config_clone).map_err(|e| e.to_string())?;
+                let client_clone =
+                    Client::new(&config_clone.clone().into()).map_err(|e| e.to_string())?;
                 let flow_ref_clone = flow_ref.clone();
                 let dir_clone = dir.clone();
                 tokio::spawn(async move {

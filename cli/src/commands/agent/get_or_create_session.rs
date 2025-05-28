@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::client::{
+use stakpak_api::{
     Client,
     models::{
         AgentCheckpointListItem, AgentID, AgentInput, AgentSessionListItem, AgentSessionVisibility,

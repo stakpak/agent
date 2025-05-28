@@ -21,12 +21,12 @@ use tokio::{sync::mpsc, time::sleep};
 use walkdir::WalkDir;
 
 use crate::{
-    client::{
-        Client, Edit,
-        models::{Document, FlowRef},
-    },
     commands::flow::{clone, create_edit, is_supported_file},
     config::AppConfig,
+};
+use stakpak_api::{
+    Client, Edit,
+    models::{Document, FlowRef},
 };
 
 #[derive(Deserialize, Serialize, Debug)]

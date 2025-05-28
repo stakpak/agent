@@ -1,25 +1,51 @@
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use stakpak_api::ToolsCallParams;
+use stakpak_api::{Client, ClientConfig};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tracing::error;
 
 #[derive(Clone)]
-pub struct Tools {}
+pub struct Tools {
+    api_config: ClientConfig,
+}
 
-impl Default for Tools {
-    fn default() -> Self {
-        Self::new()
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
+pub enum Provisioner {
+    #[serde(rename = "Terraform")]
+    Terraform,
+    #[serde(rename = "Kubernetes")]
+    Kubernetes,
+    #[serde(rename = "Dockerfile")]
+    Dockerfile,
+    #[serde(rename = "GithubActions")]
+    GithubActions,
+    #[serde(rename = "None")]
+    None,
+}
+
+impl std::fmt::Display for Provisioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Provisioner::Terraform => write!(f, "Terraform"),
+            Provisioner::Kubernetes => write!(f, "Kubernetes"),
+            Provisioner::Dockerfile => write!(f, "Dockerfile"),
+            Provisioner::GithubActions => write!(f, "GithubActions"),
+            Provisioner::None => write!(f, "None"),
+        }
     }
 }
 
 #[tool(tool_box)]
 impl Tools {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(api_config: ClientConfig) -> Self {
+        Self { api_config }
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -76,6 +102,65 @@ impl Tools {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "A tool used to generate code using a given prompt and provisioner")]
+    async fn generate_code(
+        &self,
+        #[tool(param)]
+        #[schemars(description = "The prompt to use to generate the code")]
+        prompt: String,
+        #[tool(param)]
+        #[schemars(description = "The provisioner to use to generate the code")]
+        provisioner: Provisioner,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let response = match client
+            .call_mcp_tool(&ToolsCallParams {
+                name: "generate_code".to_string(),
+                arguments: json!({
+                    "prompt": prompt,
+                    "provisioner": provisioner.to_string(),
+                    "context": Vec::<serde_json::Value>::new(),
+                }),
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("GENERATE_CODE_ERROR"),
+                    Content::text(format!("Failed to generate code: {}", e)),
+                ]));
+            }
+        };
+
+        Ok(CallToolResult::success(response))
+    }
+
+    //TODO: Add after adding widget for file reading
+    // #[tool(
+    //     description = "A system command execution tool that allows running shell commands with full system access."
+    // )]
+    // fn read_file(
+    //     &self,
+    //     #[tool(param)]
+    //     #[schemars(description = "The path to the file to read")]
+    //     path: String,
+    // ) -> Result<CallToolResult, McpError> {
+    //     let path_clone = path.clone();
+    //     let content = fs::read_to_string(path).map_err(|e| {
+    //         error!("Failed to read file: {}", e);
+    //         McpError::internal_error(
+    //             "Failed to read file",
+    //             Some(json!({ "path": path_clone, "error": e.to_string() })),
+    //         )
+    //     })?;
     #[tool(
         description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges."
     )]

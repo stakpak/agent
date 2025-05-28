@@ -1,4 +1,4 @@
-use crate::client::{
+use stakpak_api::{
     Client, SimpleLLMMessage, SimpleLLMRole,
     models::{AgentID, AgentInput, AgentOutput, RunAgentInput, RunAgentOutput},
 };

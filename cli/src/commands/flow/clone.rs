@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::client::{
+use stakpak_api::{
     Client,
     models::{FlowRef, ProvisionerType},
 };

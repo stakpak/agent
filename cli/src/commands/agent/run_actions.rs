@@ -1,4 +1,5 @@
-use crate::client::models::{Action, ActionStatus};
+use super::ActionExt;
+use stakpak_api::models::{Action, ActionStatus};
 
 pub async fn run_interactive_actions(
     action_queue: Vec<Action>,

@@ -1,6 +1,10 @@
+use crate::config::AppConfig;
+use crate::utils::local_context::LocalContext;
 use futures_util::{Stream, StreamExt};
 use rmcp::model::{CallToolRequestParam, CallToolResult};
+use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
+use stakpak_mcp_server::MCPServerConfig;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
     FinishReason, FunctionCall, FunctionCallDelta, FunctionDefinition, MessageContent, Role, Tool,
@@ -8,8 +12,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
-
-use crate::{client::Client, config::AppConfig, utils::local_context::LocalContext};
 
 use super::truncate_output;
 
@@ -122,9 +124,9 @@ pub async fn get_checkpoint_messages(
         .get_agent_checkpoint(checkpoint_uuid)
         .await
         .map_err(|e| e.to_string())?;
-    let checkpoint_output: crate::client::models::AgentOutput = checkpoint.output;
+    let checkpoint_output: stakpak_api::models::AgentOutput = checkpoint.output;
 
-    if let crate::client::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_output {
+    if let stakpak_api::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_output {
         return Ok(messages.clone());
     }
 
@@ -286,6 +288,17 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
 
+    let ctx_clone = ctx.clone();
+    tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
+            api: ClientConfig {
+                api_key: ctx_clone.api_key,
+                api_endpoint: ctx_clone.api_endpoint,
+            },
+        })
+        .await;
+    });
+
     // Initialize clients and tools
     let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
@@ -300,7 +313,11 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
     // Spawn client task
     let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-        let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+        let client = Client::new(&ClientConfig {
+            api_key: ctx.api_key,
+            api_endpoint: ctx.api_endpoint,
+        })
+        .map_err(|e| e.to_string())?;
 
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
@@ -480,11 +497,26 @@ pub async fn run_non_interactive(
 ) -> Result<(), String> {
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
+    let ctx_clone = ctx.clone();
+    tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
+            api: ClientConfig {
+                api_key: ctx_clone.api_key,
+                api_endpoint: ctx_clone.api_endpoint,
+            },
+        })
+        .await;
+    });
+
     let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
-    let client = Client::new(&ctx).map_err(|e| e.to_string())?;
+    let client = Client::new(&ClientConfig {
+        api_key: ctx.api_key,
+        api_endpoint: ctx.api_endpoint,
+    })
+    .map_err(|e| e.to_string())?;
 
     if let Some(checkpoint_id) = config.checkpoint_id {
         let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
@@ -565,7 +597,7 @@ pub async fn run_non_interactive(
 }
 
 fn add_local_context<'a>(
-    messages: &'a Vec<ChatMessage>,
+    messages: &'a [ChatMessage],
     user_input: &'a str,
     local_context: &'a Option<LocalContext>,
 ) -> (String, Option<&'a LocalContext>) {
@@ -574,8 +606,7 @@ fn add_local_context<'a>(
         if messages.is_empty() {
             let formatted_input = format!(
                 "{}\n\n<local_context>\n{}\n</local_context>",
-                user_input,
-                local_context.to_string()
+                user_input, local_context
             );
             (formatted_input, Some(local_context))
         } else {

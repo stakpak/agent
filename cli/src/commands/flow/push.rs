@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::Utc;
 use walkdir::WalkDir;
 
-use crate::client::{
+use stakpak_api::{
     Client, Edit, SaveEditsResponse,
     models::{Document, FlowRef},
 };
