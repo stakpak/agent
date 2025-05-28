@@ -102,14 +102,20 @@ impl Tools {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    #[tool(description = "A tool used to generate code using a given prompt and provisioner")]
+    #[tool(
+        description = "A tool used to generate specialized devops tool configurations and infrastructure as code using a given prompt and provisioner (type of code to generate)"
+    )]
     async fn generate_code(
         &self,
         #[tool(param)]
-        #[schemars(description = "The prompt to use to generate the code")]
+        #[schemars(
+            description = "The prompt to use to generate the code, this should be a detailed description of the code you want to generate"
+        )]
         prompt: String,
         #[tool(param)]
-        #[schemars(description = "The provisioner to use to generate the code")]
+        #[schemars(
+            description = "The provisioner to use to generate the code one of Kubernetes, Terraform, Dockerfile, GithubActions"
+        )]
         provisioner: Provisioner,
     ) -> Result<CallToolResult, McpError> {
         let client = Client::new(&self.api_config).map_err(|e| {
