@@ -428,6 +428,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         .await?;
                     }
                 }
+                OutputEvent::RejectTool(_tool_call) => {}
             }
             send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
