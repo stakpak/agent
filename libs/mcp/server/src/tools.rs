@@ -120,7 +120,7 @@ impl Tools {
             )
         })?;
 
-        let response = client
+        let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "generate_code".to_string(),
                 arguments: json!({
@@ -130,13 +130,16 @@ impl Tools {
                 }),
             })
             .await
-            .map_err(|e| {
+        {
+            Ok(response) => response,
+            Err(e) => {
                 error!("Failed to generate code: {}", e);
-                McpError::internal_error(
-                    "Failed to generate code",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+                return Ok(CallToolResult::error(vec![
+                    Content::text("GENERATE_CODE_ERROR"),
+                    Content::text(format!("Failed to generate code: {}", e)),
+                ]));
+            }
+        };
 
         Ok(CallToolResult::success(response))
     }
