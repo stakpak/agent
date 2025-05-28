@@ -496,9 +496,6 @@ pub async fn run_non_interactive(
     config: RunNonInteractiveConfig,
 ) -> Result<(), String> {
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
-    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
-    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map(&tools_map);
 
     let ctx_clone = ctx.clone();
     tokio::spawn(async move {
@@ -510,6 +507,10 @@ pub async fn run_non_interactive(
         })
         .await;
     });
+
+    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
+    let tools = convert_tools_map(&tools_map);
 
     let client = Client::new(&ClientConfig {
         api_key: ctx.api_key,

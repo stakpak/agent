@@ -1,10 +1,14 @@
 use chrono::{DateTime, Utc};
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
+use rmcp::model::Content;
+use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
 pub mod models;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use models::*;
+use serde_json::Value;
+use serde_json::json;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
 };
@@ -624,6 +628,44 @@ impl Client {
             }
         }
     }
+
+    pub async fn call_mcp_tool(&self, input: &ToolsCallParams) -> Result<Vec<Content>, String> {
+        let url = format!("{}/mcp", self.base_url);
+
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": input.name,
+                "arguments": input.arguments,
+            },
+            "id": Uuid::new_v4().to_string(),
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<JsonRpcResponse<ToolsCallResponse>>(value.clone()) {
+            Ok(response) => Ok(response.result.content),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
@@ -873,4 +915,15 @@ pub struct GenerationResult {
     pub selected_blocks: Vec<Block>,
     // #[serde(skip_serializing_if = "Option::is_none")]
     // pub delta: Option<GenerationDelta>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToolsCallParams {
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToolsCallResponse {
+    pub content: Vec<Content>,
 }

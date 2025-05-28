@@ -4,7 +4,8 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stakpak_api::{Client, ClientConfig, GenerateCodeInput, models::ProvisionerType};
+use stakpak_api::ToolsCallParams;
+use stakpak_api::{Client, ClientConfig};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -29,14 +30,14 @@ pub enum Provisioner {
     None,
 }
 
-impl From<Provisioner> for ProvisionerType {
-    fn from(provisioner: Provisioner) -> Self {
-        match provisioner {
-            Provisioner::Terraform => ProvisionerType::Terraform,
-            Provisioner::Kubernetes => ProvisionerType::Kubernetes,
-            Provisioner::Dockerfile => ProvisionerType::Dockerfile,
-            Provisioner::GithubActions => ProvisionerType::GithubActions,
-            Provisioner::None => ProvisionerType::None,
+impl std::fmt::Display for Provisioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Provisioner::Terraform => write!(f, "Terraform"),
+            Provisioner::Kubernetes => write!(f, "Kubernetes"),
+            Provisioner::Dockerfile => write!(f, "Dockerfile"),
+            Provisioner::GithubActions => write!(f, "GithubActions"),
+            Provisioner::None => write!(f, "None"),
         }
     }
 }
@@ -120,11 +121,13 @@ impl Tools {
         })?;
 
         let response = client
-            .generate_code(&GenerateCodeInput {
-                prompt,
-                provisioner: provisioner.into(),
-                resolve_validation_errors: true,
-                stream: false,
+            .call_mcp_tool(&ToolsCallParams {
+                name: "generate_code".to_string(),
+                arguments: json!({
+                    "prompt": prompt,
+                    "provisioner": provisioner.to_string(),
+                    "context": Vec::<serde_json::Value>::new(),
+                }),
             })
             .await
             .map_err(|e| {
@@ -135,55 +138,7 @@ impl Tools {
                 )
             })?;
 
-        fn block_to_markdown(block: &stakpak_api::models::Block) -> String {
-            format!(
-                "### `{}`\n**Location:** `{}`\n```{lang}\n{code}\n```\n",
-                block.name.as_deref().unwrap_or("Unnamed Block"),
-                block.get_uri(),
-                lang = block.language,
-                code = block.code
-            )
-        }
-
-        let result = response.result;
-
-        let created_md = if !result.created_blocks.is_empty() {
-            let blocks = result
-                .created_blocks
-                .iter()
-                .map(block_to_markdown)
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("## Created Blocks\n{}", blocks)
-        } else {
-            String::new()
-        };
-        let modified_md = if !result.modified_blocks.is_empty() {
-            let blocks = result
-                .modified_blocks
-                .iter()
-                .map(block_to_markdown)
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("## Modified Blocks\n{}", blocks)
-        } else {
-            String::new()
-        };
-        let removed_md = if !result.removed_blocks.is_empty() {
-            let blocks = result
-                .removed_blocks
-                .iter()
-                .map(block_to_markdown)
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("## Removed Blocks\n{}", blocks)
-        } else {
-            String::new()
-        };
-
-        let markdown = format!("{}\n{}\n{}", created_md, modified_md, removed_md);
-
-        Ok(CallToolResult::success(vec![Content::text(markdown)]))
+        Ok(CallToolResult::success(response))
     }
 
     //TODO: Add after adding widget for file reading

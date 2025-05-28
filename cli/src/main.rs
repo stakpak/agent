@@ -89,7 +89,7 @@ async fn main() {
                         match agent::code::run_non_interactive(
                             config,
                             RunNonInteractiveConfig {
-                                prompt: cli.prompt.unwrap(),
+                                prompt: cli.prompt.unwrap_or_default(),
                                 approve: cli.approve,
                                 verbose: cli.verbose,
                                 checkpoint_id: cli.checkpoint_id,
