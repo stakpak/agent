@@ -1,11 +1,18 @@
 [workspace]
 resolver = "2"
-members = ["cli", "tui", "libs/shared", "libs/api", "libs/mcp/client", "libs/mcp/server"]
+members = [
+    "cli",
+    "tui",
+    "libs/shared",
+    "libs/api",
+    "libs/mcp/client",
+    "libs/mcp/server",
+]
 default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.1.66"
+version = "0.1.67"
 edition = "2024"
 
 
@@ -26,10 +33,10 @@ rmcp = { git = "https://github.com/stakpak/rust-sdk", features = [
     "transport-streamable-http-client",
     "transport-streamable-http-server",
     "transport-streamable-http-server-session",
-    "transport-worker"
+    "transport-worker",
 ], branch = "schema" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
-reqwest = { version = "=0.12.15", features = ["json","stream"] }
+reqwest = { version = "=0.12.15", features = ["json", "stream"] }
