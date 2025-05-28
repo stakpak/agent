@@ -103,7 +103,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "A tool used to generate specialized devops tool configurations and infrastructure as code using a given prompt and provisioner (type of code to generate)"
+        description = "A tool used to generate specialized devops configurations and infrastructure as code using a given prompt and provisioner (type of code to generate). This tool does not create or modify files, it only generates the code with proposed file names and content."
     )]
     async fn generate_code(
         &self,
