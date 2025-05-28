@@ -1,12 +1,11 @@
 mod app;
 mod event;
-mod markdown;
 mod terminal;
 mod view;
+pub use app::{AppState, InputEvent, OutputEvent};
 
-pub use app::{
-    AppState, InputEvent, Message, OutputEvent, render_bash_block, render_bash_result_block, update,
-};
+mod services;
+
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -43,14 +42,16 @@ pub async fn run_tui(
     });
 
     let mut spinner_interval = interval(Duration::from_millis(100));
+    // get terminal width
+    let terminal_size = terminal.size()?;
     // Main async update/view loop
     terminal.draw(|f| view::view(f, &state))?;
     let mut should_quit = false;
     loop {
         tokio::select! {
             Some(event) = input_rx.recv() => {
-                if let InputEvent::RunCommand(tool_call) = &event {
-                    app::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx);
+                if let InputEvent::RunToolCall(tool_call) = &event {
+                    services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size);
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
                 }
@@ -58,7 +59,7 @@ pub async fn run_tui(
                     let tool_call = tool_call_result.call.clone();
                     let result = tool_call_result.result.clone();
                     // Use the new render_bash_result_block function for ToolResults
-                    render_bash_result_block(&tool_call, &result, &mut state);
+                    services::bash_block::render_bash_result_block(&tool_call, &result, &mut state);
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
                 else {
@@ -86,7 +87,7 @@ pub async fn run_tui(
                         .split(term_rect);
                     let message_area_width = outer_chunks[0].width as usize;
                     let message_area_height = outer_chunks[0].height as usize;
-                    app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
+                    services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size);
                 }
             }
             Some(event) = internal_rx.recv() => {
@@ -122,7 +123,7 @@ pub async fn run_tui(
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
                         }
                     }
-                    app::update(&mut state, event, message_area_height, message_area_width, &output_tx);
+                    services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size);
                 }
             }
             _ = spinner_interval.tick(), if state.loading => {

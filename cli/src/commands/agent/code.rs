@@ -69,9 +69,7 @@ async fn send_tool_calls(
     tool_calls: &[stakpak_shared::models::integrations::openai::ToolCall],
 ) -> Result<(), String> {
     for tool_call in tool_calls {
-        if tool_call.function.name == "run_command" {
-            send_input_event(input_tx, InputEvent::RunCommand(tool_call.clone())).await?;
-        }
+        send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
     }
     Ok(())
 }
@@ -447,6 +445,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         .await?;
                     }
                 }
+                OutputEvent::RejectTool(_tool_call) => {}
             }
             send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
