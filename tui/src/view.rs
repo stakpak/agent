@@ -1,16 +1,16 @@
-use crate::app::{AppState, MessageContent};
-use crate::app::{Message, get_wrapped_message_lines};
-use crate::markdown::render_markdown_to_lines;
+use crate::app::AppState;
+use crate::services::confirmation_dialog::render_confirmation_dialog;
+use crate::services::helper_dropdown::render_helper_dropdown;
+use crate::services::hint_helper::render_hint_or_shortcuts;
+use crate::services::message::get_wrapped_message_lines;
+use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Rect},
+    layout::{Constraint, Direction, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
-use serde_json::Value;
-use stakpak_shared::models::integrations::openai::ToolCall;
-use uuid::Uuid;
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -29,13 +29,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.is_dialog_open {
-        9
-    } else if state.show_sessions_dialog {
-        11
-    } else {
-        0
-    };
+    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
     let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
         1
     } else {
@@ -92,10 +86,11 @@ pub fn view(f: &mut Frame, state: &AppState) {
         message_area_width,
         message_area_height,
     );
-    // Only reserve and render dialog if open
+
     if state.is_dialog_open {
         render_confirmation_dialog(f, state);
     }
+
     // Only render input, dropdown, and hint if dialog is not open and sessions dialog is not open
     if !state.is_dialog_open && !state.show_sessions_dialog {
         render_multiline_input(f, state, input_area);
@@ -168,70 +163,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 }
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
-    let mut all_lines: Vec<(Line, Style)> = Vec::new();
-    for msg in &state.messages {
-        match &msg.content {
-            MessageContent::Plain(text, style) => {
-                for line in text.lines() {
-                    let mut current = line;
-                    while !current.is_empty() {
-                        let take = current
-                            .char_indices()
-                            .scan(0, |acc, (i, c)| {
-                                *acc += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
-                                Some((i, *acc))
-                            })
-                            .take_while(|&(_i, w)| w <= width)
-                            .last()
-                            .map(|(i, _w)| i + 1)
-                            .unwrap_or(current.len());
-                        if take == 0 {
-                            break;
-                        }
-                        let mut safe_take = take;
-                        while safe_take > 0 && !current.is_char_boundary(safe_take) {
-                            safe_take -= 1;
-                        }
-                        if safe_take == 0 {
-                            break;
-                        }
-                        let (part, rest) = current.split_at(safe_take);
-                        all_lines.push((Line::from(vec![Span::styled(part, *style)]), *style));
-                        current = rest;
-                    }
-                }
-                all_lines.push((Line::from(""), *style));
-            }
-            MessageContent::Styled(line) => {
-                all_lines.push((line.clone(), Style::default()));
-                all_lines.push((Line::from(""), Style::default()));
-            }
-            MessageContent::StyledBlock(lines) => {
-                for line in lines {
-                    all_lines.push((line.clone(), Style::default()));
-                }
-            }
-            MessageContent::Markdown(markdown) => {
-                let rendered_lines = render_markdown_to_lines(markdown, width);
-                for line in rendered_lines {
-                    all_lines.push((line, Style::default()));
-                }
-                all_lines.push((Line::from(""), Style::default()));
-            }
-        }
-    }
-    // Add loader as a new message line if loading
-    if state.loading {
-        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-        let loading_line = Line::from(vec![Span::styled(
-            format!("{} Stakpaking...", spinner),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        )]);
-        all_lines.push((loading_line, Style::default()));
-    }
+    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
     // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
@@ -422,263 +354,4 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     f.render_widget(input_widget, area);
-}
-
-fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
-    if state.show_helper_dropdown
-        && !state.filtered_helpers.is_empty()
-        && state.input.starts_with('/')
-    {
-        use ratatui::widgets::{List, ListItem, ListState};
-        let item_style = Style::default().bg(Color::Black);
-        let items: Vec<ListItem> = if state.input == "/" {
-            state
-                .helpers
-                .iter()
-                .map(|h| {
-                    ListItem::new(Line::from(vec![Span::raw(format!("  {}  ", h))]))
-                        .style(item_style)
-                })
-                .collect()
-        } else {
-            state
-                .filtered_helpers
-                .iter()
-                .map(|h| {
-                    ListItem::new(Line::from(vec![Span::raw(format!("  {}  ", h))]))
-                        .style(item_style)
-                })
-                .collect()
-        };
-        let bg_block = Block::default().style(Style::default().bg(Color::Black));
-        f.render_widget(bg_block, dropdown_area);
-        let mut list_state = ListState::default();
-        list_state.select(Some(
-            state.helper_selected.min(items.len().saturating_sub(1)),
-        ));
-        let dropdown_widget = List::new(items)
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::REVERSED)
-                    .bg(Color::DarkGray),
-            )
-            .block(Block::default());
-        f.render_stateful_widget(dropdown_widget, dropdown_area, &mut list_state);
-    }
-}
-
-fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if state.show_shortcuts {
-        let shortcuts = vec![
-            Line::from("/ for commands       shift + enter or ctrl + j to insert newline"),
-            Line::from("↵ to send message    ctrl + c to quit"),
-        ];
-        let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
-        f.render_widget(shortcuts_widget, area);
-    } else {
-        let hint = Paragraph::new(Span::styled(
-            "? for shortcuts",
-            Style::default().fg(Color::Cyan),
-        ));
-        f.render_widget(hint, area);
-    }
-}
-
-// Helper function to extract and truncate command name for dialog display
-fn extract_and_truncate_command_for_dialog(tool_call: &ToolCall) -> String {
-    let command = serde_json::from_str::<Value>(&tool_call.function.arguments)
-        .ok()
-        .and_then(|v| {
-            v.get("command")
-                .and_then(|c| c.as_str().map(|s| s.to_string()))
-        })
-        .unwrap_or_else(|| "unknown command".to_string());
-
-    // Split by whitespace and take first 3 words
-    let words: Vec<&str> = command.split_whitespace().take(3).collect();
-    if words.is_empty() {
-        "unknown command".to_string()
-    } else {
-        words.join(" ")
-    }
-}
-
-fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
-    let screen = f.area();
-    let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
-    let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
-
-    // Fixed dialog height (no longer dynamic based on command length)
-    let dialog_height = 10;
-
-    // Clamp so dialog fits on screen
-    if last_message_y + dialog_height > screen.height {
-        last_message_y = screen.height.saturating_sub(dialog_height + 5);
-    }
-
-    let area = ratatui::layout::Rect {
-        x: 1,
-        y: last_message_y,
-        width: screen.width - 2,
-        height: dialog_height,
-    };
-
-    // Extract and truncate command name to 3 words
-    let command_name = if let Some(tool_call) = &state.dialog_command {
-        extract_and_truncate_command_for_dialog(tool_call)
-    } else {
-        "unknown command".to_string()
-    };
-
-    let pad = "  "; // 2 spaces of padding
-    let mut lines = vec![];
-
-    // Info line
-
-    // Command line (single line, truncated to 3 words)
-    let command_line = Line::from(vec![Span::styled(
-        format!("{pad}Bash({command_name})...{pad}"),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    )]);
-    lines.push(command_line);
-
-    // Empty line
-    lines.push(Line::from(format!("{pad}{pad}")));
-
-    // Question
-    lines.push(Line::from(format!("{pad}Do you want to proceed?{pad}")));
-
-    // Empty line
-    lines.push(Line::from(format!("{pad}{pad}")));
-
-    // Options
-    let options = ["Yes", "No, and tell Stakpak what to do differently (esc)"];
-    for (i, opt) in options.iter().enumerate() {
-        let style = if state.dialog_selected == i {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-        lines.push(Line::from(vec![Span::styled(
-            format!("{pad}{}. {}{pad}", i + 1, opt),
-            style,
-        )]));
-    }
-
-    lines.push(Line::from(format!("{pad}")));
-    let info_line = Line::from(vec![Span::styled(
-        format!("{pad}Press ↑ ↓ or Tab to select · Esc to cancel"),
-        Style::default().fg(Color::DarkGray),
-    )]);
-    lines.push(info_line);
-
-    let dialog = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::LightYellow))
-                .title("Bash command"),
-        )
-        .alignment(Alignment::Left);
-    f.render_widget(dialog, area);
-}
-
-fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
-    let screen = f.area();
-    let max_height = message_area.height.saturating_sub(2).min(20);
-    let session_count = state.sessions.len() as u16;
-    let dialog_height = (session_count + 3).min(max_height);
-
-    let message_lines =
-        crate::app::get_wrapped_message_lines(&state.messages, screen.width as usize);
-    let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
-    if last_message_y + dialog_height > screen.height {
-        last_message_y = screen.height.saturating_sub(dialog_height + 1);
-    }
-
-    let area = Rect {
-        x: 1,
-        y: last_message_y,
-        width: screen.width - 2,
-        height: dialog_height,
-    };
-
-    // Outer block with title
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::LightYellow))
-        .title(Span::styled(
-            "View session",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-    f.render_widget(block, area);
-    // Help text
-    let help = "press enter to choose · esc to cancel";
-    let help_area = Rect {
-        x: area.x + 2,
-        y: area.y + 1,
-        width: area.width - 4,
-        height: 1,
-    };
-    let help_widget = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Left);
-    f.render_widget(help_widget, help_area);
-    // Session list area
-    let list_area = Rect {
-        x: area.x + 2,
-        y: area.y + 3,
-        width: area.width - 4,
-        height: area.height.saturating_sub(4),
-    };
-    let items: Vec<ListItem> = state
-        .sessions
-        .iter()
-        .map(|s| {
-            let text = format!("{} . {}", s.updated_at, s.title);
-            ListItem::new(Line::from(vec![Span::raw(text)]))
-        })
-        .collect();
-    let mut list_state = ListState::default();
-    list_state.select(Some(state.session_selected));
-    let list = List::new(items)
-        .highlight_style(
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .style(Style::default().fg(Color::Gray))
-        .block(Block::default());
-    f.render_stateful_widget(list, list_area, &mut list_state);
-}
-
-pub fn render_system_message(state: &mut AppState, msg: &str) {
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("🤖", Style::default()),
-        Span::styled(
-            " System",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    let message = Line::from(vec![Span::raw(format!(
-        "{pad} - {msg}",
-        pad = " ".repeat(2)
-    ))]);
-    lines.push(message);
-    lines.push(Line::from(vec![Span::raw(" ")]));
-
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-    });
 }
