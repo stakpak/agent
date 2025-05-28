@@ -13,8 +13,6 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
 
-use super::truncate_output;
-
 // Helper to convert tools_map to Vec<Tool>
 fn convert_tools_map(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
@@ -380,9 +378,11 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                                 &input_tx,
                                 InputEvent::ToolResult(ToolCallResult {
                                     call: tool_call.clone(),
-                                    result: truncate_output(
-                                        &message.content.as_ref().unwrap().to_string(),
-                                    ),
+                                    result: message
+                                        .content
+                                        .as_ref()
+                                        .unwrap_or(&MessageContent::String(String::new()))
+                                        .to_string(),
                                 }),
                             )
                             .await;
@@ -439,7 +439,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                             &input_tx,
                             InputEvent::ToolResult(ToolCallResult {
                                 call: tool_call.clone(),
-                                result: truncate_output(&result_content),
+                                result: result_content,
                             }),
                         )
                         .await?;
