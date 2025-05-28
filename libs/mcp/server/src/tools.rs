@@ -103,18 +103,18 @@ impl Tools {
     }
 
     #[tool(
-        description = "A tool used to generate specialized devops configurations and infrastructure as code using a given prompt and provisioner (type of code to generate). This tool does not create or modify files, it only generates the code with proposed file names and content."
+        description = "Generate configurations and infrastructure as code using a given prompt. This function only generates code with proposed file names, it does not create or modify your filesystem. You should use this to generate code (Terraform, Kubernetes, Dockerfile, GithubActions) then use other tools to create/edit files."
     )]
     async fn generate_code(
         &self,
         #[tool(param)]
         #[schemars(
-            description = "The prompt to use to generate the code, this should be a detailed description of the code you want to generate"
+            description = "Prompt to use to generate code, this should be as detailed as possible"
         )]
         prompt: String,
         #[tool(param)]
         #[schemars(
-            description = "The provisioner to use to generate the code one of Kubernetes, Terraform, Dockerfile, GithubActions"
+            description = "Type of code to generate one of Dockerfile, Kubernetes, Terraform, GithubActions"
         )]
         provisioner: Provisioner,
     ) -> Result<CallToolResult, McpError> {
