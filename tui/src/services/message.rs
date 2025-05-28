@@ -4,9 +4,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use serde_json::Value;
+#[cfg(test)]
+use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
-
 pub struct BubbleColors {
     pub border_color: Color,
     pub title_color: Color,
@@ -225,56 +226,99 @@ pub fn extract_and_truncate_command(tool_call: &ToolCall) -> String {
 }
 
 pub fn extract_full_command(tool_call: &ToolCall) -> String {
+    // First try to parse as valid JSON
     if let Ok(v) = serde_json::from_str::<Value>(&tool_call.function.arguments) {
-        if let Some(command) = v.get("command").and_then(|c| c.as_str()) {
-            return command.to_string();
-        }
+        return format_json_value(&v);
     }
-    let re1 = Regex::new(r#"command"\s*:\s*"((?:[^"\\]|\\.)*)""#).unwrap();
-    if let Some(caps) = re1.captures(&tool_call.function.arguments) {
-        if let Some(command) = caps.get(1) {
-            let unescaped = command
-                .as_str()
-                .replace(r#"\""#, "\"")
-                .replace(r"\\", "\\")
-                .replace(r"\n", "\n")
-                .replace(r"\t", "\t");
-            return unescaped;
-        }
-    }
-    let re2 = Regex::new(r#"command['"]\s*:\s*['"](.*?)['"]\s*[,}]"#).unwrap();
-    if let Some(caps) = re2.captures(&tool_call.function.arguments) {
-        if let Some(command) = caps.get(1) {
-            return command.as_str().to_string();
-        }
-    }
-    let re3 = Regex::new(r#"command.*?:\s*([^,}]+)"#).unwrap();
-    if let Some(caps) = re3.captures(&tool_call.function.arguments) {
-        if let Some(command) = caps.get(1) {
-            let cleaned = command.as_str().trim().trim_matches('"').trim_matches('\'');
-            if !cleaned.is_empty() {
-                return cleaned.to_string();
+
+    // If JSON parsing fails, try regex patterns for malformed JSON
+    let patterns = vec![
+        // Pattern for key-value pairs with quotes
+        r#"["']?(\w+)["']?\s*:\s*["']([^"']+)["']"#,
+        // Pattern for simple key-value without quotes
+        r#"(\w+)\s*:\s*([^,}\s]+)"#,
+    ];
+
+    for pattern in patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            let mut results = Vec::new();
+            for caps in re.captures_iter(&tool_call.function.arguments) {
+                if caps.len() >= 3 {
+                    let key = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                    let value = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                    results.push(format!("{} = {}", key, value));
+                }
+            }
+            if !results.is_empty() {
+                return results.join(", ");
             }
         }
     }
+
+    // Try to wrap in braces and parse as JSON
+    let wrapped = format!("{{{}}}", tool_call.function.arguments);
+    if let Ok(v) = serde_json::from_str::<Value>(&wrapped) {
+        return format_json_value(&v);
+    }
+
+    // If all else fails, return the raw arguments if they're not empty
     let trimmed = tool_call.function.arguments.trim();
-    if !trimmed.is_empty() && !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+    if !trimmed.is_empty() {
         return trimmed.to_string();
     }
-    if let Ok(v) = serde_json::from_str::<Value>(&format!("{{{}}}", tool_call.function.arguments)) {
-        if let Some(command) = v.get("command").and_then(|c| c.as_str()) {
-            return command.to_string();
+
+    // Last resort
+    format!("function_name={}", tool_call.function.name)
+}
+
+fn format_json_value(value: &Value) -> String {
+    match value {
+        Value::Object(obj) => {
+            let mut parts = Vec::new();
+
+            // Prioritize common command-like fields
+            let priority_fields = ["command", "action", "type", "method", "operation"];
+
+            // First add priority fields if they exist
+            for field in &priority_fields {
+                if let Some(val) = obj.get(*field) {
+                    parts.push(format!("{} = {}", field, format_simple_value(val)));
+                }
+            }
+
+            // Then add other fields
+            for (key, val) in obj {
+                if !priority_fields.contains(&key.as_str()) {
+                    parts.push(format!("{} = {}", key, format_simple_value(val)));
+                }
+            }
+
+            if parts.is_empty() {
+                "empty_object".to_string()
+            } else {
+                parts.join(", ")
+            }
         }
+        Value::Array(arr) => {
+            if arr.is_empty() {
+                "empty_array".to_string()
+            } else {
+                format!("array[{}]", arr.len())
+            }
+        }
+        _ => format_simple_value(value),
     }
-    eprintln!(
-        "Failed to extract command from arguments: {:?}",
-        tool_call.function.arguments
-    );
-    eprintln!(
-        "Raw arguments length: {}",
-        tool_call.function.arguments.len()
-    );
-    "unknown command".to_string()
+}
+
+fn format_simple_value(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Object(_) => "object".to_string(),
+        Value::Array(arr) => format!("array[{}]", arr.len()),
+    }
 }
 
 pub fn format_command_content(command: &str) -> Vec<String> {
@@ -401,7 +445,7 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 // Helper function to extract what the command is trying to do (bubble title)
-pub fn extract_command_purpose(command: &str) -> String {
+pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     let command = command.trim();
 
     // File creation patterns
@@ -517,8 +561,11 @@ pub fn extract_command_purpose(command: &str) -> String {
 
     // Default: return the command itself (first few words)
     let words: Vec<&str> = command.split_whitespace().take(3).collect();
+
     if words.is_empty() {
         "Running command".to_string()
+    } else if !outside_title.is_empty() {
+        return outside_title.to_string();
     } else {
         words.join(" ")
     }
@@ -550,6 +597,44 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
                 })
                 .collect::<Vec<String>>()
                 .join(" ")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_various_formats() {
+        // Test cases based on your examples
+        let test_cases = vec![
+            (r#"{"path":"."}"#, "path=."),
+            (r#"{"confidence":1.0}"#, "confidence=1.0"),
+            (r#"{"command":"ls -la"}"#, "command=ls -la"),
+            (
+                r#"{"action":"view","target":"file.txt"}"#,
+                "action=view, target=file.txt",
+            ),
+            (r#"path: ".", mode: "list""#, "path=., mode=list"),
+            ("", "function_name=test"),
+        ];
+
+        for (input, expected) in test_cases {
+            let tool_call = ToolCall {
+                id: "test".to_string(),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "test".to_string(),
+                    arguments: input.to_string(),
+                },
+            };
+
+            let result = extract_full_command(&tool_call);
+            println!(
+                "Input: '{}' -> Output: '{}' (Expected: '{}')",
+                input, result, expected
+            );
         }
     }
 }

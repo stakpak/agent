@@ -27,12 +27,18 @@ pub fn render_bash_block(
 
     // Get the command from the tool call
     let full_command = extract_full_command(tool_call);
+    // if full_command is "unknown command" then use the output as the command
+    let command = if full_command == "unknown command" {
+        output.to_string()
+    } else {
+        full_command
+    };
 
     // Get the outside title (command type name)
     let outside_title = get_command_type_name(tool_call);
 
     // Get the bubble title (what the command is trying to do)
-    let bubble_title = extract_command_purpose(&full_command);
+    let bubble_title = extract_command_purpose(&command, &outside_title);
 
     let content_lines = format_command_content(output);
 
