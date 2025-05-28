@@ -133,7 +133,6 @@ impl Tools {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("Failed to generate code: {}", e);
                 return Ok(CallToolResult::error(vec![
                     Content::text("GENERATE_CODE_ERROR"),
                     Content::text(format!("Failed to generate code: {}", e)),
