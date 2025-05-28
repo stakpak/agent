@@ -78,6 +78,7 @@ pub enum InputEvent {
 pub enum OutputEvent {
     UserMessage(String),
     AcceptTool(ToolCall),
+    RejectTool(ToolCall),
 }
 
 impl AppState {

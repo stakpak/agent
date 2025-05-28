@@ -110,7 +110,7 @@ pub fn update(
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state),
+        InputEvent::HandleEsc => handle_esc(state, output_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -205,7 +205,7 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_esc(state: &mut AppState) {
+fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
@@ -213,6 +213,7 @@ fn handle_esc(state: &mut AppState) {
     } else if state.is_dialog_open {
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
+            let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_and_truncate_command(tool_call);
             render_bash_block_rejected(&truncated_command, state);
         }
