@@ -127,7 +127,7 @@ pub fn get_wrapped_styled_block_lines<'a>(
         .collect()
 }
 
-pub fn get_wrapped_markdown_lines<'a>(markdown: &'a str, width: usize) -> Vec<(Line<'a>, Style)> {
+pub fn get_wrapped_markdown_lines(markdown: &str, width: usize) -> Vec<(Line<'_>, Style)> {
     let mut result = Vec::new();
     let rendered_lines = render_markdown_to_lines(markdown, width);
     for line in rendered_lines {
@@ -180,10 +180,7 @@ pub fn get_wrapped_bash_bubble_lines<'a>(
     lines
 }
 
-pub fn get_wrapped_message_lines<'a>(
-    messages: &'a [Message],
-    width: usize,
-) -> Vec<(Line<'a>, Style)> {
+pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line<'_>, Style)> {
     let mut all_lines = Vec::new();
     for msg in messages {
         match &msg.content {
