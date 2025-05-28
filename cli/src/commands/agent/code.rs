@@ -67,7 +67,7 @@ async fn send_tool_calls(
     tool_calls: &[stakpak_shared::models::integrations::openai::ToolCall],
 ) -> Result<(), String> {
     for tool_call in tool_calls {
-        send_input_event(input_tx, InputEvent::RunCommand(tool_call.clone())).await?;
+        send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
     }
     Ok(())
 }

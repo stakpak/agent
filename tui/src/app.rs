@@ -43,7 +43,7 @@ pub struct AppState {
 pub enum InputEvent {
     AssistantMessage(String),
     StreamAssistantMessage(Uuid, String),
-    RunCommand(ToolCall),
+    RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
     Loading(bool),
     InputChanged(char),

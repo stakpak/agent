@@ -50,14 +50,12 @@ pub async fn run_tui(
     loop {
         tokio::select! {
             Some(event) = input_rx.recv() => {
-                if let InputEvent::RunCommand(tool_call) = &event {
-                    eprintln!("RunCommand: {:?}", tool_call);
+                if let InputEvent::RunToolCall(tool_call) = &event {
                     services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size);
                     terminal.draw(|f| view::view(f, &state))?;
                     continue;
                 }
                 if let InputEvent::ToolResult(ref tool_call_result) = event {
-                    eprintln!("ToolResult: {:?}", tool_call_result);
                     let tool_call = tool_call_result.call.clone();
                     let result = tool_call_result.result.clone();
                     // Use the new render_bash_result_block function for ToolResults
