@@ -138,20 +138,20 @@ pub fn get_wrapped_markdown_lines(markdown: &str, width: usize) -> Vec<(Line<'_>
 }
 
 pub fn get_wrapped_bash_bubble_lines<'a>(
-    title: &'a str,
+    _title: &'a str,
     content: &'a [String],
     colors: &BubbleColors,
 ) -> Vec<(Line<'a>, Style)> {
-    let title_style = Style::default()
+    let _title_style = Style::default()
         .fg(colors.title_color)
         .add_modifier(Modifier::BOLD);
     let border_style = Style::default().fg(colors.border_color);
     let content_style = Style::default().fg(colors.content_color);
     let mut lines = Vec::new();
-    lines.push((
-        Line::from(vec![Span::styled(title, title_style)]),
-        title_style,
-    ));
+    // lines.push((
+    //     Line::from(vec![Span::styled(title, title_style)]),
+    //     title_style,
+    // ));
     for line in content.iter() {
         let chars: Vec<char> = line.chars().collect();
         if chars.len() > 2 && chars[0] == '│' && chars[chars.len() - 1] == '│' {
@@ -271,36 +271,38 @@ pub fn extract_full_command(tool_call: &ToolCall) -> String {
 fn format_json_value(value: &Value) -> String {
     match value {
         Value::Object(obj) => {
-            let mut parts = Vec::new();
-
-            // Prioritize common command-like fields
-            let priority_fields = ["command", "action", "type", "method", "operation"];
-
-            // First add priority fields if they exist
-            for field in &priority_fields {
-                if let Some(val) = obj.get(*field) {
-                    parts.push(format!("{} = {}", field, format_simple_value(val)));
-                }
+            if obj.is_empty() {
+                return "{}".to_string();
             }
 
-            // Then add other fields
-            for (key, val) in obj {
-                if !priority_fields.contains(&key.as_str()) {
-                    parts.push(format!("{} = {}", key, format_simple_value(val)));
-                }
-            }
-
-            if parts.is_empty() {
-                "empty_object".to_string()
-            } else {
-                parts.join(", ")
-            }
+            let mut values = obj
+                .into_iter()
+                .map(|(key, val)| (key, format_simple_value(val)))
+                .collect::<Vec<_>>();
+            values.sort_by_key(|(_, val)| val.len());
+            values
+                .into_iter()
+                .map(|(key, val)| {
+                    if val.len() > 100 {
+                        format!("{} = ```\n{}\n```", key, val)
+                    } else {
+                        format!("{} = {}", key, val)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
         }
         Value::Array(arr) => {
             if arr.is_empty() {
-                "empty_array".to_string()
+                "[]".to_string()
             } else {
-                format!("array[{}]", arr.len())
+                format!(
+                    "[{}]",
+                    arr.iter()
+                        .map(|v| format_simple_value(v))
+                        .collect::<Vec<_>>()
+                        .join(",\n")
+                )
             }
         }
         _ => format_simple_value(value),
@@ -314,42 +316,8 @@ fn format_simple_value(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::Object(_) => "object".to_string(),
-        Value::Array(arr) => format!("array[{}]", arr.len()),
+        Value::Array(arr) => format!("[{}]", arr.len()),
     }
-}
-
-pub fn format_command_content(command: &str) -> Vec<String> {
-    let mut formatted_lines = Vec::new();
-    if command.contains("<<") {
-        let parts: Vec<&str> = command.split("<<").collect();
-        if parts.len() >= 2 {
-            formatted_lines.push(parts[0].trim().to_string());
-            let heredoc_part = parts[1];
-            if let Some(delimiter_end) = heredoc_part.find('\n') {
-                let delimiter_line = &heredoc_part[..delimiter_end];
-                formatted_lines.push(format!("<< {}", delimiter_line.trim()));
-                let content = &heredoc_part[delimiter_end + 1..];
-                let content_lines: Vec<&str> = content.split("\\n").collect();
-                for (i, line) in content_lines.iter().enumerate() {
-                    for actual_line in line.split('\n') {
-                        if !actual_line.trim().is_empty() || i == content_lines.len() - 1 {
-                            formatted_lines.push(actual_line.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        let parts: Vec<&str> = command.split(" && ").collect();
-        for (i, part) in parts.iter().enumerate() {
-            if i == 0 {
-                formatted_lines.push(part.trim().to_string());
-            } else {
-                formatted_lines.push(format!("&& {}", part.trim()));
-            }
-        }
-    }
-    formatted_lines
 }
 
 pub fn extract_file_info(command: &str) -> Option<String> {
