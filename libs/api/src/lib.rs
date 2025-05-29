@@ -17,6 +17,7 @@ pub mod dave_v1;
 pub mod kevin_v1;
 pub mod norbert_v1;
 pub mod stuart_v1;
+pub use models::Block;
 
 pub struct Client {
     client: ReqwestClient,
