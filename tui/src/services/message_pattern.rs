@@ -125,7 +125,7 @@ pub fn process_checkpoint_patterns(
             checkpoint_text,
             "-".repeat(dash_right)
         );
-        (line, Style::default().fg(Color::Rgb(255, 223, 170)))
+        (line, Style::default().fg(Color::DarkGray))
     };
     process_lines_with_pattern(
         lines,
@@ -361,7 +361,7 @@ mod tests {
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,
-            Some(Color::Rgb(255, 223, 170))
+            Some(Color::DarkGray)
         );
 
         // Second line should be unchanged
@@ -392,7 +392,7 @@ mod tests {
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,
-            Some(Color::Rgb(255, 223, 170))
+            Some(Color::DarkGray)
         );
         assert_eq!(processed[0].0.spans[2].content, " message");
 
@@ -429,7 +429,7 @@ mod tests {
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,
-            Some(Color::Rgb(255, 223, 170))
+            Some(Color::DarkGray)
         );
     }
 }
