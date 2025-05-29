@@ -3,13 +3,12 @@ use crate::services::bash_block::{render_bash_block, render_bash_block_rejected}
 use crate::services::helper_block::{
     push_help_message, push_status_message, render_system_message,
 };
-use crate::services::message::{
-    Message, MessageContent, extract_and_truncate_command, extract_full_command,
-    get_wrapped_message_lines,
-};
+use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
+use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
 pub fn update(
     state: &mut AppState,
@@ -101,7 +100,7 @@ pub fn update(
         InputEvent::ShowConfirmationDialog(tool_call) => {
             state.is_dialog_open = true;
             state.dialog_command = Some(tool_call.clone());
-            let full_command = extract_full_command(&tool_call);
+            let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
@@ -214,7 +213,7 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-            let truncated_command = extract_and_truncate_command(tool_call);
+            let truncated_command = extract_truncated_command_arguments(tool_call);
             render_bash_block_rejected(&truncated_command, state);
         }
         state.is_dialog_open = false;
@@ -244,7 +243,7 @@ fn handle_input_submitted(
             // Clone dialog_command before mutating state
             let tool_call_opt = state.dialog_command.clone();
             if let Some(tool_call) = &tool_call_opt {
-                let truncated_command = extract_and_truncate_command(tool_call);
+                let truncated_command = extract_truncated_command_arguments(tool_call);
                 render_bash_block_rejected(&truncated_command, state);
             }
         }

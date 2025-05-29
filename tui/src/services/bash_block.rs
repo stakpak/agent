@@ -1,13 +1,15 @@
 use crate::app::AppState;
 use crate::services::message::{
-    BubbleColors, Message, MessageContent, extract_and_truncate_command, extract_command_purpose,
-    extract_file_info, extract_full_command, get_command_type_name, wrap_text,
+    BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
+    wrap_text,
 };
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
+
+use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
 pub fn render_bash_block(
     tool_call: &ToolCall,
@@ -25,7 +27,7 @@ pub fn render_bash_block(
     };
 
     // Get the command from the tool call
-    let full_command = extract_full_command(tool_call);
+    let full_command = extract_full_command_arguments(tool_call);
     // if full_command is "unknown command" then use the output as the command
     let command = if full_command == "unknown command" {
         output.to_string()
@@ -149,11 +151,6 @@ pub fn render_bash_block(
 
 pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
     let mut lines = Vec::new();
-
-    // Extract the actual command that was executed
-    let full_command = extract_full_command(tool_call);
-    let file_info = extract_file_info(&full_command);
-
     // Header line with approved colors (green bullet, white text)
     lines.push(Line::from(vec![
         Span::styled(
@@ -168,18 +165,10 @@ pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppSt
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
-        if let Some(file_desc) = file_info {
-            Span::styled(
-                format!(" ({})", file_desc),
-                Style::default().fg(Color::White),
-            )
-        } else {
-            Span::styled(
-                format!(" ({})", extract_and_truncate_command(tool_call)),
-                Style::default().fg(Color::Gray),
-            )
-        },
-        Span::styled("...", Style::default().fg(Color::Gray)),
+        Span::styled(
+            format!("({})", extract_truncated_command_arguments(tool_call)),
+            Style::default().fg(Color::Gray),
+        ),
     ]));
 
     // Show the command output

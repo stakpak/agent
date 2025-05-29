@@ -209,20 +209,40 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
     all_lines
 }
 
-pub fn extract_and_truncate_command(tool_call: &ToolCall) -> String {
-    let full_command = extract_full_command(tool_call);
-    if full_command == "unknown command" {
-        return full_command;
-    }
-    let words: Vec<&str> = full_command.split_whitespace().take(3).collect();
-    if words.is_empty() {
-        "unknown command".to_string()
-    } else {
-        words.join(" ")
+pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
+    let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
+    const MAX_PARAMS: usize = 3;
+    match arguments {
+        Ok(Value::Object(obj)) => {
+            let mut values = obj
+                .into_iter()
+                .map(|(key, val)| (key, format_simple_value(&val)))
+                .collect::<Vec<_>>();
+            values.sort_by_key(|(_, val)| val.len());
+            let total_params = values.len();
+            let included_params = values
+                .into_iter()
+                .take(MAX_PARAMS)
+                .map(|(key, val)| {
+                    if val.len() > 10 {
+                        format!("{} = {:.20}...", key, val).replace("\n", " ")
+                    } else {
+                        format!("{} = {}", key, val)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            if total_params > MAX_PARAMS {
+                format!("{}, {} more", included_params, total_params - MAX_PARAMS)
+            } else {
+                included_params
+            }
+        }
+        _ => "unable to parse arguments".to_string(),
     }
 }
 
-pub fn extract_full_command(tool_call: &ToolCall) -> String {
+pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
     // First try to parse as valid JSON
     if let Ok(v) = serde_json::from_str::<Value>(&tool_call.function.arguments) {
         return format_json_value(&v);
@@ -318,37 +338,6 @@ fn format_simple_value(value: &Value) -> String {
         Value::Object(_) => "object".to_string(),
         Value::Array(arr) => format!("[{}]", arr.len()),
     }
-}
-
-pub fn extract_file_info(command: &str) -> Option<String> {
-    if let Some(pos) = command.find(" > ") {
-        let after_redirect = &command[pos + 3..];
-        if let Some(filename) = after_redirect.split_whitespace().next() {
-            return Some(format!("Creating file {}", filename));
-        }
-    } else if command.contains("cat >") {
-        if let Some(pos) = command.find("cat >") {
-            let after_cat = &command[pos + 5..].trim();
-            if let Some(filename) = after_cat.split_whitespace().next() {
-                return Some(format!("Creating file {}", filename));
-            }
-        }
-    } else if command.contains("echo") && command.contains(" > ") {
-        if let Some(pos) = command.find(" > ") {
-            let after_redirect = &command[pos + 3..];
-            if let Some(filename) = after_redirect.split_whitespace().next() {
-                return Some(format!("Creating file {}", filename));
-            }
-        }
-    } else if command.contains("touch ") {
-        if let Some(pos) = command.find("touch ") {
-            let after_touch = &command[pos + 6..];
-            if let Some(filename) = after_touch.split_whitespace().next() {
-                return Some(format!("Creating file {}", filename));
-            }
-        }
-    }
-    None
 }
 
 // Helper function to wrap text to specified width
@@ -595,7 +584,7 @@ mod tests {
                 },
             };
 
-            let result = extract_full_command(&tool_call);
+            let result = extract_full_command_arguments(&tool_call);
             println!(
                 "Input: '{}' -> Output: '{}' (Expected: '{}')",
                 input, result, expected
