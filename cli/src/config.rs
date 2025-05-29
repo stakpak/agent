@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct AppConfig {
     pub api_endpoint: String,
     pub api_key: Option<String>,
+    pub mcp_server_host: Option<String>,
 }
 
 impl From<AppConfig> for ClientConfig {
