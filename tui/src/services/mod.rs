@@ -5,6 +5,6 @@ pub mod helper_dropdown;
 pub mod hint_helper;
 pub mod markdown;
 pub mod message;
+pub mod message_pattern;
 pub mod sessions_dialog;
 pub mod update;
-pub mod message_pattern;

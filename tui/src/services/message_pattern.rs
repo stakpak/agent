@@ -7,10 +7,10 @@ use regex::Regex;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PatternMatch {
-    pub full_match: String,    // The entire match including tags
-    pub content: String,       // Just the content inside the tags
-    pub start: usize,         // Start position in the original text
-    pub end: usize,           // End position in the original text
+    pub full_match: String, // The entire match including tags
+    pub content: String,    // Just the content inside the tags
+    pub start: usize,       // Start position in the original text
+    pub end: usize,         // End position in the original text
 }
 
 /// Extract all matches for a given pattern from text
@@ -33,16 +33,12 @@ pub fn extract_pattern_matches(text: &str, pattern: &str) -> Vec<PatternMatch> {
 }
 
 /// Transform a line by applying a pattern and transformation function
-pub fn transform_line_with_pattern<F>(
-    text: &str,
-    pattern: &str,
-    transform_fn: F,
-) -> Line<'static>
+pub fn transform_line_with_pattern<F>(text: &str, pattern: &str, transform_fn: F) -> Line<'static>
 where
     F: Fn(&str) -> (String, Style),
 {
     let matches = extract_pattern_matches(text, pattern);
-    
+
     if matches.is_empty() {
         return Line::from(text.to_string());
     }
@@ -79,7 +75,10 @@ where
 
 /// Helper function to convert spans back to plain text
 pub fn spans_to_string(line: &Line) -> String {
-    line.spans.iter().map(|span| span.content.as_ref()).collect()
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
 }
 
 /// Process all lines with a single pattern transformation
@@ -105,14 +104,19 @@ where
 pub fn process_checkpoint_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
     let checkpoint_formatter = |content: &str| -> (String, Style) {
         (
-            format!("-----------------------------checkpoint {}---------------------------", content),
-            Style::default().fg(Color::Rgb(255, 223, 170))
+            format!(
+                "-----------------------------checkpoint {}---------------------------",
+                content
+            ),
+            Style::default().fg(Color::Rgb(255, 223, 170)),
         )
     };
-    process_lines_with_pattern(lines, r"<checkpoint_id>([^<]*)</checkpoint_id>", checkpoint_formatter)
+    process_lines_with_pattern(
+        lines,
+        r"<checkpoint_id>([^<]*)</checkpoint_id>",
+        checkpoint_formatter,
+    )
 }
-
-
 
 /// Apply multiple pattern transformations in sequence
 pub fn apply_all_pattern_transformations(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
@@ -126,16 +130,17 @@ mod tests {
 
     #[test]
     fn test_extract_pattern_matches() {
-        let text = "Hello <checkpoint_id>123</checkpoint_id> world <checkpoint_id>456</checkpoint_id>";
+        let text =
+            "Hello <checkpoint_id>123</checkpoint_id> world <checkpoint_id>456</checkpoint_id>";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
         let matches = extract_pattern_matches(text, pattern);
-        
+
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].content, "123");
         assert_eq!(matches[0].full_match, "<checkpoint_id>123</checkpoint_id>");
         assert_eq!(matches[0].start, 6);
         assert_eq!(matches[0].end, 40);
-        
+
         assert_eq!(matches[1].content, "456");
         assert_eq!(matches[1].full_match, "<checkpoint_id>456</checkpoint_id>");
         assert_eq!(matches[1].start, 47);
@@ -147,7 +152,7 @@ mod tests {
         let text = "Hello world, no patterns here";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
         let matches = extract_pattern_matches(text, pattern);
-        
+
         assert_eq!(matches.len(), 0);
     }
 
@@ -156,7 +161,7 @@ mod tests {
         let text = "Empty <checkpoint_id></checkpoint_id> content";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
         let matches = extract_pattern_matches(text, pattern);
-        
+
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].content, "");
     }
@@ -165,17 +170,17 @@ mod tests {
     fn test_transform_line_with_pattern_simple() {
         let text = "Test <checkpoint_id>123</checkpoint_id> message";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
-        
+
         let line = transform_line_with_pattern(text, pattern, |content| {
             (format!("[{}]", content), Style::default().fg(Color::Yellow))
         });
-        
+
         // Should have 3 spans: "Test ", "[123]", " message"
         assert_eq!(line.spans.len(), 3);
         assert_eq!(line.spans[0].content, "Test ");
         assert_eq!(line.spans[1].content, "[123]");
         assert_eq!(line.spans[2].content, " message");
-        
+
         // Check styling
         assert_eq!(line.spans[1].style.fg, Some(Color::Yellow));
     }
@@ -184,11 +189,11 @@ mod tests {
     fn test_transform_line_with_pattern_no_matches() {
         let text = "No patterns in this text";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
-        
+
         let line = transform_line_with_pattern(text, pattern, |content| {
             (format!("[{}]", content), Style::default().fg(Color::Yellow))
         });
-        
+
         // Should have 1 span with original text
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].content, "No patterns in this text");
@@ -198,11 +203,11 @@ mod tests {
     fn test_transform_line_with_pattern_multiple_matches() {
         let text = "Start <checkpoint_id>123</checkpoint_id> middle <checkpoint_id>456</checkpoint_id> end";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
-        
+
         let line = transform_line_with_pattern(text, pattern, |content| {
             (format!("[{}]", content), Style::default().fg(Color::Yellow))
         });
-        
+
         // Should have 5 spans: "Start ", "[123]", " middle ", "[456]", " end"
         assert_eq!(line.spans.len(), 5);
         assert_eq!(line.spans[0].content, "Start ");
@@ -216,11 +221,11 @@ mod tests {
     fn test_transform_line_with_pattern_adjacent_matches() {
         let text = "<checkpoint_id>123</checkpoint_id><checkpoint_id>456</checkpoint_id>";
         let pattern = r"<checkpoint_id>([^<]*)</checkpoint_id>";
-        
+
         let line = transform_line_with_pattern(text, pattern, |content| {
             (format!("[{}]", content), Style::default().fg(Color::Yellow))
         });
-        
+
         // Should have 2 spans: "[123]", "[456]"
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content, "[123]");
@@ -235,7 +240,7 @@ mod tests {
             Span::raw("!"),
         ];
         let line = Line::from(spans);
-        
+
         let result = spans_to_string(&line);
         assert_eq!(result, "Hello world!");
     }
@@ -250,25 +255,33 @@ mod tests {
     #[test]
     fn test_process_lines_with_pattern() {
         let lines = vec![
-            (Line::from("Test <checkpoint_id>123</checkpoint_id> message"), Style::default()),
-            (Line::from("Another <checkpoint_id>456</checkpoint_id> line"), Style::default()),
+            (
+                Line::from("Test <checkpoint_id>123</checkpoint_id> message"),
+                Style::default(),
+            ),
+            (
+                Line::from("Another <checkpoint_id>456</checkpoint_id> line"),
+                Style::default(),
+            ),
             (Line::from("No patterns here"), Style::default()),
         ];
-        
-        let processed = process_lines_with_pattern(&lines, r"<checkpoint_id>([^<]*)</checkpoint_id>", |content| {
-            (format!("[{}]", content), Style::default().fg(Color::Cyan))
-        });
-        
+
+        let processed = process_lines_with_pattern(
+            &lines,
+            r"<checkpoint_id>([^<]*)</checkpoint_id>",
+            |content| (format!("[{}]", content), Style::default().fg(Color::Cyan)),
+        );
+
         assert_eq!(processed.len(), 3);
-        
+
         // First line should have transformed content
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(processed[0].0.spans[1].content, "[123]");
-        
+
         // Second line should have transformed content
         assert_eq!(processed[1].0.spans.len(), 3);
         assert_eq!(processed[1].0.spans[1].content, "[456]");
-        
+
         // Third line should be unchanged
         assert_eq!(processed[2].0.spans.len(), 1);
         assert_eq!(processed[2].0.spans[0].content, "No patterns here");
@@ -277,43 +290,48 @@ mod tests {
     #[test]
     fn test_process_checkpoint_patterns() {
         let lines = vec![
-            (Line::from("Hello <checkpoint_id>test123</checkpoint_id> world"), Style::default()),
+            (
+                Line::from("Hello <checkpoint_id>test123</checkpoint_id> world"),
+                Style::default(),
+            ),
             (Line::from("No checkpoint here"), Style::default()),
         ];
-        
+
         let processed = process_checkpoint_patterns(&lines);
-        
+
         assert_eq!(processed.len(), 2);
-        
+
         // First line should have uppercase content in cyan
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(processed[0].0.spans[1].content, "TEST123");
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::Cyan));
-        
+
         // Second line should be unchanged
         assert_eq!(processed[1].0.spans.len(), 1);
         assert_eq!(processed[1].0.spans[0].content, "No checkpoint here");
     }
 
- 
     #[test]
     fn test_apply_all_pattern_transformations() {
         let lines = vec![
-            (Line::from("Test <checkpoint_id>abc</checkpoint_id> message"), Style::default()),
+            (
+                Line::from("Test <checkpoint_id>abc</checkpoint_id> message"),
+                Style::default(),
+            ),
             (Line::from("Normal line"), Style::default()),
         ];
-        
+
         let processed = apply_all_pattern_transformations(&lines);
-        
+
         assert_eq!(processed.len(), 2);
-        
+
         // First line should have checkpoint transformed to uppercase cyan
         assert_eq!(processed[0].0.spans.len(), 3); // "Test ", "ABC", " message"
         assert_eq!(processed[0].0.spans[0].content, "Test ");
         assert_eq!(processed[0].0.spans[1].content, "ABC");
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::Cyan));
         assert_eq!(processed[0].0.spans[2].content, " message");
-        
+
         // Second line should be unchanged (only 1 span)
         assert_eq!(processed[1].0.spans.len(), 1);
         assert_eq!(processed[1].0.spans[0].content, "Normal line");
@@ -322,20 +340,21 @@ mod tests {
     #[test]
     fn test_multiple_patterns_in_sequence() {
         // Test that only checkpoint patterns are processed in apply_all_pattern_transformations
-        let lines = vec![
-            (Line::from("Start <checkpoint_id>abc</checkpoint_id> end"), Style::default()),
-        ];
-        
+        let lines = vec![(
+            Line::from("Start <checkpoint_id>abc</checkpoint_id> end"),
+            Style::default(),
+        )];
+
         let processed = apply_all_pattern_transformations(&lines);
-        
+
         assert_eq!(processed.len(), 1);
-        
+
         // Should have checkpoint transformation applied
         let text = spans_to_string(&processed[0].0);
         assert!(text.contains("ABC")); // Checkpoint should be uppercase
         assert!(text.contains("Start"));
         assert!(text.contains("end"));
-        
+
         // Verify the actual spans structure
         assert_eq!(processed[0].0.spans.len(), 3); // "Start ", "ABC", " end"
         assert_eq!(processed[0].0.spans[1].content, "ABC");

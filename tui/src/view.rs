@@ -3,6 +3,7 @@ use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::get_wrapped_message_lines;
+use crate::services::message_pattern::{apply_all_pattern_transformations, spans_to_string};
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
@@ -11,7 +12,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use crate::services::message_pattern::{apply_all_pattern_transformations, spans_to_string};
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -165,7 +165,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
-    
+
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
     // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
@@ -179,7 +179,8 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         if let Some((line, _)) = all_lines.get(scroll + i) {
             let line_text = spans_to_string(line);
             if line_text.contains("<checkpoint_id>") || line_text.contains("<e>") {
-                let processed = apply_all_pattern_transformations(&[(line.clone(), Style::default())]);
+                let processed =
+                    apply_all_pattern_transformations(&[(line.clone(), Style::default())]);
                 visible_lines.push(processed[0].0.clone());
             } else {
                 // No patterns = no processing (fastest path)
