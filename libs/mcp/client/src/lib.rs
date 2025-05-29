@@ -29,6 +29,7 @@ impl ClientManager {
         &self,
         client_name: &str,
     ) -> Result<&RunningService<RoleClient, LocalClientHandler>> {
+        #[allow(clippy::unwrap_used)]
         let client = self.clients.get(client_name).unwrap();
         Ok(client)
     }
@@ -59,6 +60,7 @@ impl ClientManager {
         client_name: &str,
         params: CallToolRequestParam,
     ) -> Result<()> {
+        #[allow(clippy::unwrap_used)]
         let client = self.clients.get_mut(client_name).unwrap();
         client.call_tool(params).await?;
         Ok(())

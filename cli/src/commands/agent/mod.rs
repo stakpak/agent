@@ -158,7 +158,10 @@ impl AgentCommands {
                 .map_err(|e| e.to_string())?;
                 let checkpoint_uuid = Uuid::from_str(&checkpoint_id).map_err(|e| e.to_string())?;
                 let output = client.get_agent_checkpoint(checkpoint_uuid).await?;
-                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&output).unwrap_or_default()
+                );
             }
         }
         Ok(())
@@ -343,7 +346,7 @@ impl ActionExt for Action {
                     .map_err(|e| format!("Failed to create process stream: {}", e))?;
                 let mut exit_code = -1;
 
-                let regex = Regex::new(r"\x1B\[[0-9;]*[mK]").unwrap();
+                let regex = Regex::new(r"\x1B\[[0-9;]*[mK]").map_err(|e| e.to_string())?;
                 while let Some(item) = process_stream.next().await {
                     match item {
                         Item::Stdout(line) | Item::Stderr(line) => {

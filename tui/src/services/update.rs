@@ -390,7 +390,7 @@ fn handle_stream_tool_result(
     state
         .streaming_tool_results
         .entry(tool_call_id)
-        .or_insert_with(String::new)
+        .or_default()
         .push_str(&progress.message);
 
     // 2. Remove the old message with this id (if any)
@@ -480,6 +480,6 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.streaming_tool_results.clear();
     state
         .messages
-        .retain(|m| m.id != state.streaming_tool_result_id.unwrap());
+        .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
     state.streaming_tool_result_id = None;
 }

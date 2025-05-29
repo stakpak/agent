@@ -89,8 +89,10 @@ impl Tools {
                 )
             })?;
 
-        let stdout = child.stdout.take().expect("stdout piped");
-        let stderr = child.stderr.take().expect("stderr piped");
+        #[allow(clippy::unwrap_used)]
+        let stdout = child.stdout.take().unwrap();
+        #[allow(clippy::unwrap_used)]
+        let stderr = child.stderr.take().unwrap();
 
         let mut stdout_reader = BufReader::new(stdout);
         let mut stderr_reader = BufReader::new(stderr);
@@ -139,7 +141,7 @@ impl Tools {
                         total: Some(100),
                         message: Some(serde_json::to_string(&ToolCallResultProgress {
                             id: progress_id,
-                            message: line,
+                            message: format!("{}\n", line),
                         }).unwrap_or_default()),
                     }).await;
                 }

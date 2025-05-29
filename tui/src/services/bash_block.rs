@@ -64,6 +64,7 @@ pub fn extract_bash_block_info(
     (command, outside_title, bubble_title, colors)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_styled_block(
     content: &str,
     outside_title: &str,

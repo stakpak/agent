@@ -14,3 +14,8 @@ anyhow = { workspace = true }
 rmcp = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
+
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

@@ -198,52 +198,54 @@ pub async fn process_responses_stream(
                             chat_message.tool_calls = Some(vec![]);
                         }
 
-                        let tool_calls_vec = chat_message.tool_calls.as_mut().unwrap();
+                        let tool_calls_vec = chat_message.tool_calls.as_mut();
+                        if let Some(tool_calls_vec) = tool_calls_vec {
+                            match tool_calls_vec.get_mut(delta_tool_call.index) {
+                                Some(tool_call) => {
+                                    let delta_func = delta_tool_call.function.as_ref().unwrap_or(
+                                        &FunctionCallDelta {
+                                            name: None,
+                                            arguments: None,
+                                        },
+                                    );
+                                    tool_call.function.arguments =
+                                        tool_call.function.arguments.clone()
+                                            + delta_func.arguments.as_deref().unwrap_or("");
+                                }
+                                None => {
+                                    // push empty tool calls until the index is reached
+                                    tool_calls_vec.extend(
+                                        (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
+                                            ToolCall {
+                                                id: "".to_string(),
+                                                r#type: "function".to_string(),
+                                                function: FunctionCall {
+                                                    name: "".to_string(),
+                                                    arguments: "".to_string(),
+                                                },
+                                            }
+                                        }),
+                                    );
 
-                        match tool_calls_vec.get_mut(delta_tool_call.index) {
-                            Some(tool_call) => {
-                                let delta_func = delta_tool_call.function.as_ref().unwrap_or(
-                                    &FunctionCallDelta {
-                                        name: None,
-                                        arguments: None,
-                                    },
-                                );
-                                tool_call.function.arguments = tool_call.function.arguments.clone()
-                                    + delta_func.arguments.as_deref().unwrap_or("");
-                            }
-                            None => {
-                                // push empty tool calls until the index is reached
-                                tool_calls_vec.extend(
-                                    (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
-                                        ToolCall {
-                                            id: "".to_string(),
-                                            r#type: "function".to_string(),
-                                            function: FunctionCall {
-                                                name: "".to_string(),
-                                                arguments: "".to_string(),
-                                            },
-                                        }
-                                    }),
-                                );
-
-                                tool_calls_vec.push(ToolCall {
-                                    id: delta_tool_call.id.clone().unwrap_or_default(),
-                                    r#type: "function".to_string(),
-                                    function: FunctionCall {
-                                        name: delta_tool_call
-                                            .function
-                                            .as_ref()
-                                            .unwrap_or(&FunctionCallDelta {
-                                                name: None,
-                                                arguments: None,
-                                            })
-                                            .name
-                                            .as_deref()
-                                            .unwrap_or("")
-                                            .to_string(),
-                                        arguments: "".to_string(),
-                                    },
-                                });
+                                    tool_calls_vec.push(ToolCall {
+                                        id: delta_tool_call.id.clone().unwrap_or_default(),
+                                        r#type: "function".to_string(),
+                                        function: FunctionCall {
+                                            name: delta_tool_call
+                                                .function
+                                                .as_ref()
+                                                .unwrap_or(&FunctionCallDelta {
+                                                    name: None,
+                                                    arguments: None,
+                                                })
+                                                .name
+                                                .as_deref()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            arguments: "".to_string(),
+                                        },
+                                    });
+                                }
                             }
                         }
                     }
@@ -585,12 +587,15 @@ pub async fn run_non_interactive(
     if let Some(message) = chat_messages.last() {
         if config.approve && message.tool_calls.is_some() {
             // Clone the tool_calls to avoid borrowing message while mutating chat_messages
-            let tool_calls = message.tool_calls.as_ref().unwrap().clone();
+            let tool_calls = message.tool_calls.as_ref().unwrap_or(&vec![]).clone();
             for tool_call in tool_calls.iter() {
                 let result = run_tool_call(&clients, &tools_map, tool_call).await?;
                 if let Some(result) = result {
                     if !config.verbose {
-                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result).unwrap_or_default()
+                        );
                     }
 
                     let result_content = result
@@ -624,12 +629,15 @@ pub async fn run_non_interactive(
 
     match config.verbose {
         true => {
-            println!("{}", serde_json::to_string_pretty(&chat_messages).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&chat_messages).unwrap_or_default()
+            );
         }
         false => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&response.choices[0].message).unwrap()
+                serde_json::to_string_pretty(&response.choices[0].message).unwrap_or_default()
             );
         }
     }

@@ -183,6 +183,7 @@ fn get_operating_system() -> String {
         "freebsd" => "FreeBSD".to_string(),
         "openbsd" => "OpenBSD".to_string(),
         "netbsd" => "NetBSD".to_string(),
+        #[allow(clippy::unwrap_used)]
         _ => {
             // Fallback: try using uname command for Unix-like systems
             if let Ok(output) = Command::new("uname").arg("-s").output() {
@@ -195,6 +196,7 @@ fn get_operating_system() -> String {
             }
 
             // Last resort: return the const value capitalized
+
             os.chars()
                 .next()
                 .unwrap()

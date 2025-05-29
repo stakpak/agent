@@ -1,0 +1,42 @@
+name: CI SERVER
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            server/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('server/Cargo.lock') }}
+
+      - name: Check
+        run: cargo check --verbose --all-targets
+
+      - name: Format Check
+        run: cargo fmt -- --check
+
+      - name: Lint
+        run: cargo clippy
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Test
+        run: cargo test --workspace --verbose
