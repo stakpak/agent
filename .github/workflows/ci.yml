@@ -1,4 +1,4 @@
-name: CI SERVER
+name: CI
 
 on:
   push:
@@ -23,8 +23,8 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            server/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('server/Cargo.lock') }}
+            ./target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Check
         run: cargo check --verbose --all-targets
