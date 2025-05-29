@@ -391,7 +391,7 @@ fn handle_stream_tool_result(
         .streaming_tool_results
         .entry(tool_call_id)
         .or_default()
-        .push_str(&progress.message);
+        .push_str(&format!("{}\n", progress.message));
 
     // 2. Remove the old message with this id (if any)
     state.messages.retain(|m| m.id != tool_call_id);
