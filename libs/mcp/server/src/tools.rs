@@ -225,7 +225,7 @@ impl Tools {
             // List directory contents
             match fs::read_dir(&path) {
                 Ok(entries) => {
-                    let mut result = format!("Directory listing for {}:\n", path);
+                    let mut result = format!("Directory listing for \"{}\":\n", path);
                     let mut items: Vec<_> = entries.collect();
                     items.sort_by(|a, b| match (a, b) {
                         (Ok(a_entry), Ok(b_entry)) => {
@@ -243,18 +243,21 @@ impl Tools {
                         (Err(_), Err(_)) => std::cmp::Ordering::Equal,
                     });
 
-                    for entry in items {
+                    for (i, entry) in items.iter().enumerate() {
+                        let is_last = i == items.len() - 1;
+                        let prefix = if is_last { "└── " } else { "├── " };
                         match entry {
                             Ok(entry) => {
-                                let file_type = match entry.file_type() {
-                                    Ok(ft) if ft.is_dir() => "📁",
-                                    Ok(_) => "📄",
-                                    Err(_) => "❓",
+                                let suffix = match entry.file_type() {
+                                    Ok(ft) if ft.is_dir() => "/",
+                                    Ok(_) => "",
+                                    Err(_) => "?",
                                 };
                                 result.push_str(&format!(
-                                    "{} {}\n",
-                                    file_type,
-                                    entry.file_name().to_string_lossy()
+                                    "{}{}{}\n",
+                                    prefix,
+                                    entry.file_name().to_string_lossy(),
+                                    suffix
                                 ));
                             }
                             Err(e) => {
