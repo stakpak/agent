@@ -171,7 +171,9 @@ impl Tools {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+        Ok(CallToolResult::success(vec![Content::text(clip_output(
+            &result,
+        ))]))
     }
 
     #[tool(
@@ -750,7 +752,11 @@ pub fn clip_output(output: &str) -> String {
             .map(|(i, _)| i)
             .unwrap_or(0);
 
-        return format!("{}\n[clipped]\n{}", &output[..start], &output[end..]);
+        return format!(
+            "{}\n\n[...this result was truncated because it's too long...]\n\n{}",
+            &output[..start],
+            &output[end..]
+        );
     }
 
     output.to_string()
