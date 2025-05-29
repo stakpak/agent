@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use crate::services::message_pattern::{apply_all_pattern_transformations, spans_to_string};
 
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
@@ -164,6 +165,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
+    
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
     // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
@@ -175,14 +177,13 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     let mut visible_lines = Vec::new();
     for i in 0..height {
         if let Some((line, _)) = all_lines.get(scroll + i) {
-            let pattern = "<checkpoint_id>{}</checkpoint_id>";
-            let style = Style::default().fg(Color::Yellow);
-            let highlighted = highlight_all_patterns_in_line(&line.clone().to_string(), pattern, style);
-            if highlighted.len() == 1 {
-                // If no pattern found, keep original line (preserves formatting)
-                visible_lines.push(line.clone());
+            let line_text = spans_to_string(line);
+            if line_text.contains("<checkpoint_id>") || line_text.contains("<e>") {
+                let processed = apply_all_pattern_transformations(&[(line.clone(), Style::default())]);
+                visible_lines.push(processed[0].0.clone());
             } else {
-                visible_lines.push(Line::from(highlighted));
+                // No patterns = no processing (fastest path)
+                visible_lines.push(line.clone());
             }
         } else {
             visible_lines.push(Line::from(""));
@@ -362,42 +363,4 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     f.render_widget(input_widget, area);
-}
-
-pub fn highlight_all_patterns_in_line(
-    content: &str,
-    pattern: &str,
-    style: Style,
-) -> Vec<Span<'static>> {
-    let (prefix, suffix) = match pattern.split_once("{}") {
-        Some((p, s)) => (p, s),
-        None => return vec![Span::raw(content.to_string())],
-    };
-
-    let mut spans = Vec::new();
-    let mut rest = content;
-    while let Some(start) = rest.find(prefix) {
-        let after_prefix = &rest[start + prefix.len()..];
-        if let Some(end_rel) = after_prefix.find(suffix) {
-            // Add text before the match
-            if start > 0 {
-                spans.push(Span::raw(rest[..start].to_string()));
-            }
-            // Add the highlighted match (including prefix and suffix)
-            let match_start = start;
-            let match_end = start + prefix.len() + end_rel + suffix.len();
-            let matched = &rest[match_start..match_end];
-            spans.push(Span::styled(matched.to_string(), style));
-            // Move rest pointer forward
-            rest = &rest[match_end..];
-        } else {
-            // No suffix found, push the rest and break
-            spans.push(Span::raw(rest.to_string()));
-            break;
-        }
-    }
-    if !rest.is_empty() {
-        spans.push(Span::raw(rest.to_string()));
-    }
-    spans
 }
