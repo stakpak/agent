@@ -470,8 +470,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
-                        continue;
                     }
+                    continue;
                 }
             }
             send_input_event(&input_tx, InputEvent::Loading(true)).await?;
