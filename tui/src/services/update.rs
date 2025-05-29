@@ -1,13 +1,15 @@
 use crate::app::{AppState, InputEvent, OutputEvent};
-use crate::services::bash_block::{render_bash_block, render_bash_block_rejected, render_styled_block};
+use crate::services::bash_block::{
+    render_bash_block, render_bash_block_rejected, render_styled_block,
+};
 use crate::services::helper_block::{
     push_help_message, push_status_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
+use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
@@ -377,7 +379,11 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
     }
 }
 
-fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress, terminal_size: Size) {
+fn handle_stream_tool_result(
+    state: &mut AppState,
+    progress: ToolCallResultProgress,
+    terminal_size: Size,
+) {
     let tool_call_id = progress.id;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
@@ -472,6 +478,8 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 
 pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.streaming_tool_results.clear();
-    state.messages.retain(|m| m.id != state.streaming_tool_result_id.unwrap());
+    state
+        .messages
+        .retain(|m| m.id != state.streaming_tool_result_id.unwrap());
     state.streaming_tool_result_id = None;
 }

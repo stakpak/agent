@@ -3,8 +3,8 @@ use ratatui::style::Style;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 pub struct SessionInfo {
     pub title: String,

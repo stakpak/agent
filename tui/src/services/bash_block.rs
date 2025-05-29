@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
-pub fn extract_bash_block_info(tool_call: &ToolCall, output: &str) -> (String, String, String, BubbleColors) {
+pub fn extract_bash_block_info(
+    tool_call: &ToolCall,
+    output: &str,
+) -> (String, String, String, BubbleColors) {
     let full_command = extract_full_command_arguments(tool_call);
     let command = if full_command == "unknown command" {
         output.to_string()
