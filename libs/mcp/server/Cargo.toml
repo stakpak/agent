@@ -12,4 +12,9 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 rmcp = { workspace = true }
+uuid = { workspace = true }
 axum = "0.8.4"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

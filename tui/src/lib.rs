@@ -18,6 +18,7 @@ pub use view::view;
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -58,7 +59,7 @@ pub async fn run_tui(
                 if let InputEvent::ToolResult(ref tool_call_result) = event {
                     let tool_call = tool_call_result.call.clone();
                     let result = tool_call_result.result.clone();
-                    // Use the new render_bash_result_block function for ToolResults
+                    services::update::clear_streaming_tool_results(&mut state);
                     services::bash_block::render_result_block(&tool_call, &result, &mut state);
                 }
                 if let InputEvent::Quit = event { should_quit = true; }
@@ -138,6 +139,7 @@ pub async fn run_tui(
     }
 
     println!("Quitting...");
+    let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())

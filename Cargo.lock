@@ -1811,9 +1811,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.72"
+version = "0.10.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fedfea7d58a1f73118430a55da6a286e7b044961736ce96a16a17068ea25e5da"
+checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -1843,9 +1843,9 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.108"
+version = "0.9.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e145e1651e858e820e4860f7b9c5e169bc1d8ce1c86043be79fa7b7634821847"
+checksum = "90096e2e47630d78b7d1c20952dc621f957103f8bc2c8359ec81290d75238571"
 dependencies = [
  "cc",
  "libc",
@@ -2378,7 +2378,7 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "0.1.5"
-source = "git+https://github.com/stakpak/rust-sdk?branch=schema#0c162d658b576cea5f96457ebcf5e20a4a4f6fa9"
+source = "git+https://github.com/stakpak/rust-sdk?branch=schema#003243aba54deee9224020f6b7c8129afe03537f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2409,7 +2409,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "0.1.5"
-source = "git+https://github.com/stakpak/rust-sdk?branch=schema#0c162d658b576cea5f96457ebcf5e20a4a4f6fa9"
+source = "git+https://github.com/stakpak/rust-sdk?branch=schema#003243aba54deee9224020f6b7c8129afe03537f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2947,6 +2947,7 @@ dependencies = [
  "stakpak-shared",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2962,6 +2963,7 @@ dependencies = [
  "stakpak-shared",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -142,7 +142,7 @@ async fn process_directory(
         let document_uri = format!(
             "file:///{}",
             path.strip_prefix(base_dir)
-                .unwrap()
+                .map_err(|e| format!("Failed to strip prefix: {}", e))?
                 .to_string_lossy()
                 .replace('\\', "/")
         );

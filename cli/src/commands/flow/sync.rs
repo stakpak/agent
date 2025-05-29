@@ -56,6 +56,7 @@ pub async fn sync(
 ) -> Result<(), String> {
     // Initial setup
     clone(client, flow_ref, dir).await?;
+    #[allow(clippy::unwrap_used)]
     let dir = dir
         .map(|d| Path::new(&d).to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -90,6 +91,7 @@ pub async fn sync(
 }
 
 fn initialize_watched_files(dir: &Path) -> HashMap<String, DocumentBuffer> {
+    #[allow(clippy::unwrap_used)]
     WalkDir::new(dir)
         .into_iter()
         .filter_map(Result::ok)
@@ -137,6 +139,7 @@ async fn handle_internal_change(
         return Ok(());
     };
 
+    #[allow(clippy::unwrap_used)]
     if !is_supported_file(
         event_path.file_name().unwrap().to_str(),
         event_path.is_file(),
@@ -199,6 +202,7 @@ fn process_modified_files(
             let uri = get_uri(dir, path);
             if let Some(buffer) = watched_files.get(&uri) {
                 if buffer.hash != hash {
+                    #[allow(clippy::unwrap_used)]
                     let new_content = std::fs::read_to_string(path).unwrap();
                     edits.extend([
                         create_edit(&uri, &buffer.content, "delete"),
@@ -237,6 +241,7 @@ fn handle_remote_change(
     for doc in change.documents {
         let uri = doc.uri.clone();
         let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
+        #[allow(clippy::unwrap_used)]
         std::fs::write(&absolute_path, &doc.content).unwrap();
 
         if let Ok(hash) = hash_file(&absolute_path) {
@@ -263,13 +268,13 @@ fn hash_file(path: &Path) -> Result<u64, String> {
 }
 
 fn get_uri(dir: &Path, path: &Path) -> String {
-    format!(
-        "file:///{}",
-        path.strip_prefix(dir)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/")
-    )
+    #[allow(clippy::unwrap_used)]
+    let path = path
+        .strip_prefix(dir)
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/");
+    format!("file:///{}", path)
 }
 
 async fn subscribe_to_remote_changes(
@@ -303,6 +308,7 @@ async fn setup_socket_client(
                     async move {
                         if let Payload::Text(text) = msg {
                             if let Ok(status) = serde_json::from_value::<DocumentsChange>(
+                                #[allow(clippy::unwrap_used)]
                                 text.first().unwrap().clone(),
                             ) {
                                 let _ = tx.send(Change::Remote(status)).await;

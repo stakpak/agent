@@ -135,7 +135,7 @@ impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
             Commands::Mcp => {
-                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() })
+                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() }, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }
@@ -298,13 +298,13 @@ impl Commands {
                     };
 
                     // Convert path to URI format
-                    let document_uri = format!(
-                        "file:///{}",
-                        path.strip_prefix(&base_dir)
-                            .unwrap()
-                            .to_string_lossy()
-                            .replace('\\', "/")
-                    );
+                    #[allow(clippy::unwrap_used)]
+                    let document_path = path
+                        .strip_prefix(&base_dir)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let document_uri = format!("file:///{}", document_path);
 
                     documents.push(Document {
                         content,

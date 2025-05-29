@@ -8,6 +8,7 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
+#[derive(Clone)]
 pub struct BubbleColors {
     pub border_color: Color,
     pub title_color: Color,
@@ -319,7 +320,7 @@ fn format_json_value(value: &Value) -> String {
                 format!(
                     "[{}]",
                     arr.iter()
-                        .map(|v| format_simple_value(v))
+                        .map(format_simple_value)
                         .collect::<Vec<_>>()
                         .join(",\n")
                 )
@@ -411,9 +412,10 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     }
 
     if command.starts_with("cat >") {
-        let after_cat = &command[5..].trim();
-        if let Some(filename) = after_cat.split_whitespace().next() {
-            return format!("Creating {}", filename);
+        if let Some(after_cat) = command.strip_prefix("cat >") {
+            if let Some(filename) = after_cat.split_whitespace().next() {
+                return format!("Creating {}", filename);
+            }
         }
     }
 
@@ -427,23 +429,29 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     }
 
     if command.starts_with("touch ") {
-        let after_touch = &command[6..];
-        if let Some(filename) = after_touch.split_whitespace().next() {
-            return format!("Creating {}", filename);
+        let after_touch = command.strip_prefix("touch ");
+        if let Some(filename) = after_touch {
+            if let Some(filename) = filename.split_whitespace().next() {
+                return format!("Creating {}", filename);
+            }
         }
     }
 
     if command.starts_with("mkdir ") {
-        let after_mkdir = &command[6..];
-        if let Some(dirname) = after_mkdir.split_whitespace().next() {
-            return format!("Creating directory {}", dirname);
+        let after_mkdir = command.strip_prefix("mkdir ");
+        if let Some(dirname) = after_mkdir {
+            if let Some(dirname) = dirname.split_whitespace().next() {
+                return format!("Creating directory {}", dirname);
+            }
         }
     }
 
     if command.starts_with("rm ") {
-        let after_rm = &command[3..];
-        if let Some(filename) = after_rm.split_whitespace().next() {
-            return format!("Deleting {}", filename);
+        let after_rm = command.strip_prefix("rm ");
+        if let Some(filename) = after_rm {
+            if let Some(filename) = filename.split_whitespace().next() {
+                return format!("Deleting {}", filename);
+            }
         }
     }
 
@@ -460,9 +468,11 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     }
 
     if command.starts_with("cd ") {
-        let after_cd = &command[3..];
-        if let Some(dirname) = after_cd.split_whitespace().next() {
-            return format!("Changing to {}", dirname);
+        let after_cd = command.strip_prefix("cd ");
+        if let Some(dirname) = after_cd {
+            if let Some(dirname) = dirname.split_whitespace().next() {
+                return format!("Changing to {}", dirname);
+            }
         }
     }
 

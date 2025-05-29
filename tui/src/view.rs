@@ -127,7 +127,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
         let mut is_first_line_in_segment = true;
 
         while words.peek().is_some() {
-            let word = words.next().unwrap();
+            let word = words.next().unwrap_or_default();
             let word_width = word
                 .chars()
                 .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))

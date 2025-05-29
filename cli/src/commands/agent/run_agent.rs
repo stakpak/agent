@@ -88,6 +88,7 @@ pub async fn run_agent(
                 session
                     .checkpoints
                     .sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                #[allow(clippy::unwrap_used)]
                 let checkpoint = session.checkpoints.first().unwrap();
 
                 if !processed_outputs

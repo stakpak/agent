@@ -198,52 +198,54 @@ pub async fn process_responses_stream(
                             chat_message.tool_calls = Some(vec![]);
                         }
 
-                        let tool_calls_vec = chat_message.tool_calls.as_mut().unwrap();
+                        let tool_calls_vec = chat_message.tool_calls.as_mut();
+                        if let Some(tool_calls_vec) = tool_calls_vec {
+                            match tool_calls_vec.get_mut(delta_tool_call.index) {
+                                Some(tool_call) => {
+                                    let delta_func = delta_tool_call.function.as_ref().unwrap_or(
+                                        &FunctionCallDelta {
+                                            name: None,
+                                            arguments: None,
+                                        },
+                                    );
+                                    tool_call.function.arguments =
+                                        tool_call.function.arguments.clone()
+                                            + delta_func.arguments.as_deref().unwrap_or("");
+                                }
+                                None => {
+                                    // push empty tool calls until the index is reached
+                                    tool_calls_vec.extend(
+                                        (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
+                                            ToolCall {
+                                                id: "".to_string(),
+                                                r#type: "function".to_string(),
+                                                function: FunctionCall {
+                                                    name: "".to_string(),
+                                                    arguments: "".to_string(),
+                                                },
+                                            }
+                                        }),
+                                    );
 
-                        match tool_calls_vec.get_mut(delta_tool_call.index) {
-                            Some(tool_call) => {
-                                let delta_func = delta_tool_call.function.as_ref().unwrap_or(
-                                    &FunctionCallDelta {
-                                        name: None,
-                                        arguments: None,
-                                    },
-                                );
-                                tool_call.function.arguments = tool_call.function.arguments.clone()
-                                    + delta_func.arguments.as_deref().unwrap_or("");
-                            }
-                            None => {
-                                // push empty tool calls until the index is reached
-                                tool_calls_vec.extend(
-                                    (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
-                                        ToolCall {
-                                            id: "".to_string(),
-                                            r#type: "function".to_string(),
-                                            function: FunctionCall {
-                                                name: "".to_string(),
-                                                arguments: "".to_string(),
-                                            },
-                                        }
-                                    }),
-                                );
-
-                                tool_calls_vec.push(ToolCall {
-                                    id: delta_tool_call.id.clone().unwrap_or_default(),
-                                    r#type: "function".to_string(),
-                                    function: FunctionCall {
-                                        name: delta_tool_call
-                                            .function
-                                            .as_ref()
-                                            .unwrap_or(&FunctionCallDelta {
-                                                name: None,
-                                                arguments: None,
-                                            })
-                                            .name
-                                            .as_deref()
-                                            .unwrap_or("")
-                                            .to_string(),
-                                        arguments: "".to_string(),
-                                    },
-                                });
+                                    tool_calls_vec.push(ToolCall {
+                                        id: delta_tool_call.id.clone().unwrap_or_default(),
+                                        r#type: "function".to_string(),
+                                        function: FunctionCall {
+                                            name: delta_tool_call
+                                                .function
+                                                .as_ref()
+                                                .unwrap_or(&FunctionCallDelta {
+                                                    name: None,
+                                                    arguments: None,
+                                                })
+                                                .name
+                                                .as_deref()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            arguments: "".to_string(),
+                                        },
+                                    });
+                                }
                             }
                         }
                     }
@@ -284,28 +286,42 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let mut tools_queue: Vec<ToolCall> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
+    let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let ctx_clone = ctx.clone();
-    tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
-            api: ClientConfig {
-                api_key: ctx_clone.api_key,
-                api_endpoint: ctx_clone.api_endpoint,
+    let mcp_handle = tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(
+            MCPServerConfig {
+                api: ClientConfig {
+                    api_key: ctx_clone.api_key,
+                    api_endpoint: ctx_clone.api_endpoint,
+                },
             },
-        })
+            Some(shutdown_rx),
+        )
         .await;
     });
 
     // Initialize clients and tools
-    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(Some(mcp_progress_tx))
+        .await
+        .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
     // Spawn TUI task
     let tui_handle = tokio::spawn(async move {
-        let _ = stakpak_tui::run_tui(input_rx, output_tx)
+        let _ = stakpak_tui::run_tui(input_rx, output_tx, shutdown_tx)
             .await
             .map_err(|e| e.to_string());
+    });
+
+    let input_tx_clone = input_tx.clone();
+    let mcp_progress_handle = tokio::spawn(async move {
+        while let Some(progress) = mcp_progress_rx.recv().await {
+            let _ = send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
+        }
     });
 
     // Spawn client task
@@ -460,8 +476,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
-                        continue;
                     }
+                    continue;
                 }
             }
             send_input_event(&input_tx, InputEvent::Loading(true)).await?;
@@ -495,11 +511,14 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                 }
             }
         }
+
         Ok(())
     });
 
-    // Wait for both tasks to finish
-    let (_, client_res) = tokio::try_join!(tui_handle, client_handle).map_err(|e| e.to_string())?;
+    // Wait for all tasks to finish
+    let (client_res, _, _, _) =
+        tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
+            .map_err(|e| e.to_string())?;
     client_res?;
     Ok(())
 }
@@ -520,16 +539,19 @@ pub async fn run_non_interactive(
 
     let ctx_clone = ctx.clone();
     tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
-            api: ClientConfig {
-                api_key: ctx_clone.api_key,
-                api_endpoint: ctx_clone.api_endpoint,
+        let _ = stakpak_mcp_server::start_server(
+            MCPServerConfig {
+                api: ClientConfig {
+                    api_key: ctx_clone.api_key,
+                    api_endpoint: ctx_clone.api_endpoint,
+                },
             },
-        })
+            None,
+        )
         .await;
     });
 
-    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(None).await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
@@ -565,12 +587,15 @@ pub async fn run_non_interactive(
     if let Some(message) = chat_messages.last() {
         if config.approve && message.tool_calls.is_some() {
             // Clone the tool_calls to avoid borrowing message while mutating chat_messages
-            let tool_calls = message.tool_calls.as_ref().unwrap().clone();
+            let tool_calls = message.tool_calls.as_ref().unwrap_or(&vec![]).clone();
             for tool_call in tool_calls.iter() {
                 let result = run_tool_call(&clients, &tools_map, tool_call).await?;
                 if let Some(result) = result {
                     if !config.verbose {
-                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result).unwrap_or_default()
+                        );
                     }
 
                     let result_content = result
@@ -604,12 +629,15 @@ pub async fn run_non_interactive(
 
     match config.verbose {
         true => {
-            println!("{}", serde_json::to_string_pretty(&chat_messages).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&chat_messages).unwrap_or_default()
+            );
         }
         false => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&response.choices[0].message).unwrap()
+                serde_json::to_string_pretty(&response.choices[0].message).unwrap_or_default()
             );
         }
     }
