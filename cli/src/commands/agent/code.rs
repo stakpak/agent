@@ -62,13 +62,11 @@ async fn send_input_event(
 }
 
 // Helper to send tool call messages to the TUI
-async fn send_tool_calls(
+async fn send_tool_call(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-    tool_calls: &[stakpak_shared::models::integrations::openai::ToolCall],
+    tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
 ) -> Result<(), String> {
-    for tool_call in tool_calls {
-        send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
-    }
+    send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
     Ok(())
 }
 
@@ -281,6 +279,7 @@ pub struct RunInteractiveConfig {
 
 pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
     let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut tools_queue: Vec<ToolCall> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
 
@@ -398,7 +397,11 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                 .and_then(|msg| msg.tool_calls.as_ref());
 
             if let Some(tool_calls) = tool_calls {
-                send_tool_calls(&input_tx, tool_calls).await?;
+                tools_queue.extend(tool_calls.clone());
+                if !tools_queue.is_empty() {
+                    let initial_tool_call = tools_queue.remove(0);
+                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                }
             }
 
             messages.extend(checkpoint_messages);
@@ -444,8 +447,20 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         )
                         .await?;
                     }
+
+                    if !tools_queue.is_empty() {
+                        let tool_call = tools_queue.remove(0);
+                        send_tool_call(&input_tx, &tool_call).await?;
+                        continue;
+                    }
                 }
-                OutputEvent::RejectTool(_tool_call) => {}
+                OutputEvent::RejectTool(_tool_call) => {
+                    if !tools_queue.is_empty() {
+                        let tool_call = tools_queue.remove(0);
+                        send_tool_call(&input_tx, &tool_call).await?;
+                        continue;
+                    }
+                }
             }
             send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
@@ -470,7 +485,12 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
             // Send tool calls to TUI if present
             if let Some(tool_calls) = &response.choices[0].message.tool_calls {
-                send_tool_calls(&input_tx, tool_calls).await?;
+                tools_queue.extend(tool_calls.clone());
+                if !tools_queue.is_empty() {
+                    let tool_call = tools_queue.remove(0);
+                    send_tool_call(&input_tx, &tool_call).await?;
+                    continue;
+                }
             }
         }
         Ok(())
