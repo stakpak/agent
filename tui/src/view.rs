@@ -3,6 +3,10 @@ use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::get_wrapped_message_lines;
+use crate::services::message_pattern::{
+    process_agent_mode_patterns, process_checkpoint_patterns, process_section_title_patterns,
+    spans_to_string,
+};
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
@@ -164,6 +168,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
+
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
     // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
@@ -175,7 +180,46 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     let mut visible_lines = Vec::new();
     for i in 0..height {
         if let Some((line, _)) = all_lines.get(scroll + i) {
-            visible_lines.push(line.clone());
+            let line_text = spans_to_string(line);
+            if line_text.contains("<checkpoint_id>") {
+                let processed = process_checkpoint_patterns(
+                    &[(line.clone(), Style::default())],
+                    f.area().width as usize,
+                );
+                visible_lines.push(processed[0].0.clone());
+            } else if line_text.contains("<agent_mode>") {
+                let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
+                visible_lines.push(processed[0].0.clone());
+            } else {
+                let section_tags = [
+                    "planning",
+                    "reasoning",
+                    "notes",
+                    "progress",
+                    "local_context",
+                ];
+                let mut found = false;
+                for tag in &section_tags {
+                    let closing_tag = format!("</{}>", tag);
+                    if line_text.trim() == closing_tag {
+                        // Skip this line (do not push to visible_lines)
+                        found = true;
+                        break;
+                    }
+                    if line_text.contains(&format!("<{}>", tag)) {
+                        let processed = process_section_title_patterns(
+                            &[(line.clone(), Style::default())],
+                            tag,
+                        );
+                        visible_lines.push(processed[0].0.clone());
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    visible_lines.push(line.clone());
+                }
+            }
         } else {
             visible_lines.push(Line::from(""));
         }

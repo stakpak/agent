@@ -172,7 +172,7 @@ pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppSt
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("({})", extract_truncated_command_arguments(tool_call)),
+            format!(" ({})", extract_truncated_command_arguments(tool_call)),
             Style::default().fg(Color::Gray),
         ),
     ]));
