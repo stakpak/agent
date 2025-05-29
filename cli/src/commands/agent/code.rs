@@ -213,16 +213,18 @@ pub async fn process_responses_stream(
                             }
                             None => {
                                 // push empty tool calls until the index is reached
-                                for _ in 0..delta_tool_call.index {
-                                    tool_calls_vec.push(ToolCall {
-                                        id: "".to_string(),
-                                        r#type: "function".to_string(),
-                                        function: FunctionCall {
-                                            name: "".to_string(),
-                                            arguments: "".to_string(),
-                                        },
-                                    });
-                                }
+                                tool_calls_vec.extend(
+                                    (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
+                                        ToolCall {
+                                            id: "".to_string(),
+                                            r#type: "function".to_string(),
+                                            function: FunctionCall {
+                                                name: "".to_string(),
+                                                arguments: "".to_string(),
+                                            },
+                                        }
+                                    }),
+                                );
 
                                 tool_calls_vec.push(ToolCall {
                                     id: delta_tool_call.id.clone().unwrap_or_default(),
