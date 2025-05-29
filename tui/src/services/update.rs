@@ -1,5 +1,5 @@
 use crate::app::{AppState, InputEvent, OutputEvent};
-use crate::services::bash_block::{render_bash_block, render_bash_block_rejected};
+use crate::services::bash_block::{render_bash_block, render_bash_block_rejected, render_styled_block};
 use crate::services::helper_block::{
     push_help_message, push_status_message, render_system_message,
 };
@@ -7,6 +7,7 @@ use crate::services::message::{Message, MessageContent, get_wrapped_message_line
 use ratatui::layout::Size;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
@@ -68,6 +69,9 @@ pub fn update(
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
+        }
+        InputEvent::StreamToolResult(progress) => {
+            handle_stream_tool_result(state, progress, terminal_size)
         }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
@@ -373,6 +377,39 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
     }
 }
 
+fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress, terminal_size: Size) {
+    let tool_call_id = progress.id;
+    state.streaming_tool_result_id = Some(tool_call_id);
+    // 1. Update the buffer for this tool_call_id
+    state
+        .streaming_tool_results
+        .entry(tool_call_id)
+        .or_insert_with(String::new)
+        .push_str(&progress.message);
+
+    // 2. Remove the old message with this id (if any)
+    state.messages.retain(|m| m.id != tool_call_id);
+
+    // 3. Get the buffer content for rendering (clone to String)
+    let buffer_content = state
+        .streaming_tool_results
+        .get(&tool_call_id)
+        .cloned()
+        .unwrap_or_default();
+
+    // 4. Re-render the styled block with the full buffer
+    render_styled_block(
+        &buffer_content,
+        "Tool Streaming",
+        "Result",
+        None,
+        state,
+        terminal_size,
+        "Streaming",
+        Some(tool_call_id),
+    );
+}
+
 fn handle_scroll_up(state: &mut AppState) {
     if state.scroll > 0 {
         state.scroll -= 1;
@@ -431,4 +468,10 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
     } else if state.scroll > max_scroll {
         state.scroll = max_scroll;
     }
+}
+
+pub fn clear_streaming_tool_results(state: &mut AppState) {
+    state.streaming_tool_results.clear();
+    state.messages.retain(|m| m.id != state.streaming_tool_result_id.unwrap());
+    state.streaming_tool_result_id = None;
 }

@@ -8,6 +8,7 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
+#[derive(Clone)]
 pub struct BubbleColors {
     pub border_color: Color,
     pub title_color: Color,

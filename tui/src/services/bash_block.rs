@@ -11,90 +11,15 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
-pub fn render_bash_block(
-    tool_call: &ToolCall,
-    output: &str,
-    _accepted: bool,
-    state: &mut AppState,
-    terminal_size: Size,
-) -> Uuid {
-    let terminal_width = terminal_size.width as usize;
-    // Use full terminal width minus small margin
-    let content_width = if terminal_width > 4 {
-        terminal_width - 4
-    } else {
-        40 // minimum fallback
-    };
-
-    // Get the command from the tool call
+pub fn extract_bash_block_info(tool_call: &ToolCall, output: &str) -> (String, String, String, BubbleColors) {
     let full_command = extract_full_command_arguments(tool_call);
-    // if full_command is "unknown command" then use the output as the command
     let command = if full_command == "unknown command" {
         output.to_string()
     } else {
         full_command
     };
-
-    // Get the outside title (command type name)
     let outside_title = get_command_type_name(tool_call);
-
-    // Get the bubble title (what the command is trying to do)
     let bubble_title = extract_command_purpose(&command, &outside_title);
-
-    let content_lines = command.split('\n').collect::<Vec<_>>();
-
-    // Use the full content width
-    let inner_width = content_width;
-
-    // Create borders for full width
-    let horizontal_line = "─".repeat(inner_width + 2);
-    let bottom_border = format!("╰{}╯", horizontal_line);
-
-    // Create title border with the bubble title
-    let title_border = {
-        let title_width = bubble_title.chars().count();
-        if title_width <= inner_width {
-            let remaining_dashes = inner_width + 2 - title_width;
-            format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮"
-        } else {
-            let truncated_title = bubble_title.chars().take(inner_width).collect::<String>();
-            format!("╭{}─╮", truncated_title)
-        }
-    };
-
-    // Build the bubble lines
-    let mut bubble_lines = vec![];
-
-    // Add title border
-    bubble_lines.push(title_border);
-
-    // Add content lines with wrapping
-    for line in &content_lines {
-        let trimmed_line = line.trim_end();
-
-        if trimmed_line.is_empty() {
-            let padding = " ".repeat(inner_width);
-            bubble_lines.push(format!("│ {} │", padding));
-            continue;
-        }
-
-        // Wrap long lines
-        let wrapped_lines = wrap_text(trimmed_line, inner_width);
-
-        for wrapped_line in wrapped_lines {
-            let line_char_count = wrapped_line.chars().count();
-            let padding_needed = inner_width - line_char_count;
-            let padding = " ".repeat(padding_needed);
-
-            let formatted_line = format!("│ {}{} │", wrapped_line, padding);
-            bubble_lines.push(formatted_line);
-        }
-    }
-
-    // Add bottom border
-    bubble_lines.push(bottom_border);
-
-    // Choose colors based on command type
     let colors = match tool_call.function.name.as_str() {
         "create_file" => BubbleColors {
             border_color: Color::Green,
@@ -133,20 +58,97 @@ pub fn render_bash_block(
             tool_type: "unknown".to_string(),
         },
     };
+    (command, outside_title, bubble_title, colors)
+}
 
-    // Create and add message
-    let message_id = Uuid::new_v4();
+pub fn render_styled_block(
+    content: &str,
+    outside_title: &str,
+    bubble_title: &str,
+    colors: Option<BubbleColors>,
+    state: &mut AppState,
+    terminal_size: Size,
+    tool_type: &str,
+    message_id: Option<Uuid>,
+) -> Uuid {
+    let terminal_width = terminal_size.width as usize;
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let content_lines = content.split('\n').collect::<Vec<_>>();
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+    let bottom_border = format!("╰{}╯", horizontal_line);
+    let title_border = {
+        let title_width = bubble_title.chars().count();
+        if title_width <= inner_width {
+            let remaining_dashes = inner_width + 2 - title_width;
+            format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮"
+        } else {
+            let truncated_title = bubble_title.chars().take(inner_width).collect::<String>();
+            format!("╭{}─╮", truncated_title)
+        }
+    };
+    let mut bubble_lines = vec![];
+    bubble_lines.push(title_border);
+    for line in &content_lines {
+        let trimmed_line = line.trim_end();
+        if trimmed_line.is_empty() {
+            let padding = " ".repeat(inner_width);
+            bubble_lines.push(format!("│ {} │", padding));
+            continue;
+        }
+        let wrapped_lines = wrap_text(trimmed_line, inner_width);
+        for wrapped_line in wrapped_lines {
+            let line_char_count = wrapped_line.chars().count();
+            let padding_needed = inner_width - line_char_count;
+            let padding = " ".repeat(padding_needed);
+            let formatted_line = format!("│ {}{} │", wrapped_line, padding);
+            bubble_lines.push(formatted_line);
+        }
+    }
+    bubble_lines.push(bottom_border);
+
+    let default_colors = BubbleColors {
+        border_color: Color::Cyan,
+        title_color: Color::White,
+        content_color: Color::Gray,
+        tool_type: "unknown".to_string(),
+    };
+
+    let message_id = message_id.unwrap_or_else(Uuid::new_v4);
     state.messages.push(Message {
         id: message_id,
         content: MessageContent::BashBubble {
-            title: outside_title, // This is the outside title
+            title: outside_title.to_string(),
             content: bubble_lines,
-            colors,
-            tool_type: tool_call.function.name.clone(),
+            colors: colors.clone().unwrap_or(default_colors),
+            tool_type: tool_type.to_string(),
         },
     });
-
     message_id
+}
+
+pub fn render_bash_block(
+    tool_call: &ToolCall,
+    output: &str,
+    _accepted: bool,
+    state: &mut AppState,
+    terminal_size: Size,
+) -> Uuid {
+    let (command, outside_title, bubble_title, colors) = extract_bash_block_info(tool_call, output);
+    render_styled_block(
+        &command,
+        &outside_title,
+        &bubble_title,
+        Some(colors.clone()),
+        state,
+        terminal_size,
+        &tool_call.function.name,
+        None,
+    )
 }
 
 pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {

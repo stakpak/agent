@@ -4,6 +4,7 @@ use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
 use uuid::Uuid;
+use std::collections::HashMap;
 
 pub struct SessionInfo {
     pub title: String,
@@ -39,6 +40,8 @@ pub struct AppState {
     pub session_selected: usize,
     pub account_info: String,
     pub pending_bash_message_id: Option<Uuid>, // New field to track pending bash message
+    pub streaming_tool_results: HashMap<Uuid, String>,
+    pub streaming_tool_result_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -126,6 +129,8 @@ impl AppState {
             session_selected: 0,
             account_info: String::new(),
             pending_bash_message_id: None, // Initialize new field
+            streaming_tool_results: HashMap::new(),
+            streaming_tool_result_id: None,
         }
     }
 }
