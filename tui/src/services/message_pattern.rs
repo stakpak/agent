@@ -105,15 +105,27 @@ where
 }
 
 /// Process checkpoint_id patterns specifically
-pub fn process_checkpoint_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
+pub fn process_checkpoint_patterns(
+    lines: &[(Line, Style)],
+    terminal_width: usize,
+) -> Vec<(Line<'static>, Style)> {
     let checkpoint_formatter = |content: &str| -> (String, Style) {
-        (
-            format!(
-                "-----------------------------checkpoint {}---------------------------",
-                content
-            ),
-            Style::default().fg(Color::Rgb(255, 223, 170)),
-        )
+        let checkpoint_text = format!("Checkpoint ID: {}", content);
+        let total_len = checkpoint_text.len();
+        let terminal_width = terminal_width.max(total_len + 2); // Ensure at least enough space
+
+        // Calculate dashes for left and right
+        let dash_total = terminal_width.saturating_sub(total_len);
+        let dash_left = dash_total / 2;
+        let dash_right = dash_total - dash_left;
+
+        let line = format!(
+            "{}{}{}",
+            "-".repeat(dash_left),
+            checkpoint_text,
+            "-".repeat(dash_right)
+        );
+        (line, Style::default().fg(Color::Rgb(255, 223, 170)))
     };
     process_lines_with_pattern(
         lines,
@@ -122,10 +134,46 @@ pub fn process_checkpoint_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static
     )
 }
 
+pub fn process_agent_mode_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
+    let agent_mode_formatter = |content: &str| -> (String, Style) {
+        let icon = "🤖";
+        let static_text = "[Agent Mode]:";
+        let dynamic = content[..1].to_uppercase() + &content[1..].to_lowercase();
+        let formatted = format!("{icon} {static_text} {dynamic}");
+        (formatted, Style::default().fg(Color::Cyan))
+    };
+    process_lines_with_pattern(
+        lines,
+        r"<agent_mode>([^<]*)</agent_mode>",
+        agent_mode_formatter,
+    )
+}
+
+pub fn process_section_title_patterns(
+    lines: &[(Line, Style)],
+    tag: &str,
+) -> Vec<(Line<'static>, Style)> {
+    let pattern = format!(r"<{}>", tag);
+    let title = tag[..1].to_uppercase() + &tag[1..].to_lowercase();
+    let section_formatter = move |_content: &str| -> (String, Style) {
+        (
+            title.clone(),
+            Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )
+    };
+    process_lines_with_pattern(lines, &pattern, section_formatter)
+}
+
+#[allow(dead_code)]
 /// Apply multiple pattern transformations in sequence
-pub fn apply_all_pattern_transformations(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
+pub fn apply_all_pattern_transformations(
+    lines: &[(Line, Style)],
+    terminal_width: usize,
+) -> Vec<(Line<'static>, Style)> {
     // Only process checkpoint patterns for now to avoid the styling loss issue
-    process_checkpoint_patterns(lines)
+    process_checkpoint_patterns(lines, terminal_width)
 }
 
 #[cfg(test)]
@@ -301,7 +349,7 @@ mod tests {
             (Line::from("No checkpoint here"), Style::default()),
         ];
 
-        let processed = process_checkpoint_patterns(&lines);
+        let processed = process_checkpoint_patterns(&lines, 100);
 
         assert_eq!(processed.len(), 2);
 
@@ -309,7 +357,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------checkpoint test123---------------------------"
+            "---------------------------------------Checkpoint ID: test123---------------------------------------"
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,
@@ -331,7 +379,7 @@ mod tests {
             (Line::from("Normal line"), Style::default()),
         ];
 
-        let processed = apply_all_pattern_transformations(&lines);
+        let processed = apply_all_pattern_transformations(&lines, 100);
 
         assert_eq!(processed.len(), 2);
 
@@ -340,7 +388,7 @@ mod tests {
         assert_eq!(processed[0].0.spans[0].content, "Test ");
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------checkpoint abc---------------------------"
+            "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,
@@ -361,14 +409,14 @@ mod tests {
             Style::default(),
         )];
 
-        let processed = apply_all_pattern_transformations(&lines);
+        let processed = apply_all_pattern_transformations(&lines, 100);
 
         assert_eq!(processed.len(), 1);
 
         // Should have checkpoint transformation applied
         let text = spans_to_string(&processed[0].0);
         assert!(
-            text.contains("-----------------------------checkpoint abc---------------------------")
+            text.contains("-----------------------------------------Checkpoint ID: abc-----------------------------------------")
         ); // Checkpoint should be uppercase
         assert!(text.contains("Start"));
         assert!(text.contains("end"));
@@ -377,7 +425,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3); // "Start ", "ABC", " end"
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------checkpoint abc---------------------------"
+            "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
         );
         assert_eq!(
             processed[0].0.spans[1].style.fg,

@@ -3,7 +3,10 @@ use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::get_wrapped_message_lines;
-use crate::services::message_pattern::{apply_all_pattern_transformations, spans_to_string};
+use crate::services::message_pattern::{
+    process_agent_mode_patterns, process_checkpoint_patterns, process_section_title_patterns,
+    spans_to_string,
+};
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
@@ -178,13 +181,32 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     for i in 0..height {
         if let Some((line, _)) = all_lines.get(scroll + i) {
             let line_text = spans_to_string(line);
-            if line_text.contains("<checkpoint_id>") || line_text.contains("<e>") {
-                let processed =
-                    apply_all_pattern_transformations(&[(line.clone(), Style::default())]);
+            if line_text.contains("<checkpoint_id>") {
+                let processed = process_checkpoint_patterns(
+                    &[(line.clone(), Style::default())],
+                    f.area().width as usize,
+                );
+                visible_lines.push(processed[0].0.clone());
+            } else if line_text.contains("<agent_mode>") {
+                let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
                 visible_lines.push(processed[0].0.clone());
             } else {
-                // No patterns = no processing (fastest path)
-                visible_lines.push(line.clone());
+                let section_tags = ["planning", "reasoning", "notes", "progress"];
+                let mut found = false;
+                for tag in &section_tags {
+                    if line_text.contains(&format!("<{}>", tag)) {
+                        let processed = process_section_title_patterns(
+                            &[(line.clone(), Style::default())],
+                            tag,
+                        );
+                        visible_lines.push(processed[0].0.clone());
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    visible_lines.push(line.clone());
+                }
             }
         } else {
             visible_lines.push(Line::from(""));
