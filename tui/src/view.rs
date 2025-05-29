@@ -191,9 +191,21 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                 let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
                 visible_lines.push(processed[0].0.clone());
             } else {
-                let section_tags = ["planning", "reasoning", "notes", "progress"];
+                let section_tags = [
+                    "planning",
+                    "reasoning",
+                    "notes",
+                    "progress",
+                    "local_context",
+                ];
                 let mut found = false;
                 for tag in &section_tags {
+                    let closing_tag = format!("</{}>", tag);
+                    if line_text.trim() == closing_tag {
+                        // Skip this line (do not push to visible_lines)
+                        found = true;
+                        break;
+                    }
                     if line_text.contains(&format!("<{}>", tag)) {
                         let processed = process_section_title_patterns(
                             &[(line.clone(), Style::default())],
