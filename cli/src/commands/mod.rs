@@ -135,7 +135,7 @@ impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
             Commands::Mcp => {
-                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() })
+                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() }, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }

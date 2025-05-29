@@ -285,15 +285,19 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let ctx_clone = ctx.clone();
-    tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
-            api: ClientConfig {
-                api_key: ctx_clone.api_key,
-                api_endpoint: ctx_clone.api_endpoint,
+    let mcp_handle = tokio::spawn(async move {
+        let _ = stakpak_mcp_server::start_server(
+            MCPServerConfig {
+                api: ClientConfig {
+                    api_key: ctx_clone.api_key,
+                    api_endpoint: ctx_clone.api_endpoint,
+                },
             },
-        })
+            Some(shutdown_rx),
+        )
         .await;
     });
 
@@ -306,13 +310,13 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
 
     // Spawn TUI task
     let tui_handle = tokio::spawn(async move {
-        let _ = stakpak_tui::run_tui(input_rx, output_tx)
+        let _ = stakpak_tui::run_tui(input_rx, output_tx, shutdown_tx)
             .await
             .map_err(|e| e.to_string());
     });
 
     let input_tx_clone = input_tx.clone();
-    let mcp_handle = tokio::spawn(async move {
+    let mcp_progress_handle = tokio::spawn(async move {
         while let Some(progress) = mcp_progress_rx.recv().await {
             let _ = send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
         }
@@ -509,9 +513,10 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
         Ok(())
     });
 
-    // Wait for both tasks to finish
-    let (_, client_res, _) =
-        tokio::try_join!(tui_handle, client_handle, mcp_handle).map_err(|e| e.to_string())?;
+    // Wait for all tasks to finish
+    let (client_res, _, _, _) =
+        tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
+            .map_err(|e| e.to_string())?;
     client_res?;
     Ok(())
 }
@@ -532,12 +537,15 @@ pub async fn run_non_interactive(
 
     let ctx_clone = ctx.clone();
     tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(MCPServerConfig {
-            api: ClientConfig {
-                api_key: ctx_clone.api_key,
-                api_endpoint: ctx_clone.api_endpoint,
+        let _ = stakpak_mcp_server::start_server(
+            MCPServerConfig {
+                api: ClientConfig {
+                    api_key: ctx_clone.api_key,
+                    api_endpoint: ctx_clone.api_endpoint,
+                },
             },
-        })
+            None,
+        )
         .await;
     });
 

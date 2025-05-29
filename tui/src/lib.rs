@@ -18,6 +18,7 @@ pub use view::view;
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -138,6 +139,7 @@ pub async fn run_tui(
     }
 
     println!("Quitting...");
+    let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
