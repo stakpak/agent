@@ -177,7 +177,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. You should use this to generate code (Terraform, Kubernetes, Dockerfile, GithubActions). If save_files is true, the generated files will be saved to the filesystem."
+        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. This code generation only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem."
     )]
     async fn generate_code(
         &self,
@@ -506,7 +506,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation."
+        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation. When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
     )]
     fn str_replace(
         &self,
@@ -519,7 +519,9 @@ impl Tools {
         )]
         old_str: String,
         #[tool(param)]
-        #[schemars(description = "The new text to insert in place of the old text")]
+        #[schemars(
+            description = "The new text to insert in place of the old text. When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+        )]
         new_str: String,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
@@ -579,7 +581,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Create a new file with the specified content. Will fail if file already exists."
+        description = "Create a new file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist."
     )]
     fn create(
         &self,
@@ -587,7 +589,9 @@ impl Tools {
         #[schemars(description = "The path where the new file should be created")]
         path: String,
         #[tool(param)]
-        #[schemars(description = "The content to write to the new file")]
+        #[schemars(
+            description = "The content to write to the new file, when creating code, ensure the new text has proper syntax, indentation, and follows the codebase style."
+        )]
         file_text: String,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
