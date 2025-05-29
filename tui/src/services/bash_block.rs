@@ -1,8 +1,7 @@
 use crate::app::AppState;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_and_truncate_command, extract_command_purpose,
-    extract_file_info, extract_full_command, format_command_content, get_command_type_name,
-    wrap_text,
+    extract_file_info, extract_full_command, get_command_type_name, wrap_text,
 };
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
@@ -40,7 +39,7 @@ pub fn render_bash_block(
     // Get the bubble title (what the command is trying to do)
     let bubble_title = extract_command_purpose(&command, &outside_title);
 
-    let content_lines = format_command_content(output);
+    let content_lines = command.split('\n').collect::<Vec<_>>();
 
     // Use the full content width
     let inner_width = content_width;
@@ -148,7 +147,7 @@ pub fn render_bash_block(
     message_id
 }
 
-pub fn render_bash_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
+pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
     let mut lines = Vec::new();
 
     // Extract the actual command that was executed
@@ -164,7 +163,7 @@ pub fn render_bash_result_block(tool_call: &ToolCall, result: &str, state: &mut 
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "Bash",
+            tool_call.function.name.to_string(),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
