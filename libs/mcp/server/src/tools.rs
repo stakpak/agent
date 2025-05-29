@@ -149,24 +149,55 @@ impl Tools {
         Ok(CallToolResult::success(response))
     }
 
-    //TODO: Add after adding widget for file reading
-    // #[tool(
-    //     description = "A system command execution tool that allows running shell commands with full system access."
-    // )]
-    // fn read_file(
-    //     &self,
-    //     #[tool(param)]
-    //     #[schemars(description = "The path to the file to read")]
-    //     path: String,
-    // ) -> Result<CallToolResult, McpError> {
-    //     let path_clone = path.clone();
-    //     let content = fs::read_to_string(path).map_err(|e| {
-    //         error!("Failed to read file: {}", e);
-    //         McpError::internal_error(
-    //             "Failed to read file",
-    //             Some(json!({ "path": path_clone, "error": e.to_string() })),
-    //         )
-    //     })?;
+    #[tool(
+        description = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem."
+    )]
+    async fn smart_search_code(
+        &self,
+        #[tool(param)]
+        #[schemars(
+            description = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be"
+        )]
+        query: String,
+        // #[tool(param)]
+        // #[schemars(
+        //     description = "The flow reference in the format owner/name/version, this allows you to limit the search scopre to a specific project (optional)"
+        // )]
+        // flow_ref: Option<String>,
+        #[tool(param)]
+        #[schemars(description = "The maximum number of results to return (default: 10)")]
+        limit: Option<u32>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let response = match client
+            .call_mcp_tool(&ToolsCallParams {
+                name: "smart_search_code".to_string(),
+                arguments: json!({
+                    "query": query,
+                    "limit": limit,
+                }),
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("SMART_SEARCH_CODE_ERROR"),
+                    Content::text(format!("Failed to search for code: {}", e)),
+                ]));
+            }
+        };
+
+        Ok(CallToolResult::success(response))
+    }
+
     #[tool(
         description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges."
     )]
