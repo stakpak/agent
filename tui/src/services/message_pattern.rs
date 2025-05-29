@@ -359,10 +359,7 @@ mod tests {
             processed[0].0.spans[1].content,
             "---------------------------------------Checkpoint ID: test123---------------------------------------"
         );
-        assert_eq!(
-            processed[0].0.spans[1].style.fg,
-            Some(Color::DarkGray)
-        );
+        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
 
         // Second line should be unchanged
         assert_eq!(processed[1].0.spans.len(), 1);
@@ -390,10 +387,7 @@ mod tests {
             processed[0].0.spans[1].content,
             "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
         );
-        assert_eq!(
-            processed[0].0.spans[1].style.fg,
-            Some(Color::DarkGray)
-        );
+        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
         assert_eq!(processed[0].0.spans[2].content, " message");
 
         // Second line should be unchanged (only 1 span)
@@ -427,9 +421,6 @@ mod tests {
             processed[0].0.spans[1].content,
             "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
         );
-        assert_eq!(
-            processed[0].0.spans[1].style.fg,
-            Some(Color::DarkGray)
-        );
+        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
     }
 }
