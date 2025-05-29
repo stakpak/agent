@@ -12,7 +12,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.1.72"
+version = "0.1.73"
 edition = "2024"
 
 
