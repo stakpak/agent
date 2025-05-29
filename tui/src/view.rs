@@ -81,7 +81,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
         hint_area = chunks.get(5).copied().unwrap_or(input_area);
     }
     let message_area_width = message_area.width as usize;
-    let message_area_height = message_area.height as usize;
+    let message_area_height = message_area.height.saturating_sub(input_height) as usize;
 
     render_messages(
         f,
