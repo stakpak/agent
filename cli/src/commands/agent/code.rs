@@ -304,7 +304,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     });
 
     // Initialize clients and tools
-    let clients = ClientManager::new(Some(mcp_progress_tx))
+    let clients = ClientManager::new(ctx.mcp_server_host.clone(), Some(mcp_progress_tx))
         .await
         .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
@@ -551,7 +551,9 @@ pub async fn run_non_interactive(
         .await;
     });
 
-    let clients = ClientManager::new(None).await.map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(ctx.mcp_server_host, None)
+        .await
+        .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
