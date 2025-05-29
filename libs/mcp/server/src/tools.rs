@@ -4,8 +4,9 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stakpak_api::ToolsCallParams;
 use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{GenerationResult, ToolsCallParams};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -174,7 +175,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Generate configurations and infrastructure as code using a given prompt. This function only generates code with proposed file names, it does not create or modify your filesystem. You should use this to generate code (Terraform, Kubernetes, Dockerfile, GithubActions) then use other tools to create/edit files."
+        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. You should use this to generate code (Terraform, Kubernetes, Dockerfile, GithubActions). If save_files is true, the generated files will be saved to the filesystem."
     )]
     async fn generate_code(
         &self,
@@ -188,6 +189,11 @@ impl Tools {
             description = "Type of code to generate one of Dockerfile, Kubernetes, Terraform, GithubActions"
         )]
         provisioner: Provisioner,
+        #[tool(param)]
+        #[schemars(
+            description = "Whether to save the generated files to the filesystem (default: false)"
+        )]
+        save_files: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
         let client = Client::new(&self.api_config).map_err(|e| {
             error!("Failed to create client: {}", e);
@@ -197,6 +203,12 @@ impl Tools {
             )
         })?;
 
+        let output_format = if save_files.unwrap_or(false) {
+            "json"
+        } else {
+            "markdown"
+        };
+
         let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "generate_code".to_string(),
@@ -204,6 +216,7 @@ impl Tools {
                     "prompt": prompt,
                     "provisioner": provisioner.to_string(),
                     "context": Vec::<serde_json::Value>::new(),
+                    "output_format": output_format,
                 }),
             })
             .await
@@ -216,6 +229,101 @@ impl Tools {
                 ]));
             }
         };
+        if save_files.unwrap_or(false) {
+            let mut result_report = String::new();
+
+            let response_text = response
+                .iter()
+                .map(|r| {
+                    if let Some(RawTextContent { text }) = r.as_text() {
+                        text.clone()
+                    } else {
+                        "".to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("");
+
+            let generation_result: GenerationResult = serde_json::from_str(&response_text)
+                .map_err(|e| {
+                    error!("Failed to parse generation result: {}", e);
+                    McpError::internal_error(
+                        "Failed to parse generation result",
+                        Some(json!({ "error": e.to_string() })),
+                    )
+                })?;
+
+            // Group blocks by document_uri
+            let mut grouped_blocks: HashMap<String, Vec<&stakpak_api::Block>> = HashMap::new();
+            for block in &generation_result.created_blocks {
+                grouped_blocks
+                    .entry(block.document_uri.clone())
+                    .or_insert_with(Vec::new)
+                    .push(block);
+            }
+
+            // Process each file
+            for (document_uri, mut blocks) in grouped_blocks {
+                // Sort blocks by start line number
+                blocks.sort_by(|a, b| a.start_point.row.cmp(&b.start_point.row));
+
+                // Concatenate the code blocks
+                let file_content = blocks
+                    .iter()
+                    .map(|block| block.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Strip file:/// prefix from document_uri to get the file path
+                let file_path = document_uri
+                    .strip_prefix("file:///")
+                    .unwrap_or(&document_uri);
+
+                // Create parent directories if they don't exist
+                if let Some(parent) = Path::new(file_path).parent() {
+                    if !parent.exists() {
+                        if let Err(e) = fs::create_dir_all(parent) {
+                            error!("Failed to create directory {}: {}", parent.display(), e);
+                            continue;
+                        }
+                    }
+                }
+
+                // Write the file
+                match fs::write(file_path, &file_content) {
+                    Ok(_) => {
+                        result_report.push_str(&format!(
+                            "Created file {}\n```\n{}\n```\n\n",
+                            file_path, file_content
+                        ));
+                    }
+                    Err(e) => {
+                        result_report.push_str(&format!(
+                            "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                            file_path, e, file_content
+                        ));
+                    }
+                }
+            }
+
+            // ignore modified blocks
+            for block in generation_result.modified_blocks {
+                result_report.push_str(&format!(
+                    "Ignored modified block:\n{}\n```\n{}\n```\n\n",
+                    block.document_uri, block.code
+                ));
+            }
+
+            // ignore removed blocks
+            for block in generation_result.removed_blocks {
+                result_report.push_str(&format!(
+                    "Ignored removed block:\n{}\n```\n{}\n```\n\n",
+                    block.document_uri, block.code
+                ));
+            }
+
+            return Ok(CallToolResult::success(vec![Content::text(result_report)]));
+        }
 
         Ok(CallToolResult::success(response))
     }
