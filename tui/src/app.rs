@@ -1,6 +1,8 @@
 use crate::services::message::Message;
 use ratatui::style::Style;
-use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{
+    ToolCall, ToolCallResult, ToolCallResultProgress,
+};
 use uuid::Uuid;
 
 pub struct SessionInfo {
@@ -45,6 +47,7 @@ pub enum InputEvent {
     StreamAssistantMessage(Uuid, String),
     RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
+    StreamToolResult(ToolCallResultProgress),
     Loading(bool),
     InputChanged(char),
     GetStatus(String),

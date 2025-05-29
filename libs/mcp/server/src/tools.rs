@@ -8,8 +8,12 @@ use stakpak_api::ToolsCallParams;
 use stakpak_api::{Client, ClientConfig};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tracing::error;
+use uuid::Uuid;
+
+use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 
 #[derive(Clone)]
 pub struct Tools {
@@ -55,8 +59,9 @@ impl Tools {
     #[tool(
         description = "A system command execution tool that allows running shell commands with full system access."
     )]
-    fn run_command(
+    async fn run_command(
         &self,
+        peer: rmcp::Peer<RoleServer>,
         #[tool(param)]
         #[schemars(description = "The shell command to execute")]
         command: String,
@@ -65,11 +70,14 @@ impl Tools {
         work_dir: Option<String>,
     ) -> Result<CallToolResult, McpError> {
         let command_clone = command.clone();
-        let output = Command::new("sh")
+
+        let mut child = Command::new("sh")
             .arg("-c")
             .arg(command)
             .current_dir(work_dir.unwrap_or(".".to_string()))
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|e| {
                 error!("Failed to run command: {}", e);
                 McpError::internal_error(
@@ -81,22 +89,83 @@ impl Tools {
                 )
             })?;
 
-        let exit_code = output.status.code().unwrap_or(-1);
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
 
+        let mut stdout_reader = BufReader::new(stdout);
+        let mut stderr_reader = BufReader::new(stderr);
+
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
         let mut result = String::new();
+        let progress_id = Uuid::new_v4();
+
+        // Read from both streams concurrently
+        loop {
+            tokio::select! {
+                Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
+                    if n == 0 {
+                        break;
+                    }
+                    let line = stderr_buf.trim_end_matches('\n').to_string();
+                    stderr_buf.clear();
+                    result.push_str(&format!("{}\n", line));
+                    // Send notification but continue processing
+                    let _ = peer.notify_progress(ProgressNotificationParam {
+                        progress_token: ProgressToken(NumberOrString::Number(0)),
+                        progress: 50,
+                        total: Some(100),
+                        message: Some(serde_json::to_string(&ToolCallResultProgress {
+                            id: progress_id,
+                            message: line,
+                        }).unwrap_or_default()),
+                    }).await;
+                }
+                Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
+                    if n == 0 {
+                        break;
+                    }
+                    let line = stdout_buf.trim_end_matches('\n').to_string();
+                    stdout_buf.clear();
+                    result.push_str(&format!("{}\n", line));
+                    // Send notification but continue processing
+                    // skip if message is empty
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let _ = peer.notify_progress(ProgressNotificationParam {
+                        progress_token: ProgressToken(NumberOrString::Number(0)),
+                        progress: 50,
+                        total: Some(100),
+                        message: Some(serde_json::to_string(&ToolCallResultProgress {
+                            id: progress_id,
+                            message: line,
+                        }).unwrap_or_default()),
+                    }).await;
+                }
+                else => break,
+            }
+        }
+
+        // Wait for the process to complete
+        let exit_code = child
+            .wait()
+            .await
+            .map_err(|e| {
+                error!("Failed to wait for command: {}", e);
+                McpError::internal_error(
+                    "Failed to wait for command",
+                    Some(json!({
+                        "command": command_clone,
+                        "error": e.to_string()
+                    })),
+                )
+            })?
+            .code()
+            .unwrap_or(-1);
+
         if exit_code != 0 {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
-        }
-        // print stderr first, some commands show warnings in stderr
-        if !stderr.is_empty() {
-            let stderr = clip_output(&stderr);
-            result.push_str(&stderr);
-        }
-        if !stdout.is_empty() {
-            let stdout = clip_output(&stdout);
-            result.push_str(&stdout);
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))

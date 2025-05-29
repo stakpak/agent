@@ -284,6 +284,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let mut tools_queue: Vec<ToolCall> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
+    let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
 
     let ctx_clone = ctx.clone();
     tokio::spawn(async move {
@@ -297,7 +298,9 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     });
 
     // Initialize clients and tools
-    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(Some(mcp_progress_tx))
+        .await
+        .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
@@ -306,6 +309,13 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
         let _ = stakpak_tui::run_tui(input_rx, output_tx)
             .await
             .map_err(|e| e.to_string());
+    });
+
+    let input_tx_clone = input_tx.clone();
+    let mcp_handle = tokio::spawn(async move {
+        while let Some(progress) = mcp_progress_rx.recv().await {
+            let _ = send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
+        }
     });
 
     // Spawn client task
@@ -495,11 +505,13 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                 }
             }
         }
+
         Ok(())
     });
 
     // Wait for both tasks to finish
-    let (_, client_res) = tokio::try_join!(tui_handle, client_handle).map_err(|e| e.to_string())?;
+    let (_, client_res, _) =
+        tokio::try_join!(tui_handle, client_handle, mcp_handle).map_err(|e| e.to_string())?;
     client_res?;
     Ok(())
 }
@@ -529,7 +541,7 @@ pub async fn run_non_interactive(
         .await;
     });
 
-    let clients = ClientManager::new().await.map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(None).await.map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 

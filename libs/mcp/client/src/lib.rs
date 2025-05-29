@@ -1,22 +1,25 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use local::LocalClientHandler;
 use rmcp::{
     RoleClient,
-    model::{CallToolRequestParam, InitializeRequestParam, Tool},
+    model::{CallToolRequestParam, Tool},
     service::RunningService,
 };
+use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use tokio::sync::mpsc::Sender;
 
 mod local;
 use crate::local::local_client;
 
 pub struct ClientManager {
-    clients: HashMap<String, RunningService<RoleClient, InitializeRequestParam>>,
+    clients: HashMap<String, RunningService<RoleClient, LocalClientHandler>>,
 }
 
 impl ClientManager {
-    pub async fn new() -> Result<Self> {
-        let client1 = local_client().await?;
+    pub async fn new(progress_tx: Option<Sender<ToolCallResultProgress>>) -> Result<Self> {
+        let client1 = local_client(progress_tx).await?;
         Ok(Self {
             clients: HashMap::from([("local".to_string(), client1)]),
         })
@@ -25,14 +28,14 @@ impl ClientManager {
     pub async fn get_client(
         &self,
         client_name: &str,
-    ) -> Result<&RunningService<RoleClient, InitializeRequestParam>> {
+    ) -> Result<&RunningService<RoleClient, LocalClientHandler>> {
         let client = self.clients.get(client_name).unwrap();
         Ok(client)
     }
 
     pub async fn get_clients(
         &self,
-    ) -> Result<Vec<&RunningService<RoleClient, InitializeRequestParam>>> {
+    ) -> Result<Vec<&RunningService<RoleClient, LocalClientHandler>>> {
         let clients = self.clients.values().collect();
         Ok(clients)
     }

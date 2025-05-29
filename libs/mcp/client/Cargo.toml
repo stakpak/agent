@@ -13,3 +13,4 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 rmcp = { workspace = true }
 futures = { workspace = true }
+uuid = { workspace = true }

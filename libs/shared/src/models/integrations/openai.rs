@@ -304,6 +304,12 @@ pub struct ToolCallResult {
     pub result: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCallResultProgress {
+    pub id: Uuid,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct FunctionCall {
     pub name: String,
