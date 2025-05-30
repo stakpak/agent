@@ -31,6 +31,9 @@ pub async fn start_server(
         .with_graceful_shutdown(async move {
             if let Some(mut shutdown_rx) = shutdown_rx {
                 let _ = shutdown_rx.recv().await;
+            } else {
+                #[allow(clippy::unwrap_used)]
+                tokio::signal::ctrl_c().await.unwrap();
             }
         })
         .await?;

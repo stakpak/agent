@@ -231,6 +231,7 @@ impl Tools {
                 ]));
             }
         };
+
         if save_files.unwrap_or(false) {
             let mut result_report = String::new();
 
@@ -260,7 +261,7 @@ impl Tools {
             for block in &generation_result.created_blocks {
                 grouped_blocks
                     .entry(block.document_uri.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(block);
             }
 
