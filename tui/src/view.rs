@@ -174,7 +174,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
-    
+
     let scroll = if state.stay_at_bottom {
         max_scroll
     } else {
@@ -183,16 +183,16 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
     let mut visible_lines = Vec::new();
     let mut lines_added = 0;
-    
+
     // Process only the lines we need, and ensure we don't exceed height
     for i in 0..height {
         if lines_added >= height {
             break; // Prevent overflow
         }
-        
+
         if let Some((line, _)) = all_lines.get(scroll + i) {
             let line_text = spans_to_string(line);
-            
+
             if line_text.contains("<checkpoint_id>") {
                 let processed = process_checkpoint_patterns(
                     &[(line.clone(), Style::default())],
@@ -217,13 +217,13 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             } else {
                 let section_tags = [
                     "planning",
-                    "reasoning", 
+                    "reasoning",
                     "notes",
                     "progress",
                     "local_context",
                 ];
                 let mut found = false;
-                
+
                 for tag in &section_tags {
                     let closing_tag = format!("</{}>", tag);
                     if line_text.trim() == closing_tag {
@@ -247,7 +247,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                         break;
                     }
                 }
-                
+
                 if !found && lines_added < height {
                     visible_lines.push(line.clone());
                     lines_added += 1;
@@ -258,10 +258,10 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             lines_added += 1;
         }
     }
-    
+
     // Ensure we don't exceed the allocated height
     visible_lines.truncate(height);
-    
+
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
 }
