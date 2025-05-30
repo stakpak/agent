@@ -183,7 +183,7 @@ impl Tools {
         &self,
         #[tool(param)]
         #[schemars(
-            description = "Prompt to use to generate code, this should be as detailed as possible"
+            description = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify output file paths if you want to save the files to the filesystem."
         )]
         prompt: String,
         #[tool(param)]
