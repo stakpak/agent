@@ -12,7 +12,7 @@ pub struct MCPServerConfig {
     pub api: ClientConfig,
 }
 
-const BIND_ADDRESS: &str = "127.0.0.1:65535";
+const BIND_ADDRESS: &str = "0.0.0.0:65535";
 
 /// npx @modelcontextprotocol/inspector cargo run mcp
 pub async fn start_server(
