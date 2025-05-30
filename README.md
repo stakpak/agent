@@ -1,7 +1,7 @@
 # Stakpak CLI
-
+<img src="assets/TUIOverview.jpeg" width="800">
 > **Warning**
-> This CLI tool is under heavy development and breaking changes should be expected. Use with caution.
+> This CLI tool is under heavy development and breaking changes should be expected. Use with caution 🚧
 
 A CLI for the Stakpak API. Manage all your DevOps flows and configurations in one place, with AI-agents helping you out.
 
@@ -53,6 +53,15 @@ export STAKPAK_API_KEY=<mykey>
 stakpak login --api-key $STAKPAK_API_KEY
 ```
 
+#### Start Stakpak
+```bash
+stakpak
+```
+#### Start from a saved checkpoint
+```bash
+stakpak -c <checkpoint-id>
+```
+
 #### View current account (Optional)
 
 ```bash
@@ -75,3 +84,15 @@ stakpak account
 - Get agent checkpoint state
 - Run agent
 - Run agent form a specific checkpoint
+
+## Keyboard Shortcuts
+<img src="assets/keyboardshortcuts.jpeg" width="800">
+
+- Use `Arrow keys` or **Tab** to select options  
+- Press `Esc` to exit the prompt
+- `?` for Shortcuts  
+- `/` for commands  
+- `↵` to send message  
+- `Shift + Enter` or `Ctrl + J` to insert newline  
+- `Ctrl + C` to quit
+
