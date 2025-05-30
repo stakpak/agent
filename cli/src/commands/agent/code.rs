@@ -286,6 +286,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let ctx_clone = ctx.clone();
+
+    // Spawn MCP server task
     let mcp_handle = tokio::spawn(async move {
         let _ = stakpak_mcp_server::start_server(
             MCPServerConfig {
@@ -321,201 +323,227 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     });
 
     // Spawn client task
-    let client_handle: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-        let client = Client::new(&ClientConfig {
-            api_key: ctx.api_key,
-            api_endpoint: ctx.api_endpoint,
-        })
-        .map_err(|e| e.to_string())?;
+    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> =
+        tokio::spawn(async move {
+            let client = Client::new(&ClientConfig {
+                api_key: ctx.api_key,
+                api_endpoint: ctx.api_endpoint,
+            })
+            .map_err(|e| e.to_string())?;
 
-        let data = client.get_my_account().await?;
-        send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+            let data = client.get_my_account().await?;
+            send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
-        if let Some(checkpoint_id) = config.checkpoint_id {
-            let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+            if let Some(checkpoint_id) = config.checkpoint_id {
+                let mut checkpoint_messages =
+                    get_checkpoint_messages(&client, &checkpoint_id).await?;
 
-            // Append checkpoint_id to the last assistant message if present
-            if let Some(last_message) = checkpoint_messages
-                .iter_mut()
-                .rev()
-                .find(|message| message.role != Role::User && message.role != Role::Tool)
-            {
-                if last_message.role == Role::Assistant {
-                    last_message.content = Some(MessageContent::String(format!(
-                        "{}\n<checkpoint_id>{}</checkpoint_id>",
-                        last_message
-                            .content
-                            .as_ref()
-                            .unwrap_or(&MessageContent::String(String::new())),
-                        checkpoint_id
-                    )));
-                }
-            }
-
-            for message in &checkpoint_messages {
-                match message.role {
-                    Role::Assistant | Role::User => {
-                        if let Some(content) = &message.content {
-                            let _ = input_tx
-                                .send(InputEvent::InputSubmittedWith(content.to_string()))
-                                .await;
-                        }
+                // Append checkpoint_id to the last assistant message if present
+                if let Some(last_message) = checkpoint_messages
+                    .iter_mut()
+                    .rev()
+                    .find(|message| message.role != Role::User && message.role != Role::Tool)
+                {
+                    if last_message.role == Role::Assistant {
+                        last_message.content = Some(MessageContent::String(format!(
+                            "{}\n<checkpoint_id>{}</checkpoint_id>",
+                            last_message
+                                .content
+                                .as_ref()
+                                .unwrap_or(&MessageContent::String(String::new())),
+                            checkpoint_id
+                        )));
                     }
-                    Role::Tool => {
-                        let tool_call = checkpoint_messages
-                            .iter()
-                            .find(|checkpoint_message| {
-                                checkpoint_message
-                                    .tool_calls
-                                    .as_ref()
-                                    .is_some_and(|tool_calls| {
-                                        message.tool_call_id.as_ref().is_some_and(|tool_call_id| {
+                }
+
+                for message in &checkpoint_messages {
+                    match message.role {
+                        Role::Assistant | Role::User => {
+                            if let Some(content) = &message.content {
+                                let _ = input_tx
+                                    .send(InputEvent::InputSubmittedWith(content.to_string()))
+                                    .await;
+                            }
+                        }
+                        Role::Tool => {
+                            let tool_call = checkpoint_messages
+                                .iter()
+                                .find(|checkpoint_message| {
+                                    checkpoint_message.tool_calls.as_ref().is_some_and(
+                                        |tool_calls| {
+                                            message.tool_call_id.as_ref().is_some_and(
+                                                |tool_call_id| {
+                                                    tool_calls.iter().any(|tool_call| {
+                                                        tool_call.id == *tool_call_id
+                                                    })
+                                                },
+                                            )
+                                        },
+                                    )
+                                })
+                                .and_then(|chat_message| {
+                                    chat_message.tool_calls.as_ref().and_then(|tool_calls| {
+                                        message.tool_call_id.as_ref().and_then(|tool_call_id| {
                                             tool_calls
                                                 .iter()
-                                                .any(|tool_call| tool_call.id == *tool_call_id)
+                                                .find(|tool_call| tool_call.id == *tool_call_id)
                                         })
                                     })
-                            })
-                            .and_then(|chat_message| {
-                                chat_message.tool_calls.as_ref().and_then(|tool_calls| {
-                                    message.tool_call_id.as_ref().and_then(|tool_call_id| {
-                                        tool_calls
-                                            .iter()
-                                            .find(|tool_call| tool_call.id == *tool_call_id)
-                                    })
-                                })
-                            });
+                                });
 
-                        if let Some(tool_call) = tool_call {
-                            let _ = send_input_event(
+                            if let Some(tool_call) = tool_call {
+                                let _ = send_input_event(
+                                    &input_tx,
+                                    InputEvent::ToolResult(ToolCallResult {
+                                        call: tool_call.clone(),
+                                        result: message
+                                            .content
+                                            .as_ref()
+                                            .unwrap_or(&MessageContent::String(String::new()))
+                                            .to_string(),
+                                    }),
+                                )
+                                .await;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                let tool_calls = checkpoint_messages
+                    .last()
+                    .filter(|msg| msg.role == Role::Assistant)
+                    .and_then(|msg| msg.tool_calls.as_ref());
+
+                if let Some(tool_calls) = tool_calls {
+                    tools_queue.extend(tool_calls.clone());
+                    if !tools_queue.is_empty() {
+                        let initial_tool_call = tools_queue.remove(0);
+                        send_tool_call(&input_tx, &initial_tool_call).await?;
+                    }
+                }
+
+                messages.extend(checkpoint_messages);
+            }
+
+            while let Some(output_event) = output_rx.recv().await {
+                match output_event {
+                    OutputEvent::UserMessage(user_input) => {
+                        let (user_input, local_context) =
+                            add_local_context(&messages, &user_input, &config.local_context);
+                        if let Some(local_context) = local_context {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::InputSubmittedWith(local_context.to_string()),
+                            )
+                            .await?;
+                        }
+                        messages.push(user_message(user_input));
+                    }
+                    OutputEvent::AcceptTool(tool_call) => {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                        let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        if let Some(result) = result {
+                            let result_content = result
+                                .content
+                                .iter()
+                                .map(|c| match c.raw.as_text() {
+                                    Some(text) => text.text.clone(),
+                                    None => String::new(),
+                                })
+                                .collect::<Vec<String>>()
+                                .join("\n");
+
+                            messages
+                                .push(tool_result(tool_call.clone().id, result_content.clone()));
+
+                            send_input_event(
                                 &input_tx,
                                 InputEvent::ToolResult(ToolCallResult {
                                     call: tool_call.clone(),
-                                    result: message
-                                        .content
-                                        .as_ref()
-                                        .unwrap_or(&MessageContent::String(String::new()))
-                                        .to_string(),
+                                    result: result_content,
                                 }),
                             )
-                            .await;
+                            .await?;
+                        }
+
+                        if !tools_queue.is_empty() {
+                            let tool_call = tools_queue.remove(0);
+                            send_tool_call(&input_tx, &tool_call).await?;
+                            continue;
                         }
                     }
-                    _ => {}
-                }
-            }
-
-            let tool_calls = checkpoint_messages
-                .last()
-                .filter(|msg| msg.role == Role::Assistant)
-                .and_then(|msg| msg.tool_calls.as_ref());
-
-            if let Some(tool_calls) = tool_calls {
-                tools_queue.extend(tool_calls.clone());
-                if !tools_queue.is_empty() {
-                    let initial_tool_call = tools_queue.remove(0);
-                    send_tool_call(&input_tx, &initial_tool_call).await?;
-                }
-            }
-
-            messages.extend(checkpoint_messages);
-        }
-
-        while let Some(output_event) = output_rx.recv().await {
-            match output_event {
-                OutputEvent::UserMessage(user_input) => {
-                    let (user_input, local_context) =
-                        add_local_context(&messages, &user_input, &config.local_context);
-                    if let Some(local_context) = local_context {
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::InputSubmittedWith(local_context.to_string()),
-                        )
-                        .await?;
+                    OutputEvent::RejectTool(_tool_call) => {
+                        if !tools_queue.is_empty() {
+                            let tool_call = tools_queue.remove(0);
+                            send_tool_call(&input_tx, &tool_call).await?;
+                        }
+                        continue;
                     }
-                    messages.push(user_message(user_input));
                 }
-                OutputEvent::AcceptTool(tool_call) => {
-                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                    let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
-                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                    if let Some(result) = result {
-                        let result_content = result
-                            .content
-                            .iter()
-                            .map(|c| match c.raw.as_text() {
-                                Some(text) => text.text.clone(),
-                                None => String::new(),
-                            })
-                            .collect::<Vec<String>>()
-                            .join("\n");
+                send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
-                        messages.push(tool_result(tool_call.clone().id, result_content.clone()));
+                let mut stream = client
+                    .chat_completion_stream(messages.clone(), Some(tools.clone()))
+                    .await?;
 
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::ToolResult(ToolCallResult {
-                                call: tool_call.clone(),
-                                result: result_content,
-                            }),
-                        )
-                        .await?;
+                let response = match process_responses_stream(&mut stream, &input_tx).await {
+                    Ok(response) => response,
+                    Err(e) => {
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        input_tx
+                            .send(InputEvent::Quit)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        return Err(e.to_string());
                     }
+                };
+                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
+                messages.push(response.choices[0].message.clone());
+
+                // Send tool calls to TUI if present
+                if let Some(tool_calls) = &response.choices[0].message.tool_calls {
+                    tools_queue.extend(tool_calls.clone());
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
                         continue;
                     }
                 }
-                OutputEvent::RejectTool(_tool_call) => {
-                    if !tools_queue.is_empty() {
-                        let tool_call = tools_queue.remove(0);
-                        send_tool_call(&input_tx, &tool_call).await?;
-                    }
-                    continue;
-                }
             }
-            send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
-            let mut stream = client
-                .chat_completion_stream(messages.clone(), Some(tools.clone()))
-                .await?;
-
-            let response = match process_responses_stream(&mut stream, &input_tx).await {
-                Ok(response) => response,
-                Err(e) => {
-                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                    input_tx
-                        .send(InputEvent::Quit)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    return Err(e.to_string());
-                }
-            };
-            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-
-            messages.push(response.choices[0].message.clone());
-
-            // Send tool calls to TUI if present
-            if let Some(tool_calls) = &response.choices[0].message.tool_calls {
-                tools_queue.extend(tool_calls.clone());
-                if !tools_queue.is_empty() {
-                    let tool_call = tools_queue.remove(0);
-                    send_tool_call(&input_tx, &tool_call).await?;
-                    continue;
-                }
-            }
-        }
-
-        Ok(())
-    });
+            Ok(messages)
+        });
 
     // Wait for all tasks to finish
     let (client_res, _, _, _) =
         tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
             .map_err(|e| e.to_string())?;
-    client_res?;
+
+    // Get latest checkpoint
+    let latest_checkpoint = client_res?
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Assistant)
+        .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
+
+    if let Some(latest_checkpoint) = latest_checkpoint {
+        println!(
+            r#"
+Terminating session at checkpoint {}
+
+To resume, run:
+stakpak -c {}
+
+To get session data, run:
+stakpak agent get {}
+"#,
+            latest_checkpoint, latest_checkpoint, latest_checkpoint
+        );
+    }
+
     Ok(())
 }
 
