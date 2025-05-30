@@ -8,7 +8,8 @@ stakpak-shared = { path = "../../libs/shared" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-futures-util = {workspace = true}
+futures-util = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
+eventsource-stream = "0.2.3"

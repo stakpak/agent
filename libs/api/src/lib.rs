@@ -1,4 +1,7 @@
+use std::io::Write;
+
 use chrono::{DateTime, Utc};
+use eventsource_stream::Eventsource;
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
 use rmcp::model::Content;
 use rmcp::model::JsonRpcResponse;
@@ -557,7 +560,7 @@ impl Client {
         &self,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
-    ) -> Result<impl Stream<Item = Result<Vec<ChatCompletionStreamResponse>, String>>, String> {
+    ) -> Result<impl Stream<Item = Result<ChatCompletionStreamResponse, String>>, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
         let input = ChatCompletionRequest::new(messages, tools, Some(true));
@@ -574,26 +577,12 @@ impl Client {
             let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
             return Err(error.error.message);
         }
-
-        let stream = response.bytes_stream().map(|chunk| {
-            chunk
+        let stream = response.bytes_stream().eventsource().map(|event| {
+            event
                 .map_err(|_| "Failed to read response".to_string())
-                .and_then(|bytes| {
-                    std::str::from_utf8(&bytes)
-                        .map_err(|_| "Failed to parse UTF-8 from Anthropic response".to_string())
-                        .map(|text| {
-                            text.split("\n\n")
-                                .filter(|event| event.starts_with("data: "))
-                                .filter_map(|event| {
-                                    event.strip_prefix("data: ").and_then(|json_str| {
-                                        serde_json::from_str::<ChatCompletionStreamResponse>(
-                                            json_str,
-                                        )
-                                        .ok()
-                                    })
-                                })
-                                .collect::<Vec<ChatCompletionStreamResponse>>()
-                        })
+                .and_then(|event| {
+                    serde_json::from_str::<ChatCompletionStreamResponse>(&event.data)
+                        .map_err(|_| "Failed to parse JSON from Anthropic response".to_string())
                 })
         });
 
