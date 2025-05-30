@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use chrono::{DateTime, Utc};
 use eventsource_stream::Eventsource;
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
