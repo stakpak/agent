@@ -201,10 +201,7 @@ pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppSt
             Line::from(owned_spans)
         })
         .collect();
-    owned_lines.push(Line::from(vec![Span::styled(
-        "  ",
-        Style::default().fg(Color::Gray),
-    )]));
+    owned_lines.push(Line::from(""));
 
     state.messages.push(Message {
         id: Uuid::new_v4(),
@@ -254,10 +251,7 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
             Line::from(owned_spans)
         })
         .collect();
-    owned_lines.push(Line::from(vec![Span::styled(
-        "  ",
-        Style::default().fg(Color::Gray),
-    )]));
+    owned_lines.push(Line::from(""));
 
     state.messages.push(Message {
         id: Uuid::new_v4(),

@@ -20,7 +20,11 @@ pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
-    let input_height = (input_lines + 2) as u16; // +2 for border
+    let input_height = if state.is_dialog_open {
+        input_lines as u16
+    } else {
+        (input_lines + 2) as u16
+    };
 
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
@@ -81,7 +85,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
         hint_area = chunks.get(5).copied().unwrap_or(input_area);
     }
     let message_area_width = message_area.width as usize;
-    let message_area_height = message_area.height.saturating_sub(input_height) as usize;
+    let message_area_height = message_area.height as usize;
 
     render_messages(
         f,
@@ -114,7 +118,6 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
     if input.is_empty() {
         return 1; // At least one line
     }
-
     let prompt_width = 2; // "> " prefix
     let first_line_width = width.saturating_sub(prompt_width);
     let available_width = width;
@@ -171,25 +174,46 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
-    // If stay_at_bottom, always scroll to the bottom (show last messages above dialog if open)
+
     let scroll = if state.stay_at_bottom {
         max_scroll
     } else {
         state.scroll.min(max_scroll)
     };
+
     let mut visible_lines = Vec::new();
+    let mut lines_added = 0;
+
+    // Process only the lines we need, and ensure we don't exceed height
     for i in 0..height {
+        if lines_added >= height {
+            break; // Prevent overflow
+        }
+
         if let Some((line, _)) = all_lines.get(scroll + i) {
             let line_text = spans_to_string(line);
+
             if line_text.contains("<checkpoint_id>") {
                 let processed = process_checkpoint_patterns(
                     &[(line.clone(), Style::default())],
                     f.area().width as usize,
                 );
-                visible_lines.push(processed[0].0.clone());
+                // Add processed lines but respect height limit
+                for (processed_line, _) in processed {
+                    if lines_added < height {
+                        visible_lines.push(processed_line);
+                        lines_added += 1;
+                    }
+                }
             } else if line_text.contains("<agent_mode>") {
                 let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
-                visible_lines.push(processed[0].0.clone());
+                // Add processed lines but respect height limit
+                for (processed_line, _) in processed {
+                    if lines_added < height {
+                        visible_lines.push(processed_line);
+                        lines_added += 1;
+                    }
+                }
             } else {
                 let section_tags = [
                     "planning",
@@ -199,10 +223,11 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "local_context",
                 ];
                 let mut found = false;
+
                 for tag in &section_tags {
                     let closing_tag = format!("</{}>", tag);
                     if line_text.trim() == closing_tag {
-                        // Skip this line (do not push to visible_lines)
+                        // Skip this line entirely
                         found = true;
                         break;
                     }
@@ -211,19 +236,32 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                             &[(line.clone(), Style::default())],
                             tag,
                         );
-                        visible_lines.push(processed[0].0.clone());
+                        // Add processed lines but respect height limit
+                        for (processed_line, _) in processed {
+                            if lines_added < height {
+                                visible_lines.push(processed_line);
+                                lines_added += 1;
+                            }
+                        }
                         found = true;
                         break;
                     }
                 }
-                if !found {
+
+                if !found && lines_added < height {
                     visible_lines.push(line.clone());
+                    lines_added += 1;
                 }
             }
-        } else {
+        } else if lines_added < height {
             visible_lines.push(Line::from(""));
+            lines_added += 1;
         }
     }
+
+    // Ensure we don't exceed the allocated height
+    visible_lines.truncate(height);
+
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
 }
