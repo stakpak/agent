@@ -12,7 +12,7 @@ pub struct MCPServerConfig {
     pub api: ClientConfig,
 }
 
-const BIND_ADDRESS: &str = "0.0.0.0:65535";
+const BIND_ADDRESS: &str = "127.0.0.1:65535";
 
 /// npx @modelcontextprotocol/inspector cargo run mcp
 pub async fn start_server(
@@ -31,6 +31,9 @@ pub async fn start_server(
         .with_graceful_shutdown(async move {
             if let Some(mut shutdown_rx) = shutdown_rx {
                 let _ = shutdown_rx.recv().await;
+            } else {
+                #[allow(clippy::unwrap_used)]
+                tokio::signal::ctrl_c().await.unwrap();
             }
         })
         .await?;
