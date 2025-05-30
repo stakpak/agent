@@ -1,5 +1,6 @@
 # Stakpak CLI
 <img src="assets/TUIOverview.jpeg" width="800">
+
 > **Warning**
 > This CLI tool is under heavy development and breaking changes should be expected. Use with caution 🚧
 
