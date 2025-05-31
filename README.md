@@ -8,7 +8,11 @@ A CLI for the Stakpak API. Manage all your DevOps flows and configurations in on
 
 ## Installation
 
-### Homebrew (macOS & Linux)
+### All installation options (Linux, MacOs, Windows)
+
+[Check the docs](https://stakpak.gitbook.io/docs/get-started/installing-stakpak-cli)
+
+### Homebrew (Linux & MacOS)
 
 ```bash
 brew tap stakpak/stakpak
@@ -21,36 +25,15 @@ Download the latest binary for your platform from our [GitHub Releases](https://
 
 ### Docker
 This image includes the most popular CLI tools the agent might need for everyday DevOps tasks like docker, kubectl, aws cli, gcloud, azure cli, and more.
-
-Pull the image:
-
 ```bash
 docker pull ghcr.io/stakpak/cli:latest
-```
-
-Run the Agent in interactive mode:
-```bash
-docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
-```
-
-Run the Agent in interactive mode for containerization tasks (you need to mount the Docker socket):
-```bash
-docker run -it \
-   -v "/var/run/docker.sock":"/var/run/docker.sock" \
-   -v "{your app path}":"/agent/" \
-   --entrypoint stakpak ghcr.io/stakpak/cli:latest
-```
-
-Start other Stakpak CLI commands:
-```bash
-docker run -it ghcr.io/stakpak/cli:latest
 ```
 
 ## Usage
 
 ### Authentication
 
-#### Create an API Key
+#### Get an API Key (no card required)
 
 1. Visit [stakpak.dev](https://stakpak.dev)
 2. Click "Login" in the top right
@@ -62,28 +45,36 @@ docker run -it ghcr.io/stakpak/cli:latest
    <img src="assets/apikeys.png" width="800">
 
 #### Set the environment variable `STAKPAK_API_KEY`
-
 ```bash
 export STAKPAK_API_KEY=<mykey>
 ```
 
 #### Save your API key to `~/.stakpak/config.toml`
-
 ```bash
 stakpak login --api-key $STAKPAK_API_KEY
 ```
 
-#### Start Stakpak
+#### Start Stakpak Agent TUI
 ```bash
 stakpak
 ```
+
+#### Start Stakpak Agent TUI with Docker
+```bash
+docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
+# for containerization tasks (you need to mount the Docker socket)
+docker run -it \
+   -v "/var/run/docker.sock":"/var/run/docker.sock" \
+   -v "{your app path}":"/agent/" \
+   --entrypoint stakpak ghcr.io/stakpak/cli:latest
+```
+
 #### Start from a saved checkpoint
 ```bash
 stakpak -c <checkpoint-id>
 ```
 
 #### View current account (Optional)
-
 ```bash
 stakpak account
 ```
