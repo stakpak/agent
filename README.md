@@ -1,4 +1,4 @@
-# Stakpak CLI
+# Stakpak Agent CLI
 <img src="assets/TUIOverview.jpeg" width="800">
 
 > **Warning**
