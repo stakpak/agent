@@ -27,15 +27,16 @@ Pull the image:
 docker pull ghcr.io/stakpak/cli:latest
 ```
 
-Start the Stakpak Agent:
-```bash
-docker run -it ghcr.io/stakpak/cli:latest
-```
-
 Start the Interactive Agent mode:
 ```bash
 docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
 ```
+
+Start other Stakpak cli commands:
+```bash
+docker run -it ghcr.io/stakpak/cli:latest
+```
+
 ## Usage
 
 ### Authentication
