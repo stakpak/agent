@@ -2,6 +2,7 @@ use crate::config::AppConfig;
 use crate::utils::local_context::LocalContext;
 use futures_util::{Stream, StreamExt};
 use rmcp::model::{CallToolRequestParam, CallToolResult};
+use stakpak_api::models::AgentSession;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::MCPServerConfig;
@@ -10,6 +11,7 @@ use stakpak_shared::models::integrations::openai::{
     FinishReason, FunctionCall, FunctionCallDelta, FunctionDefinition, MessageContent, Role, Tool,
     ToolCall, ToolCallResult, Usage,
 };
+use stakpak_tui::SessionInfo;
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
 
@@ -68,6 +70,20 @@ async fn send_tool_call(
 ) -> Result<(), String> {
     send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
     Ok(())
+}
+
+async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
+    let sessions: Vec<AgentSession> = client.list_agent_sessions().await?;
+    // Convert AgentSession to SessionInfo
+    let session_infos: Vec<SessionInfo> = sessions
+        .into_iter()
+        .map(|s| SessionInfo {
+            id: s.id.to_string(),
+            title: s.title,
+            updated_at: s.updated_at.to_string(),
+        })
+        .collect();
+    Ok(session_infos)
 }
 
 async fn run_tool_call(
@@ -478,6 +494,18 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         if !tools_queue.is_empty() {
                             let tool_call = tools_queue.remove(0);
                             send_tool_call(&input_tx, &tool_call).await?;
+                        }
+                        continue;
+                    }
+                    OutputEvent::ListSessions => {
+                        match list_sessions(&client).await {
+                            Ok(sessions) => {
+                                send_input_event(&input_tx, InputEvent::SetSessions(sessions))
+                                    .await?;
+                            }
+                            Err(e) => {
+                                send_input_event(&input_tx, InputEvent::Error(e)).await?;
+                            }
                         }
                         continue;
                     }

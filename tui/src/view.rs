@@ -107,9 +107,8 @@ pub fn view(f: &mut Frame, state: &AppState) {
             render_hint_or_shortcuts(f, state, hint_area);
         }
     }
-    // Loader: still as a message at the end of the message list
     if state.show_sessions_dialog {
-        render_sessions_dialog(f, state, message_area);
+        render_sessions_dialog(f, state);
     }
 }
 

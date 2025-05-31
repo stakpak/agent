@@ -3,7 +3,7 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_help_message, push_status_message, render_system_message,
+    push_error_message, push_help_message, push_status_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
@@ -56,14 +56,7 @@ pub fn update(
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
-            if state.show_sessions_dialog {
-                let selected = &state.sessions[state.session_selected];
-                render_system_message(state, &format!("Switching to session . {}", selected.title));
-                state.show_sessions_dialog = false;
-                // input box and helper will show again automatically
-            } else {
-                handle_input_submitted(state, message_area_height, output_tx);
-            }
+            handle_input_submitted(state, message_area_height, output_tx);
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
@@ -121,6 +114,12 @@ pub fn update(
             state.account_info = account_info;
         }
         InputEvent::Tab => handle_tab(state),
+        InputEvent::SetSessions(sessions) => {
+            state.sessions = sessions;
+        }
+        InputEvent::Error(error) => {
+            push_error_message(state, &error);
+        }
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -236,7 +235,11 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
 ) {
     let input_height = 3;
-    if state.is_dialog_open {
+    if state.show_sessions_dialog {
+        let selected = &state.sessions[state.session_selected];
+        render_system_message(state, &format!("Switching to session . {}", selected.title));
+        state.show_sessions_dialog = false;
+    } else if state.is_dialog_open {
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
@@ -260,6 +263,8 @@ fn handle_input_submitted(
 
         match selected {
             "/sessions" => {
+                let _ = output_tx.try_send(OutputEvent::ListSessions);
+                state.show_sessions_dialog = true;
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;

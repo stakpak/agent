@@ -348,6 +348,7 @@ impl FlowRef {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AgentSession {
     pub id: Uuid,
+    pub title: String,
     pub agent_id: AgentID,
     pub flow_ref: Option<FlowRef>,
     pub visibility: AgentSessionVisibility,

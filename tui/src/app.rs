@@ -6,15 +6,11 @@ use stakpak_shared::models::integrations::openai::{
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct SessionInfo {
     pub title: String,
     pub id: String,
     pub updated_at: String,
-}
-
-// TODO: add user list sessions
-pub fn list_sessions() -> Vec<SessionInfo> {
-    vec![]
 }
 
 pub struct AppState {
@@ -54,6 +50,8 @@ pub enum InputEvent {
     Loading(bool),
     InputChanged(char),
     GetStatus(String),
+    Error(String),
+    SetSessions(Vec<SessionInfo>),
     InputBackspace,
     InputChangedNewline,
     InputSubmitted,
@@ -85,6 +83,7 @@ pub enum OutputEvent {
     UserMessage(String),
     AcceptTool(ToolCall),
     RejectTool(ToolCall),
+    ListSessions,
 }
 
 impl AppState {
@@ -124,7 +123,7 @@ impl AppState {
             dialog_selected: 0,
             loading: false,
             spinner_frame: 0,
-            sessions: list_sessions(),
+            sessions: Vec::new(),
             show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
