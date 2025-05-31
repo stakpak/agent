@@ -21,12 +21,21 @@ Download the latest binary for your platform from our [GitHub Releases](https://
 
 ### Docker
 
-To run the CLI using Docker:
+Pull the image:
 
+```bash
+docker pull ghcr.io/stakpak/cli:latest
+```
+
+Start the Stakpak Agent:
 ```bash
 docker run -it ghcr.io/stakpak/cli:latest
 ```
 
+Start the Interactive Agent mode:
+```bash
+docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
+```
 ## Usage
 
 ### Authentication
