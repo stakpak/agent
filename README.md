@@ -1,10 +1,11 @@
 # Stakpak Agent CLI
-<img src="assets/TUIOverview.jpeg" width="800">
+A CLI for the Stakpak API. Manage all your DevOps flows and configurations in one place, with AI-agents helping you out.
 
 > **Warning**
 > This CLI tool is under heavy development and breaking changes should be expected. Use with caution 🚧
 
-A CLI for the Stakpak API. Manage all your DevOps flows and configurations in one place, with AI-agents helping you out.
+<img src="assets/TUIOverview.jpeg" width="800">
+
 
 ## Installation
 
@@ -54,9 +55,16 @@ export STAKPAK_API_KEY=<mykey>
 stakpak login --api-key $STAKPAK_API_KEY
 ```
 
+#### View current account (Optional)
+```bash
+stakpak account
+```
+
 #### Start Stakpak Agent TUI
 ```bash
 stakpak
+# Resume execution from a checkpoint
+stakpak -c <checkpoint-id>
 ```
 
 #### Start Stakpak Agent TUI with Docker
@@ -68,33 +76,6 @@ docker run -it \
    -v "{your app path}":"/agent/" \
    --entrypoint stakpak ghcr.io/stakpak/cli:latest
 ```
-
-#### Start from a saved checkpoint
-```bash
-stakpak -c <checkpoint-id>
-```
-
-#### View current account (Optional)
-```bash
-stakpak account
-```
-
-### Flow management
-
-- List flows
-- Get flow versions
-- Clone configurations from a flow version
-- Push configurations to a new flow
-- Push configurations to an existing flow
-- Perform LLM-powered queries on your configurations
-
-### Agents
-
-- List agent types
-- List agent sessions and checkpoints
-- Get agent checkpoint state
-- Run agent
-- Run agent form a specific checkpoint
 
 ## Keyboard Shortcuts
 <img src="assets/keyboardshortcuts.jpeg" width="800">
