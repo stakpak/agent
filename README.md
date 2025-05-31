@@ -20,6 +20,7 @@ brew install stakpak
 Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/cli/releases).
 
 ### Docker
+This image includes the most popular CLI tools the agent might need for everyday DevOps tasks like docker, kubectl, aws cli, gcloud, azure cli, and more.
 
 Pull the image:
 
@@ -27,12 +28,20 @@ Pull the image:
 docker pull ghcr.io/stakpak/cli:latest
 ```
 
-Start the Interactive Agent mode:
+Run the Agent in interactive mode:
 ```bash
 docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
 ```
 
-Start other Stakpak cli commands:
+Run the Agent in interactive mode for containerization tasks (you need to mount the Docker socket):
+```bash
+docker run -it \
+   -v "/var/run/docker.sock":"/var/run/docker.sock" \
+   -v "{your app path}":"/agent/" \
+   --entrypoint stakpak ghcr.io/stakpak/cli:latest
+```
+
+Start other Stakpak CLI commands:
 ```bash
 docker run -it ghcr.io/stakpak/cli:latest
 ```
