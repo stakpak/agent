@@ -1,4 +1,4 @@
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
@@ -116,6 +116,10 @@ pub fn update(
         InputEvent::Tab => handle_tab(state),
         InputEvent::SetSessions(sessions) => {
             state.sessions = sessions;
+            state.loading = false;
+            state.spinner_frame = 0;
+            state.loading_type = LoadingType::LLM;
+            state.show_sessions_dialog = true;
         }
         InputEvent::Error(error) => {
             push_error_message(state, &error);
@@ -265,8 +269,9 @@ fn handle_input_submitted(
 
         match selected {
             "/sessions" => {
+                state.loading_type = LoadingType::Sessions;
+                state.loading = true;
                 let _ = output_tx.try_send(OutputEvent::ListSessions);
-                state.show_sessions_dialog = true;
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;

@@ -36,30 +36,31 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         ));
     f.render_widget(block, area);
-    // Help text
-    let help = "press enter to choose · esc to cancel";
-    let help_area = Rect {
-        x: area.x + 2,
-        y: area.y + 1,
-        width: area.width - 4,
-        height: 1,
-    };
-    let help_widget = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Left);
-    f.render_widget(help_widget, help_area);
     // Session list area
     let list_area = Rect {
         x: area.x + 2,
-        y: area.y + 3,
+        y: area.y + 1, // Start just below the block title
         width: area.width - 4,
-        height: area.height.saturating_sub(4),
+        height: area.height.saturating_sub(3), // Leave space for help at the bottom
     };
     let items: Vec<ListItem> = state
         .sessions
         .iter()
         .map(|s| {
-            let text = format!("{} . {}", s.updated_at, s.title);
+            // Parse the ISO datetime string properly
+            let formatted_datetime = if let Ok(dt) =
+                chrono::DateTime::parse_from_rfc3339(&s.updated_at.replace(" UTC", "+00:00"))
+            {
+                dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+            } else {
+                // Fallback to string manipulation if parsing fails
+                let parts = s.updated_at.split('T').collect::<Vec<_>>();
+                let date = parts.get(0).unwrap_or(&"");
+                let time = parts.get(1).and_then(|t| t.split('.').next()).unwrap_or("");
+                format!("{} {} UTC", date, time)
+            };
+
+            let text = format!("{} . {}", formatted_datetime, s.title);
             ListItem::new(Line::from(vec![Span::raw(text)]))
         })
         .collect();
@@ -75,4 +76,17 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
         .style(Style::default().fg(Color::Gray))
         .block(Block::default());
     f.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Help text at the bottom
+    let help = "press enter to choose · esc to cancel";
+    let help_area = Rect {
+        x: area.x + 2,
+        y: area.y + area.height - 2, // Second to last line of the dialog
+        width: area.width - 4,
+        height: 1,
+    };
+    let help_widget = Paragraph::new(help)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Left);
+    f.render_widget(help_widget, help_area);
 }

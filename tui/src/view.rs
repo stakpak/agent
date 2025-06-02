@@ -1,5 +1,6 @@
 use crate::app::AppState;
 use crate::services::confirmation_dialog::render_confirmation_dialog;
+use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::get_wrapped_message_lines;
@@ -171,14 +172,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
     let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
     if state.loading {
-        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-        let loading_line = Line::from(vec![Span::styled(
-            format!("{} Stakpaking...", spinner),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        )]);
+        let loading_line = render_loading_spinner(state);
         all_lines.push((loading_line, Style::default()));
     }
     let total_lines = all_lines.len();

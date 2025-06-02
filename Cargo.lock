@@ -2991,6 +2991,7 @@ dependencies = [
 name = "stakpak-tui"
 version = "0.1.84"
 dependencies = [
+ "chrono",
  "crossterm 0.29.0",
  "ratatui",
  "regex",
