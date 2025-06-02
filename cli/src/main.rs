@@ -36,6 +36,10 @@ struct Cli {
     #[arg(long = "verbose", default_value_t = false)]
     verbose: bool,
 
+    /// Enable debug output
+    #[arg(long = "debug", default_value_t = false)]
+    debug: bool,
+
     /// Positional string argument
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -49,7 +53,7 @@ async fn main() {
     let cli = Cli::parse();
     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
 
-    if cli.verbose {
+    if cli.debug {
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::EnvFilter::try_from_default_env()
