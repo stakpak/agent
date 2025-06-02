@@ -11,6 +11,7 @@ pub struct SessionInfo {
     pub title: String,
     pub id: String,
     pub updated_at: String,
+    pub checkpoints: Vec<String>,
 }
 
 pub struct AppState {
@@ -84,6 +85,7 @@ pub enum OutputEvent {
     AcceptTool(ToolCall),
     RejectTool(ToolCall),
     ListSessions,
+    SwitchToSession(String),
 }
 
 impl AppState {

@@ -74,13 +74,19 @@ async fn send_tool_call(
 
 async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
     let sessions: Vec<AgentSession> = client.list_agent_sessions().await?;
+
     // Convert AgentSession to SessionInfo
     let session_infos: Vec<SessionInfo> = sessions
         .into_iter()
-        .map(|s| SessionInfo {
+        .map(|s| {
+            let mut checkpoints = s.checkpoints.clone();
+            checkpoints.sort_by_key(|c| c.created_at);
+            SessionInfo {
             id: s.id.to_string(),
             title: s.title,
             updated_at: s.updated_at.to_string(),
+            checkpoints: checkpoints.iter().map(|c| c.id.to_string()).collect(),
+            }
         })
         .collect();
     Ok(session_infos)
@@ -308,8 +314,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
         let _ = stakpak_mcp_server::start_server(
             MCPServerConfig {
                 api: ClientConfig {
-                    api_key: ctx_clone.api_key,
-                    api_endpoint: ctx_clone.api_endpoint,
+                    api_key: ctx_clone.api_key.clone(),
+                    api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
             },
             Some(shutdown_rx),
@@ -342,8 +348,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
     let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> =
         tokio::spawn(async move {
             let client = Client::new(&ClientConfig {
-                api_key: ctx.api_key,
-                api_endpoint: ctx.api_endpoint,
+                api_key: ctx.api_key.clone(),
+                api_endpoint: ctx.api_endpoint.clone(),
             })
             .map_err(|e| e.to_string())?;
 
@@ -509,6 +515,16 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         }
                         continue;
                     }
+                    OutputEvent::SwitchToSession(session_id) => {
+                        messages.clear();
+                        let new_config = RunInteractiveConfig {
+                            checkpoint_id: Some(session_id.clone()),
+                            local_context: config.local_context.clone(),
+                        };
+                        let ctx_clone = ctx.clone();
+                        tokio::spawn(run(ctx_clone, new_config));
+                        continue;
+                    }
                 }
                 send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
@@ -594,8 +610,8 @@ pub async fn run_non_interactive(
         let _ = stakpak_mcp_server::start_server(
             MCPServerConfig {
                 api: ClientConfig {
-                    api_key: ctx_clone.api_key,
-                    api_endpoint: ctx_clone.api_endpoint,
+                    api_key: ctx_clone.api_key.clone(),
+                    api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
             },
             None,
@@ -610,8 +626,8 @@ pub async fn run_non_interactive(
     let tools = convert_tools_map(&tools_map);
 
     let client = Client::new(&ClientConfig {
-        api_key: ctx.api_key,
-        api_endpoint: ctx.api_endpoint,
+        api_key: ctx.api_key.clone(),
+        api_endpoint: ctx.api_endpoint.clone(),
     })
     .map_err(|e| e.to_string())?;
 
