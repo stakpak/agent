@@ -82,10 +82,10 @@ async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
             let mut checkpoints = s.checkpoints.clone();
             checkpoints.sort_by_key(|c| c.created_at);
             SessionInfo {
-            id: s.id.to_string(),
-            title: s.title,
-            updated_at: s.updated_at.to_string(),
-            checkpoints: checkpoints.iter().map(|c| c.id.to_string()).collect(),
+                id: s.id.to_string(),
+                title: s.title,
+                updated_at: s.updated_at.to_string(),
+                checkpoints: checkpoints.iter().map(|c| c.id.to_string()).collect(),
             }
         })
         .collect();
@@ -515,16 +515,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         }
                         continue;
                     }
-                    OutputEvent::SwitchToSession(session_id) => {
-                        messages.clear();
-                        let new_config = RunInteractiveConfig {
-                            checkpoint_id: Some(session_id.clone()),
-                            local_context: config.local_context.clone(),
-                        };
-                        let ctx_clone = ctx.clone();
-                        tokio::spawn(run(ctx_clone, new_config));
-                        continue;
-                    }
+                    OutputEvent::SwitchToSession(_session_id) => {}
                 }
                 send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
