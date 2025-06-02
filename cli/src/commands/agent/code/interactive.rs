@@ -1,6 +1,6 @@
 use crate::commands::agent::code::checkpoint::{
-    get_checkpoint_messages, get_messages_from_checkpoint_output,
-    send_checkpoint_messages_as_input_events,
+    extract_checkpoint_messages_and_tool_calls, get_checkpoint_messages,
+    get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::code::helpers::{
     add_local_context, convert_tools_map, tool_result, user_message,
@@ -82,12 +82,19 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
             if let Some(checkpoint_id) = config.checkpoint_id {
                 let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
 
-                let chat_messages = send_checkpoint_messages_as_input_events(
+                let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
                     &checkpoint_id,
                     &input_tx,
                     checkpoint_messages,
                 )
                 .await?;
+
+                tools_queue.extend(tool_calls.clone());
+
+                if !tools_queue.is_empty() {
+                    let initial_tool_call = tools_queue.remove(0);
+                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                }
 
                 messages.extend(chat_messages);
             }
@@ -166,13 +173,20 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         let session_id = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
                         match client.get_agent_session_latest_checkpoint(session_id).await {
                             Ok(checkpoint) => {
-                                let chat_messages = send_checkpoint_messages_as_input_events(
-                                    &checkpoint.checkpoint.id.to_string(),
-                                    &input_tx,
-                                    get_messages_from_checkpoint_output(&checkpoint.output),
-                                )
-                                .await?;
+                                let (chat_messages, tool_calls) =
+                                    extract_checkpoint_messages_and_tool_calls(
+                                        &checkpoint.checkpoint.id.to_string(),
+                                        &input_tx,
+                                        get_messages_from_checkpoint_output(&checkpoint.output),
+                                    )
+                                    .await?;
                                 messages.extend(chat_messages);
+
+                                tools_queue.extend(tool_calls.clone());
+                                if !tools_queue.is_empty() {
+                                    let initial_tool_call = tools_queue.remove(0);
+                                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                                }
                                 send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                             }
                             Err(e) => {

@@ -2,7 +2,7 @@ use crate::commands::agent::code::tui::send_input_event;
 use stakpak_api::Client;
 use stakpak_api::models::AgentOutput;
 use stakpak_shared::models::integrations::openai::{
-    ChatMessage, MessageContent, Role, ToolCallResult,
+    ChatMessage, MessageContent, Role, ToolCall, ToolCallResult,
 };
 use stakpak_tui::InputEvent;
 use uuid::Uuid;
@@ -34,11 +34,11 @@ pub fn get_messages_from_checkpoint_output(output: &AgentOutput) -> Vec<ChatMess
     vec![]
 }
 
-pub async fn send_checkpoint_messages_as_input_events(
+pub async fn extract_checkpoint_messages_and_tool_calls(
     checkpoint_id: &String,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     messages: Vec<ChatMessage>,
-) -> Result<Vec<ChatMessage>, String> {
+) -> Result<(Vec<ChatMessage>, Vec<ToolCall>), String> {
     let mut checkpoint_messages = messages.clone();
     // Append checkpoint_id to the last assistant message if present
     if let Some(last_message) = checkpoint_messages
@@ -111,6 +111,13 @@ pub async fn send_checkpoint_messages_as_input_events(
         }
     }
 
-    // NOTE: tools_queue logic is handled in the main run loop, not here.
-    Ok(checkpoint_messages.clone())
+    let tool_calls = checkpoint_messages
+        .last()
+        .filter(|msg| msg.role == Role::Assistant)
+        .and_then(|msg| msg.tool_calls.as_ref());
+
+    Ok((
+        checkpoint_messages.clone(),
+        tool_calls.map(|t| t.to_vec()).unwrap_or_default(),
+    ))
 }
