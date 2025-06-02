@@ -797,10 +797,11 @@ mod tests {
         let result = clip_output(&output);
 
         // Check that result has the expected format with [clipped] marker
-        assert!(result.contains("[clipped]"));
+        assert!(result.contains("[...this result was truncated because it's too long...]"));
 
         // Check the total length is as expected (2000 + 2000 + length of "\n[clipped]\n")
-        let expected_length = 2000 + 2001 + "\n[clipped]\n".len();
+        let expected_length =
+            2000 + 2001 + "\n\n[...this result was truncated because it's too long...]\n\n".len();
         assert_eq!(result.len(), expected_length);
     }
 
@@ -811,7 +812,7 @@ mod tests {
         let emoji_repeat = "😀🌍🚀".repeat(1500); // Each emoji is multiple bytes
         let result = clip_output(&emoji_repeat);
 
-        assert!(result.contains("[clipped]"));
+        assert!(result.contains("[...this result was truncated because it's too long...]"));
 
         // Verify the string was properly split on character boundaries
         // by checking that we don't have any invalid UTF-8 sequences
