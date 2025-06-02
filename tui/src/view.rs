@@ -169,8 +169,18 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 }
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
-    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
-
+    let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
+    if state.loading {
+        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
+        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+        let loading_line = Line::from(vec![Span::styled(
+            format!("{} Stakpaking...", spinner),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        )]);
+        all_lines.push((loading_line, Style::default()));
+    }
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(height);
 

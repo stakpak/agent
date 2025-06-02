@@ -105,7 +105,6 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;
                         let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         if let Some(result) = result {
                             let result_content = result
                                 .content
@@ -130,6 +129,8 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                                 ),
                             )
                             .await?;
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+
                         }
 
                         if !tools_queue.is_empty() {

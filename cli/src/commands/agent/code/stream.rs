@@ -37,7 +37,7 @@ pub async fn process_responses_stream(
     let message_id = Uuid::new_v4();
 
     while let Some(response) = stream.next().await {
-        send_input_event(input_tx, InputEvent::Loading(false)).await?;
+        send_input_event(input_tx, InputEvent::Loading(true)).await?;
         if let Ok(response) = response {
             let delta = &response.choices[0].delta;
 
