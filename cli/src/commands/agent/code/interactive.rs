@@ -129,8 +129,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                                 ),
                             )
                             .await?;
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-
+                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         }
 
                         if !tools_queue.is_empty() {
