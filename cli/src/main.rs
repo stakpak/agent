@@ -49,13 +49,15 @@ async fn main() {
     let cli = Cli::parse();
     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("error,{}=debug", env!("CARGO_CRATE_NAME")).into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    if cli.verbose {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| format!("error,{}=debug", env!("CARGO_CRATE_NAME")).into()),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
 
     match AppConfig::load() {
         Ok(config) => match cli.command {
