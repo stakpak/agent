@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::app::{AppState, LoadingType};
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -223,4 +223,21 @@ pub fn push_error_message(state: &mut AppState, error: &str) {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
     });
+}
+
+pub fn render_loading_spinner<'a>(state: &'a AppState) -> Line<'a> {
+    let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
+    let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+    let spinner_text = if state.loading_type == LoadingType::Sessions {
+        "Loading sessions..."
+    } else {
+        "Stakpaking..."
+    };
+    let loading_line = Line::from(vec![Span::styled(
+        format!("{} {}", spinner, spinner_text),
+        Style::default()
+            .fg(Color::LightRed)
+            .add_modifier(Modifier::BOLD),
+    )]);
+    loading_line
 }

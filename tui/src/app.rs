@@ -14,6 +14,12 @@ pub struct SessionInfo {
     pub checkpoints: Vec<String>,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum LoadingType {
+    LLM,
+    Sessions,
+}
+
 pub struct AppState {
     pub input: String,
     pub cursor_position: usize,
@@ -31,6 +37,7 @@ pub struct AppState {
     pub dialog_command: Option<ToolCall>,
     pub dialog_selected: usize,
     pub loading: bool,
+    pub loading_type: LoadingType,
     pub spinner_frame: usize,
     pub sessions: Vec<SessionInfo>,
     pub show_sessions_dialog: bool,
@@ -124,6 +131,7 @@ impl AppState {
             dialog_command: None,
             dialog_selected: 0,
             loading: false,
+            loading_type: LoadingType::LLM,
             spinner_frame: 0,
             sessions: Vec::new(),
             show_sessions_dialog: false,
