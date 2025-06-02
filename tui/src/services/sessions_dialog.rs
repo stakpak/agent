@@ -8,11 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
-pub fn render_sessions_dialog(f: &mut Frame, state: &AppState, message_area: Rect) {
+pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
     let screen = f.area();
-    let max_height = message_area.height.saturating_sub(2).min(20);
-    let session_count = state.sessions.len() as u16;
-    let dialog_height = (session_count + 3).min(max_height);
+    let dialog_height = 12;
 
     let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap

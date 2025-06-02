@@ -194,3 +194,33 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
         content: MessageContent::StyledBlock(lines),
     });
 }
+
+pub fn push_error_message(state: &mut AppState, error: &str) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "[Error] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(error, Style::default().fg(Color::Red)),
+        ]),
+        Line::from(""),
+    ];
+    let owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(owned_lines),
+    });
+}

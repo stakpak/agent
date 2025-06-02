@@ -2,7 +2,7 @@ mod app;
 mod event;
 mod terminal;
 mod view;
-pub use app::{AppState, InputEvent, OutputEvent};
+pub use app::{AppState, InputEvent, OutputEvent, SessionInfo};
 
 mod services;
 
