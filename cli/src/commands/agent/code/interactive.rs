@@ -1,5 +1,6 @@
 use crate::commands::agent::code::checkpoint::{
-    get_checkpoint_messages, get_messages_from_checkpoint_output, process_checkpoint_messages,
+    get_checkpoint_messages, get_messages_from_checkpoint_output,
+    send_checkpoint_messages_as_input_events,
 };
 use crate::commands::agent::code::helpers::{
     add_local_context, convert_tools_map, tool_result, user_message,
@@ -81,9 +82,12 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
             if let Some(checkpoint_id) = config.checkpoint_id {
                 let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
 
-                let chat_messages =
-                    process_checkpoint_messages(&checkpoint_id, &input_tx, checkpoint_messages)
-                        .await?;
+                let chat_messages = send_checkpoint_messages_as_input_events(
+                    &checkpoint_id,
+                    &input_tx,
+                    checkpoint_messages,
+                )
+                .await?;
 
                 messages.extend(chat_messages);
             }
@@ -162,7 +166,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                         let session_id = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
                         match client.get_agent_session_latest_checkpoint(session_id).await {
                             Ok(checkpoint) => {
-                                let chat_messages = process_checkpoint_messages(
+                                let chat_messages = send_checkpoint_messages_as_input_events(
                                     &checkpoint.checkpoint.id.to_string(),
                                     &input_tx,
                                     get_messages_from_checkpoint_output(&checkpoint.output),

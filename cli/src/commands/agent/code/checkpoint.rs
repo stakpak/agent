@@ -34,7 +34,7 @@ pub fn get_messages_from_checkpoint_output(output: &AgentOutput) -> Vec<ChatMess
     vec![]
 }
 
-pub async fn process_checkpoint_messages(
+pub async fn send_checkpoint_messages_as_input_events(
     checkpoint_id: &String,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     messages: Vec<ChatMessage>,
