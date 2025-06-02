@@ -237,8 +237,7 @@ fn handle_input_submitted(
     let input_height = 3;
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
-        let checkpoint_id = selected.checkpoints.first().unwrap();
-        let _ = output_tx.try_send(OutputEvent::SwitchToSession(checkpoint_id.to_string()));
+        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
         state.messages.clear();
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
