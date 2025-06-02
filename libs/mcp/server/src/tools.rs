@@ -58,7 +58,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access."
+        description = "A system command execution tool that allows running shell commands with full system access. If the output is too long, it will be truncated from the middle."
     )]
     async fn run_command(
         &self,
@@ -381,7 +381,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges."
+        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges. If the output is too long, it will be truncated from the middle."
     )]
     fn view(
         &self,
