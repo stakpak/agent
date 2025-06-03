@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_api::{GenerationResult, ToolsCallParams};
-use stakpak_shared::secrets::redact_secrets;
+use stakpak_shared::secrets::{redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -58,12 +58,98 @@ impl Tools {
         }
     }
 
+    /// Load the redaction map from the session file
+    fn load_session_redaction_map(&self) -> HashMap<String, String> {
+        let path = ".env.stakpak.session.secrets";
+
+        if !Path::new(&path).exists() {
+            return HashMap::new();
+        }
+
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                if content.trim().is_empty() {
+                    return HashMap::new();
+                }
+
+                match serde_json::from_str::<HashMap<String, String>>(&content) {
+                    Ok(map) => map,
+                    Err(e) => {
+                        error!("Failed to parse session redaction map JSON: {}", e);
+                        HashMap::new()
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to read session redaction map file: {}", e);
+                HashMap::new()
+            }
+        }
+    }
+
+    /// Save the redaction map to the session file
+    fn save_session_redaction_map(&self, redaction_map: &HashMap<String, String>) {
+        let path = ".env.stakpak.session.secrets";
+
+        match serde_json::to_string_pretty(redaction_map) {
+            Ok(json_content) => {
+                if let Err(e) = fs::write(path, json_content) {
+                    error!("Failed to save session redaction map: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to serialize session redaction map to JSON: {}", e);
+            }
+        }
+    }
+
+    /// Add new redactions to the session map
+    fn add_to_session_redaction_map(&self, new_redactions: &HashMap<String, String>) {
+        if new_redactions.is_empty() {
+            return;
+        }
+
+        let mut existing_map = self.load_session_redaction_map();
+        existing_map.extend(new_redactions.clone());
+        self.save_session_redaction_map(&existing_map);
+    }
+
+    /// Restore secrets in a string using the session redaction map
+    fn restore_secrets_in_string(&self, input: &str) -> String {
+        let redaction_map = self.load_session_redaction_map();
+        if redaction_map.is_empty() {
+            return input.to_string();
+        }
+        restore_secrets(input, &redaction_map)
+    }
+
+    /// Redact secrets and add to session map
+    fn redact_and_store_secrets(&self, content: &str, path: Option<&str>) -> String {
+        if !self.redact_secrets {
+            return content.to_string();
+        }
+
+        let redaction_result = redact_secrets(content, path);
+
+        // Add new redactions to session map
+        self.add_to_session_redaction_map(&redaction_result.redaction_map);
+
+        redaction_result.redacted_string
+    }
+
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
         RawResource::new(uri, name.to_string()).no_annotation()
     }
 
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access. If the output is too long, it will be truncated from the middle. The shell output will redact any secrets, secrets will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]."
+        description = "A system command execution tool that allows running shell commands with full system access. 
+
+SECRET HANDLING: 
+- Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
+- You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
+- Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
+
+If the output is too long, it will be truncated from the middle."
     )]
     async fn run_command(
         &self,
@@ -77,9 +163,12 @@ impl Tools {
     ) -> Result<CallToolResult, McpError> {
         let command_clone = command.clone();
 
+        // Restore secrets in the command before execution
+        let actual_command = self.restore_secrets_in_string(&command);
+
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg(command)
+            .arg(actual_command)
             .current_dir(work_dir.unwrap_or(".".to_string()))
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -176,16 +265,10 @@ impl Tools {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        if self.redact_secrets {
-            let redaction_result = redact_secrets(&result, None);
-            Ok(CallToolResult::success(vec![Content::text(clip_output(
-                &redaction_result.redacted_string,
-            ))]))
-        } else {
-            Ok(CallToolResult::success(vec![Content::text(clip_output(
-                &result,
-            ))]))
-        }
+        let redacted_output = self.redact_and_store_secrets(&result, None);
+        Ok(CallToolResult::success(vec![Content::text(clip_output(
+            &redacted_output,
+        ))]))
     }
 
     #[tool(
@@ -305,36 +388,20 @@ impl Tools {
                 }
 
                 // Write the file
-                if self.redact_secrets {
-                    let redaction_result = redact_secrets(&file_content, Some(file_path));
-                    match fs::write(file_path, &file_content) {
-                        Ok(_) => {
-                            result_report.push_str(&format!(
-                                "Created file {}\n```\n{}\n```\n\n",
-                                file_path, redaction_result.redacted_string
-                            ));
-                        }
-                        Err(e) => {
-                            result_report.push_str(&format!(
-                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
-                                file_path, e, redaction_result.redacted_string
-                            ));
-                        }
+                let redacted_content =
+                    self.redact_and_store_secrets(&file_content, Some(file_path));
+                match fs::write(file_path, &file_content) {
+                    Ok(_) => {
+                        result_report.push_str(&format!(
+                            "Created file {}\n```\n{}\n```\n\n",
+                            file_path, redacted_content
+                        ));
                     }
-                } else {
-                    match fs::write(file_path, &file_content) {
-                        Ok(_) => {
-                            result_report.push_str(&format!(
-                                "Created file {}\n```\n{}\n```\n\n",
-                                file_path, file_content
-                            ));
-                        }
-                        Err(e) => {
-                            result_report.push_str(&format!(
-                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
-                                file_path, e, file_content
-                            ));
-                        }
+                    Err(e) => {
+                        result_report.push_str(&format!(
+                            "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                            file_path, e, redacted_content
+                        ));
                     }
                 }
             }
@@ -411,7 +478,14 @@ impl Tools {
     }
 
     #[tool(
-        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges. If the output is too long, it will be truncated from the middle. The shell output will redact any secrets, secrets will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]."
+        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges.
+
+SECRET HANDLING:
+- File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
+- These placeholders represent actual secret values that are safely stored for later use
+- You can reference these placeholders when working with the file content
+
+If the output is too long, it will be truncated from the middle."
     )]
     fn view(
         &self,
@@ -460,6 +534,12 @@ impl Tools {
                         let prefix = if is_last { "└── " } else { "├── " };
                         match entry {
                             Ok(entry) => {
+                                // Skip the session secrets file
+                                if entry.file_name().to_string_lossy()
+                                    == ".env.stakpak.session.secrets"
+                                {
+                                    continue;
+                                }
                                 let suffix = match entry.file_type() {
                                     Ok(ft) if ft.is_dir() => "/",
                                     Ok(_) => "",
@@ -524,16 +604,10 @@ impl Tools {
                         result
                     };
 
-                    if self.redact_secrets {
-                        let redaction_result = redact_secrets(&result, Some(&path));
-                        Ok(CallToolResult::success(vec![Content::text(clip_output(
-                            &redaction_result.redacted_string,
-                        ))]))
-                    } else {
-                        Ok(CallToolResult::success(vec![Content::text(clip_output(
-                            &result,
-                        ))]))
-                    }
+                    let redacted_result = self.redact_and_store_secrets(&result, Some(&path));
+                    Ok(CallToolResult::success(vec![Content::text(clip_output(
+                        &redacted_result,
+                    ))]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -544,7 +618,14 @@ impl Tools {
     }
 
     #[tool(
-        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation. When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation.
+
+SECRET HANDLING:
+- You can use secret placeholders like [REDACTED_SECRET:rule-id:hash] in both old_str and new_str parameters
+- These placeholders will be automatically restored to actual secret values before performing the replacement
+- This allows you to safely work with secret values without exposing them
+
+When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
     )]
     fn str_replace(
         &self,
@@ -578,9 +659,13 @@ impl Tools {
             ]));
         }
 
+        // Restore secrets in the input strings
+        let actual_old_str = self.restore_secrets_in_string(&old_str);
+        let actual_new_str = self.restore_secrets_in_string(&new_str);
+
         match fs::read_to_string(&path) {
             Ok(content) => {
-                let matches: Vec<_> = content.match_indices(&old_str).collect();
+                let matches: Vec<_> = content.match_indices(&actual_old_str).collect();
 
                 match matches.len() {
                     0 => Ok(CallToolResult::error(vec![
@@ -590,7 +675,7 @@ impl Tools {
                         ),
                     ])),
                     1 => {
-                        let new_content = content.replace(&old_str, &new_str);
+                        let new_content = content.replace(&actual_old_str, &actual_new_str);
                         match fs::write(&path, new_content) {
                             Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
                                 "Successfully replaced text in {}",
@@ -653,7 +738,10 @@ impl Tools {
             }
         }
 
-        match fs::write(&path, file_text) {
+        // Restore secrets in the file content before writing
+        let actual_file_text = self.restore_secrets_in_string(&file_text);
+
+        match fs::write(&path, actual_file_text) {
             Ok(_) => {
                 let lines = fs::read_to_string(&path)
                     .map(|content| content.lines().count())
@@ -721,8 +809,11 @@ impl Tools {
                     ]));
                 }
 
+                // Restore secrets in the text to insert
+                let actual_new_str = self.restore_secrets_in_string(&new_str);
+
                 // Split new_str by lines and insert each line
-                let new_lines: Vec<&str> = new_str.lines().collect();
+                let new_lines: Vec<&str> = actual_new_str.lines().collect();
                 for (i, line) in new_lines.iter().enumerate() {
                     lines.insert(insert_idx + i, line);
                 }
@@ -854,5 +945,107 @@ mod tests {
         // Verify the string was properly split on character boundaries
         // by checking that we don't have any invalid UTF-8 sequences
         assert!(result.chars().all(|c| c.is_ascii() || c.len_utf8() > 1));
+    }
+
+    #[test]
+    fn test_session_redaction_map() {
+        // Create a Tools instance with secret redaction enabled
+        let api_config = ClientConfig {
+            api_key: Some("test".to_string()),
+            api_endpoint: "https://test.com".to_string(),
+        };
+        let tools = Tools::new(api_config, true);
+
+        // Test that session file path is as expected
+        let path = ".env.stakpak.session.secrets";
+        assert!(path.contains("stakpak"));
+        assert!(path.contains("secrets"));
+
+        // Clean up any existing session file before test
+        let _ = std::fs::remove_file(path);
+
+        // Test adding redactions to session map
+        let mut test_redactions = HashMap::new();
+        test_redactions.insert(
+            "[REDACTED_SECRET:api-key:abc123]".to_string(),
+            "secret_value_123".to_string(),
+        );
+        test_redactions.insert(
+            "[REDACTED_SECRET:token:def456]".to_string(),
+            "token_value_456".to_string(),
+        );
+
+        tools.add_to_session_redaction_map(&test_redactions);
+
+        // Verify the session file was created and contains valid JSON
+        assert!(
+            std::path::Path::new(&path).exists(),
+            "Session file should be created"
+        );
+
+        let file_content =
+            std::fs::read_to_string(path).expect("Should be able to read session file");
+        let json_value: serde_json::Value =
+            serde_json::from_str(&file_content).expect("Session file should contain valid JSON");
+        assert!(
+            json_value.is_object(),
+            "Session file should contain a JSON object"
+        );
+
+        // Test loading redaction map
+        let loaded_map = tools.load_session_redaction_map();
+        assert_eq!(loaded_map.len(), 2);
+        assert_eq!(
+            loaded_map.get("[REDACTED_SECRET:api-key:abc123]"),
+            Some(&"secret_value_123".to_string())
+        );
+        assert_eq!(
+            loaded_map.get("[REDACTED_SECRET:token:def456]"),
+            Some(&"token_value_456".to_string())
+        );
+
+        // Test secret restoration
+        let input_with_placeholders = "echo '[REDACTED_SECRET:api-key:abc123]' > file.txt && curl -H 'Authorization: Bearer [REDACTED_SECRET:token:def456]'";
+        let restored = tools.restore_secrets_in_string(input_with_placeholders);
+        let expected =
+            "echo 'secret_value_123' > file.txt && curl -H 'Authorization: Bearer token_value_456'";
+        assert_eq!(restored, expected);
+
+        // Clean up the test session file
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_redact_and_store_secrets() {
+        // Create a Tools instance with secret redaction enabled
+        let api_config = ClientConfig {
+            api_key: Some("test".to_string()),
+            api_endpoint: "https://test.com".to_string(),
+        };
+        let tools = Tools::new(api_config, true);
+
+        // Test content with secrets
+        let content_with_secrets =
+            "export API_KEY=abc123def456ghi789jklmnop\nexport TOKEN=xyz789uvw012";
+        let redacted = tools.redact_and_store_secrets(content_with_secrets, None);
+
+        // Should contain redaction placeholders
+        assert!(redacted.contains("[REDACTED_SECRET:"));
+
+        // Should have stored the redactions in session map
+        let session_map = tools.load_session_redaction_map();
+        assert!(!session_map.is_empty());
+
+        // Should be able to restore the original content
+        let restored = tools.restore_secrets_in_string(&redacted);
+        // Note: The restored content might not be exactly the same as original due to redaction rules,
+        // but it should contain the original secret values
+        assert!(
+            restored.contains("abc123def456ghi789jklmnop") || restored.contains("xyz789uvw012")
+        );
+
+        // Clean up the test session file
+        let path = ".env.stakpak.session.secrets";
+        let _ = std::fs::remove_file(path);
     }
 }
