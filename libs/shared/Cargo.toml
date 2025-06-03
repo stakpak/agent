@@ -7,3 +7,6 @@ edition = "2024"
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }
+toml = { workspace = true }
+once_cell = { workspace = true }
