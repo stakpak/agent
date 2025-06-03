@@ -2982,8 +2982,11 @@ dependencies = [
 name = "stakpak-shared"
 version = "0.1.86"
 dependencies = [
+ "once_cell",
+ "regex",
  "serde",
  "serde_json",
+ "toml",
  "uuid",
 ]
 

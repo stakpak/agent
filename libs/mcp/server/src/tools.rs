@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_api::{GenerationResult, ToolsCallParams};
+use stakpak_shared::secrets::redact_secrets;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -19,6 +20,7 @@ use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 #[derive(Clone)]
 pub struct Tools {
     api_config: ClientConfig,
+    redact_secrets: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
@@ -49,8 +51,11 @@ impl std::fmt::Display for Provisioner {
 
 #[tool(tool_box)]
 impl Tools {
-    pub fn new(api_config: ClientConfig) -> Self {
-        Self { api_config }
+    pub fn new(api_config: ClientConfig, redact_secrets: bool) -> Self {
+        Self {
+            api_config,
+            redact_secrets,
+        }
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -58,7 +63,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access. If the output is too long, it will be truncated from the middle."
+        description = "A system command execution tool that allows running shell commands with full system access. If the output is too long, it will be truncated from the middle. The shell output will redact any secrets, secrets will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]."
     )]
     async fn run_command(
         &self,
@@ -171,13 +176,20 @@ impl Tools {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        Ok(CallToolResult::success(vec![Content::text(clip_output(
-            &result,
-        ))]))
+        if self.redact_secrets {
+            let redaction_result = redact_secrets(&result, None);
+            Ok(CallToolResult::success(vec![Content::text(clip_output(
+                &redaction_result.redacted_string,
+            ))]))
+        } else {
+            Ok(CallToolResult::success(vec![Content::text(clip_output(
+                &result,
+            ))]))
+        }
     }
 
     #[tool(
-        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. This code generation only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem."
+        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. This code generation only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]"
     )]
     async fn generate_code(
         &self,
@@ -293,18 +305,36 @@ impl Tools {
                 }
 
                 // Write the file
-                match fs::write(file_path, &file_content) {
-                    Ok(_) => {
-                        result_report.push_str(&format!(
-                            "Created file {}\n```\n{}\n```\n\n",
-                            file_path, file_content
-                        ));
+                if self.redact_secrets {
+                    let redaction_result = redact_secrets(&file_content, Some(&file_path));
+                    match fs::write(file_path, &file_content) {
+                        Ok(_) => {
+                            result_report.push_str(&format!(
+                                "Created file {}\n```\n{}\n```\n\n",
+                                file_path, redaction_result.redacted_string
+                            ));
+                        }
+                        Err(e) => {
+                            result_report.push_str(&format!(
+                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                                file_path, e, redaction_result.redacted_string
+                            ));
+                        }
                     }
-                    Err(e) => {
-                        result_report.push_str(&format!(
-                            "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
-                            file_path, e, file_content
-                        ));
+                } else {
+                    match fs::write(file_path, &file_content) {
+                        Ok(_) => {
+                            result_report.push_str(&format!(
+                                "Created file {}\n```\n{}\n```\n\n",
+                                file_path, file_content
+                            ));
+                        }
+                        Err(e) => {
+                            result_report.push_str(&format!(
+                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                                file_path, e, file_content
+                            ));
+                        }
                     }
                 }
             }
@@ -325,10 +355,10 @@ impl Tools {
                 ));
             }
 
-            return Ok(CallToolResult::success(vec![Content::text(result_report)]));
+            Ok(CallToolResult::success(vec![Content::text(result_report)]))
+        } else {
+            Ok(CallToolResult::success(response))
         }
-
-        Ok(CallToolResult::success(response))
     }
 
     #[tool(
@@ -381,7 +411,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges. If the output is too long, it will be truncated from the middle."
+        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges. If the output is too long, it will be truncated from the middle. The shell output will redact any secrets, secrets will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]."
     )]
     fn view(
         &self,
@@ -494,9 +524,16 @@ impl Tools {
                         result
                     };
 
-                    Ok(CallToolResult::success(vec![Content::text(clip_output(
-                        &result,
-                    ))]))
+                    if self.redact_secrets {
+                        let redaction_result = redact_secrets(&result, Some(&path));
+                        Ok(CallToolResult::success(vec![Content::text(clip_output(
+                            &redaction_result.redacted_string,
+                        ))]))
+                    } else {
+                        Ok(CallToolResult::success(vec![Content::text(clip_output(
+                            &result,
+                        ))]))
+                    }
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),

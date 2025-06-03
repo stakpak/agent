@@ -16,6 +16,7 @@ pub struct RunNonInteractiveConfig {
     pub verbose: bool,
     pub checkpoint_id: Option<String>,
     pub local_context: Option<LocalContext>,
+    pub redact_secrets: bool,
 }
 
 pub async fn run_non_interactive(
@@ -32,6 +33,7 @@ pub async fn run_non_interactive(
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
+                redact_secrets: config.redact_secrets,
             },
             None,
         )
