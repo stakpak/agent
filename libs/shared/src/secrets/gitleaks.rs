@@ -29,8 +29,9 @@ pub struct Rule {
     pub id: String,
     #[allow(dead_code)]
     pub description: String,
-    pub regex: String,
+    pub regex: Option<String>,
     pub entropy: Option<f64>,
+    #[serde(default)]
     pub keywords: Vec<String>,
     #[allow(dead_code)]
     pub path: Option<String>,
@@ -141,33 +142,39 @@ impl RegexCompilable for Rule {
         let mut errors = CompilationErrors::default();
 
         // Compile main regex with fallback handling
-        match Regex::new(&self.regex) {
-            Ok(regex) => self.compiled_regex = Some(regex),
-            Err(e) => {
-                // Handle regex compilation errors with specific fallbacks
-                if self.id == "generic-api-key" {
-                    match create_simple_api_key_regex() {
-                        Ok(simple_regex) => {
-                            self.compiled_regex = Some(simple_regex);
-                            errors.add_warning(format!(
-                                "Used fallback regex for rule '{}' due to: {}",
-                                self.id, e
-                            ));
+        if let Some(regex_pattern) = &self.regex {
+            match Regex::new(regex_pattern) {
+                Ok(regex) => self.compiled_regex = Some(regex),
+                Err(e) => {
+                    // Handle regex compilation errors with specific fallbacks
+                    if self.id == "generic-api-key" {
+                        match create_simple_api_key_regex() {
+                            Ok(simple_regex) => {
+                                self.compiled_regex = Some(simple_regex);
+                                errors.add_warning(format!(
+                                    "Used fallback regex for rule '{}' due to: {}",
+                                    self.id, e
+                                ));
+                            }
+                            Err(fallback_err) => {
+                                errors.add_regex_error(
+                                    self.id.clone(),
+                                    format!(
+                                        "Failed to compile regex and fallback: {} / {}",
+                                        e, fallback_err
+                                    ),
+                                );
+                            }
                         }
-                        Err(fallback_err) => {
-                            errors.add_regex_error(
-                                self.id.clone(),
-                                format!(
-                                    "Failed to compile regex and fallback: {} / {}",
-                                    e, fallback_err
-                                ),
-                            );
-                        }
+                    } else {
+                        errors.add_regex_error(self.id.clone(), e.to_string());
                     }
-                } else {
-                    errors.add_regex_error(self.id.clone(), e.to_string());
                 }
             }
+        } else {
+            // Rule has no regex pattern (e.g., path-only rules like pkcs12-file)
+            // This is valid for certain types of rules, so no error
+            self.compiled_regex = None;
         }
 
         // Compile allowlist regexes
@@ -201,8 +208,8 @@ impl RegexCompilable for GitleaksConfig {
             errors.warnings.extend(rule_errors.warnings);
             errors.regex_errors.extend(rule_errors.regex_errors);
 
-            // Only keep rules that compiled successfully
-            if rule.compiled_regex.is_some() {
+            // Keep rules that either compiled successfully or don't have regex patterns (e.g., path-only rules)
+            if rule.compiled_regex.is_some() || rule.regex.is_none() {
                 compiled_rules.push(rule);
             }
         }
@@ -214,9 +221,42 @@ impl RegexCompilable for GitleaksConfig {
 
 /// Lazy-loaded gitleaks configuration
 pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
+    // Load main gitleaks configuration
     let config_str = include_str!("gitleaks.toml");
     let mut config: GitleaksConfig =
         toml::from_str(config_str).expect("Failed to parse gitleaks.toml");
+
+    // Load additional rules configuration
+    let additional_config_str = include_str!("additional_rules.toml");
+    let additional_config: GitleaksConfig =
+        toml::from_str(additional_config_str).expect("Failed to parse additional_rules.toml");
+
+    // Merge additional rules into the main configuration
+    config.rules.extend(additional_config.rules);
+
+    // Merge additional allowlist if present
+    if let Some(additional_allowlist) = additional_config.allowlist {
+        match &mut config.allowlist {
+            Some(existing_allowlist) => {
+                // Merge regexes
+                if let Some(additional_regexes) = additional_allowlist.regexes {
+                    match &mut existing_allowlist.regexes {
+                        Some(existing_regexes) => existing_regexes.extend(additional_regexes),
+                        None => existing_allowlist.regexes = Some(additional_regexes),
+                    }
+                }
+
+                // Merge stopwords
+                if let Some(additional_stopwords) = additional_allowlist.stopwords {
+                    match &mut existing_allowlist.stopwords {
+                        Some(existing_stopwords) => existing_stopwords.extend(additional_stopwords),
+                        None => existing_allowlist.stopwords = Some(additional_stopwords),
+                    }
+                }
+            }
+            None => config.allowlist = Some(additional_allowlist),
+        }
+    }
 
     let compilation_errors = config.compile_regexes();
 
@@ -236,8 +276,18 @@ pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
     }
 
     eprintln!(
-        "Gitleaks config loaded: {} rules compiled successfully",
-        config.rules.len()
+        "Gitleaks config loaded: {} rules compiled successfully (includes {} content-based and {} path-based rules)",
+        config.rules.len(),
+        config
+            .rules
+            .iter()
+            .filter(|r| r.compiled_regex.is_some())
+            .count(),
+        config
+            .rules
+            .iter()
+            .filter(|r| r.compiled_regex.is_none())
+            .count(),
     );
     config
 });
@@ -300,7 +350,7 @@ pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
 
     // Apply each compiled rule from the configuration
     for rule in &config.rules {
-        // Skip rules that failed to compile
+        // Skip rules that don't have regex patterns (e.g., path-only rules)
         let regex = match &rule.compiled_regex {
             Some(regex) => regex,
             None => continue,
@@ -547,5 +597,46 @@ mod tests {
         println!("High entropy: {:.2}", high_entropy);
         println!("Low entropy: {:.2}", low_entropy);
         println!("Zero entropy: {:.2}", zero_entropy);
+    }
+
+    #[test]
+    fn test_additional_rules_loaded() {
+        let config = &*GITLEAKS_CONFIG;
+
+        // Check that the Anthropic API key rule from additional_rules.toml is loaded
+        let anthropic_rule = config.rules.iter().find(|r| r.id == "anthropic-api-key");
+        assert!(
+            anthropic_rule.is_some(),
+            "Anthropic API key rule should be loaded from additional_rules.toml"
+        );
+
+        if let Some(rule) = anthropic_rule {
+            assert!(rule.keywords.contains(&"anthropic".to_string()));
+            assert!(
+                rule.compiled_regex.is_some(),
+                "Anthropic rule regex should be compiled"
+            );
+        }
+
+        println!("Total rules loaded: {}", config.rules.len());
+    }
+
+    #[test]
+    fn test_anthropic_api_key_detection() {
+        // Use a more realistic API key that doesn't contain alphabet sequences
+        let test_input =
+            "ANTHROPIC_API_KEY=sk-ant-api03-Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA9bD2eG5kM8pR1tX4zB7";
+        let secrets = detect_secrets(test_input, None);
+
+        // Should detect the Anthropic API key
+        let anthropic_secret = secrets.iter().find(|s| s.rule_id == "anthropic-api-key");
+        assert!(
+            anthropic_secret.is_some(),
+            "Should detect Anthropic API key"
+        );
+
+        if let Some(secret) = anthropic_secret {
+            assert!(secret.value.starts_with("sk-ant-api03-"));
+        }
     }
 }
