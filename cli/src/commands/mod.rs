@@ -124,7 +124,11 @@ pub enum Commands {
     },
 
     /// Start the MCP server
-    Mcp,
+    Mcp {
+        /// Disable secret redaction (WARNING: this will print secrets to the console)
+        #[arg(long = "disable-secret-redaction", default_value_t = false)]
+        disable_secret_redaction: bool,
+    },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
@@ -134,10 +138,18 @@ pub enum Commands {
 impl Commands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
-            Commands::Mcp => {
-                stakpak_mcp_server::start_server(MCPServerConfig { api: config.into() }, None)
-                    .await
-                    .map_err(|e| e.to_string())?;
+            Commands::Mcp {
+                disable_secret_redaction,
+            } => {
+                stakpak_mcp_server::start_server(
+                    MCPServerConfig {
+                        api: config.into(),
+                        redact_secrets: !disable_secret_redaction,
+                    },
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
             }
             Commands::Login { api_key } => {
                 let mut updated_config = config.clone();

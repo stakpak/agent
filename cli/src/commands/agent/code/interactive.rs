@@ -20,6 +20,7 @@ use uuid::Uuid;
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub local_context: Option<LocalContext>,
+    pub redact_secrets: bool,
 }
 
 pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -40,6 +41,7 @@ pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), Str
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
+                redact_secrets: config.redact_secrets,
             },
             Some(shutdown_rx),
         )

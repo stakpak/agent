@@ -20,6 +20,7 @@ use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 #[derive(Clone)]
 pub struct Tools {
     api_config: ClientConfig,
+    redact_secrets: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
@@ -50,8 +51,11 @@ impl std::fmt::Display for Provisioner {
 
 #[tool(tool_box)]
 impl Tools {
-    pub fn new(api_config: ClientConfig) -> Self {
-        Self { api_config }
+    pub fn new(api_config: ClientConfig, redact_secrets: bool) -> Self {
+        Self {
+            api_config,
+            redact_secrets,
+        }
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -172,11 +176,16 @@ impl Tools {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        let redaction_result = redact_secrets(&result, None);
-
-        Ok(CallToolResult::success(vec![Content::text(clip_output(
-            &redaction_result.redacted_string,
-        ))]))
+        if self.redact_secrets {
+            let redaction_result = redact_secrets(&result, None);
+            Ok(CallToolResult::success(vec![Content::text(clip_output(
+                &redaction_result.redacted_string,
+            ))]))
+        } else {
+            Ok(CallToolResult::success(vec![Content::text(clip_output(
+                &result,
+            ))]))
+        }
     }
 
     #[tool(
@@ -295,21 +304,37 @@ impl Tools {
                     }
                 }
 
-                let redaction_result = redact_secrets(&file_content, Some(&file_path));
-
                 // Write the file
-                match fs::write(file_path, &file_content) {
-                    Ok(_) => {
-                        result_report.push_str(&format!(
-                            "Created file {}\n```\n{}\n```\n\n",
-                            file_path, redaction_result.redacted_string
-                        ));
+                if self.redact_secrets {
+                    let redaction_result = redact_secrets(&file_content, Some(&file_path));
+                    match fs::write(file_path, &file_content) {
+                        Ok(_) => {
+                            result_report.push_str(&format!(
+                                "Created file {}\n```\n{}\n```\n\n",
+                                file_path, redaction_result.redacted_string
+                            ));
+                        }
+                        Err(e) => {
+                            result_report.push_str(&format!(
+                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                                file_path, e, redaction_result.redacted_string
+                            ));
+                        }
                     }
-                    Err(e) => {
-                        result_report.push_str(&format!(
-                            "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
-                            file_path, e, redaction_result.redacted_string
-                        ));
+                } else {
+                    match fs::write(file_path, &file_content) {
+                        Ok(_) => {
+                            result_report.push_str(&format!(
+                                "Created file {}\n```\n{}\n```\n\n",
+                                file_path, file_content
+                            ));
+                        }
+                        Err(e) => {
+                            result_report.push_str(&format!(
+                                "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
+                                file_path, e, file_content
+                            ));
+                        }
                     }
                 }
             }
@@ -499,11 +524,16 @@ impl Tools {
                         result
                     };
 
-                    let redaction_result = redact_secrets(&result, Some(&path));
-
-                    Ok(CallToolResult::success(vec![Content::text(clip_output(
-                        &redaction_result.redacted_string,
-                    ))]))
+                    if self.redact_secrets {
+                        let redaction_result = redact_secrets(&result, Some(&path));
+                        Ok(CallToolResult::success(vec![Content::text(clip_output(
+                            &redaction_result.redacted_string,
+                        ))]))
+                    } else {
+                        Ok(CallToolResult::success(vec![Content::text(clip_output(
+                            &result,
+                        ))]))
+                    }
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),

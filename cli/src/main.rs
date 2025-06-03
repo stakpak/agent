@@ -40,6 +40,10 @@ struct Cli {
     #[arg(long = "debug", default_value_t = false)]
     debug: bool,
 
+    /// Disable secret redaction (WARNING: this will print secrets to the console)
+    #[arg(long = "disable-secret-redaction", default_value_t = false)]
+    disable_secret_redaction: bool,
+
     /// Positional string argument
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -81,6 +85,7 @@ async fn main() {
                         RunInteractiveConfig {
                             checkpoint_id: cli.checkpoint_id,
                             local_context,
+                            redact_secrets: !cli.disable_secret_redaction,
                         },
                     )
                     .await
@@ -100,6 +105,7 @@ async fn main() {
                                 verbose: cli.verbose,
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
                             },
                         )
                         .await
