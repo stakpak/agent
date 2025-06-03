@@ -58,30 +58,78 @@ pub struct DetectedSecret {
     pub end_pos: usize,
 }
 
+/// A compiled rule with its pre-compiled regex
+#[derive(Debug)]
+pub struct CompiledRule {
+    pub rule: Rule,
+    pub regex: Regex,
+    pub compiled_allowlists: Option<Vec<CompiledRuleAllowlist>>,
+}
+
+#[allow(dead_code)]
+/// Pre-compiled allowlist with compiled regexes
+#[derive(Debug)]
+pub struct CompiledGlobalAllowlist {
+    pub description: Option<String>,
+    pub paths: Option<Vec<String>>,
+    pub compiled_regexes: Vec<Regex>,
+    pub stopwords: Option<Vec<String>>,
+}
+
+#[allow(dead_code)]
+/// Pre-compiled rule allowlist with compiled regexes
+#[derive(Debug)]
+pub struct CompiledRuleAllowlist {
+    pub description: Option<String>,
+    pub condition: Option<String>, // "AND" or default "OR"
+    pub paths: Option<Vec<String>>,
+    pub compiled_regexes: Vec<Regex>,
+    pub stopwords: Option<Vec<String>>,
+    pub regex_target: Option<String>, // "match", "line", etc.
+}
+
+#[allow(dead_code)]
+/// Pre-compiled gitleaks configuration with all regexes compiled
+#[derive(Debug)]
+pub struct CompiledGitleaksConfig {
+    pub title: Option<String>,
+    pub compiled_allowlist: Option<CompiledGlobalAllowlist>,
+    pub compiled_rules: Vec<CompiledRule>,
+}
+
 /// Lazy-loaded gitleaks configuration
 pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
     let config_str = include_str!("gitleaks.toml");
     toml::from_str(config_str).expect("Failed to parse gitleaks.toml")
 });
 
-/// Detects secrets in the input string using gitleaks configuration
-///
-/// This implementation follows the gitleaks methodology:
-/// 1. Apply regex rules to find potential secrets
-/// 2. Check entropy thresholds to filter out low-entropy matches
-/// 3. Apply allowlists to exclude known false positives
-/// 4. Check keywords to ensure relevance
-pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
-    let mut detected_secrets = Vec::new();
+/// Lazy-loaded compiled gitleaks configuration with pre-compiled regexes
+pub static COMPILED_GITLEAKS_CONFIG: Lazy<CompiledGitleaksConfig> = Lazy::new(|| {
     let config = &*GITLEAKS_CONFIG;
+    let mut compiled_rules = Vec::new();
 
-    // Apply each rule from the configuration
-    for rule in &config.rules {
-        // Pre-filter: Skip rule if none of its keywords are present in the input
-        if !rule.keywords.is_empty() && !contains_any_keyword(input, &rule.keywords) {
-            continue;
+    // Compile global allowlist regexes
+    let compiled_allowlist = config.allowlist.as_ref().map(|allowlist| {
+        let mut compiled_regexes = Vec::new();
+        if let Some(regexes) = &allowlist.regexes {
+            for pattern in regexes {
+                if let Ok(regex) = Regex::new(pattern) {
+                    compiled_regexes.push(regex);
+                } else {
+                    eprintln!("Warning: Failed to compile allowlist regex: {}", pattern);
+                }
+            }
         }
 
+        CompiledGlobalAllowlist {
+            description: allowlist.description.clone(),
+            paths: allowlist.paths.clone(),
+            compiled_regexes,
+            stopwords: allowlist.stopwords.clone(),
+        }
+    });
+
+    for rule in &config.rules {
         // Try to compile the regex, skip if it's too complex
         let regex = match Regex::new(&rule.regex) {
             Ok(regex) => regex,
@@ -97,15 +145,81 @@ pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
                     if let Ok(simple_regex) = create_simple_api_key_regex() {
                         simple_regex
                     } else {
-                        continue;
+                        continue; // Skip this rule entirely
                     }
                 } else {
-                    continue;
+                    continue; // Skip this rule entirely
                 }
             }
         };
 
-        // Find all matches for this rule
+        // Compile rule allowlist regexes
+        let compiled_allowlists = rule.allowlists.as_ref().map(|allowlists| {
+            allowlists
+                .iter()
+                .map(|allowlist| {
+                    let mut compiled_regexes = Vec::new();
+                    if let Some(regexes) = &allowlist.regexes {
+                        for pattern in regexes {
+                            if let Ok(regex) = Regex::new(pattern) {
+                                compiled_regexes.push(regex);
+                            } else {
+                                eprintln!(
+                                    "Warning: Failed to compile rule allowlist regex: {}",
+                                    pattern
+                                );
+                            }
+                        }
+                    }
+
+                    CompiledRuleAllowlist {
+                        description: allowlist.description.clone(),
+                        condition: allowlist.condition.clone(),
+                        paths: allowlist.paths.clone(),
+                        compiled_regexes,
+                        stopwords: allowlist.stopwords.clone(),
+                        regex_target: allowlist.regex_target.clone(),
+                    }
+                })
+                .collect()
+        });
+
+        compiled_rules.push(CompiledRule {
+            rule: rule.clone(),
+            regex,
+            compiled_allowlists,
+        });
+    }
+
+    CompiledGitleaksConfig {
+        title: config.title.clone(),
+        compiled_allowlist,
+        compiled_rules,
+    }
+});
+
+/// Detects secrets in the input string using gitleaks configuration
+///
+/// This implementation follows the gitleaks methodology:
+/// 1. Apply regex rules to find potential secrets
+/// 2. Check entropy thresholds to filter out low-entropy matches
+/// 3. Apply allowlists to exclude known false positives
+/// 4. Check keywords to ensure relevance
+pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
+    let mut detected_secrets = Vec::new();
+    let config = &*COMPILED_GITLEAKS_CONFIG;
+
+    // Apply each compiled rule from the configuration
+    for compiled_rule in &config.compiled_rules {
+        let rule = &compiled_rule.rule;
+        let regex = &compiled_rule.regex;
+
+        // Pre-filter: Skip rule if none of its keywords are present in the input
+        if !rule.keywords.is_empty() && !contains_any_keyword(input, &rule.keywords) {
+            continue;
+        }
+
+        // Find all matches for this rule using the pre-compiled regex
         for mat in regex.find_iter(input) {
             let match_text = mat.as_str();
             let start_pos = mat.start();
@@ -118,8 +232,8 @@ pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
                 match_text,
                 start_pos,
                 end_pos,
-                rule,
-                &config.allowlist,
+                compiled_rule,
+                &config.compiled_allowlist,
             ) {
                 continue;
             }
@@ -210,8 +324,8 @@ pub fn should_allow_match(
     match_text: &str,
     start_pos: usize,
     end_pos: usize,
-    rule: &Rule,
-    global_allowlist: &Option<GlobalAllowlist>,
+    compiled_rule: &CompiledRule,
+    global_allowlist: &Option<CompiledGlobalAllowlist>,
 ) -> bool {
     // Check global allowlist first
     if let Some(global) = global_allowlist {
@@ -221,7 +335,7 @@ pub fn should_allow_match(
     }
 
     // Check rule-specific allowlists
-    if let Some(rule_allowlists) = &rule.allowlists {
+    if let Some(rule_allowlists) = &compiled_rule.compiled_allowlists {
         for allowlist in rule_allowlists {
             if is_allowed_by_rule_allowlist(input, path, match_text, start_pos, end_pos, allowlist)
             {
@@ -239,16 +353,12 @@ fn is_allowed_by_allowlist(
     match_text: &str,
     _start_pos: usize,
     _end_pos: usize,
-    allowlist: &GlobalAllowlist,
+    allowlist: &CompiledGlobalAllowlist,
 ) -> bool {
     // Check regex patterns
-    if let Some(regexes) = &allowlist.regexes {
-        for pattern in regexes {
-            if let Ok(regex) = Regex::new(pattern) {
-                if regex.is_match(match_text) {
-                    return true;
-                }
-            }
+    for regex in &allowlist.compiled_regexes {
+        if regex.is_match(match_text) {
+            return true;
         }
     }
 
@@ -271,7 +381,7 @@ pub fn is_allowed_by_rule_allowlist(
     match_text: &str,
     start_pos: usize,
     end_pos: usize,
-    allowlist: &RuleAllowlist,
+    allowlist: &CompiledRuleAllowlist,
 ) -> bool {
     let mut checks = Vec::new();
 
@@ -290,15 +400,12 @@ pub fn is_allowed_by_rule_allowlist(
         _ => match_text, // Default to match
     };
 
-    // Check regex patterns
-    if let Some(regexes) = &allowlist.regexes {
-        let regex_matches = regexes.iter().any(|pattern| {
-            if let Ok(regex) = Regex::new(pattern) {
-                regex.is_match(target_text)
-            } else {
-                false
-            }
-        });
+    // Check regex patterns using pre-compiled regexes
+    if !allowlist.compiled_regexes.is_empty() {
+        let regex_matches = allowlist
+            .compiled_regexes
+            .iter()
+            .any(|regex| regex.is_match(target_text));
         checks.push(regex_matches);
     }
 
