@@ -1,4 +1,4 @@
-mod gitleaks;
+pub mod gitleaks;
 
 use gitleaks::{DetectedSecret, detect_secrets};
 use std::collections::HashMap;
@@ -135,6 +135,9 @@ fn generate_redaction_key(rule_id: &str) -> String {
     let short_hash = format!("{:x}", hash).chars().take(6).collect::<String>();
     format!("[REDACTED_SECRET:{rule_id}:{short_hash}]")
 }
+
+/// Re-export the gitleaks initialization function for external access
+pub use gitleaks::initialize_gitleaks_config;
 
 #[cfg(test)]
 mod tests {

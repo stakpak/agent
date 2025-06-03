@@ -1,7 +1,7 @@
 // Secret redaction implementation based on gitleaks (https://github.com/gitleaks/gitleaks)
 use once_cell::sync::Lazy;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitleaksConfig {
@@ -69,7 +69,7 @@ pub struct DetectedSecret {
     pub end_pos: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct CompilationErrors {
     pub regex_errors: Vec<(String, String)>, // (rule_id, error_message)
     pub warnings: Vec<String>,
@@ -147,27 +147,30 @@ impl RegexCompilable for Rule {
                 Ok(regex) => self.compiled_regex = Some(regex),
                 Err(e) => {
                     // Handle regex compilation errors with specific fallbacks
-                    if self.id == "generic-api-key" {
-                        match create_simple_api_key_regex() {
-                            Ok(simple_regex) => {
-                                self.compiled_regex = Some(simple_regex);
-                                errors.add_warning(format!(
-                                    "Used fallback regex for rule '{}' due to: {}",
-                                    self.id, e
-                                ));
-                            }
-                            Err(fallback_err) => {
-                                errors.add_regex_error(
-                                    self.id.clone(),
-                                    format!(
-                                        "Failed to compile regex and fallback: {} / {}",
-                                        e, fallback_err
-                                    ),
-                                );
+                    match self.id.as_str() {
+                        "generic-api-key" | "pypi-upload-token" | "vault-batch-token" => {
+                            match create_simple_api_key_regex() {
+                                Ok(simple_regex) => {
+                                    self.compiled_regex = Some(simple_regex);
+                                    errors.add_warning(format!(
+                                        "Used fallback regex for rule '{}' due to: {}",
+                                        self.id, e
+                                    ));
+                                }
+                                Err(fallback_err) => {
+                                    errors.add_regex_error(
+                                        self.id.clone(),
+                                        format!(
+                                            "Failed to compile regex and fallback: {} / {}",
+                                            e, fallback_err
+                                        ),
+                                    );
+                                }
                             }
                         }
-                    } else {
-                        errors.add_regex_error(self.id.clone(), e.to_string());
+                        _ => {
+                            errors.add_regex_error(self.id.clone(), e.to_string());
+                        }
                     }
                 }
             }
@@ -259,36 +262,15 @@ pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
     }
 
     let compilation_errors = config.compile_regexes();
-
-    // Log compilation results
-    if !compilation_errors.warnings.is_empty() {
-        eprintln!("Gitleaks compilation warnings:");
-        for warning in &compilation_errors.warnings {
-            eprintln!("  Warning: {}", warning);
-        }
-    }
-
     if !compilation_errors.regex_errors.is_empty() {
-        eprintln!("Gitleaks compilation errors:");
-        for (rule_id, error) in &compilation_errors.regex_errors {
-            eprintln!("  Error in rule '{}': {}", rule_id, error);
+        const ERROR_LOG_FILE: &str = ".stakpak_mcp_secret_detection_errors";
+        // Write errors to log file
+        if let Ok(json) = serde_json::to_string(&compilation_errors) {
+            if let Err(e) = std::fs::write(ERROR_LOG_FILE, json) {
+                eprintln!("Failed to write errors to log file: {}", e);
+            }
         }
     }
-
-    eprintln!(
-        "Gitleaks config loaded: {} rules compiled successfully (includes {} content-based and {} path-based rules)",
-        config.rules.len(),
-        config
-            .rules
-            .iter()
-            .filter(|r| r.compiled_regex.is_some())
-            .count(),
-        config
-            .rules
-            .iter()
-            .filter(|r| r.compiled_regex.is_none())
-            .count(),
-    );
     config
 });
 
@@ -574,6 +556,18 @@ pub fn contains_any_keyword(input: &str, keywords: &[String]) -> bool {
     keywords
         .iter()
         .any(|keyword| input_lower.contains(&keyword.to_lowercase()))
+}
+
+/// Forces initialization of the gitleaks configuration
+///
+/// This function should be called during application startup to preload and compile
+/// the gitleaks rules, avoiding delays on the first call to detect_secrets.
+///
+/// Returns the number of successfully compiled rules.
+pub fn initialize_gitleaks_config() -> usize {
+    // Force evaluation of the lazy static
+    let config = &*GITLEAKS_CONFIG;
+    config.rules.len()
 }
 
 #[cfg(test)]

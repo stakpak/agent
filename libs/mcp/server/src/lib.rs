@@ -19,6 +19,18 @@ pub async fn start_server(
     config: MCPServerConfig,
     shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
 ) -> Result<()> {
+    // Initialize gitleaks configuration in a background task to avoid blocking server startup
+    tokio::spawn(async {
+        match std::panic::catch_unwind(|| stakpak_shared::secrets::initialize_gitleaks_config()) {
+            Ok(_rule_count) => {
+                // Gitleaks rules initialized successfully
+            }
+            Err(_) => {
+                // Failed to initialize, will initialize on first use
+            }
+        }
+    });
+
     // Create an instance of our counter router
     let service = StreamableHttpService::new(
         move || Tools::new(config.api.clone()),
