@@ -46,13 +46,10 @@ impl ClientHandler for LocalClientHandler {
 }
 
 pub async fn local_client(
-    host: Option<String>,
+    host: String,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
-    let transport = StreamableHttpClientTransport::from_uri(format!(
-        "{}/mcp",
-        host.unwrap_or("http://0.0.0.0:65535".to_string())
-    ));
+    let transport = StreamableHttpClientTransport::from_uri(format!("{}/mcp", host));
 
     let client_handler = LocalClientHandler { progress_tx };
     let client: RunningService<RoleClient, LocalClientHandler> =

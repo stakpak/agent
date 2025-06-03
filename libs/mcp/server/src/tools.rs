@@ -306,7 +306,7 @@ impl Tools {
 
                 // Write the file
                 if self.redact_secrets {
-                    let redaction_result = redact_secrets(&file_content, Some(&file_path));
+                    let redaction_result = redact_secrets(&file_content, Some(file_path));
                     match fs::write(file_path, &file_content) {
                         Ok(_) => {
                             result_report.push_str(&format!(

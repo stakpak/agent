@@ -55,7 +55,6 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
 
     if cli.debug {
         tracing_subscriber::registry()
@@ -69,13 +68,16 @@ async fn main() {
 
     match AppConfig::load() {
         Ok(config) => match cli.command {
-            Some(command) => match command.run(config).await {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Ops! something went wrong: {}", e);
-                    std::process::exit(1);
+            Some(command) => {
+                let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                match command.run(config).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Ops! something went wrong: {}", e);
+                        std::process::exit(1);
+                    }
                 }
-            },
+            }
             None => {
                 let local_context = analyze_local_context().await.ok();
 

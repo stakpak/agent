@@ -1,4 +1,4 @@
-use crate::config::AppConfig;
+use crate::{config::AppConfig, utils::network};
 use agent::{AgentCommands, get_or_create_session, run_agent};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
@@ -141,10 +141,13 @@ impl Commands {
             Commands::Mcp {
                 disable_secret_redaction,
             } => {
+                let bind_address = network::find_available_bind_address_descending().await?;
+                println!("MCP server started at {}", bind_address);
                 stakpak_mcp_server::start_server(
                     MCPServerConfig {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
+                        bind_address: bind_address.clone(),
                     },
                     None,
                 )
