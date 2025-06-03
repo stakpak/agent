@@ -1,4 +1,4 @@
-// Add these imports for gitleaks implementation
+// Secret redaction implementation based on gitleaks (https://github.com/gitleaks/gitleaks)
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
