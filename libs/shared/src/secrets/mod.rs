@@ -145,7 +145,7 @@ mod tests {
         is_allowed_by_rule_allowlist, should_allow_match,
     };
 
-    use super::{gitleaks::COMPILED_GITLEAKS_CONFIG, *};
+    use super::*;
 
     #[test]
     fn test_redaction_key_generation() {
@@ -424,12 +424,18 @@ mod tests {
 
     #[test]
     fn test_working_api_key_patterns() {
-        let config = &*COMPILED_GITLEAKS_CONFIG;
+        let config = &*GITLEAKS_CONFIG;
         let generic_rule = config
-            .compiled_rules
+            .rules
             .iter()
-            .find(|r| r.rule.id == "generic-api-key")
+            .find(|r| r.id == "generic-api-key")
             .unwrap();
+
+        // Get the compiled regex
+        let regex = generic_rule
+            .compiled_regex
+            .as_ref()
+            .expect("Regex should be compiled");
 
         // Create test patterns that should match the regex structure
         let test_inputs = vec![
@@ -444,13 +450,13 @@ mod tests {
         for input in test_inputs {
             println!("\nTesting: '{}'", input);
 
-            let matches: Vec<_> = generic_rule.regex.find_iter(input).collect();
+            let matches: Vec<_> = regex.find_iter(input).collect();
             println!("  Matches found: {}", matches.len());
 
             for (i, mat) in matches.iter().enumerate() {
                 println!("  Match {}: '{}'", i, mat.as_str());
 
-                if let Some(captures) = generic_rule.regex.captures(mat.as_str()) {
+                if let Some(captures) = regex.captures(mat.as_str()) {
                     for (j, cap) in captures.iter().enumerate() {
                         if let Some(cap) = cap {
                             println!("    Capture {}: '{}'", j, cap.as_str());
@@ -466,7 +472,7 @@ mod tests {
                                     mat.start(),
                                     mat.end(),
                                     generic_rule,
-                                    &config.compiled_allowlist,
+                                    &config.allowlist,
                                 );
                                 println!("    Allowed by allowlist: {}", allowed);
                             }
@@ -965,11 +971,11 @@ export PORT=3000
                         }
 
                         // Test allowlist checking
-                        let config = &*COMPILED_GITLEAKS_CONFIG;
+                        let config = &*GITLEAKS_CONFIG;
                         let generic_rule = config
-                            .compiled_rules
+                            .rules
                             .iter()
-                            .find(|r| r.rule.id == "generic-api-key")
+                            .find(|r| r.id == "generic-api-key")
                             .unwrap();
                         let allowed = should_allow_match(
                             input,
@@ -978,7 +984,7 @@ export PORT=3000
                             mat.start(),
                             mat.end(),
                             generic_rule,
-                            &config.compiled_allowlist,
+                            &config.allowlist,
                         );
                         println!("      Allowed by allowlist: {}", allowed);
                         if allowed {
@@ -1099,11 +1105,11 @@ export PORT=3000
             "API_KEY=example_key",  // Should be filtered
         ];
 
-        let config = &*COMPILED_GITLEAKS_CONFIG;
+        let config = &*GITLEAKS_CONFIG;
         let generic_rule = config
-            .compiled_rules
+            .rules
             .iter()
-            .find(|r| r.rule.id == "generic-api-key")
+            .find(|r| r.id == "generic-api-key")
             .unwrap();
 
         for input in test_cases {
@@ -1146,7 +1152,7 @@ export PORT=3000
                     }
 
                     // Test the actual allowlist
-                    if let Some(rule_allowlists) = &generic_rule.compiled_allowlists {
+                    if let Some(rule_allowlists) = &generic_rule.allowlists {
                         for (rule_idx, allowlist) in rule_allowlists.iter().enumerate() {
                             let allowed = is_allowed_by_rule_allowlist(
                                 input,
