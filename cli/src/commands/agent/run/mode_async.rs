@@ -5,6 +5,7 @@ use crate::commands::agent::run::helpers::{
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::local_context::LocalContext;
+use crate::utils::network;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::MCPServerConfig;
@@ -22,6 +23,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
     let ctx_clone = ctx.clone();
+    let bind_address = network::find_available_bind_address_descending().await?;
+    let local_mcp_server_host = format!("http://{}", bind_address);
     let redact_secrets = config.redact_secrets;
     tokio::spawn(async move {
         let _ = stakpak_mcp_server::start_server(
@@ -30,6 +33,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
+                bind_address,
                 redact_secrets,
             },
             None,
@@ -37,7 +41,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         .await;
     });
 
-    let clients = ClientManager::new(ctx.mcp_server_host, None)
+    let clients = ClientManager::new(ctx.mcp_server_host.unwrap_or(local_mcp_server_host), None)
         .await
         .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
