@@ -278,7 +278,7 @@ fn get_shell_type() -> String {
     }
 }
 
-fn detect_container_environment() -> bool {
+pub fn detect_container_environment() -> bool {
     // Check for common container indicators
 
     // Check for /.dockerenv file (Docker)
