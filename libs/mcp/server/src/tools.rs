@@ -66,7 +66,7 @@ impl Tools {
             return HashMap::new();
         }
 
-        match fs::read_to_string(&path) {
+        match fs::read_to_string(path) {
             Ok(content) => {
                 if content.trim().is_empty() {
                     return HashMap::new();
@@ -93,7 +93,7 @@ impl Tools {
 
         match serde_json::to_string_pretty(redaction_map) {
             Ok(json_content) => {
-                if let Err(e) = fs::write(&path, json_content) {
+                if let Err(e) = fs::write(path, json_content) {
                     error!("Failed to save session redaction map: {}", e);
                 }
             }
@@ -389,7 +389,7 @@ If the output is too long, it will be truncated from the middle."
 
                 // Write the file
                 let redacted_content =
-                    self.redact_and_store_secrets(&file_content, Some(&file_path));
+                    self.redact_and_store_secrets(&file_content, Some(file_path));
                 match fs::write(file_path, &file_content) {
                     Ok(_) => {
                         result_report.push_str(&format!(
@@ -962,7 +962,7 @@ mod tests {
         assert!(path.contains("secrets"));
 
         // Clean up any existing session file before test
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
 
         // Test adding redactions to session map
         let mut test_redactions = HashMap::new();
@@ -982,8 +982,9 @@ mod tests {
             std::path::Path::new(&path).exists(),
             "Session file should be created"
         );
+
         let file_content =
-            std::fs::read_to_string(&path).expect("Should be able to read session file");
+            std::fs::read_to_string(path).expect("Should be able to read session file");
         let json_value: serde_json::Value =
             serde_json::from_str(&file_content).expect("Session file should contain valid JSON");
         assert!(
@@ -1011,7 +1012,7 @@ mod tests {
         assert_eq!(restored, expected);
 
         // Clean up the test session file
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -1045,6 +1046,6 @@ mod tests {
 
         // Clean up the test session file
         let path = ".env.stakpak.session.secrets";
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
     }
 }

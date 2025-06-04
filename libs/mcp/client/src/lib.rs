@@ -19,7 +19,7 @@ pub struct ClientManager {
 
 impl ClientManager {
     pub async fn new(
-        local_server_host: Option<String>,
+        local_server_host: String,
         progress_tx: Option<Sender<ToolCallResultProgress>>,
     ) -> Result<Self> {
         let client1 = local_client(local_server_host, progress_tx).await?;

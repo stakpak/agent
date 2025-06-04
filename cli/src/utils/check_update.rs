@@ -8,6 +8,27 @@ pub struct Release {
 }
 
 pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
+    let release = get_latest_cli_version().await?;
+    if current_version != release {
+        let sep = "\x1b[1;34m═\x1b[0m".repeat(40); // Half-length for better proportions
+        println!("\n\x1b[1;34m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
+        println!(
+            "\x1b[1;34m┃\x1b[0m\x1b[1;36m⮕ \x1b[1;37m Version Update Available!\x1b[0m\x1b[1;34m ┃\x1b[0m"
+        );
+        println!("\x1b[1;34m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m");
+        println!(
+            "\x1b[1;37m \x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m",
+            current_version, release
+        );
+        println!("\x1b[1;35m{}\x1b[0m", sep);
+        println!("\x1b[1;37m Upgrade to access the latest features! 🚀\x1b[0m");
+        println!("\x1b[1;35m{}\x1b[0m", sep);
+    }
+
+    Ok(())
+}
+
+pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static("update-checker"));
 
@@ -24,22 +45,5 @@ pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
     }
 
     let release: Release = response.json().await?;
-
-    if current_version != release.tag_name {
-        let sep = "\x1b[1;34m═\x1b[0m".repeat(40); // Half-length for better proportions
-        println!("\n\x1b[1;34m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
-        println!(
-            "\x1b[1;34m┃\x1b[0m\x1b[1;36m⮕ \x1b[1;37m Version Update Available!\x1b[0m\x1b[1;34m ┃\x1b[0m"
-        );
-        println!("\x1b[1;34m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m");
-        println!(
-            "\x1b[1;37m \x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m",
-            current_version, release.tag_name
-        );
-        println!("\x1b[1;35m{}\x1b[0m", sep);
-        println!("\x1b[1;37m Upgrade to access the latest features! 🚀\x1b[0m");
-        println!("\x1b[1;35m{}\x1b[0m", sep);
-    }
-
-    Ok(())
+    Ok(release.tag_name)
 }
