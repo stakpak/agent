@@ -50,7 +50,7 @@ echo "api_125136713" > secret.txt
 
 ### Session File
 
-- **Location**: `.env.stakpak.session.secrets`
+- **Location**: `.stakpak.session.secrets`
 - **Format**: JSON object with placeholder-to-secret mappings
 - **Persistence**: Maintained throughout the session
 - **Security**: Local file with redaction mappings
@@ -146,7 +146,7 @@ echo actual_api_key_value > /tmp/key.txt
 curl -H "Authorization: Bearer actual_api_key_value" https://api.example.com
 ```
 
-**Session file (`.env.stakpak.session.secrets`):**
+**Session file (`.stakpak.session.secrets`):**
 
 ```json
 {
@@ -197,7 +197,7 @@ When disabled, all content passes through without modification.
 
 ## Security Considerations
 
-1. **Session file protection**: Ensure `.env.stakpak.session.secrets` has appropriate permissions
+1. **Session file protection**: Ensure `.stakpak.session.secrets` has appropriate permissions
 2. **Cleanup**: Consider cleaning up session files after use
 3. **Logging**: Avoid logging redacted content mappings
 4. **Rule updates**: Keep gitleaks rules updated for comprehensive detection
