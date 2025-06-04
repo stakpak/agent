@@ -99,9 +99,9 @@ async fn main() {
             None => {
                 let local_context = analyze_local_context().await.ok();
 
-                if cli.r#async {
+                match (cli.r#async, cli.print || cli.approve) {
                     // Async mode: run continuously until no more tool calls
-                    match agent::run::run_async(
+                    (true, _) => match agent::run::run_async(
                         config,
                         RunAsyncConfig {
                             prompt: cli.prompt.unwrap_or_default(),
@@ -118,47 +118,46 @@ async fn main() {
                             eprintln!("Ops! something went wrong: {}", e);
                             std::process::exit(1);
                         }
-                    }
-                } else {
-                    match cli.print || cli.approve {
-                        false => match agent::run::run_interactive(
-                            config,
-                            RunInteractiveConfig {
-                                checkpoint_id: cli.checkpoint_id,
-                                local_context,
-                                redact_secrets: !cli.disable_secret_redaction,
-                            },
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                eprintln!("Ops! something went wrong: {}", e);
-                                std::process::exit(1);
-                            }
+                    },
+
+                    // Non-interactive mode: run one step at a time
+                    (false, true) => match agent::run::run_non_interactive(
+                        config,
+                        RunNonInteractiveConfig {
+                            prompt: cli.prompt.unwrap_or_default(),
+                            approve: cli.approve,
+                            verbose: cli.verbose,
+                            checkpoint_id: cli.checkpoint_id,
+                            local_context,
+                            redact_secrets: !cli.disable_secret_redaction,
                         },
-                        true => {
-                            match agent::run::run_non_interactive(
-                                config,
-                                RunNonInteractiveConfig {
-                                    prompt: cli.prompt.unwrap_or_default(),
-                                    approve: cli.approve,
-                                    verbose: cli.verbose,
-                                    checkpoint_id: cli.checkpoint_id,
-                                    local_context,
-                                    redact_secrets: !cli.disable_secret_redaction,
-                                },
-                            )
-                            .await
-                            {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    eprintln!("Ops! something went wrong: {}", e);
-                                    std::process::exit(1);
-                                }
-                            }
+                    )
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Ops! something went wrong: {}", e);
+                            std::process::exit(1);
                         }
-                    }
+                    },
+
+                    // Interactive mode: run in TUI
+                    (false, false) => match agent::run::run_interactive(
+                        config,
+                        RunInteractiveConfig {
+                            checkpoint_id: cli.checkpoint_id,
+                            local_context,
+                            redact_secrets: !cli.disable_secret_redaction,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Ops! something went wrong: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
                 }
             }
         },
