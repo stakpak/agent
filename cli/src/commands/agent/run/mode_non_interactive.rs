@@ -1,8 +1,8 @@
-use crate::commands::agent::code::checkpoint::get_checkpoint_messages;
-use crate::commands::agent::code::helpers::{
+use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
+use crate::commands::agent::run::helpers::{
     add_local_context, convert_tools_map, tool_result, user_message,
 };
-use crate::commands::agent::code::tooling::run_tool_call;
+use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::local_context::LocalContext;
 use stakpak_api::{Client, ClientConfig};

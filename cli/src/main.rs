@@ -1,3 +1,5 @@
+use std::{env, path::Path};
+
 use clap::Parser;
 
 mod commands;
@@ -8,7 +10,7 @@ use commands::{
     Commands,
     agent::{
         self,
-        code::{RunInteractiveConfig, RunNonInteractiveConfig},
+        run::{RunAsyncConfig, RunInteractiveConfig, RunNonInteractiveConfig},
     },
 };
 use config::AppConfig;
@@ -20,19 +22,27 @@ use utils::local_context::analyze_local_context;
 #[command(name = "stakpak")]
 #[command(about = "Stakpak CLI tool", long_about = None)]
 struct Cli {
-    /// Add Prompt
+    /// Run the agent in non-interactive mode
     #[arg(short = 'p', long = "print", default_value_t = false)]
     print: bool,
 
-    /// Resume the conversation
+    /// Run the agent in asyncronous mode
+    #[arg(short = 'a', long = "async", default_value_t = false)]
+    r#async: bool,
+
+    /// Resume agent session at a specific checkpoint
     #[arg(short = 'c', long = "checkpoint")]
     checkpoint_id: Option<String>,
 
-    /// Approve the tool call
+    /// Run the agent in a specific directory
+    #[arg(short = 'w', long = "workdir")]
+    workdir: Option<String>,
+
+    /// Approve the tool call in non-interactive mode
     #[arg(long = "approve", default_value_t = false)]
     approve: bool,
 
-    /// Enable verbose output
+    /// Enable verbose output in non-interactive mode
     #[arg(long = "verbose", default_value_t = false)]
     verbose: bool,
 
@@ -44,7 +54,7 @@ struct Cli {
     #[arg(long = "disable-secret-redaction", default_value_t = false)]
     disable_secret_redaction: bool,
 
-    /// Positional string argument
+    /// Prompt to run the agent with in non-interactive mode
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
 
@@ -56,6 +66,14 @@ struct Cli {
 async fn main() {
     let cli = Cli::parse();
     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+
+    if let Some(workdir) = cli.workdir {
+        let workdir = Path::new(&workdir);
+        if let Err(e) = env::set_current_dir(workdir) {
+            eprintln!("Failed to set current directory: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     if cli.debug {
         tracing_subscriber::registry()
@@ -79,10 +97,13 @@ async fn main() {
             None => {
                 let local_context = analyze_local_context().await.ok();
 
-                match cli.print || cli.approve {
-                    false => match agent::code::run(
+                if cli.r#async {
+                    // Async mode: run continuously until no more tool calls
+                    match agent::run::run_async(
                         config,
-                        RunInteractiveConfig {
+                        RunAsyncConfig {
+                            prompt: cli.prompt.unwrap_or_default(),
+                            verbose: cli.verbose,
                             checkpoint_id: cli.checkpoint_id,
                             local_context,
                             redact_secrets: !cli.disable_secret_redaction,
@@ -95,14 +116,12 @@ async fn main() {
                             eprintln!("Ops! something went wrong: {}", e);
                             std::process::exit(1);
                         }
-                    },
-                    true => {
-                        match agent::code::run_non_interactive(
+                    }
+                } else {
+                    match cli.print || cli.approve {
+                        false => match agent::run::run_interactive(
                             config,
-                            RunNonInteractiveConfig {
-                                prompt: cli.prompt.unwrap_or_default(),
-                                approve: cli.approve,
-                                verbose: cli.verbose,
+                            RunInteractiveConfig {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
@@ -114,6 +133,27 @@ async fn main() {
                             Err(e) => {
                                 eprintln!("Ops! something went wrong: {}", e);
                                 std::process::exit(1);
+                            }
+                        },
+                        true => {
+                            match agent::run::run_non_interactive(
+                                config,
+                                RunNonInteractiveConfig {
+                                    prompt: cli.prompt.unwrap_or_default(),
+                                    approve: cli.approve,
+                                    verbose: cli.verbose,
+                                    checkpoint_id: cli.checkpoint_id,
+                                    local_context,
+                                    redact_secrets: !cli.disable_secret_redaction,
+                                },
+                            )
+                            .await
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    eprintln!("Ops! something went wrong: {}", e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
                     }
