@@ -99,10 +99,10 @@ impl AppState {
     pub fn new(helpers: Vec<&'static str>, latest_version: Option<String>) -> Self {
         let version_message = match latest_version {
             Some(version) => {
-                if version != env!("CARGO_PKG_VERSION") {
+                if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
                     Message::info(
                         format!(
-                            "🚀 Update available!  Current: {}  →  New: {} ✨   ",
+                            "🚀 Update available!  Current: {}  →  New: v{} ✨   ",
                             env!("CARGO_PKG_VERSION"),
                             version
                         ),
