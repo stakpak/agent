@@ -142,7 +142,7 @@ impl Commands {
                 disable_secret_redaction,
             } => {
                 let bind_address = network::find_available_bind_address_descending().await?;
-                println!("MCP server started at {}", bind_address);
+                println!("MCP server started at http://{}", bind_address);
                 stakpak_mcp_server::start_server(
                     MCPServerConfig {
                         api: config.into(),
