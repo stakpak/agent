@@ -102,7 +102,7 @@ impl AppState {
                 if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
                     Message::info(
                         format!(
-                            "🚀 Update available!  Current: {}  →  New: v{} ✨   ",
+                            "🚀 Update available!  Current: v{}  →  New: {} ✨   ",
                             env!("CARGO_PKG_VERSION"),
                             version
                         ),
