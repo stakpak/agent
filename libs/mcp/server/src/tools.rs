@@ -7,13 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_api::{GenerationResult, ToolsCallParams};
+use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::secrets::{redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
@@ -61,13 +62,7 @@ impl Tools {
 
     /// Load the redaction map from the session file
     fn load_session_redaction_map(&self) -> HashMap<String, String> {
-        let path = ".stakpak.session.secrets";
-
-        if !Path::new(&path).exists() {
-            return HashMap::new();
-        }
-
-        match fs::read_to_string(path) {
+        match LocalStore::read_session_data("secrets.json") {
             Ok(content) => {
                 if content.trim().is_empty() {
                     return HashMap::new();
@@ -82,7 +77,7 @@ impl Tools {
                 }
             }
             Err(e) => {
-                error!("Failed to read session redaction map file: {}", e);
+                warn!("Failed to read session redaction map file: {}", e);
                 HashMap::new()
             }
         }
@@ -90,11 +85,9 @@ impl Tools {
 
     /// Save the redaction map to the session file
     fn save_session_redaction_map(&self, redaction_map: &HashMap<String, String>) {
-        let path = ".stakpak.session.secrets";
-
         match serde_json::to_string_pretty(redaction_map) {
             Ok(json_content) => {
-                if let Err(e) = fs::write(path, json_content) {
+                if let Err(e) = LocalStore::write_session_data("secrets.json", &json_content) {
                     error!("Failed to save session redaction map: {}", e);
                 }
             }
@@ -273,24 +266,23 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         result = if output_lines.len() >= MAX_LINES {
             // Create a output file to store the full output
             let output_file = format!(
-                ".stakpak.session.command.output.{:06x}.txt",
+                "command.output.{:06x}.txt",
                 rand::rng().random_range(0..=0xFFFFFF)
             );
-
-            // Write the full output to the output file
-            std::fs::write(&output_file, &result).map_err(|e| {
-                error!("Failed to write command output file {}: {}", output_file, e);
-                McpError::internal_error(
-                    "Failed to write command output file",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+            let output_file_path =
+                LocalStore::write_session_data(&output_file, &result).map_err(|e| {
+                    error!("Failed to write session data to {}: {}", output_file, e);
+                    McpError::internal_error(
+                        "Failed to write session data",
+                        Some(json!({ "error": e.to_string() })),
+                    )
+                })?;
 
             format!(
-                "Showing the last {} / {} output lines. Full output saved to {}\n\n...\n{}",
+                "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
                 MAX_LINES,
                 output_lines.len(),
-                output_file,
+                output_file_path,
                 output_lines
                     .into_iter()
                     .rev()
@@ -574,11 +566,6 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
                         let prefix = if is_last { "└── " } else { "├── " };
                         match entry {
                             Ok(entry) => {
-                                // Skip the session secrets file
-                                if entry.file_name().to_string_lossy() == ".stakpak.session.secrets"
-                                {
-                                    continue;
-                                }
                                 let suffix = match entry.file_type() {
                                     Ok(ft) if ft.is_dir() => "/",
                                     Ok(_) => "",
@@ -1045,7 +1032,7 @@ mod tests {
         let tools = Tools::new(api_config, true);
 
         // Test that session file path is as expected
-        let path = ".stakpak.session.secrets";
+        let path = ".stakpak/session/secrets.json";
         assert!(path.contains("stakpak"));
         assert!(path.contains("secrets"));
 
@@ -1133,7 +1120,7 @@ mod tests {
         );
 
         // Clean up the test session file
-        let path = ".stakpak.session.secrets";
+        let path = ".stakpak/session/secrets.json";
         let _ = std::fs::remove_file(&path);
     }
 }

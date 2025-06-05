@@ -298,7 +298,7 @@ fn format_json_value(value: &Value) -> String {
 
             let mut values = obj
                 .into_iter()
-                .map(|(key, val)| (key, format_simple_value(val)))
+                .map(|(key, val)| (key, format_json_value(val)))
                 .collect::<Vec<_>>();
             values.sort_by_key(|(_, val)| val.len());
             values
@@ -322,7 +322,7 @@ fn format_json_value(value: &Value) -> String {
                     arr.iter()
                         .map(format_simple_value)
                         .collect::<Vec<_>>()
-                        .join(",\n")
+                        .join(", ")
                 )
             }
         }

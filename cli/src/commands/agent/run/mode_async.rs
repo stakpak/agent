@@ -9,6 +9,7 @@ use crate::utils::network;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::MCPServerConfig;
+use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 
 pub struct RunAsyncConfig {
@@ -165,8 +166,14 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             // Save conversation to file
             let conversation_json =
                 serde_json::to_string_pretty(&chat_messages).unwrap_or_default();
-            if let Err(e) = std::fs::write(".stakpak.session.messages.json", conversation_json) {
-                eprintln!("Failed to write messages to file: {}", e);
+
+            match LocalStore::write_session_data("messages.json", &conversation_json) {
+                Ok(path) => {
+                    println!("{} messages saved to {}", chat_messages.len(), path);
+                }
+                Err(e) => {
+                    eprintln!("Failed to write messages to file: {}", e);
+                }
             }
         } else {
             break;
@@ -181,20 +188,16 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
 
     println!("Async execution completed after {} steps", step - 1);
-    println!(
-        "{} messages saved to .stakpak.session.messages.json",
-        chat_messages.len()
-    );
 
     // Save checkpoint to file if available
     if let Some(checkpoint_id) = &latest_checkpoint {
-        if let Err(e) = std::fs::write(".stakpak.session.checkpoint", checkpoint_id) {
-            eprintln!("Failed to write checkpoint to file: {}", e);
-        } else {
-            println!(
-                "Checkpoint {} saved to .stakpak.session.checkpoint",
-                checkpoint_id
-            );
+        match LocalStore::write_session_data("checkpoint", checkpoint_id.to_string().as_str()) {
+            Ok(path) => {
+                println!("Checkpoint {} saved to {}", checkpoint_id, path);
+            }
+            Err(e) => {
+                eprintln!("Failed to write checkpoint to file: {}", e);
+            }
         }
     }
 

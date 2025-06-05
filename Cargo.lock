@@ -2968,6 +2968,7 @@ version = "0.1.89"
 dependencies = [
  "anyhow",
  "axum",
+ "rand 0.9.1",
  "rmcp",
  "serde",
  "serde_json",
