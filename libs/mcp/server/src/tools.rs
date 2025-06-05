@@ -485,7 +485,7 @@ SECRET HANDLING:
 - These placeholders represent actual secret values that are safely stored for later use
 - You can reference these placeholders when working with the file content
 
-If the output is too long, it will be truncated from the middle."
+A maximum of 300 lines will be shown at a time, the rest will be truncated."
     )]
     fn view(
         &self,
@@ -498,6 +498,8 @@ If the output is too long, it will be truncated from the middle."
         )]
         view_range: Option<[i32; 2]>,
     ) -> Result<CallToolResult, McpError> {
+        const MAX_LINES: usize = 300;
+
         let path_obj = Path::new(&path);
 
         if !path_obj.exists() {
@@ -589,25 +591,74 @@ If the output is too long, it will be truncated from the middle."
                         }
 
                         let selected_lines = &lines[start_idx..end_idx];
-                        let mut result =
-                            format!("File: {} (lines {}-{})\n", path, start_idx + 1, end_idx);
-                        for (i, line) in selected_lines.iter().enumerate() {
-                            result.push_str(&format!("{:4}: {}\n", start_idx + i + 1, line));
+                        if selected_lines.len() <= MAX_LINES {
+                            format!(
+                                "File: {} (lines {}-{})\n{}",
+                                path,
+                                start_idx + 1,
+                                end_idx,
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", start_idx + i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        } else {
+                            // truncate the extra lines
+                            let selected_lines =
+                                selected_lines.iter().take(MAX_LINES).collect::<Vec<_>>();
+
+                            format!(
+                                "File: {} (showing lines {}-{}, only the first {} lines of your view range)\n{}\n...",
+                                path,
+                                start_idx + 1,
+                                start_idx + 1 + MAX_LINES,
+                                MAX_LINES,
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:4}: {}", start_idx + i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
                         }
-                        result
                     } else {
                         let lines: Vec<&str> = content.lines().collect();
-                        let mut result = format!("File: {} ({} lines)\n", path, lines.len());
-                        for (i, line) in lines.iter().enumerate() {
-                            result.push_str(&format!("{:4}: {}\n", i + 1, line));
+                        if lines.len() <= MAX_LINES {
+                            format!(
+                                "File: {} ({} lines)\n{}",
+                                path,
+                                lines.len(),
+                                lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        } else {
+                            // truncate the extra lines
+                            let selected_lines = lines.iter().take(MAX_LINES).collect::<Vec<_>>();
+                            format!(
+                                "File: {} (showing {} / {} lines)\n{}\n...",
+                                path,
+                                MAX_LINES,
+                                lines.len(),
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
                         }
-                        result
                     };
 
                     let redacted_result = self.redact_and_store_secrets(&result, Some(&path));
-                    Ok(CallToolResult::success(vec![Content::text(clip_output(
+                    Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
-                    ))]))
+                    )]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
