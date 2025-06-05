@@ -1,3 +1,4 @@
+use rand::Rng;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
@@ -149,7 +150,7 @@ SECRET HANDLING:
 - You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
 - Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
 
-If the output is too long, it will be truncated from the middle."
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
     )]
     async fn run_command(
         &self,
@@ -161,6 +162,8 @@ If the output is too long, it will be truncated from the middle."
         #[schemars(description = "Optional working directory for command execution")]
         work_dir: Option<String>,
     ) -> Result<CallToolResult, McpError> {
+        const MAX_LINES: usize = 300;
+
         let command_clone = command.clone();
 
         // Restore secrets in the command before execution
@@ -265,10 +268,45 @@ If the output is too long, it will be truncated from the middle."
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
+        let output_lines = result.lines().collect::<Vec<_>>();
+
+        result = if output_lines.len() >= MAX_LINES {
+            // Create a output file to store the full output
+            let output_file = format!(
+                ".stakpak.session.command.output.{:06x}.txt",
+                rand::rng().random_range(0..=0xFFFFFF)
+            );
+
+            // Write the full output to the output file
+            std::fs::write(&output_file, &result).map_err(|e| {
+                error!("Failed to write command output file {}: {}", output_file, e);
+                McpError::internal_error(
+                    "Failed to write command output file",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+            format!(
+                "Showing the last {} / {} output lines. Full output saved to {}\n\n...\n{}",
+                MAX_LINES,
+                output_lines.len(),
+                output_file,
+                output_lines
+                    .into_iter()
+                    .rev()
+                    .take(MAX_LINES)
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        } else {
+            result
+        };
+
         let redacted_output = self.redact_and_store_secrets(&result, None);
-        Ok(CallToolResult::success(vec![Content::text(clip_output(
+        Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
-        ))]))
+        )]))
     }
 
     #[tool(
