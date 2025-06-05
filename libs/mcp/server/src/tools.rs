@@ -1,3 +1,4 @@
+use rand::Rng;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
@@ -6,13 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_api::{GenerationResult, ToolsCallParams};
+use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::secrets::{redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
@@ -60,13 +62,7 @@ impl Tools {
 
     /// Load the redaction map from the session file
     fn load_session_redaction_map(&self) -> HashMap<String, String> {
-        let path = ".stakpak.session.secrets";
-
-        if !Path::new(&path).exists() {
-            return HashMap::new();
-        }
-
-        match fs::read_to_string(path) {
+        match LocalStore::read_session_data("secrets.json") {
             Ok(content) => {
                 if content.trim().is_empty() {
                     return HashMap::new();
@@ -81,7 +77,7 @@ impl Tools {
                 }
             }
             Err(e) => {
-                error!("Failed to read session redaction map file: {}", e);
+                warn!("Failed to read session redaction map file: {}", e);
                 HashMap::new()
             }
         }
@@ -89,11 +85,9 @@ impl Tools {
 
     /// Save the redaction map to the session file
     fn save_session_redaction_map(&self, redaction_map: &HashMap<String, String>) {
-        let path = ".stakpak.session.secrets";
-
         match serde_json::to_string_pretty(redaction_map) {
             Ok(json_content) => {
-                if let Err(e) = fs::write(path, json_content) {
+                if let Err(e) = LocalStore::write_session_data("secrets.json", &json_content) {
                     error!("Failed to save session redaction map: {}", e);
                 }
             }
@@ -149,7 +143,7 @@ SECRET HANDLING:
 - You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
 - Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
 
-If the output is too long, it will be truncated from the middle."
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
     )]
     async fn run_command(
         &self,
@@ -161,6 +155,8 @@ If the output is too long, it will be truncated from the middle."
         #[schemars(description = "Optional working directory for command execution")]
         work_dir: Option<String>,
     ) -> Result<CallToolResult, McpError> {
+        const MAX_LINES: usize = 300;
+
         let command_clone = command.clone();
 
         // Restore secrets in the command before execution
@@ -265,10 +261,44 @@ If the output is too long, it will be truncated from the middle."
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
+        let output_lines = result.lines().collect::<Vec<_>>();
+
+        result = if output_lines.len() >= MAX_LINES {
+            // Create a output file to store the full output
+            let output_file = format!(
+                "command.output.{:06x}.txt",
+                rand::rng().random_range(0..=0xFFFFFF)
+            );
+            let output_file_path =
+                LocalStore::write_session_data(&output_file, &result).map_err(|e| {
+                    error!("Failed to write session data to {}: {}", output_file, e);
+                    McpError::internal_error(
+                        "Failed to write session data",
+                        Some(json!({ "error": e.to_string() })),
+                    )
+                })?;
+
+            format!(
+                "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
+                MAX_LINES,
+                output_lines.len(),
+                output_file_path,
+                output_lines
+                    .into_iter()
+                    .rev()
+                    .take(MAX_LINES)
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        } else {
+            result
+        };
+
         let redacted_output = self.redact_and_store_secrets(&result, None);
-        Ok(CallToolResult::success(vec![Content::text(clip_output(
+        Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
-        ))]))
+        )]))
     }
 
     #[tool(
@@ -485,7 +515,7 @@ SECRET HANDLING:
 - These placeholders represent actual secret values that are safely stored for later use
 - You can reference these placeholders when working with the file content
 
-If the output is too long, it will be truncated from the middle."
+A maximum of 300 lines will be shown at a time, the rest will be truncated."
     )]
     fn view(
         &self,
@@ -498,6 +528,8 @@ If the output is too long, it will be truncated from the middle."
         )]
         view_range: Option<[i32; 2]>,
     ) -> Result<CallToolResult, McpError> {
+        const MAX_LINES: usize = 300;
+
         let path_obj = Path::new(&path);
 
         if !path_obj.exists() {
@@ -534,11 +566,6 @@ If the output is too long, it will be truncated from the middle."
                         let prefix = if is_last { "└── " } else { "├── " };
                         match entry {
                             Ok(entry) => {
-                                // Skip the session secrets file
-                                if entry.file_name().to_string_lossy() == ".stakpak.session.secrets"
-                                {
-                                    continue;
-                                }
                                 let suffix = match entry.file_type() {
                                     Ok(ft) if ft.is_dir() => "/",
                                     Ok(_) => "",
@@ -588,25 +615,74 @@ If the output is too long, it will be truncated from the middle."
                         }
 
                         let selected_lines = &lines[start_idx..end_idx];
-                        let mut result =
-                            format!("File: {} (lines {}-{})\n", path, start_idx + 1, end_idx);
-                        for (i, line) in selected_lines.iter().enumerate() {
-                            result.push_str(&format!("{:4}: {}\n", start_idx + i + 1, line));
+                        if selected_lines.len() <= MAX_LINES {
+                            format!(
+                                "File: {} (lines {}-{})\n{}",
+                                path,
+                                start_idx + 1,
+                                end_idx,
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", start_idx + i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        } else {
+                            // truncate the extra lines
+                            let selected_lines =
+                                selected_lines.iter().take(MAX_LINES).collect::<Vec<_>>();
+
+                            format!(
+                                "File: {} (showing lines {}-{}, only the first {} lines of your view range)\n{}\n...",
+                                path,
+                                start_idx + 1,
+                                start_idx + 1 + MAX_LINES,
+                                MAX_LINES,
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:4}: {}", start_idx + i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
                         }
-                        result
                     } else {
                         let lines: Vec<&str> = content.lines().collect();
-                        let mut result = format!("File: {} ({} lines)\n", path, lines.len());
-                        for (i, line) in lines.iter().enumerate() {
-                            result.push_str(&format!("{:4}: {}\n", i + 1, line));
+                        if lines.len() <= MAX_LINES {
+                            format!(
+                                "File: {} ({} lines)\n{}",
+                                path,
+                                lines.len(),
+                                lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        } else {
+                            // truncate the extra lines
+                            let selected_lines = lines.iter().take(MAX_LINES).collect::<Vec<_>>();
+                            format!(
+                                "File: {} (showing {} / {} lines)\n{}\n...",
+                                path,
+                                MAX_LINES,
+                                lines.len(),
+                                selected_lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
                         }
-                        result
                     };
 
                     let redacted_result = self.redact_and_store_secrets(&result, Some(&path));
-                    Ok(CallToolResult::success(vec![Content::text(clip_output(
+                    Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
-                    ))]))
+                    )]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -867,84 +943,9 @@ impl ServerHandler for Tools {
     }
 }
 
-pub fn clip_output(output: &str) -> String {
-    const MAX_OUTPUT_LENGTH: usize = 4000;
-    // Truncate long output
-    if output.len() > MAX_OUTPUT_LENGTH {
-        let offset = MAX_OUTPUT_LENGTH / 2;
-        let start = output
-            .char_indices()
-            .nth(offset)
-            .map(|(i, _)| i)
-            .unwrap_or(output.len());
-        let end = output
-            .char_indices()
-            .rev()
-            .nth(offset)
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-
-        return format!(
-            "{}\n\n[...this result was truncated because it's too long...]\n\n{}",
-            &output[..start],
-            &output[end..]
-        );
-    }
-
-    output.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_clip_output_empty_string() {
-        let output = "";
-        assert_eq!(clip_output(output), "");
-    }
-
-    #[test]
-    fn test_clip_output_short_string() {
-        let output = "This is a short string that should not be clipped.";
-        assert_eq!(clip_output(output), output);
-    }
-
-    #[test]
-    fn test_clip_output_exact_length() {
-        // Create a string with exactly MAX_OUTPUT_LENGTH characters
-        let output = "a".repeat(4000);
-        assert_eq!(clip_output(&output), output);
-    }
-
-    #[test]
-    fn test_clip_output_long_string() {
-        // Create a string longer than MAX_OUTPUT_LENGTH
-        let output = "a".repeat(6000);
-        let result = clip_output(&output);
-
-        // Check that result has the expected format with [clipped] marker
-        assert!(result.contains("[...this result was truncated because it's too long...]"));
-
-        // Check the total length is as expected (2000 + 2000 + length of "\n[clipped]\n")
-        let expected_length =
-            2000 + 2001 + "\n\n[...this result was truncated because it's too long...]\n\n".len();
-        assert_eq!(result.len(), expected_length);
-    }
-
-    #[test]
-    fn test_clip_output_unicode_characters() {
-        // Create a string with unicode characters that's longer than MAX_OUTPUT_LENGTH
-        // Using characters like emoji that take more than one byte
-        let emoji_repeat = "😀🌍🚀".repeat(1500); // Each emoji is multiple bytes
-        let result = clip_output(&emoji_repeat);
-
-        assert!(result.contains("[...this result was truncated because it's too long...]"));
-
-        // Verify the string was properly split on character boundaries
-        // by checking that we don't have any invalid UTF-8 sequences
-        assert!(result.chars().all(|c| c.is_ascii() || c.len_utf8() > 1));
-    }
 
     #[test]
     fn test_session_redaction_map() {
@@ -956,12 +957,10 @@ mod tests {
         let tools = Tools::new(api_config, true);
 
         // Test that session file path is as expected
-        let path = ".stakpak.session.secrets";
-        assert!(path.contains("stakpak"));
-        assert!(path.contains("secrets"));
+        let path = LocalStore::get_local_session_store_path().join("secrets.json");
 
         // Clean up any existing session file before test
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path.clone());
 
         // Test adding redactions to session map
         let mut test_redactions = HashMap::new();
@@ -977,13 +976,10 @@ mod tests {
         tools.add_to_session_redaction_map(&test_redactions);
 
         // Verify the session file was created and contains valid JSON
-        assert!(
-            std::path::Path::new(&path).exists(),
-            "Session file should be created"
-        );
+        assert!(path.exists(), "Session file should be created");
 
         let file_content =
-            std::fs::read_to_string(path).expect("Should be able to read session file");
+            std::fs::read_to_string(&path).expect("Should be able to read session file");
         let json_value: serde_json::Value =
             serde_json::from_str(&file_content).expect("Session file should contain valid JSON");
         assert!(
@@ -1044,7 +1040,7 @@ mod tests {
         );
 
         // Clean up the test session file
-        let path = ".stakpak.session.secrets";
+        let path = LocalStore::get_local_session_store_path().join("secrets.json");
         let _ = std::fs::remove_file(&path);
     }
 }
