@@ -943,84 +943,9 @@ impl ServerHandler for Tools {
     }
 }
 
-pub fn clip_output(output: &str) -> String {
-    const MAX_OUTPUT_LENGTH: usize = 4000;
-    // Truncate long output
-    if output.len() > MAX_OUTPUT_LENGTH {
-        let offset = MAX_OUTPUT_LENGTH / 2;
-        let start = output
-            .char_indices()
-            .nth(offset)
-            .map(|(i, _)| i)
-            .unwrap_or(output.len());
-        let end = output
-            .char_indices()
-            .rev()
-            .nth(offset)
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-
-        return format!(
-            "{}\n\n[...this result was truncated because it's too long...]\n\n{}",
-            &output[..start],
-            &output[end..]
-        );
-    }
-
-    output.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_clip_output_empty_string() {
-        let output = "";
-        assert_eq!(clip_output(output), "");
-    }
-
-    #[test]
-    fn test_clip_output_short_string() {
-        let output = "This is a short string that should not be clipped.";
-        assert_eq!(clip_output(output), output);
-    }
-
-    #[test]
-    fn test_clip_output_exact_length() {
-        // Create a string with exactly MAX_OUTPUT_LENGTH characters
-        let output = "a".repeat(4000);
-        assert_eq!(clip_output(&output), output);
-    }
-
-    #[test]
-    fn test_clip_output_long_string() {
-        // Create a string longer than MAX_OUTPUT_LENGTH
-        let output = "a".repeat(6000);
-        let result = clip_output(&output);
-
-        // Check that result has the expected format with [clipped] marker
-        assert!(result.contains("[...this result was truncated because it's too long...]"));
-
-        // Check the total length is as expected (2000 + 2000 + length of "\n[clipped]\n")
-        let expected_length =
-            2000 + 2001 + "\n\n[...this result was truncated because it's too long...]\n\n".len();
-        assert_eq!(result.len(), expected_length);
-    }
-
-    #[test]
-    fn test_clip_output_unicode_characters() {
-        // Create a string with unicode characters that's longer than MAX_OUTPUT_LENGTH
-        // Using characters like emoji that take more than one byte
-        let emoji_repeat = "😀🌍🚀".repeat(1500); // Each emoji is multiple bytes
-        let result = clip_output(&emoji_repeat);
-
-        assert!(result.contains("[...this result was truncated because it's too long...]"));
-
-        // Verify the string was properly split on character boundaries
-        // by checking that we don't have any invalid UTF-8 sequences
-        assert!(result.chars().all(|c| c.is_ascii() || c.len_utf8() > 1));
-    }
 
     #[test]
     fn test_session_redaction_map() {
@@ -1032,12 +957,10 @@ mod tests {
         let tools = Tools::new(api_config, true);
 
         // Test that session file path is as expected
-        let path = ".stakpak/session/secrets.json";
-        assert!(path.contains("stakpak"));
-        assert!(path.contains("secrets"));
+        let path = LocalStore::get_local_session_store_path().join("secrets.json");
 
         // Clean up any existing session file before test
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path.clone());
 
         // Test adding redactions to session map
         let mut test_redactions = HashMap::new();
@@ -1053,13 +976,10 @@ mod tests {
         tools.add_to_session_redaction_map(&test_redactions);
 
         // Verify the session file was created and contains valid JSON
-        assert!(
-            std::path::Path::new(&path).exists(),
-            "Session file should be created"
-        );
+        assert!(path.exists(), "Session file should be created");
 
         let file_content =
-            std::fs::read_to_string(path).expect("Should be able to read session file");
+            std::fs::read_to_string(&path).expect("Should be able to read session file");
         let json_value: serde_json::Value =
             serde_json::from_str(&file_content).expect("Session file should contain valid JSON");
         assert!(
@@ -1120,7 +1040,7 @@ mod tests {
         );
 
         // Clean up the test session file
-        let path = ".stakpak/session/secrets.json";
+        let path = LocalStore::get_local_session_store_path().join("secrets.json");
         let _ = std::fs::remove_file(&path);
     }
 }
