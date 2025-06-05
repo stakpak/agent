@@ -1,13 +1,13 @@
-use crate::commands::agent::code::checkpoint::{
+use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_messages_and_tool_calls, get_checkpoint_messages,
     get_messages_from_checkpoint_output,
 };
-use crate::commands::agent::code::helpers::{
+use crate::commands::agent::run::helpers::{
     add_local_context, convert_tools_map, tool_result, user_message,
 };
-use crate::commands::agent::code::stream::process_responses_stream;
-use crate::commands::agent::code::tooling::{list_sessions, run_tool_call};
-use crate::commands::agent::code::tui::{send_input_event, send_tool_call};
+use crate::commands::agent::run::stream::process_responses_stream;
+use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
+use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
@@ -25,7 +25,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
 }
 
-pub async fn run(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
+pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
     let mut messages: Vec<ChatMessage> = Vec::new();
     let mut tools_queue: Vec<ToolCall> = Vec::new();
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);

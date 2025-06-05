@@ -1,4 +1,4 @@
-use crate::commands::agent::code::tui::send_input_event;
+use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,

@@ -1,4 +1,4 @@
-use crate::commands::agent::code::tui::send_input_event;
+use crate::commands::agent::run::tui::send_input_event;
 use stakpak_api::Client;
 use stakpak_api::models::AgentOutput;
 use stakpak_shared::models::integrations::openai::{
