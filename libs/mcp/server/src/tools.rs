@@ -61,7 +61,7 @@ impl Tools {
 
     /// Load the redaction map from the session file
     fn load_session_redaction_map(&self) -> HashMap<String, String> {
-        let path = ".env.stakpak.session.secrets";
+        let path = ".stakpak.session.secrets";
 
         if !Path::new(&path).exists() {
             return HashMap::new();
@@ -90,7 +90,7 @@ impl Tools {
 
     /// Save the redaction map to the session file
     fn save_session_redaction_map(&self, redaction_map: &HashMap<String, String>) {
-        let path = ".env.stakpak.session.secrets";
+        let path = ".stakpak.session.secrets";
 
         match serde_json::to_string_pretty(redaction_map) {
             Ok(json_content) => {
@@ -575,8 +575,7 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
                         match entry {
                             Ok(entry) => {
                                 // Skip the session secrets file
-                                if entry.file_name().to_string_lossy()
-                                    == ".env.stakpak.session.secrets"
+                                if entry.file_name().to_string_lossy() == ".stakpak.session.secrets"
                                 {
                                     continue;
                                 }
@@ -1046,7 +1045,7 @@ mod tests {
         let tools = Tools::new(api_config, true);
 
         // Test that session file path is as expected
-        let path = ".env.stakpak.session.secrets";
+        let path = ".stakpak.session.secrets";
         assert!(path.contains("stakpak"));
         assert!(path.contains("secrets"));
 
@@ -1134,7 +1133,7 @@ mod tests {
         );
 
         // Clean up the test session file
-        let path = ".env.stakpak.session.secrets";
-        let _ = std::fs::remove_file(path);
+        let path = ".stakpak.session.secrets";
+        let _ = std::fs::remove_file(&path);
     }
 }
