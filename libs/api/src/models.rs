@@ -60,6 +60,12 @@ pub struct Document {
     pub provisioner: ProvisionerType,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SimpleDocument {
+    pub uri: String,
+    pub content: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct QueryBlocksOutput {
     pub results: Vec<QueryBlockResult>,

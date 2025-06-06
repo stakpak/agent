@@ -5,6 +5,7 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use stakpak_api::models::SimpleDocument;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_api::{GenerationResult, ToolsCallParams};
 use stakpak_shared::local_store::LocalStore;
@@ -328,6 +329,11 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             description = "Whether to save the generated files to the filesystem (default: false)"
         )]
         save_files: Option<bool>,
+        #[tool(param)]
+        #[schemars(
+            description = "Optional list of file paths to include as context for the generation (default: empty)"
+        )]
+        context: Option<Vec<String>>,
     ) -> Result<CallToolResult, McpError> {
         let client = Client::new(&self.api_config).map_err(|e| {
             error!("Failed to create client: {}", e);
@@ -343,13 +349,44 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             "markdown"
         };
 
+        // Convert context paths to Vec<Document>
+        let context_documents = if let Some(context_paths) = context {
+            context_paths
+                .into_iter()
+                .map(|path| {
+                    let uri = format!("file://{}", path);
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            // Redact secrets in the file content
+                            let redacted_content =
+                                self.redact_and_store_secrets(&content, Some(&path));
+                            SimpleDocument {
+                                uri,
+                                content: redacted_content,
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to read context file {}: {}", path, e);
+                            // Add empty document with error message
+                            SimpleDocument {
+                                uri,
+                                content: format!("Error reading file: {}", e),
+                            }
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
         let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "generate_code".to_string(),
                 arguments: json!({
                     "prompt": prompt,
                     "provisioner": provisioner.to_string(),
-                    "context": Vec::<serde_json::Value>::new(),
+                    "context": context_documents,
                     "output_format": output_format,
                 }),
             })
