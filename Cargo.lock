@@ -2915,6 +2915,7 @@ dependencies = [
  "rust_socketio",
  "serde",
  "serde_json",
+ "sha2",
  "stakpak-api",
  "stakpak-mcp-client",
  "stakpak-mcp-server",

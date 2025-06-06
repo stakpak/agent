@@ -29,6 +29,7 @@ tokio-process-stream = "0.4.0"
 tokio-stream = "0.1.17"
 rust_socketio = { version = "0.6.0", features = ["async"] }
 notify = "8.0.0"
+sha2 = "0.10.9"
 
 
 [lints.clippy]

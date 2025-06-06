@@ -123,7 +123,9 @@ impl Tools {
             return content.to_string();
         }
 
-        let redaction_result = redact_secrets(content, path);
+        // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
+        let existing_redaction_map = self.load_session_redaction_map();
+        let redaction_result = redact_secrets(content, path, &existing_redaction_map);
 
         // Add new redactions to session map
         self.add_to_session_redaction_map(&redaction_result.redaction_map);
