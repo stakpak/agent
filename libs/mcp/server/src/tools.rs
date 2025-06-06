@@ -297,7 +297,12 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             result
         };
 
+        if result.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text("No output")]));
+        }
+
         let redacted_output = self.redact_and_store_secrets(&result, None);
+
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
         )]))
