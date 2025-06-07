@@ -332,7 +332,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         save_files: Option<bool>,
         #[tool(param)]
         #[schemars(
-            description = "Optional list of file paths to include as context for the generation (default: empty)"
+            description = "Optional list of file paths to include as context for the generation, add any files you want to edit, or that you want to use as context for the generation (default: empty)"
         )]
         context: Option<Vec<String>>,
     ) -> Result<CallToolResult, McpError> {
