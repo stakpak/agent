@@ -426,7 +426,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     )
                 })?;
 
-            let mut new_files = Vec::new();
+            let mut new_files: Vec<String> = Vec::new();
             let mut failed_edits = Vec::new();
 
             for edit in generation_result.edits.unwrap_or(Vec::new()) {
@@ -457,7 +457,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                 if !file_path.exists() {
                     match fs::File::create(file_path) {
                         Ok(_) => {
-                            new_files.push(file_path.to_str().unwrap().to_string());
+                            new_files.push(file_path.to_str().unwrap_or_default().to_string());
                         }
                         Err(e) => {
                             error!("Failed to create file {}: {}", file_path.display(), e);
