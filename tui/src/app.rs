@@ -16,7 +16,7 @@ pub struct SessionInfo {
 
 #[derive(Debug, PartialEq)]
 pub enum LoadingType {
-    LLM,
+    Llm,
     Sessions,
 }
 
@@ -155,7 +155,7 @@ impl AppState {
             dialog_command: None,
             dialog_selected: 0,
             loading: false,
-            loading_type: LoadingType::LLM,
+            loading_type: LoadingType::Llm,
             spinner_frame: 0,
             sessions: Vec::new(),
             show_sessions_dialog: false,

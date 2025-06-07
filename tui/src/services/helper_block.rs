@@ -225,7 +225,7 @@ pub fn push_error_message(state: &mut AppState, error: &str) {
     });
 }
 
-pub fn render_loading_spinner<'a>(state: &'a AppState) -> Line<'a> {
+pub fn render_loading_spinner(state: &AppState) -> Line {
     let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
     let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
     let spinner_text = if state.loading_type == LoadingType::Sessions {
@@ -233,11 +233,11 @@ pub fn render_loading_spinner<'a>(state: &'a AppState) -> Line<'a> {
     } else {
         "Stakpaking..."
     };
-    let loading_line = Line::from(vec![Span::styled(
+
+    Line::from(vec![Span::styled(
         format!("{} {}", spinner, spinner_text),
         Style::default()
             .fg(Color::LightRed)
             .add_modifier(Modifier::BOLD),
-    )]);
-    loading_line
+    )])
 }

@@ -429,7 +429,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             let mut new_files: Vec<String> = Vec::new();
             let mut failed_edits = Vec::new();
 
-            for edit in generation_result.edits.unwrap_or(Vec::new()) {
+            for edit in generation_result.edits.unwrap_or_default() {
                 let file_path = Path::new(
                     edit.document_uri
                         .strip_prefix("file:///")
@@ -472,16 +472,12 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     }
                 }
 
-                let redacted_edit = self
-                    .redact_and_store_secrets(&edit.to_string(), Some(file_path.to_str().unwrap()));
+                let redacted_edit =
+                    self.redact_and_store_secrets(&edit.to_string(), file_path.to_str());
 
                 if edit.old_str.is_empty() {
                     // This is an addition to a file (appending content)
-                    match fs::OpenOptions::new()
-                        .write(true)
-                        .append(true)
-                        .open(file_path)
-                    {
+                    match fs::OpenOptions::new().append(true).open(file_path) {
                         Ok(mut file) => {
                             if let Err(e) = file.write_all(edit.new_str.as_bytes()) {
                                 error!("Failed to append to file {}: {}", file_path.display(), e);

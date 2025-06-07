@@ -55,7 +55,7 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
             } else {
                 // Fallback to string manipulation if parsing fails
                 let parts = s.updated_at.split('T').collect::<Vec<_>>();
-                let date = parts.get(0).unwrap_or(&"");
+                let date = parts.first().unwrap_or(&"");
                 let time = parts.get(1).and_then(|t| t.split('.').next()).unwrap_or("");
                 format!("{} {} UTC", date, time)
             };

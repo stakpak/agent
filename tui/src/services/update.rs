@@ -118,7 +118,7 @@ pub fn update(
             state.sessions = sessions;
             state.loading = false;
             state.spinner_frame = 0;
-            state.loading_type = LoadingType::LLM;
+            state.loading_type = LoadingType::Llm;
             state.show_sessions_dialog = true;
         }
         InputEvent::Error(error) => {
