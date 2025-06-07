@@ -311,7 +311,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
     }
 
     #[tool(
-        description = "Generate configurations and infrastructure as code with suggested file names using a given prompt. This code generation only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]"
+        description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]"
     )]
     async fn generate_code(
         &self,
@@ -426,6 +426,9 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     )
                 })?;
 
+            let mut new_files = Vec::new();
+            let mut failed_edits = Vec::new();
+
             for edit in generation_result.edits.unwrap_or(Vec::new()) {
                 let file_path = Path::new(
                     edit.document_uri
@@ -438,19 +441,32 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     if !parent.exists() {
                         if let Err(e) = fs::create_dir_all(parent) {
                             error!("Failed to create directory {}: {}", parent.display(), e);
+                            failed_edits.push(format!(
+                                "Failed to create directory {} for file {}: {}\nEdit content:\n{}",
+                                parent.display(),
+                                file_path.display(),
+                                e,
+                                edit
+                            ));
                             continue;
                         }
                     }
                 }
+
                 // Check if file exists, if not create it
                 if !file_path.exists() {
                     match fs::File::create(file_path) {
                         Ok(_) => {
-                            result_report
-                                .push_str(&format!("Created new file: {}\n", file_path.display()));
+                            new_files.push(file_path.to_str().unwrap().to_string());
                         }
                         Err(e) => {
                             error!("Failed to create file {}: {}", file_path.display(), e);
+                            failed_edits.push(format!(
+                                "Failed to create file {}: {}\nEdit content:\n{}",
+                                file_path.display(),
+                                e,
+                                edit
+                            ));
                             continue;
                         }
                     }
@@ -469,10 +485,15 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                         Ok(mut file) => {
                             if let Err(e) = file.write_all(edit.new_str.as_bytes()) {
                                 error!("Failed to append to file {}: {}", file_path.display(), e);
+                                failed_edits.push(format!(
+                                    "Failed to append content to file {}: {}\nEdit content:\n{}",
+                                    file_path.display(),
+                                    e,
+                                    redacted_edit
+                                ));
                                 continue;
                             }
-                            result_report
-                                .push_str(&format!("Applied append edit: \n{}\n\n", redacted_edit));
+                            result_report.push_str(&format!("{}\n\n", redacted_edit));
                         }
                         Err(e) => {
                             error!(
@@ -480,6 +501,12 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                                 file_path.display(),
                                 e
                             );
+                            failed_edits.push(format!(
+                                "Failed to open file {} for appending: {}\nEdit content:\n{}",
+                                file_path.display(),
+                                e,
+                                redacted_edit
+                            ));
                             continue;
                         }
                     }
@@ -490,6 +517,12 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                         Ok(content) => content,
                         Err(e) => {
                             error!("Failed to read file {}: {}", file_path.display(), e);
+                            failed_edits.push(format!(
+                                "Failed to read file {} for content replacement: {}\nEdit content:\n{}",
+                                file_path.display(),
+                                e,
+                                edit
+                            ));
                             continue;
                         }
                     };
@@ -501,6 +534,11 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                             file_path.display(),
                             edit
                         );
+                        failed_edits.push(format!(
+                            "Search string not found in file {} - the file content may have changed or the search string is incorrect.\nEdit content:\n{}",
+                            file_path.display(),
+                            edit
+                        ));
                         continue;
                     }
 
@@ -508,20 +546,43 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     let updated_content = current_content.replace(&edit.old_str, &edit.new_str);
                     match fs::write(file_path, updated_content) {
                         Ok(_) => {
-                            result_report.push_str(&format!(
-                                "Applied search and replace edit: \n{}\n\n",
-                                redacted_edit
-                            ));
+                            result_report.push_str(&format!("{}\n\n", redacted_edit));
                         }
                         Err(e) => {
                             error!("Failed to write to file {}: {}", file_path.display(), e);
+                            failed_edits.push(format!(
+                                "Failed to write updated content to file {}: {}\nEdit content:\n{}",
+                                file_path.display(),
+                                e,
+                                redacted_edit
+                            ));
                             continue;
                         }
                     }
                 }
             }
 
-            Ok(CallToolResult::success(vec![Content::text(result_report)]))
+            // Build the final result report
+            let mut final_report = String::new();
+
+            if !new_files.is_empty() {
+                final_report.push_str(&format!("Created files: {}\n\n", new_files.join(", ")));
+            }
+
+            if !result_report.is_empty() {
+                final_report.push_str("Successfully applied edits:\n");
+                final_report.push_str(&result_report);
+            }
+
+            if !failed_edits.is_empty() {
+                final_report.push_str("\n❌ Failed Edits:\n");
+                for (i, failed_edit) in failed_edits.iter().enumerate() {
+                    final_report.push_str(&format!("{}. {}\n", i + 1, failed_edit));
+                }
+                final_report.push_str("\nPlease review the failed edits above and take appropriate action to resolve the issues.\n");
+            }
+
+            Ok(CallToolResult::success(vec![Content::text(final_report)]))
         } else {
             Ok(CallToolResult::success(response))
         }

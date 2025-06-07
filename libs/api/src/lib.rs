@@ -948,9 +948,12 @@ pub struct EditInfo {
 
 impl std::fmt::Display for EditInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            r#"# {}
+        match (self.old_str.is_empty(), self.new_str.is_empty()) {
+            // replace
+            (false, false) => {
+                write!(
+                    f,
+                    r#"# {}
 {}
 ```
 <<<<<<< SEARCH
@@ -959,8 +962,45 @@ impl std::fmt::Display for EditInfo {
 {}
 >>>>>>> REPLACE
 ```"#,
-            self.reasoning, self.document_uri, self.old_str, self.new_str
-        )
+                    self.reasoning,
+                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.old_str,
+                    self.new_str
+                )
+            }
+            // append
+            (true, false) => {
+                write!(
+                    f,
+                    r#"# {}
+{}
+```
+{}
+```"#,
+                    self.reasoning,
+                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.new_str
+                )
+            }
+            // remove
+            (false, true) => {
+                write!(
+                    f,
+                    r#"# {}
+{}
+```
+<<<<<<< SEARCH
+{}
+=======
+>>>>>>> REPLACE
+```"#,
+                    self.reasoning,
+                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.old_str
+                )
+            }
+            _ => Ok(()),
+        }
     }
 }
 
