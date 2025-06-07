@@ -928,13 +928,40 @@ pub struct GenerateCodeOutput {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GenerationResult {
-    pub created_blocks: Vec<Block>,
-    pub modified_blocks: Vec<Block>,
-    pub removed_blocks: Vec<Block>,
+    // pub created_blocks: Vec<Block>,
+    // pub modified_blocks: Vec<Block>,
+    // pub removed_blocks: Vec<Block>,
     pub score: i32,
     pub selected_blocks: Vec<Block>,
+    pub edits: Option<Vec<EditInfo>>,
     // #[serde(skip_serializing_if = "Option::is_none")]
     // pub delta: Option<GenerationDelta>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EditInfo {
+    pub reasoning: String,
+    pub document_uri: String,
+    pub old_str: String,
+    pub new_str: String,
+}
+
+impl std::fmt::Display for EditInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"# {}
+{}
+```
+<<<<<<< SEARCH
+{}
+=======
+{}
+>>>>>>> REPLACE
+```"#,
+            self.reasoning, self.document_uri, self.old_str, self.new_str
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

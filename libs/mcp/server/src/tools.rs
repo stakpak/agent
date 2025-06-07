@@ -12,6 +12,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::secrets::{redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -316,7 +317,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         &self,
         #[tool(param)]
         #[schemars(
-            description = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify output file paths if you want to save the files to the filesystem."
+            description = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify the paths of the files to be created or modified if you want to save changes to the filesystem."
         )]
         prompt: String,
         #[tool(param)]
@@ -425,34 +426,15 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     )
                 })?;
 
-            // Group blocks by document_uri
-            let mut grouped_blocks: HashMap<String, Vec<&stakpak_api::Block>> = HashMap::new();
-            for block in &generation_result.created_blocks {
-                grouped_blocks
-                    .entry(block.document_uri.clone())
-                    .or_default()
-                    .push(block);
-            }
-
-            // Process each file
-            for (document_uri, mut blocks) in grouped_blocks {
-                // Sort blocks by start line number
-                blocks.sort_by(|a, b| a.start_point.row.cmp(&b.start_point.row));
-
-                // Concatenate the code blocks
-                let file_content = blocks
-                    .iter()
-                    .map(|block| block.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                // Strip file:/// prefix from document_uri to get the file path
-                let file_path = document_uri
-                    .strip_prefix("file:///")
-                    .unwrap_or(&document_uri);
+            for edit in generation_result.edits.unwrap_or(Vec::new()) {
+                let file_path = Path::new(
+                    edit.document_uri
+                        .strip_prefix("file:///")
+                        .unwrap_or(&edit.document_uri),
+                );
 
                 // Create parent directories if they don't exist
-                if let Some(parent) = Path::new(file_path).parent() {
+                if let Some(parent) = file_path.parent() {
                     if !parent.exists() {
                         if let Err(e) = fs::create_dir_all(parent) {
                             error!("Failed to create directory {}: {}", parent.display(), e);
@@ -460,40 +442,83 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                         }
                     }
                 }
-
-                // Write the file
-                let redacted_content =
-                    self.redact_and_store_secrets(&file_content, Some(file_path));
-                match fs::write(file_path, &file_content) {
-                    Ok(_) => {
-                        result_report.push_str(&format!(
-                            "Created file {}\n```\n{}\n```\n\n",
-                            file_path, redacted_content
-                        ));
-                    }
-                    Err(e) => {
-                        result_report.push_str(&format!(
-                            "Failed to create file {} with error: {}\n```\n{}\n```\n\n",
-                            file_path, e, redacted_content
-                        ));
+                // Check if file exists, if not create it
+                if !file_path.exists() {
+                    match fs::File::create(file_path) {
+                        Ok(_) => {
+                            result_report
+                                .push_str(&format!("Created new file: {}\n", file_path.display()));
+                        }
+                        Err(e) => {
+                            error!("Failed to create file {}: {}", file_path.display(), e);
+                            continue;
+                        }
                     }
                 }
-            }
 
-            // ignore modified blocks
-            for block in generation_result.modified_blocks {
-                result_report.push_str(&format!(
-                    "Ignored modified block:\n{}\n```\n{}\n```\n\n",
-                    block.document_uri, block.code
-                ));
-            }
+                let redacted_edit = self
+                    .redact_and_store_secrets(&edit.to_string(), Some(file_path.to_str().unwrap()));
 
-            // ignore removed blocks
-            for block in generation_result.removed_blocks {
-                result_report.push_str(&format!(
-                    "Ignored removed block:\n{}\n```\n{}\n```\n\n",
-                    block.document_uri, block.code
-                ));
+                if edit.old_str.is_empty() {
+                    // This is an addition to a file (appending content)
+                    match fs::OpenOptions::new()
+                        .write(true)
+                        .append(true)
+                        .open(file_path)
+                    {
+                        Ok(mut file) => {
+                            if let Err(e) = file.write_all(edit.new_str.as_bytes()) {
+                                error!("Failed to append to file {}: {}", file_path.display(), e);
+                                continue;
+                            }
+                            result_report
+                                .push_str(&format!("Applied append edit: \n{}\n\n", redacted_edit));
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to open file for appending {}: {}",
+                                file_path.display(),
+                                e
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    // This is a modification to a file (replacing content)
+                    // Read the current file content
+                    let current_content = match fs::read_to_string(file_path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            error!("Failed to read file {}: {}", file_path.display(), e);
+                            continue;
+                        }
+                    };
+
+                    // Verify that the file contains the old string
+                    if !current_content.contains(&edit.old_str) {
+                        error!(
+                            "Search string not found in file {}, skipping edit: \n{}",
+                            file_path.display(),
+                            edit
+                        );
+                        continue;
+                    }
+
+                    // Replace old content with new content
+                    let updated_content = current_content.replace(&edit.old_str, &edit.new_str);
+                    match fs::write(file_path, updated_content) {
+                        Ok(_) => {
+                            result_report.push_str(&format!(
+                                "Applied search and replace edit: \n{}\n\n",
+                                redacted_edit
+                            ));
+                        }
+                        Err(e) => {
+                            error!("Failed to write to file {}: {}", file_path.display(), e);
+                            continue;
+                        }
+                    }
+                }
             }
 
             Ok(CallToolResult::success(vec![Content::text(result_report)]))
