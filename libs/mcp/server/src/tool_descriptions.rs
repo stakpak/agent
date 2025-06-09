@@ -1,5 +1,3 @@
-/// Shared tool and parameter descriptions to avoid duplication across tool implementations
-
 // Tool descriptions
 pub const RUN_COMMAND_DESCRIPTION: &str = "A system command execution tool that allows running shell commands with full system access. 
 

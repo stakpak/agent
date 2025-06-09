@@ -25,30 +25,14 @@ pub enum ToolMode {
     Combined,
 }
 
-impl ToolMode {
-    /// Convert ToolMode to string representation
-    pub fn to_string(&self) -> String {
-        match self {
-            ToolMode::LocalOnly => "local".to_string(),
-            ToolMode::RemoteOnly => "remote".to_string(),
-            ToolMode::Combined => "combined".to_string(),
-        }
-    }
-
-    /// Create ToolMode from string
-    pub fn from_string(s: &str) -> Result<Self, String> {
-        match s.to_lowercase().as_str() {
-            "local" => Ok(ToolMode::LocalOnly),
-            "remote" => Ok(ToolMode::RemoteOnly),
-            "combined" => Ok(ToolMode::Combined),
-            _ => Err(format!("Invalid tool mode: {}", s)),
-        }
-    }
-}
-
 impl std::fmt::Display for ToolMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        let s = match self {
+            ToolMode::LocalOnly => "local",
+            ToolMode::RemoteOnly => "remote",
+            ToolMode::Combined => "combined",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -56,7 +40,12 @@ impl std::str::FromStr for ToolMode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_string(s)
+        match s.to_lowercase().as_str() {
+            "local" => Ok(ToolMode::LocalOnly),
+            "remote" => Ok(ToolMode::RemoteOnly),
+            "combined" => Ok(ToolMode::Combined),
+            _ => Err(format!("Invalid tool mode: {}", s)),
+        }
     }
 }
 
