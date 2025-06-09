@@ -6,7 +6,7 @@ use stakpak_api::{
     Client,
     models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
 };
-use stakpak_mcp_server::MCPServerConfig;
+use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -128,6 +128,10 @@ pub enum Commands {
         /// Disable secret redaction (WARNING: this will print secrets to the console)
         #[arg(long = "disable-secret-redaction", default_value_t = false)]
         disable_secret_redaction: bool,
+
+        /// Tool mode to use (local, remote, combined)
+        #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
+        tool_mode: ToolMode,
     },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
@@ -140,6 +144,7 @@ impl Commands {
         match self {
             Commands::Mcp {
                 disable_secret_redaction,
+                tool_mode,
             } => {
                 let bind_address = network::find_available_bind_address_descending().await?;
                 println!("MCP server started at http://{}", bind_address);
@@ -148,6 +153,7 @@ impl Commands {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
                         bind_address: bind_address.clone(),
+                        tool_mode,
                     },
                     None,
                 )
