@@ -23,9 +23,7 @@ pub async fn start_server(
         // Initialize gitleaks configuration in a background task to avoid blocking server startup
         tokio::spawn(async {
             match std::panic::catch_unwind(stakpak_shared::secrets::initialize_gitleaks_config) {
-                Ok(_rule_count) => {
-                    // Gitleaks rules initialized successfully
-                }
+                Ok(_rule_count) => {}
                 Err(_) => {
                     // Failed to initialize, will initialize on first use
                 }
@@ -33,7 +31,6 @@ pub async fn start_server(
         });
     }
 
-    // Create an instance of our counter router
     let service = StreamableHttpService::new(
         move || Tools::new(config.api.clone(), config.redact_secrets),
         LocalSessionManager::default().into(),
