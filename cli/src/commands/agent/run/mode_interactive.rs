@@ -14,7 +14,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::MCPServerConfig;
+use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
 use stakpak_tui::{InputEvent, OutputEvent};
 use uuid::Uuid;
@@ -47,6 +47,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 },
                 redact_secrets: config.redact_secrets,
                 bind_address,
+                tool_mode: ToolMode::Combined,
             },
             Some(shutdown_rx),
         )

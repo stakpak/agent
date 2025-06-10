@@ -8,7 +8,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::MCPServerConfig;
+use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 
@@ -36,6 +36,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 },
                 bind_address,
                 redact_secrets,
+                tool_mode: ToolMode::Combined,
             },
             None,
         )
