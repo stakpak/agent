@@ -22,12 +22,12 @@ brew install stakpak
 
 ### Binary Release
 
-Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/cli/releases).
+Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/agent/releases).
 
 ### Docker
 This image includes the most popular CLI tools the agent might need for everyday DevOps tasks like docker, kubectl, aws cli, gcloud, azure cli, and more.
 ```bash
-docker pull ghcr.io/stakpak/cli:latest
+docker pull ghcr.io/stakpak/agent:latest
 ```
 
 ## Usage
@@ -69,12 +69,12 @@ stakpak -c <checkpoint-id>
 
 #### Start Stakpak Agent TUI with Docker
 ```bash
-docker run -it --entrypoint stakpak ghcr.io/stakpak/cli:latest
+docker run -it --entrypoint stakpak ghcr.io/stakpak/agent:latest
 # for containerization tasks (you need to mount the Docker socket)
 docker run -it \
    -v "/var/run/docker.sock":"/var/run/docker.sock" \
    -v "{your app path}":"/agent/" \
-   --entrypoint stakpak ghcr.io/stakpak/cli:latest
+   --entrypoint stakpak ghcr.io/stakpak/agent:latest
 ```
 
 ## Keyboard Shortcuts
