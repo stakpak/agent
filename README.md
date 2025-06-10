@@ -116,10 +116,10 @@ The local MCP tools provide enhanced security for working with sensitive data:
 #### Start MCP Server
 
 ```bash
-# Local tools only (most secure, no API key needed)
+# Local tools only (no API key required)
 stakpak mcp --tool-mode local
 
-# Remote tools only (AI features)
+# Remote tools only (AI tools optimized for DevOps)
 stakpak mcp --tool-mode remote
 
 # Combined mode (default - all tools)
