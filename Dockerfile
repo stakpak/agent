@@ -79,4 +79,3 @@ WORKDIR /agent/
 RUN groupadd -r docker
 
 ENTRYPOINT ["/usr/local/bin/stakpak"]
-CMD ["--help"]
