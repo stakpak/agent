@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
   # pull_request:
   #   branches: [main]
 
@@ -26,9 +26,6 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: stakpak-linux-x86_64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact_name: stakpak-linux-aarch64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: stakpak-darwin-x86_64
@@ -93,7 +90,6 @@ jobs:
         with:
           files: |
             stakpak-linux-x86_64/stakpak-linux-x86_64.tar.gz
-            stakpak-linux-aarch64/stakpak-linux-aarch64.tar.gz
             stakpak-darwin-x86_64/stakpak-darwin-x86_64.tar.gz
             stakpak-darwin-aarch64/stakpak-darwin-aarch64.tar.gz
             stakpak-windows-x86_64/stakpak-windows-x86_64.zip
@@ -151,13 +147,11 @@ jobs:
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-x86_64.tar.gz" -o stakpak-darwin-x86_64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz" -o stakpak-darwin-aarch64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz" -o stakpak-linux-x86_64.tar.gz
-          curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-aarch64.tar.gz" -o stakpak-linux-aarch64.tar.gz
-          
+
           SHA256_DARWIN_X64=$(sha256sum stakpak-darwin-x86_64.tar.gz | cut -d ' ' -f 1)
           SHA256_DARWIN_ARM=$(sha256sum stakpak-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
           SHA256_LINUX_X64=$(sha256sum stakpak-linux-x86_64.tar.gz | cut -d ' ' -f 1)
-          SHA256_LINUX_ARM=$(sha256sum stakpak-linux-aarch64.tar.gz | cut -d ' ' -f 1)
-          
+
           cat > stakpak.rb << EOF
           class Stakpak < Formula
             desc "Stakpak CLI tool"
@@ -175,13 +169,8 @@ jobs:
             end
             
             on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-aarch64.tar.gz"
-                sha256 "${SHA256_LINUX_ARM}"
-              else
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz"
-                sha256 "${SHA256_LINUX_X64}"
-              end
+              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz"
+              sha256 "${SHA256_LINUX_X64}"
             end
             
             def install
@@ -189,7 +178,7 @@ jobs:
             end
           end
           EOF
-          
+
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add stakpak.rb
