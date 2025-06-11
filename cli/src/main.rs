@@ -1,6 +1,5 @@
-use std::{env, path::Path};
-
 use clap::Parser;
+use std::{env, io::Write, path::Path};
 
 mod commands;
 mod config;
@@ -85,82 +84,113 @@ async fn main() {
     }
 
     match AppConfig::load() {
-        Ok(config) => match cli.command {
-            Some(command) => {
-                let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
-                match command.run(config).await {
-                    Ok(_) => {}
+        Ok(mut config) => {
+            if config.api_key.is_none() {
+                println!();
+                println!("Stakpak API Key not found!");
+                println!("1. Login to Stakpak from here: https://stakpak.dev/auth/signin");
+                println!("2. Go to your profile in the top right corner, and click on 'API Keys'");
+                println!("3. Create a new API Key, and copy it");
+                print!("Enter your API Key: ");
+                if let Err(e) = std::io::stdout().flush() {
+                    eprintln!("Failed to flush stdout: {}", e);
+                    std::process::exit(1);
+                }
+
+                let api_key = match rpassword::read_password() {
+                    Ok(key) => key,
                     Err(e) => {
-                        eprintln!("Ops! something went wrong: {}", e);
+                        eprintln!("\nFailed to read API key: {}", e);
                         std::process::exit(1);
+                    }
+                };
+
+                let mut updated_config = config.clone();
+                updated_config.api_key = Some(api_key.trim().to_string());
+                if let Err(e) = updated_config.save() {
+                    eprintln!("Failed to save config: {}", e);
+                }
+                println!("API Key saved successfully!");
+
+                config = updated_config;
+            }
+            match cli.command {
+                Some(command) => {
+                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    match command.run(config).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Ops! something went wrong: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => {
+                    let local_context = analyze_local_context().await.ok();
+
+                    match (cli.r#async, cli.print || cli.approve) {
+                        // Async mode: run continuously until no more tool calls
+                        (true, _) => match agent::run::run_async(
+                            config,
+                            RunAsyncConfig {
+                                prompt: cli.prompt.unwrap_or_default(),
+                                verbose: cli.verbose,
+                                checkpoint_id: cli.checkpoint_id,
+                                local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("Ops! something went wrong: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+
+                        // Non-interactive mode: run one step at a time
+                        (false, true) => match agent::run::run_non_interactive(
+                            config,
+                            RunNonInteractiveConfig {
+                                prompt: cli.prompt.unwrap_or_default(),
+                                approve: cli.approve,
+                                verbose: cli.verbose,
+                                checkpoint_id: cli.checkpoint_id,
+                                local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("Ops! something went wrong: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+
+                        // Interactive mode: run in TUI
+                        (false, false) => match agent::run::run_interactive(
+                            config,
+                            RunInteractiveConfig {
+                                checkpoint_id: cli.checkpoint_id,
+                                local_context,
+                                redact_secrets: !cli.disable_secret_redaction,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("Ops! something went wrong: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
                     }
                 }
             }
-            None => {
-                let local_context = analyze_local_context().await.ok();
-
-                match (cli.r#async, cli.print || cli.approve) {
-                    // Async mode: run continuously until no more tool calls
-                    (true, _) => match agent::run::run_async(
-                        config,
-                        RunAsyncConfig {
-                            prompt: cli.prompt.unwrap_or_default(),
-                            verbose: cli.verbose,
-                            checkpoint_id: cli.checkpoint_id,
-                            local_context,
-                            redact_secrets: !cli.disable_secret_redaction,
-                        },
-                    )
-                    .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Ops! something went wrong: {}", e);
-                            std::process::exit(1);
-                        }
-                    },
-
-                    // Non-interactive mode: run one step at a time
-                    (false, true) => match agent::run::run_non_interactive(
-                        config,
-                        RunNonInteractiveConfig {
-                            prompt: cli.prompt.unwrap_or_default(),
-                            approve: cli.approve,
-                            verbose: cli.verbose,
-                            checkpoint_id: cli.checkpoint_id,
-                            local_context,
-                            redact_secrets: !cli.disable_secret_redaction,
-                        },
-                    )
-                    .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Ops! something went wrong: {}", e);
-                            std::process::exit(1);
-                        }
-                    },
-
-                    // Interactive mode: run in TUI
-                    (false, false) => match agent::run::run_interactive(
-                        config,
-                        RunInteractiveConfig {
-                            checkpoint_id: cli.checkpoint_id,
-                            local_context,
-                            redact_secrets: !cli.disable_secret_redaction,
-                        },
-                    )
-                    .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Ops! something went wrong: {}", e);
-                            std::process::exit(1);
-                        }
-                    },
-                }
-            }
-        },
+        }
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
 }
