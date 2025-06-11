@@ -7,6 +7,7 @@ use crate::services::helper_block::{
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
+use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -123,7 +124,9 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            state.messages.push(Message::info(line, None));
+            state
+                .messages
+                .push(Message::info(line, Some(Style::default().fg(Color::Gray))));
             adjust_scroll(state, message_area_height, message_area_width);
         }
 

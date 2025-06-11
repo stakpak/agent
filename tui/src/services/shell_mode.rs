@@ -209,7 +209,7 @@ pub fn run_pty_command(
 
         // Read output - buffer for partial reads
         let mut reader = pair.master.try_clone_reader().unwrap();
-        
+
         let mut buffer = vec![0u8; 4096];
         let mut accumulated = Vec::new();
         loop {
@@ -217,7 +217,7 @@ pub fn run_pty_command(
                 Ok(0) => break, // EOF
                 Ok(n) => {
                     accumulated.extend_from_slice(&buffer[..n]);
-                    
+
                     // Process accumulated data
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
                         // Look for password prompt patterns
@@ -229,9 +229,11 @@ pub fn run_pty_command(
                             // Process complete lines
                             for line in text.lines() {
                                 if line.to_lowercase().contains("password") {
-                                    let _ = output_tx.blocking_send(ShellEvent::InputRequest(line.to_string()));
+                                    let _ = output_tx
+                                        .blocking_send(ShellEvent::InputRequest(line.to_string()));
                                 } else {
-                                    let _ = output_tx.blocking_send(ShellEvent::Output(line.to_string()));
+                                    let _ = output_tx
+                                        .blocking_send(ShellEvent::Output(line.to_string()));
                                 }
                             }
                             accumulated.clear();
@@ -243,13 +245,13 @@ pub fn run_pty_command(
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 Err(e) => {
-                    let _ = output_tx.blocking_send(ShellEvent::Error(format!("Read error: {}", e)));
+                    let _ =
+                        output_tx.blocking_send(ShellEvent::Error(format!("Read error: {}", e)));
                     break;
                 }
             }
         }
 
-      
         // Wait for completion
         match child.wait() {
             Ok(status) => {

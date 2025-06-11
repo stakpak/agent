@@ -270,8 +270,12 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 }
 
 fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
-    // Make a copy of input to avoid borrowing issues
-    let input = state.input.clone();
+    // Mask input if in shell mode and waiting for shell input (password)
+    let input = if state.show_shell_mode && state.waiting_for_shell_input {
+        "*".repeat(state.input.chars().count())
+    } else {
+        state.input.clone()
+    };
     let available_width = area.width.saturating_sub(4) as usize; // -4 for borders and padding
 
     // Ensure the cursor position is valid
