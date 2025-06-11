@@ -92,8 +92,18 @@ async fn main() {
                 println!("2. Go to your profile in the top right corner, and click on 'API Keys'");
                 println!("3. Create a new API Key, and copy it");
                 print!("Enter your API Key: ");
-                std::io::stdout().flush().unwrap();
-                let api_key = rpassword::read_password().expect("Failed to read API key");
+                if let Err(e) = std::io::stdout().flush() {
+                    eprintln!("Failed to flush stdout: {}", e);
+                    std::process::exit(1);
+                }
+
+                let api_key = match rpassword::read_password() {
+                    Ok(key) => key,
+                    Err(e) => {
+                        eprintln!("\nFailed to read API key: {}", e);
+                        std::process::exit(1);
+                    }
+                };
 
                 let mut updated_config = config.clone();
                 updated_config.api_key = Some(api_key.trim().to_string());
