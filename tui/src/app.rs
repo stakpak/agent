@@ -1,10 +1,16 @@
+use crate::services::helper_block::push_error_message;
 use crate::services::message::Message;
 use ratatui::style::Style;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+use crate::services::shell_mode::{
+    ShellCommand, ShellEvent, run_background_shell_command, run_pty_command,
+};
 
 #[derive(Debug)]
 pub struct SessionInfo {
@@ -46,6 +52,10 @@ pub struct AppState {
     pub pending_bash_message_id: Option<Uuid>, // New field to track pending bash message
     pub streaming_tool_results: HashMap<Uuid, String>,
     pub streaming_tool_result_id: Option<Uuid>,
+    pub show_shell_mode: bool,
+    pub active_shell_command: Option<ShellCommand>,
+    pub shell_mode_input: String,
+    pub waiting_for_shell_input: bool,
 }
 
 #[derive(Debug)]
@@ -84,6 +94,10 @@ pub enum InputEvent {
     DialogConfirm,
     DialogCancel,
     Tab,
+    ShellOutput(String),
+    ShellError(String),
+    ShellInputRequest(String),
+    ShellCompleted(i32),
 }
 
 #[derive(Debug)]
@@ -164,6 +178,63 @@ impl AppState {
             pending_bash_message_id: None, // Initialize new field
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
+            show_shell_mode: false,
+            active_shell_command: None,
+            shell_mode_input: String::new(),
+            waiting_for_shell_input: false,
         }
+    }
+
+    pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
+        let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
+
+        // Show the command being run
+        self.messages
+            .push(Message::info(format!("$ {}", command), None));
+
+        // Use PTY for sudo commands
+        let shell_cmd = if command.contains("sudo") || command.contains("ssh") {
+            #[cfg(unix)]
+            {
+                match run_pty_command(command.clone(), shell_tx) {
+                    Ok(cmd) => cmd,
+                    Err(e) => {
+                        push_error_message(self, &format!("Failed to run command: {}", e));
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                run_background_shell_command(command.clone(), shell_tx)
+            }
+        } else {
+            run_background_shell_command(command.clone(), shell_tx)
+        };
+
+        // Store the command handle
+        self.active_shell_command = Some(shell_cmd.clone());
+
+        // Spawn task to handle shell events and convert to InputEvents
+        let input_tx = input_tx.clone();
+        tokio::spawn(async move {
+            while let Some(event) = shell_rx.recv().await {
+                match event {
+                    ShellEvent::Output(line) => {
+                        let _ = input_tx.send(InputEvent::ShellOutput(line)).await;
+                    }
+                    ShellEvent::Error(line) => {
+                        let _ = input_tx.send(InputEvent::ShellError(line)).await;
+                    }
+                    ShellEvent::InputRequest(prompt) => {
+                        let _ = input_tx.send(InputEvent::ShellInputRequest(prompt)).await;
+                    }
+                    ShellEvent::Completed(code) => {
+                        let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
+                        break;
+                    }
+                }
+            }
+        });
     }
 }

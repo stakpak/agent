@@ -31,14 +31,26 @@ pub async fn run_tui(
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
+    let internal_tx_thread = internal_tx.clone();
     std::thread::spawn(move || {
         loop {
             if let Ok(event) = crossterm::event::read() {
                 if let Some(event) = crate::event::map_crossterm_event_to_input_event(event) {
-                    if internal_tx.blocking_send(event).is_err() {
+                    if internal_tx_thread.blocking_send(event).is_err() {
                         break;
                     }
                 }
+            }
+        }
+    });
+
+    let (shell_tx, mut shell_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
+
+    tokio::spawn({
+        let internal_tx = internal_tx.clone();
+        async move {
+            while let Some(event) = shell_rx.recv().await {
+                let _ = internal_tx.send(event).await;
             }
         }
     });
@@ -51,88 +63,97 @@ pub async fn run_tui(
     let mut should_quit = false;
     loop {
         tokio::select! {
-            Some(event) = input_rx.recv() => {
-                if let InputEvent::RunToolCall(tool_call) = &event {
-                    services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size);
-                    terminal.draw(|f| view::view(f, &state))?;
-                    continue;
-                }
-                if let InputEvent::ToolResult(ref tool_call_result) = event {
-                    let tool_call = tool_call_result.call.clone();
-                    let result = tool_call_result.result.clone();
-                    services::update::clear_streaming_tool_results(&mut state);
-                    services::bash_block::render_result_block(&tool_call, &result, &mut state);
-                }
-                if let InputEvent::Quit = event { should_quit = true; }
-                else {
-                    let term_size = terminal.size()?;
-                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
-                    let input_height = 3;
-                    let margin_height = 2;
-                    let dropdown_showing = state.show_helper_dropdown
-                        && !state.filtered_helpers.is_empty()
-                        && state.input.starts_with('/');
-                    let dropdown_height = if dropdown_showing {
-                        state.filtered_helpers.len() as u16
-                    } else {
-                        0
-                    };
-                    let hint_height = if dropdown_showing { 0 } else { margin_height };
-                    let outer_chunks = ratatui::layout::Layout::default()
-                        .direction(ratatui::layout::Direction::Vertical)
-                        .constraints([
-                            ratatui::layout::Constraint::Min(1),
-                            ratatui::layout::Constraint::Length(input_height as u16),
-                            ratatui::layout::Constraint::Length(dropdown_height),
-                            ratatui::layout::Constraint::Length(hint_height),
-                        ])
-                        .split(term_rect);
-                    let message_area_width = outer_chunks[0].width as usize;
-                    let message_area_height = outer_chunks[0].height as usize;
-                    services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size);
-                }
-            }
-            Some(event) = internal_rx.recv() => {
-                if let InputEvent::Quit = event { should_quit = true; }
-                else {
-                    let term_size = terminal.size()?;
-                    let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
-                    let input_height = 3;
-                    let margin_height = 2;
-                    let dropdown_showing = state.show_helper_dropdown
-                        && !state.filtered_helpers.is_empty()
-                        && state.input.starts_with('/');
-                    let dropdown_height = if dropdown_showing {
-                        state.filtered_helpers.len() as u16
-                    } else {
-                        0
-                    };
-                    let hint_height = if dropdown_showing { 0 } else { margin_height };
-                    let outer_chunks = ratatui::layout::Layout::default()
-                        .direction(ratatui::layout::Direction::Vertical)
-                        .constraints([
-                            ratatui::layout::Constraint::Min(1),
-                            ratatui::layout::Constraint::Length(input_height as u16),
-                            ratatui::layout::Constraint::Length(dropdown_height),
-                            ratatui::layout::Constraint::Length(hint_height),
-                        ])
-                        .split(term_rect);
-                    let message_area_width = outer_chunks[0].width as usize;
-                    let message_area_height = outer_chunks[0].height as usize;
-                    if let InputEvent::InputSubmitted = event {
-                        // if input starts with / don't submit output event
-                        if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
-                            let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
-                        }
-                    }
-                    services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size);
-                }
-            }
-            _ = spinner_interval.tick(), if state.loading => {
-                state.spinner_frame = state.spinner_frame.wrapping_add(1);
-                terminal.draw(|f| view::view(f, &state))?;
-            }
+
+               Some(event) = input_rx.recv() => {
+                   if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
+                   InputEvent::ShellInputRequest(_) | InputEvent::ShellCompleted(_)) {
+            // These are shell events, forward them to the shell channel
+            let _ = shell_tx.send(event).await;
+            continue;
         }
+                   if let InputEvent::RunToolCall(tool_call) = &event {
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size, &shell_tx);
+                       terminal.draw(|f| view::view(f, &state))?;
+                       continue;
+                   }
+                   if let InputEvent::ToolResult(ref tool_call_result) = event {
+                       let tool_call = tool_call_result.call.clone();
+                       let result = tool_call_result.result.clone();
+                       services::update::clear_streaming_tool_results(&mut state);
+                       services::bash_block::render_result_block(&tool_call, &result, &mut state);
+                   }
+
+                   if let InputEvent::Quit = event { should_quit = true; }
+                   else {
+                       let term_size = terminal.size()?;
+                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       let input_height = 3;
+                       let margin_height = 2;
+                       let dropdown_showing = state.show_helper_dropdown
+                           && !state.filtered_helpers.is_empty()
+                           && state.input.starts_with('/');
+                       let dropdown_height = if dropdown_showing {
+                           state.filtered_helpers.len() as u16
+                       } else {
+                           0
+                       };
+                       let hint_height = if dropdown_showing { 0 } else { margin_height };
+                       let outer_chunks = ratatui::layout::Layout::default()
+                           .direction(ratatui::layout::Direction::Vertical)
+                           .constraints([
+                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Length(input_height as u16),
+                               ratatui::layout::Constraint::Length(dropdown_height),
+                               ratatui::layout::Constraint::Length(hint_height),
+                           ])
+                           .split(term_rect);
+                       let message_area_width = outer_chunks[0].width as usize;
+                       let message_area_height = outer_chunks[0].height as usize;
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_tx);
+                   }
+               }
+               Some(event) = internal_rx.recv() => {
+                   if let InputEvent::Quit = event { should_quit = true; }
+                   else {
+                       let term_size = terminal.size()?;
+                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       let input_height = 3;
+                       let margin_height = 2;
+                       let dropdown_showing = state.show_helper_dropdown
+                           && !state.filtered_helpers.is_empty()
+                           && state.input.starts_with('/');
+                       let dropdown_height = if dropdown_showing {
+                           state.filtered_helpers.len() as u16
+                       } else {
+                           0
+                       };
+                       let hint_height = if dropdown_showing { 0 } else { margin_height };
+                       let outer_chunks = ratatui::layout::Layout::default()
+                           .direction(ratatui::layout::Direction::Vertical)
+                           .constraints([
+                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Length(input_height as u16),
+                               ratatui::layout::Constraint::Length(dropdown_height),
+                               ratatui::layout::Constraint::Length(hint_height),
+                           ])
+                           .split(term_rect);
+                       let message_area_width = outer_chunks[0].width as usize;
+                       let message_area_height = outer_chunks[0].height as usize;
+                       if let InputEvent::InputSubmitted = event {
+                           if state.show_shell_mode && !state.waiting_for_shell_input {
+                           } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
+                               let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
+                           }
+                       }
+
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_tx);
+                   }
+               }
+               _ = spinner_interval.tick(), if state.loading => {
+                   state.spinner_frame = state.spinner_frame.wrapping_add(1);
+                   terminal.draw(|f| view::view(f, &state))?;
+               }
+           }
         if should_quit {
             break;
         }

@@ -427,15 +427,18 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             ),
         ]));
     }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if state.show_shell_mode {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
 
     // Render the input widget
     let input_widget = Paragraph::new(lines)
         .style(Style::default())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
+        .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     f.render_widget(input_widget, area);

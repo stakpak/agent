@@ -20,6 +20,7 @@ pub fn update(
     message_area_width: usize,
     output_tx: &Sender<OutputEvent>,
     terminal_size: Size,
+    shell_tx: &Sender<InputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -56,7 +57,7 @@ pub fn update(
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
-            handle_input_submitted(state, message_area_height, output_tx);
+            handle_input_submitted(state, message_area_height, output_tx, shell_tx);
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
@@ -121,8 +122,31 @@ pub fn update(
             state.loading_type = LoadingType::Llm;
             state.show_sessions_dialog = true;
         }
-        InputEvent::Error(error) => {
-            push_error_message(state, &error);
+        InputEvent::ShellOutput(line) => {
+            state.messages.push(Message::info(line, None));
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellError(line) => {
+            push_error_message(state, &line);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellInputRequest(prompt) => {
+            render_system_message(state, &format!("{}", prompt));
+            state.waiting_for_shell_input = true;
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellCompleted(code) => {
+            let msg = if code == 0 {
+                "✓ Command completed successfully"
+            } else {
+                &format!("✗ Command failed with exit code: {}", code)
+            };
+            render_system_message(state, &msg);
+            state.active_shell_command = None;
+            adjust_scroll(state, message_area_height, message_area_width);
         }
         _ => {}
     }
@@ -160,6 +184,14 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     let pos = state.cursor_position.min(state.input.len());
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
+
+    if state.input.starts_with('!') {
+        state.input = "".to_string();
+        state.cursor_position = 0;
+        state.show_shell_mode = !state.show_shell_mode;
+        state.show_helper_dropdown = false;
+        return;
+    }
 
     if state.input.starts_with('/') {
         state.show_helper_dropdown = true;
@@ -237,8 +269,39 @@ fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
     output_tx: &Sender<OutputEvent>,
+    shell_tx: &Sender<InputEvent>,
 ) {
     let input_height = 3;
+    if state.show_shell_mode {
+        // Check if we're waiting for shell input (like password)
+        if state.waiting_for_shell_input {
+            let input = state.input.clone();
+            state.input.clear();
+            state.cursor_position = 0;
+            state.waiting_for_shell_input = false;
+
+            // Send the password to the shell command
+            if let Some(cmd) = &state.active_shell_command {
+                let stdin_tx = cmd.stdin_tx.clone();
+                tokio::spawn(async move {
+                    let _ = stdin_tx.send(input).await;
+                });
+            }
+            return;
+        }
+
+        // Otherwise, it's a new shell command
+        if !state.input.trim().is_empty() {
+            let command = state.input.clone();
+            state.input.clear();
+            state.cursor_position = 0;
+            state.show_helper_dropdown = false;
+
+            // Run the shell command with the shell event channel
+            state.run_shell_command(command, shell_tx);
+        }
+        return;
+    }
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
