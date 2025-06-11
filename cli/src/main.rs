@@ -84,7 +84,7 @@ async fn main() {
     }
 
     match AppConfig::load() {
-        Ok(config) => {
+        Ok(mut config) => {
             if config.api_key.is_none() {
                 println!();
                 println!("Stakpak API Key not found!");
@@ -111,7 +111,8 @@ async fn main() {
                     eprintln!("Failed to save config: {}", e);
                 }
                 println!("API Key saved successfully!");
-                std::process::exit(0);
+
+                config = updated_config;
             }
             match cli.command {
                 Some(command) => {
