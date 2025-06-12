@@ -155,8 +155,19 @@ pub fn render_bash_block(
     )
 }
 
-pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppState) {
+pub fn render_result_block(
+    tool_call: &ToolCall,
+    result: &str,
+    state: &mut AppState,
+    terminal_size: Size,
+) {
     let mut lines = Vec::new();
+
+    // Get terminal width for wrapping calculation
+    let terminal_width: usize = terminal_size.width as usize;
+    let prefix_width = 6; // "    └ " or "      "
+    let available_width = terminal_width.saturating_sub(prefix_width);
+
     // Header line with approved colors (green bullet, white text)
     lines.push(Line::from(vec![
         Span::styled(
@@ -177,17 +188,26 @@ pub fn render_result_block(tool_call: &ToolCall, result: &str, state: &mut AppSt
         ),
     ]));
 
-    // Show the command output
+    // Show the command output with proper wrapping
     let output_pad = "    "; // 4 spaces for indentation
     for (i, line) in result.lines().enumerate() {
         let prefix = if i == 0 { "└ " } else { "  " };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{output_pad}{prefix}"),
-                Style::default().fg(Color::Gray),
-            ),
-            Span::styled(line, Style::default().fg(Color::Gray)),
-        ]));
+
+        // Wrap long lines
+        let wrapped_lines = wrap_text(line, available_width);
+
+        for (j, wrapped_line) in wrapped_lines.iter().enumerate() {
+            let line_prefix = if j == 0 {
+                format!("{output_pad}{prefix}")
+            } else {
+                format!("{output_pad}  ") // Continue indent for wrapped lines
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(line_prefix, Style::default().fg(Color::Gray)),
+                Span::styled(wrapped_line.clone(), Style::default().fg(Color::Gray)),
+            ]));
+        }
     }
 
     let mut owned_lines: Vec<Line<'static>> = lines
