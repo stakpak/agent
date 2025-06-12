@@ -1,9 +1,9 @@
-# Stakpak Agent CLI
+# Stakpak Agent
 
-A CLI for the Stakpak API. Manage all your DevOps flows and configurations in one place, with AI-agents helping you out.
+A TUI for an agent designed for the gritty parts of software development: DevOps work. It has everything you'd expect from a Coding Agent, except that it's exceptionally good at writing Terraform code, building containers, and analysing the security of your cloud account (and much more!)
 
 > **Warning**
-> This CLI tool is under heavy development and breaking changes should be expected. Use with caution 🚧
+> This CLI tool is under heavy development, and breaking changes should be expected. Use with caution 🚧
 
 <img src="assets/TUIOverview.jpeg" width="800">
 
