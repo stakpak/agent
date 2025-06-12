@@ -38,7 +38,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
+    let dialog_height = if state.show_sessions_dialog {
+        11
+    } else if state.is_dialog_open {
+        3
+    } else {
+        0
+    };
     let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
         1
     } else {
