@@ -1,4 +1,4 @@
-use crate::services::helper_block::push_error_message;
+use crate::services::helper_block::{push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::{
@@ -188,11 +188,7 @@ impl AppState {
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
 
-        // Show the command being run
-        self.messages.push(Message::info(
-            format!("$ {}", command),
-            Some(Style::default().fg(Color::Gray)),
-        ));
+        push_styled_message(self, &command, Color::White, "! ", Color::Red);
 
         // Use PTY for sudo commands
         let shell_cmd = if command.contains("sudo") || command.contains("ssh") {

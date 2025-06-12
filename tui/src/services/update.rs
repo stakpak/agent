@@ -3,11 +3,12 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_status_message, render_system_message,
+    push_error_message, push_help_message, push_status_message, push_styled_message,
+    render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
-use ratatui::style::{Color, Style};
+use ratatui::style::Color;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -124,9 +125,7 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            state
-                .messages
-                .push(Message::info(line, Some(Style::default().fg(Color::Gray))));
+            push_styled_message(state, &line, Color::Gray, "", Color::Gray);
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
@@ -136,18 +135,19 @@ pub fn update(
         }
 
         InputEvent::ShellInputRequest(prompt) => {
-            render_system_message(state, &format!("{}", prompt));
+            push_styled_message(state, &prompt, Color::Gray, "?! ", Color::Yellow);
             state.waiting_for_shell_input = true;
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
         InputEvent::ShellCompleted(code) => {
             let msg = if code == 0 {
-                "✓ Command completed successfully"
+                " Command completed successfully"
             } else {
-                &format!("✗ Command failed with exit code: {}", code)
+                &format!(" Command failed with exit code: {}", code)
             };
-            render_system_message(state, &msg);
+            let icon: &'static str = if code == 0 { " ✓" } else { " ✗" };
+            push_styled_message(state, &msg, Color::Gray, icon, Color::Green);
             state.active_shell_command = None;
             adjust_scroll(state, message_area_height, message_area_width);
         }

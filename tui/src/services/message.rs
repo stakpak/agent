@@ -71,6 +71,13 @@ impl Message {
             content: MessageContent::Markdown(text.into()),
         }
     }
+
+    pub fn plain_text(text: impl Into<String>) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::Plain(text.into(), Style::default()),
+        }
+    }
 }
 
 pub fn get_wrapped_plain_lines<'a>(
