@@ -46,6 +46,7 @@ pub struct AppState {
     pub pending_bash_message_id: Option<Uuid>, // New field to track pending bash message
     pub streaming_tool_results: HashMap<Uuid, String>,
     pub streaming_tool_result_id: Option<Uuid>,
+    pub is_pasting: bool,
 }
 
 #[derive(Debug)]
@@ -84,6 +85,7 @@ pub enum InputEvent {
     DialogConfirm,
     DialogCancel,
     Tab,
+    HandlePaste(String),
 }
 
 #[derive(Debug)]
@@ -164,6 +166,7 @@ impl AppState {
             pending_bash_message_id: None, // Initialize new field
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
+            is_pasting: false,
         }
     }
 }

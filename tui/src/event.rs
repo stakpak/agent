@@ -31,6 +31,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             _ => None,
         },
         Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),
+        Event::Paste(p) => Some(InputEvent::HandlePaste(p)),
         _ => None,
     }
 }
