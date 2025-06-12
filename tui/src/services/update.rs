@@ -147,7 +147,7 @@ pub fn update(
                 &format!(" Command failed with exit code: {}", code)
             };
             let icon: &'static str = if code == 0 { " ✓" } else { " ✗" };
-            push_styled_message(state, &msg, Color::Gray, icon, Color::Green);
+            push_styled_message(state, msg, Color::Gray, icon, Color::Green);
             state.active_shell_command = None;
             adjust_scroll(state, message_area_height, message_area_width);
         }

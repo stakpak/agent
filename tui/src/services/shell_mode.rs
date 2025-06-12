@@ -185,7 +185,16 @@ pub fn run_pty_command(
         };
 
         // Take the writer for stdin
-        let mut writer = pair.master.take_writer().unwrap();
+        let mut writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = output_tx.blocking_send(ShellEvent::Error(format!(
+                    "Failed to get PTY writer: {}",
+                    e
+                )));
+                return;
+            }
+        };
 
         // Handle stdin in a separate thread
         std::thread::spawn(move || {
@@ -195,8 +204,7 @@ pub fn run_pty_command(
                     eprintln!("Failed to write to PTY: {}", e);
                     break;
                 }
-                // Send newline separately
-                if let Err(e) = write!(writer, "\n") {
+                if let Err(e) = writeln!(writer) {
                     eprintln!("Failed to write newline to PTY: {}", e);
                     break;
                 }
@@ -208,7 +216,16 @@ pub fn run_pty_command(
         });
 
         // Read output - buffer for partial reads
-        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = output_tx.blocking_send(ShellEvent::Error(format!(
+                    "Failed to clone PTY reader: {}",
+                    e
+                )));
+                return;
+            }
+        };
 
         let mut buffer = vec![0u8; 4096];
         let mut accumulated = Vec::new();
