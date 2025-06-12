@@ -1,6 +1,6 @@
 # Stakpak Agent
 
-A TUI for an agent designed for the gritty parts of software development: DevOps work. It has everything you'd expect from a Coding Agent, except that it's exceptionally good at writing Terraform code, building containers, and analysing the security of your cloud account (and much more!)
+A TUI for an agent designed for the grittiest parts of software development: DevOps work. It has everything you'd expect from a Coding Agent, except that it's exceptionally good at writing Terraform code, building containers, and analysing the security of your cloud account (and much more!)
 
 > **Warning**
 > This CLI tool is under heavy development, and breaking changes should be expected. Use with caution 🚧
