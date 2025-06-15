@@ -255,3 +255,16 @@ pub fn push_styled_message(
     ]);
     state.messages.push(Message::styled(line));
 }
+
+pub fn push_shell_message(state: &mut AppState) {
+    let msg = format!(
+        "A terminal is required to run this command since it contains sudo or ssh, type '!' to activate shell mode or press 'Esc' to cancel"
+    );
+    push_styled_message(
+        state,
+        &msg,
+        Color::Rgb(160, 92, 158),
+        "! ",
+        Color::Rgb(160, 92, 158),
+    );
+}
