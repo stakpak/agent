@@ -21,6 +21,7 @@ pub enum MessageContent {
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
+    PlainText(String),
     BashBubble {
         title: String,
         content: Vec<String>,
@@ -75,7 +76,7 @@ impl Message {
     pub fn plain_text(text: impl Into<String>) -> Self {
         Message {
             id: Uuid::new_v4(),
-            content: MessageContent::Plain(text.into(), Style::default()),
+            content: MessageContent::PlainText(text.into()),
         }
     }
 }
@@ -203,6 +204,9 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
             }
             MessageContent::Markdown(markdown) => {
                 all_lines.extend(get_wrapped_markdown_lines(markdown, width));
+            }
+            MessageContent::PlainText(text) => {
+                all_lines.push((Line::from(vec![Span::styled(text, Style::default())]), Style::default()));
             }
             MessageContent::BashBubble {
                 title,

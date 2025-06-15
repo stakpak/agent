@@ -125,7 +125,7 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            push_styled_message(state, &line, Color::Gray, "", Color::Gray);
+            state.messages.push(Message::plain_text(line));
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
@@ -140,14 +140,14 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
-        InputEvent::ShellCompleted(code) => {
-            let msg = if code == 0 {
-                " Command completed successfully"
-            } else {
-                &format!(" Command failed with exit code: {}", code)
-            };
-            let icon: &'static str = if code == 0 { " ✓" } else { " ✗" };
-            push_styled_message(state, msg, Color::Gray, icon, Color::Green);
+        InputEvent::ShellCompleted(_code) => {
+            // let msg = if code == 0 {
+            //     " Command completed successfully"
+            // } else {
+            //     &format!(" Command failed with exit code: {}", code)
+            // };
+            // let icon: &'static str = if code == 0 { " ✓" } else { " ✗" };
+            // push_styled_message(state, msg, Color::Gray, icon, Color::Green);
             state.active_shell_command = None;
             adjust_scroll(state, message_area_height, message_area_width);
         }

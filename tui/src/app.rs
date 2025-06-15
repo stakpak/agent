@@ -188,7 +188,7 @@ impl AppState {
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
 
-        push_styled_message(self, &command, Color::White, "! ", Color::Red);
+        push_styled_message(self, &command, Color::White, "! ", Color::Rgb(160, 92, 158));
 
         // Use PTY for sudo commands
         let shell_cmd = if command.contains("sudo") || command.contains("ssh") {

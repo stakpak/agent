@@ -11,7 +11,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shell_mode {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     ! to undo shell mode",
-            Style::default().fg(Color::Red),
+            Style::default().fg(Color::Rgb(160, 92, 158)),
         ));
         f.render_widget(hint, area);
         return;

@@ -434,7 +434,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
-            Style::default().fg(Color::Red)
+            Style::default().fg(Color::Rgb(160, 92, 158))
         } else {
             Style::default().fg(Color::DarkGray)
         });
