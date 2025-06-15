@@ -294,7 +294,12 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         let mut current_line = Vec::new();
         // Add prompt to first line only
         if state.show_shell_mode {
-            current_line.push(Span::styled(" ! ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+            current_line.push(Span::styled(
+                " ! ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
         } else if segment_idx == 0 {
             current_line.push(Span::raw("> "));
         }

@@ -3,8 +3,8 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_status_message, push_styled_message,
-    render_system_message,
+    push_error_message, push_help_message, push_shell_message, push_status_message,
+    push_styled_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
@@ -100,12 +100,17 @@ pub fn update(
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ShowConfirmationDialog(tool_call) => {
-            state.is_dialog_open = true;
             state.dialog_command = Some(tool_call.clone());
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
+            if full_command.contains("sudo") || full_command.contains("ssh") {
+                state.is_dialog_open = false;
+                push_shell_message(state);
+            } else {
+                state.is_dialog_open = true;
+            }
         }
 
         InputEvent::Loading(is_loading) => {
@@ -135,7 +140,13 @@ pub fn update(
         }
 
         InputEvent::ShellInputRequest(prompt) => {
-            push_styled_message(state, &prompt, Color::Rgb(180, 180, 180), "?! ", Color::Yellow);
+            push_styled_message(
+                state,
+                &prompt,
+                Color::Rgb(180, 180, 180),
+                "?! ",
+                Color::Yellow,
+            );
             state.waiting_for_shell_input = true;
             adjust_scroll(state, message_area_height, message_area_width);
         }
@@ -259,6 +270,15 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
+    } else if let Some(tool_call) = &state.dialog_command {
+        let command = extract_full_command_arguments(tool_call);
+        if command.contains("sudo") || command.contains("ssh") {
+            let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
+            let truncated_command = extract_truncated_command_arguments(tool_call);
+            render_bash_block_rejected(&truncated_command, state);
+            state.is_dialog_open = false;
+            state.dialog_command = None;
+        }
     }
 
     state.input.clear();
