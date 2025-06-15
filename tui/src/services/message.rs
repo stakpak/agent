@@ -206,7 +206,10 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                 all_lines.extend(get_wrapped_markdown_lines(markdown, width));
             }
             MessageContent::PlainText(text) => {
-                all_lines.push((Line::from(vec![Span::styled(text, Style::default())]), Style::default()));
+                all_lines.push((
+                    Line::from(vec![Span::styled(text, Style::default())]),
+                    Style::default(),
+                ));
             }
             MessageContent::BashBubble {
                 title,
