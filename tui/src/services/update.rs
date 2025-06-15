@@ -135,20 +135,17 @@ pub fn update(
         }
 
         InputEvent::ShellInputRequest(prompt) => {
-            push_styled_message(state, &prompt, Color::Gray, "?! ", Color::Yellow);
+            push_styled_message(state, &prompt, Color::Rgb(180, 180, 180), "?! ", Color::Yellow);
             state.waiting_for_shell_input = true;
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
         InputEvent::ShellCompleted(_code) => {
-            // let msg = if code == 0 {
-            //     " Command completed successfully"
-            // } else {
-            //     &format!(" Command failed with exit code: {}", code)
-            // };
-            // let icon: &'static str = if code == 0 { " ✓" } else { " ✗" };
-            // push_styled_message(state, msg, Color::Gray, icon, Color::Green);
             state.active_shell_command = None;
+            state.show_shell_mode = false;
+            state.input.clear();
+            state.cursor_position = 0;
+            state.messages.push(Message::plain_text(""));
             adjust_scroll(state, message_area_height, message_area_width);
         }
         _ => {}
