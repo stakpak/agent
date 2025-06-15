@@ -56,7 +56,9 @@ pub fn update(
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
-            handle_input_submitted(state, message_area_height, output_tx);
+            if !state.is_pasting {
+                handle_input_submitted(state, message_area_height, output_tx);
+            }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
@@ -123,6 +125,12 @@ pub fn update(
         }
         InputEvent::Error(error) => {
             push_error_message(state, &error);
+        }
+        InputEvent::HandlePaste(text) => {
+            state.is_pasting = true;
+            state.input.insert_str(state.cursor_position, &text);
+            state.cursor_position += text.len();
+            state.is_pasting = false;
         }
         _ => {}
     }

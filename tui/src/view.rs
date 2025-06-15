@@ -38,7 +38,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
+    let dialog_height = if state.show_sessions_dialog {
+        11
+    } else if state.is_dialog_open {
+        3
+    } else {
+        0
+    };
     let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
         1
     } else {
@@ -170,6 +176,7 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
 }
 
 fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
+    f.render_widget(ratatui::widgets::Clear, area);
     let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
     if state.loading {
         let loading_line = render_loading_spinner(state);
@@ -230,7 +237,11 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                 for tag in &section_tags {
                     let closing_tag = format!("</{}>", tag);
                     if line_text.trim() == closing_tag {
-                        // Skip this line entirely
+                        // Add empty line instead of skipping
+                        if lines_added < height {
+                            visible_lines.push(Line::from(""));
+                            lines_added += 1;
+                        }
                         found = true;
                         break;
                     }
