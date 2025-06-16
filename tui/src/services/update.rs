@@ -304,7 +304,11 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         state.dialog_command = None;
     } else if state.is_tool_call_shell_command {
         if let Some(tool_call) = &state.dialog_command {
-            let command = extract_full_command_arguments(tool_call);
+            let command = state
+                .active_shell_command
+                .as_ref()
+                .map(|cmd| cmd.command.clone())
+                .unwrap_or_default();
             if command.contains("sudo") || command.contains("ssh") {
                 let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
                 let truncated_command = extract_truncated_command_arguments(tool_call);
@@ -616,11 +620,20 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 }
 
 pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
-    let id = format!("toolu_{}", Uuid::new_v4().to_string());
-    let args = format!(
-        "{{\"command\": \"{}\"}}",
-        state.active_shell_command.as_ref().unwrap().command
-    );
+    let id = if state.dialog_command.is_some() {
+        state.dialog_command.as_ref().unwrap().id.clone()
+    } else {
+        format!("toolu_{}", Uuid::new_v4())
+    };
+
+    let command = state
+        .active_shell_command
+        .as_ref()
+        .map(|cmd| cmd.command.clone())
+        .unwrap_or_default();
+
+    let args = format!("{{\"command\": \"{}\"}}", command);
+
     let call = ToolCall {
         id: id,
         r#type: "function".to_string(),
