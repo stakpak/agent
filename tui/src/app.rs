@@ -58,6 +58,7 @@ pub struct AppState {
     pub shell_mode_input: String,
     pub waiting_for_shell_input: bool,
     pub is_tool_call_shell_command: bool,
+    pub is_pasting: bool,
 }
 
 #[derive(Debug)]
@@ -100,6 +101,7 @@ pub enum InputEvent {
     ShellError(String),
     ShellInputRequest(String),
     ShellCompleted(i32),
+    HandlePaste(String),
 }
 
 #[derive(Debug)]
@@ -187,6 +189,7 @@ impl AppState {
             shell_mode_input: String::new(),
             waiting_for_shell_input: false,
             is_tool_call_shell_command: false,
+            is_pasting: false,
         }
     }
 

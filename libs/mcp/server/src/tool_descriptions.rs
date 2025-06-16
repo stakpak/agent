@@ -31,7 +31,9 @@ pub const CREATE_DESCRIPTION: &str = "Create a new file with the specified conte
 pub const INSERT_DESCRIPTION: &str =
     "Insert text at a specific line number in a file. Line numbers are 1-indexed.";
 
-pub const GENERATE_CODE_DESCRIPTION: &str = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]";
+pub const GENERATE_CODE_DESCRIPTION: &str = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
+
+IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files.";
 
 pub const SMART_SEARCH_CODE_DESCRIPTION: &str = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem.";
 
@@ -59,7 +61,7 @@ pub const PROVISIONER_PARAM_DESCRIPTION: &str =
     "Type of code to generate one of Dockerfile, Kubernetes, Terraform, GithubActions";
 pub const SAVE_FILES_PARAM_DESCRIPTION: &str =
     "Whether to save the generated files to the filesystem (default: false)";
-pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to include as context for the generation, add any files you want to edit, or that you want to use as context for the generation (default: empty)";
+pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to include as context for the generation. CRITICAL: When generating code in multiple steps (breaking down large projects), always include previously generated files from earlier steps to ensure consistent references, imports, and overall project coherence. Add any files you want to edit, or that you want to use as context for the generation (default: empty)";
 
 pub const SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
 pub const SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
