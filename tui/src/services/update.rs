@@ -61,7 +61,9 @@ pub fn update(
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
-            handle_input_submitted(state, message_area_height, output_tx, shell_tx);
+            if !state.is_pasting {
+                handle_input_submitted(state, message_area_height, output_tx, shell_tx);
+            }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
@@ -170,6 +172,12 @@ pub fn update(
             state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
             adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::HandlePaste(text) => {
+            state.is_pasting = true;
+            state.input.insert_str(state.cursor_position, &text);
+            state.cursor_position += text.len();
+            state.is_pasting = false;
         }
         _ => {}
     }
