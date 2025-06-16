@@ -162,13 +162,13 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             if state.is_tool_call_shell_command {
                 let result = shell_command_to_tool_call(state);
+                eprintln!("result: {:?}", result);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
             }
             state.active_shell_command = None;
             state.show_shell_mode = false;
             state.input.clear();
             state.cursor_position = 0;
-            state.is_tool_call_shell_command = false;
             state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
             adjust_scroll(state, message_area_height, message_area_width);
@@ -345,6 +345,7 @@ fn handle_input_submitted(
         }
         return;
     }
+
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
