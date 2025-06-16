@@ -2997,9 +2997,11 @@ dependencies = [
  "serde_json",
  "stakpak-api",
  "stakpak-shared",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
