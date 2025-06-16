@@ -24,7 +24,7 @@ futures-util = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 termimad = "0.31.1"
-walkdir = "2"
+walkdir = { workspace = true }
 tokio-process-stream = "0.4.0"
 tokio-stream = "0.1.17"
 rust_socketio = { version = "0.6.0", features = ["async"] }
