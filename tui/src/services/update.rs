@@ -9,9 +9,12 @@ use crate::services::helper_block::{
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
 use ratatui::style::Color;
+use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
     FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
+use stakpak_shared::secrets::redact_secrets;
+use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -135,10 +138,18 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            state.messages.push(Message::plain_text(line.clone()));
+            let redaction_result = redact_secrets(&line, None, &HashMap::new());
+            let mut redacted_line = redaction_result.redacted_string;
+
             if let Some(output) = state.active_shell_command_output.as_mut() {
-                output.push_str(&line);
+                output.push_str(&redacted_line);
+                *output = truncate_output(output);
             }
+
+            redacted_line = truncate_output(&redacted_line);
+
+            state.messages.push(Message::plain_text(redacted_line));
+
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
