@@ -208,6 +208,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                         continue;
                     }
+                    OutputEvent::SendToolResult(_tool_call_result) => {}
                 }
                 send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 

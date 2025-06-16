@@ -9,7 +9,9 @@ use crate::services::helper_block::{
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
 use ratatui::style::Color;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::models::integrations::openai::{
+    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -107,6 +109,7 @@ pub fn update(
             state.pending_bash_message_id = Some(message_id);
             if full_command.contains("sudo") || full_command.contains("ssh") {
                 state.is_dialog_open = false;
+                state.is_tool_call_shell_command = true;
                 push_shell_message(state);
             } else {
                 state.is_dialog_open = true;
@@ -130,7 +133,10 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            state.messages.push(Message::plain_text(line));
+            state.messages.push(Message::plain_text(line.clone()));
+            if let Some(output) = state.active_shell_command_output.as_mut() {
+                output.push_str(&line);
+            }
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
@@ -152,10 +158,16 @@ pub fn update(
         }
 
         InputEvent::ShellCompleted(_code) => {
+            if state.is_tool_call_shell_command {
+                let result = shell_command_to_tool_call(state);
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+            }
             state.active_shell_command = None;
             state.show_shell_mode = false;
             state.input.clear();
             state.cursor_position = 0;
+            state.is_tool_call_shell_command = false;
+            state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
             adjust_scroll(state, message_area_height, message_area_width);
         }
@@ -270,14 +282,17 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
-    } else if let Some(tool_call) = &state.dialog_command {
-        let command = extract_full_command_arguments(tool_call);
-        if command.contains("sudo") || command.contains("ssh") {
-            let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-            let truncated_command = extract_truncated_command_arguments(tool_call);
-            render_bash_block_rejected(&truncated_command, state);
-            state.is_dialog_open = false;
-            state.dialog_command = None;
+    } else if state.is_tool_call_shell_command {
+        if let Some(tool_call) = &state.dialog_command {
+            let command = extract_full_command_arguments(tool_call);
+            if command.contains("sudo") || command.contains("ssh") {
+                let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
+                let truncated_command = extract_truncated_command_arguments(tool_call);
+                render_bash_block_rejected(&truncated_command, state);
+                state.is_dialog_open = false;
+                state.dialog_command = None;
+                state.is_tool_call_shell_command = false;
+            }
         }
     }
 
@@ -577,4 +592,28 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
         .messages
         .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
     state.streaming_tool_result_id = None;
+}
+
+pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
+    let call = ToolCall {
+        id: Uuid::new_v4().to_string(),
+        r#type: "shell".to_string(),
+        function: FunctionCall {
+            name: "shell".to_string(),
+            arguments: state
+                .active_shell_command
+                .as_ref()
+                .map(|cmd| cmd.command.clone())
+                .unwrap_or_default(),
+        },
+    };
+    let result = ToolCallResult {
+        call: call,
+        result: state
+            .active_shell_command_output
+            .as_ref()
+            .cloned()
+            .unwrap_or_default(),
+    };
+    result
 }

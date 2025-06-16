@@ -54,8 +54,10 @@ pub struct AppState {
     pub streaming_tool_result_id: Option<Uuid>,
     pub show_shell_mode: bool,
     pub active_shell_command: Option<ShellCommand>,
+    pub active_shell_command_output: Option<String>,
     pub shell_mode_input: String,
     pub waiting_for_shell_input: bool,
+    pub is_tool_call_shell_command: bool,
 }
 
 #[derive(Debug)]
@@ -107,6 +109,7 @@ pub enum OutputEvent {
     RejectTool(ToolCall),
     ListSessions,
     SwitchToSession(String),
+    SendToolResult(ToolCallResult),
 }
 
 impl AppState {
@@ -180,8 +183,10 @@ impl AppState {
             streaming_tool_result_id: None,
             show_shell_mode: false,
             active_shell_command: None,
+            active_shell_command_output: None,
             shell_mode_input: String::new(),
             waiting_for_shell_input: false,
+            is_tool_call_shell_command: false,
         }
     }
 
@@ -218,6 +223,7 @@ impl AppState {
 
         // Store the command handle
         self.active_shell_command = Some(shell_cmd.clone());
+        self.active_shell_command_output = Some(String::new());
 
         // Spawn task to handle shell events and convert to InputEvents
         let input_tx = input_tx.clone();
