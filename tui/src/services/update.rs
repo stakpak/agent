@@ -616,16 +616,17 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 }
 
 pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
+    let id = format!("toolu_{}", Uuid::new_v4().to_string());
+    let args = format!(
+        "{{\"command\": \"{}\"}}",
+        state.active_shell_command.as_ref().unwrap().command
+    );
     let call = ToolCall {
-        id: Uuid::new_v4().to_string(),
-        r#type: "shell".to_string(),
+        id: id,
+        r#type: "function".to_string(),
         function: FunctionCall {
-            name: "shell".to_string(),
-            arguments: state
-                .active_shell_command
-                .as_ref()
-                .map(|cmd| cmd.command.clone())
-                .unwrap_or_default(),
+            name: "run_command".to_string(),
+            arguments: args,
         },
     };
     let result = ToolCallResult {
