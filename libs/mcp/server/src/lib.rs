@@ -10,6 +10,7 @@ pub mod local_tools;
 pub mod remote_tools;
 pub mod secret_manager;
 pub mod tool_descriptions;
+pub mod utils;
 
 pub use combined_tools::CombinedTools;
 pub use local_tools::LocalTools;

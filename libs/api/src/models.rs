@@ -960,3 +960,22 @@ pub struct AgentTask {
 pub struct AgentTaskOutput {
     pub results: Vec<AgentTask>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildCodeIndexToolArgs {
+    pub documents: Vec<SimpleDocument>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct IndexError {
+    pub uri: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildIndexOutput {
+    pub blocks: Vec<Block>,
+    pub errors: Vec<IndexError>,
+    pub warnings: Vec<IndexError>,
+}
