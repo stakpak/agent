@@ -171,6 +171,7 @@ pub fn update(
             state.cursor_position = 0;
             state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
+            state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
