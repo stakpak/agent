@@ -620,12 +620,11 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 }
 
 pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
-    let id = if state.dialog_command.is_some() {
-        state.dialog_command.as_ref().unwrap().id.clone()
-    } else {
-        format!("toolu_{}", Uuid::new_v4())
-    };
-
+    let id = state
+        .dialog_command
+        .as_ref()
+        .map(|cmd| cmd.id.clone())
+        .unwrap_or_default();
     let command = state
         .active_shell_command
         .as_ref()
@@ -635,20 +634,19 @@ pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
     let args = format!("{{\"command\": \"{}\"}}", command);
 
     let call = ToolCall {
-        id: id,
+        id,
         r#type: "function".to_string(),
         function: FunctionCall {
             name: "run_command".to_string(),
             arguments: args,
         },
     };
-    let result = ToolCallResult {
-        call: call,
+    ToolCallResult {
+        call,
         result: state
             .active_shell_command_output
             .as_ref()
             .cloned()
             .unwrap_or_default(),
-    };
-    result
+    }
 }

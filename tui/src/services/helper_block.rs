@@ -257,9 +257,8 @@ pub fn push_styled_message(
 }
 
 pub fn push_shell_message(state: &mut AppState) {
-    let msg = format!(
-        "A terminal is required to run this command since it contains sudo or ssh, type '!' to activate shell mode or press 'Esc' to cancel"
-    );
+    let msg = 
+        "A terminal is required to run this command since it contains sudo or ssh, type '!' to activate shell mode or press 'Esc' to cancel".to_string();
     push_styled_message(
         state,
         &msg,
