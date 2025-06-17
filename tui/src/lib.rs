@@ -44,7 +44,7 @@ pub async fn run_tui(
         }
     });
 
-    let shell_event_tx = internal_tx.clone(); 
+    let shell_event_tx = internal_tx.clone();
 
     let mut spinner_interval = interval(Duration::from_millis(100));
     // get terminal width
