@@ -2990,7 +2990,6 @@ version = "0.1.96"
 dependencies = [
  "anyhow",
  "axum",
- "chrono",
  "rand 0.9.1",
  "rmcp",
  "serde",
@@ -3001,13 +3000,13 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "walkdir",
 ]
 
 [[package]]
 name = "stakpak-shared"
 version = "0.1.96"
 dependencies = [
+ "chrono",
  "futures-util",
  "notify",
  "once_cell",
@@ -3017,6 +3016,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tracing",
  "uuid",
  "walkdir",
 ]

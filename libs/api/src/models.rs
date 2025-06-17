@@ -962,7 +962,7 @@ pub struct AgentTaskOutput {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BuildCodeIndexToolArgs {
+pub struct BuildCodeIndexInput {
     pub documents: Vec<SimpleDocument>,
 }
 
@@ -974,8 +974,14 @@ pub struct IndexError {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildIndexOutput {
+pub struct BuildCodeIndexOutput {
     pub blocks: Vec<Block>,
     pub errors: Vec<IndexError>,
     pub warnings: Vec<IndexError>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CodeIndex {
+    pub last_updated: DateTime<Utc>,
+    pub index: BuildCodeIndexOutput,
 }

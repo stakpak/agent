@@ -1,7 +1,5 @@
-use rmcp::model::RawTextContent;
-use serde::{Deserialize, Serialize};
-use stakpak_api::models::{BuildCodeIndexToolArgs, BuildIndexOutput, SimpleDocument};
-use stakpak_api::{Client, ClientConfig, ToolsCallParams};
+use stakpak_api::models::{BuildCodeIndexInput, BuildCodeIndexOutput, CodeIndex, SimpleDocument};
+use stakpak_api::{Client, ClientConfig};
 use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 use stakpak_shared::local_store::LocalStore;
 
@@ -10,8 +8,10 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
-use crate::utils::{self, is_supported_file, read_gitignore_patterns, should_include_entry};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use stakpak_shared::utils::{
+    self, is_supported_file, read_gitignore_patterns, should_include_entry,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -33,12 +33,6 @@ impl std::fmt::Display for FileOperation {
             FileOperation::Deleted => write!(f, "deleted"),
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CodeIndex {
-    pub last_updated: DateTime<Utc>,
-    pub index: BuildIndexOutput,
 }
 
 const INDEX_FRESHNESS_MINUTES: i64 = 10;
@@ -242,36 +236,9 @@ async fn build_local_code_index(
 
     let documents = process_directory(&directory)?;
 
-    let arguments = serde_json::to_value(BuildCodeIndexToolArgs { documents })
-        .map_err(|e| format!("Failed to convert documents to JSON: {}", e))?;
-
-    let response = match client
-        .call_mcp_tool(&ToolsCallParams {
-            name: "build_code_index".to_string(),
-            arguments,
-        })
-        .await
-    {
-        Ok(response) => response,
-        Err(e) => {
-            return Err(format!("Failed to build code index: {}", e));
-        }
-    };
-
-    let response_text = response
-        .iter()
-        .map(|r| {
-            if let Some(RawTextContent { text }) = r.as_text() {
-                text.clone()
-            } else {
-                "".to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
-    let index: BuildIndexOutput = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse build index output: {}", e))?;
+    let index = client
+        .build_code_index(&BuildCodeIndexInput { documents })
+        .await?;
 
     // Create CodeIndex with timestamp
     let code_index = CodeIndex {
@@ -413,7 +380,7 @@ async fn handle_code_index_update_event(
 }
 
 /// Find all document URIs that the given document depends on
-fn find_document_dependencies(index: &BuildIndexOutput, document_uri: &str) -> HashSet<String> {
+fn find_document_dependencies(index: &BuildCodeIndexOutput, document_uri: &str) -> HashSet<String> {
     index
         .blocks
         .iter()
@@ -434,7 +401,7 @@ fn find_document_dependencies(index: &BuildIndexOutput, document_uri: &str) -> H
 }
 
 /// Find all document URIs that depend on the given document
-fn find_document_dependents(index: &BuildIndexOutput, document_uri: &str) -> HashSet<String> {
+fn find_document_dependents(index: &BuildCodeIndexOutput, document_uri: &str) -> HashSet<String> {
     // Find all blocks in this document
     let document_block_keys: HashSet<String> = index
         .blocks
@@ -497,8 +464,8 @@ fn path_to_uri(path: &str) -> String {
 
 /// Merge new index results into existing index, replacing blocks for specified documents
 fn merge_index_results(
-    existing_index: &mut BuildIndexOutput,
-    new_index: BuildIndexOutput,
+    existing_index: &mut BuildCodeIndexOutput,
+    new_index: BuildCodeIndexOutput,
     updated_document_uris: &HashSet<String>,
 ) {
     // Remove all blocks from documents that were re-indexed
@@ -621,31 +588,9 @@ async fn execute_code_index_update(
 
             // Call the indexing API
             let client = Client::new(api_config)?;
-            let arguments = serde_json::to_value(BuildCodeIndexToolArgs { documents })
-                .map_err(|e| format!("Failed to convert documents to JSON: {}", e))?;
-
-            let response = client
-                .call_mcp_tool(&ToolsCallParams {
-                    name: "build_code_index".to_string(),
-                    arguments,
-                })
-                .await
-                .map_err(|e| format!("Failed to build code index: {}", e))?;
-
-            let response_text = response
-                .iter()
-                .map(|r| {
-                    if let Some(RawTextContent { text }) = r.as_text() {
-                        text.clone()
-                    } else {
-                        "".to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("");
-
-            let new_index: BuildIndexOutput = serde_json::from_str(&response_text)
-                .map_err(|e| format!("Failed to parse build index output: {}", e))?;
+            let new_index = client
+                .build_code_index(&BuildCodeIndexInput { documents })
+                .await?;
 
             // Merge the results
             merge_index_results(&mut existing_index.index, new_index, &documents_to_reindex);
@@ -723,11 +668,11 @@ async fn execute_code_index_update(
     Ok(())
 }
 
-pub fn stop_code_index_watcher(handle: JoinHandle<Result<(), String>>) {
-    info!("Stopping code index file watcher");
-    handle.abort();
-}
+// pub fn stop_code_index_watcher(handle: JoinHandle<Result<(), String>>) {
+//     info!("Stopping code index file watcher");
+//     handle.abort();
+// }
 
-pub fn is_code_index_watcher_running(handle: &JoinHandle<Result<(), String>>) -> bool {
-    !handle.is_finished()
-}
+// pub fn is_code_index_watcher_running(handle: &JoinHandle<Result<(), String>>) -> bool {
+//     !handle.is_finished()
+// }

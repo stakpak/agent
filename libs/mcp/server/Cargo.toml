@@ -15,8 +15,7 @@ rmcp = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 axum = "0.8.4"
-walkdir = { workspace = true }
-chrono = { workspace = true }
+
 
 [dev-dependencies]
 tempfile = "3.8"

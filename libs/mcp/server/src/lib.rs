@@ -5,20 +5,15 @@ use rmcp::transport::streamable_http_server::{
 
 use stakpak_api::ClientConfig;
 
-pub mod code_index;
 pub mod combined_tools;
 pub mod local_tools;
 pub mod remote_tools;
 pub mod secret_manager;
 pub mod tool_descriptions;
-pub mod utils;
 
-use code_index::get_or_build_local_code_index;
 pub use combined_tools::CombinedTools;
 pub use local_tools::LocalTools;
 pub use remote_tools::RemoteTools;
-
-use crate::code_index::start_code_index_watcher;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
@@ -75,25 +70,25 @@ async fn init_gitleaks_if_needed(redact_secrets: bool) {
     }
 }
 
-/// Initialize code index in background if needed for remote/combined modes
-async fn init_code_index_if_needed(tool_mode: &ToolMode, api_config: &ClientConfig) {
-    match tool_mode {
-        ToolMode::RemoteOnly | ToolMode::Combined => {
-            let api_config = api_config.clone();
-            tokio::spawn(async move {
-                match get_or_build_local_code_index(&api_config, None).await {
-                    Ok(_) => if let Ok(_handle) = start_code_index_watcher(&api_config, None) {},
-                    Err(_) => {
-                        // Index will be built on first use if initialization fails
-                    }
-                }
-            });
-        }
-        ToolMode::LocalOnly => {
-            // No code index needed for local-only mode
-        }
-    }
-}
+// /// Initialize code index in background if needed for remote/combined modes
+// async fn init_code_index_if_needed(tool_mode: &ToolMode, api_config: &ClientConfig) {
+//     match tool_mode {
+//         ToolMode::RemoteOnly | ToolMode::Combined => {
+//             let api_config = api_config.clone();
+//             tokio::spawn(async move {
+//                 match get_or_build_local_code_index(&api_config, None).await {
+//                     Ok(_) => if let Ok(_handle) = start_code_index_watcher(&api_config, None) {},
+//                     Err(_) => {
+//                         // Index will be built on first use if initialization fails
+//                     }
+//                 }
+//             });
+//         }
+//         ToolMode::LocalOnly => {
+//             // No code index needed for local-only mode
+//         }
+//     }
+// }
 
 /// Create graceful shutdown handler
 async fn create_shutdown_handler(shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>) {
@@ -162,7 +157,6 @@ pub async fn start_server(
     shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
 ) -> Result<()> {
     init_gitleaks_if_needed(config.redact_secrets).await;
-    init_code_index_if_needed(&config.tool_mode, &config.api).await;
 
     match config.tool_mode {
         ToolMode::LocalOnly => {
