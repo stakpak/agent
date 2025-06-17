@@ -144,7 +144,7 @@ fn handle_remote_change(change: DocumentsChange, dir: &Path) {
     // Handle deleted files
     for uri in change.touched_document_uris {
         if !document_uris.contains(&uri) {
-            let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
+            let absolute_path = Path::new(dir).join(uri.strip_prefix("file://").unwrap_or(&uri));
             std::fs::remove_file(&absolute_path).ok();
         }
     }
@@ -152,7 +152,7 @@ fn handle_remote_change(change: DocumentsChange, dir: &Path) {
     // Handle created/modified files
     for doc in change.documents {
         let uri = doc.uri.clone();
-        let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
+        let absolute_path = Path::new(dir).join(uri.strip_prefix("file://").unwrap_or(&uri));
 
         // Create parent directories if they don't exist
         if let Some(parent) = absolute_path.parent() {
