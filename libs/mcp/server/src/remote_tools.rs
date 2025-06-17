@@ -503,7 +503,7 @@ impl RemoteTools {
 
             result.push_str("   Code:\n");
             result.push_str("   ```\n");
-            for (_, line) in code_lines.iter().enumerate() {
+            for line in code_lines.iter() {
                 // let line_num = start_line_num + i;
                 // result.push_str(&format!("   {:4}: {}\n", line_num, line));
                 result.push_str(&format!("   {}\n", line));
@@ -552,7 +552,7 @@ impl RemoteTools {
                 }
             }
 
-            result.push_str("\n");
+            result.push('\n');
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))

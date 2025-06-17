@@ -18,6 +18,8 @@ pub use combined_tools::CombinedTools;
 pub use local_tools::LocalTools;
 pub use remote_tools::RemoteTools;
 
+use crate::code_index::start_code_index_watcher;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
     /// Only local tools (no API key required)
@@ -80,7 +82,7 @@ async fn init_code_index_if_needed(tool_mode: &ToolMode, api_config: &ClientConf
             let api_config = api_config.clone();
             tokio::spawn(async move {
                 match get_or_build_local_code_index(&api_config, None).await {
-                    Ok(_) => {}
+                    Ok(_) => if let Ok(_handle) = start_code_index_watcher(&api_config, None) {},
                     Err(_) => {
                         // Index will be built on first use if initialization fails
                     }

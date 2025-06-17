@@ -2,12 +2,15 @@ use rmcp::model::RawTextContent;
 use serde::{Deserialize, Serialize};
 use stakpak_api::models::{BuildCodeIndexToolArgs, BuildIndexOutput, SimpleDocument};
 use stakpak_api::{Client, ClientConfig, ToolsCallParams};
+use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 use stakpak_shared::local_store::LocalStore;
 
-use tracing::{error, warn};
+use std::path::{Path, PathBuf};
+use tokio::task::JoinHandle;
+use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
-use crate::utils::{read_gitignore_patterns, should_include_entry};
+use crate::utils::{self, is_supported_file, read_gitignore_patterns, should_include_entry};
 use chrono::{DateTime, Utc};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -119,11 +122,6 @@ async fn build_local_code_index(
         .collect::<Vec<_>>()
         .join("");
 
-    // Log response text to debug.log for debugging
-    if let Err(e) = std::fs::write("debug.log", &response_text) {
-        warn!("Failed to write debug log: {}", e);
-    }
-
     let index: BuildIndexOutput = serde_json::from_str(&response_text)
         .map_err(|e| format!("Failed to parse build index output: {}", e))?;
 
@@ -174,4 +172,156 @@ fn process_directory(base_dir: &str) -> Result<Vec<SimpleDocument>, String> {
     }
 
     Ok(documents)
+}
+
+pub fn start_code_index_watcher(
+    api_config: &ClientConfig,
+    directory: Option<String>,
+) -> Result<JoinHandle<Result<(), String>>, String> {
+    let watch_dir = directory.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    });
+
+    let watch_path = PathBuf::from(&watch_dir);
+
+    // Read gitignore patterns for filtering
+    let ignore_patterns = read_gitignore_patterns(&watch_dir);
+
+    // Create file filter that combines gitignore patterns and supported file types
+    let watch_dir_clone = watch_dir.clone();
+    let filter = move |path: &Path| -> bool {
+        // Get relative path from base directory to match gitignore patterns
+        let base_path = PathBuf::from(&watch_dir_clone);
+        let relative_path = match path.strip_prefix(&base_path) {
+            Ok(rel_path) => rel_path,
+            Err(_) => path,
+        };
+        let path_str = relative_path.to_string_lossy();
+
+        // Check gitignore patterns
+        for pattern in &ignore_patterns {
+            if utils::matches_gitignore_pattern(pattern, &path_str) {
+                return false;
+            }
+        }
+
+        is_supported_file(path)
+    };
+
+    info!(
+        "Starting code index file watcher for directory: {}",
+        watch_dir
+    );
+
+    let api_config = api_config.clone();
+    // Spawn background task
+    let handle = tokio::spawn(async move {
+        // Create the file watcher with channel
+        let (_watcher, mut event_receiver) = create_and_start_watcher(watch_path, filter)
+            .await
+            .map_err(|e| format!("Failed to create file watcher: {}", e))?;
+
+        info!("Code index file watcher started successfully");
+
+        // Main event loop - handle processed file watch events
+        while let Some(watch_event) = event_receiver.recv().await {
+            if let Err(e) =
+                handle_code_index_update_event(&api_config, &directory, watch_event).await
+            {
+                error!("Error handling code index update: {}", e);
+            }
+        }
+
+        warn!("File watcher channel closed, stopping watcher");
+
+        Ok(())
+    });
+
+    Ok(handle)
+}
+
+async fn handle_code_index_update_event(
+    api_config: &ClientConfig,
+    directory: &Option<String>,
+    event: FileWatchEvent,
+) -> Result<(), String> {
+    match event {
+        FileWatchEvent::Created { file } => {
+            info!("File created: {}", file.uri);
+            // TODO: Implement incremental index update for created file
+            update_code_index_placeholder(api_config, directory, "created", &file.uri).await
+        }
+        FileWatchEvent::Modified {
+            file,
+            old_content: _,
+        } => {
+            info!("File modified: {}", file.uri);
+            // TODO: Implement incremental index update for modified file
+            update_code_index_placeholder(api_config, directory, "modified", &file.uri).await
+        }
+        FileWatchEvent::Deleted { file } => {
+            info!("File deleted: {}", file.uri);
+            // TODO: Implement incremental index update for deleted file
+            update_code_index_placeholder(api_config, directory, "deleted", &file.uri).await
+        }
+        FileWatchEvent::Raw { event } => {
+            debug!("Raw filesystem event: {:?}", event);
+            // Usually we don't need to handle raw events as they're processed into the above variants
+            Ok(())
+        }
+    }
+}
+
+async fn update_code_index_placeholder(
+    _api_config: &ClientConfig,
+    _directory: &Option<String>,
+    _operation: &str,
+    _file_uri: &str,
+) -> Result<(), String> {
+    // Log to debug file
+    // let debug_message = format!(
+    //     "[{}] {} file: {}\n",
+    //     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+    //     operation,
+    //     file_uri
+    // );
+
+    // if let Err(e) = std::fs::OpenOptions::new()
+    //     .create(true)
+    //     .append(true)
+    //     .open("debug.log")
+    //     .and_then(|mut file| std::io::Write::write_all(&mut file, debug_message.as_bytes()))
+    // {
+    //     warn!("Failed to write to debug.log: {}", e);
+    // }
+
+    // TODO: Implement the following logic:
+    // 1. For created/modified files:
+    //    - Read the file content
+    //    - Call the build_code_index API for just this file
+    //    - Merge the result into the existing index
+    //    - Update the timestamp
+    //    - Save the updated index
+    //
+    // 2. For deleted files:
+    //    - Remove the file's blocks from the existing index
+    //    - Update the timestamp
+    //    - Save the updated index
+    //
+    // 3. Consider debouncing to avoid too frequent updates
+    //    - Could batch updates and process them every few seconds
+    //    - Or use a more sophisticated strategy based on file type/size
+
+    Ok(())
+}
+
+pub fn stop_code_index_watcher(handle: JoinHandle<Result<(), String>>) {
+    info!("Stopping code index file watcher");
+    handle.abort();
+}
+
+pub fn is_code_index_watcher_running(handle: &JoinHandle<Result<(), String>>) -> bool {
+    !handle.is_finished()
 }
