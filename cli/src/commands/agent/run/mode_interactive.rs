@@ -208,6 +208,21 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                         continue;
                     }
+                    OutputEvent::SendToolResult(tool_call_result) => {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                        messages.push(tool_result(
+                            tool_call_result.call.clone().id,
+                            tool_call_result.result.clone(),
+                        ));
+
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+
+                        if !tools_queue.is_empty() {
+                            let tool_call = tools_queue.remove(0);
+                            send_tool_call(&input_tx, &tool_call).await?;
+                            continue;
+                        }
+                    }
                 }
                 send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 

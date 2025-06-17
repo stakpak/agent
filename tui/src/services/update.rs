@@ -3,11 +3,18 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_status_message, render_system_message,
+    push_error_message, push_help_message, push_status_message, push_styled_message,
+    render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use ratatui::style::Color;
+use stakpak_shared::helper::truncate_output;
+use stakpak_shared::models::integrations::openai::{
+    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+};
+use stakpak_shared::secrets::redact_secrets;
+use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -20,6 +27,7 @@ pub fn update(
     message_area_width: usize,
     output_tx: &Sender<OutputEvent>,
     terminal_size: Size,
+    shell_tx: &Sender<InputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -57,9 +65,10 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx);
+                handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
+        InputEvent::ShellMode => handle_shell_mode(state),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -99,12 +108,12 @@ pub fn update(
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ShowConfirmationDialog(tool_call) => {
-            state.is_dialog_open = true;
             state.dialog_command = Some(tool_call.clone());
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
+            state.is_dialog_open = true;
         }
 
         InputEvent::Loading(is_loading) => {
@@ -123,8 +132,52 @@ pub fn update(
             state.loading_type = LoadingType::Llm;
             state.show_sessions_dialog = true;
         }
-        InputEvent::Error(error) => {
-            push_error_message(state, &error);
+        InputEvent::ShellOutput(line) => {
+            let redaction_result = redact_secrets(&line, None, &HashMap::new());
+            let mut redacted_line = redaction_result.redacted_string;
+
+            if let Some(output) = state.active_shell_command_output.as_mut() {
+                output.push_str(&redacted_line);
+                *output = truncate_output(output);
+            }
+
+            redacted_line = truncate_output(&redacted_line);
+
+            state.messages.push(Message::plain_text(redacted_line));
+
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellError(line) => {
+            push_error_message(state, &line);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellInputRequest(prompt) => {
+            push_styled_message(
+                state,
+                &prompt,
+                Color::Rgb(180, 180, 180),
+                "?! ",
+                Color::Yellow,
+            );
+            state.waiting_for_shell_input = true;
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+
+        InputEvent::ShellCompleted(_code) => {
+            if state.dialog_command.is_some() {
+                let result = shell_command_to_tool_call(state);
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+            }
+            state.active_shell_command = None;
+            state.show_shell_mode = false;
+            state.input.clear();
+            state.cursor_position = 0;
+            state.active_shell_command_output = None;
+            state.messages.push(Message::plain_text(""));
+            state.is_tool_call_shell_command = false;
+            adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
             state.is_pasting = true;
@@ -135,6 +188,18 @@ pub fn update(
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
+}
+
+fn handle_shell_mode(state: &mut AppState) {
+    state.show_shell_mode = !state.show_shell_mode;
+    if state.show_shell_mode {
+        state.is_dialog_open = false;
+    }
+    if !state.show_shell_mode && state.dialog_command.is_some() {
+        state.is_dialog_open = true;
+    }
+    state.input.clear();
+    state.cursor_position = 0;
 }
 
 fn handle_tab(_state: &mut AppState) {}
@@ -235,6 +300,13 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
+    } else if state.show_shell_mode {
+        state.show_shell_mode = false;
+        state.input.clear();
+        state.cursor_position = 0;
+        if state.dialog_command.is_some() {
+            state.is_dialog_open = true
+        }
     }
 
     state.input.clear();
@@ -245,8 +317,40 @@ fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
     output_tx: &Sender<OutputEvent>,
+    shell_tx: &Sender<InputEvent>,
 ) {
     let input_height = 3;
+    if state.show_shell_mode {
+        // Check if we're waiting for shell input (like password)
+        if state.waiting_for_shell_input {
+            let input = state.input.clone();
+            state.input.clear();
+            state.cursor_position = 0;
+            state.waiting_for_shell_input = false;
+
+            // Send the password to the shell command
+            if let Some(cmd) = &state.active_shell_command {
+                let stdin_tx = cmd.stdin_tx.clone();
+                tokio::spawn(async move {
+                    let _ = stdin_tx.send(input).await;
+                });
+            }
+            return;
+        }
+
+        // Otherwise, it's a new shell command
+        if !state.input.trim().is_empty() {
+            let command = state.input.clone();
+            state.input.clear();
+            state.cursor_position = 0;
+            state.show_helper_dropdown = false;
+
+            // Run the shell command with the shell event channel
+            state.run_shell_command(command, shell_tx);
+        }
+        return;
+    }
+
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
@@ -257,7 +361,6 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
-
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
@@ -502,4 +605,36 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
         .messages
         .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
     state.streaming_tool_result_id = None;
+}
+
+pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
+    let id = state
+        .dialog_command
+        .as_ref()
+        .map(|cmd| cmd.id.clone())
+        .unwrap_or_default();
+    let command = state
+        .active_shell_command
+        .as_ref()
+        .map(|cmd| cmd.command.clone())
+        .unwrap_or_default();
+
+    let args = format!("{{\"command\": \"{}\"}}", command);
+
+    let call = ToolCall {
+        id,
+        r#type: "function".to_string(),
+        function: FunctionCall {
+            name: "run_command".to_string(),
+            arguments: args,
+        },
+    };
+    ToolCallResult {
+        call,
+        result: state
+            .active_shell_command_output
+            .as_ref()
+            .cloned()
+            .unwrap_or_default(),
+    }
 }
