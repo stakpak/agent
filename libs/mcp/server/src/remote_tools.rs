@@ -4,15 +4,15 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stakpak_api::models::SimpleDocument;
+use stakpak_api::models::{CodeIndex, SimpleDocument};
 use stakpak_api::{Client, ClientConfig, GenerationResult, ToolsCallParams};
+use stakpak_shared::local_store::LocalStore;
 
 use std::fs::{self};
 use std::io::Write;
 use std::path::Path;
 use tracing::{error, warn};
 
-use crate::code_index::get_or_build_local_code_index;
 use crate::secret_manager::SecretManager;
 use crate::tool_descriptions::*;
 
@@ -377,16 +377,19 @@ impl RemoteTools {
         #[schemars(description = LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION)]
         show_dependencies: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let index = get_or_build_local_code_index(&self.api_config, None)
-            .await
-            .map_err(|e| {
-                error!("Failed to get local code index: {}", e);
-                McpError::internal_error(
-                    "Failed to get local code index",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?
-            .index;
+        let index_str = LocalStore::read_session_data("code_index.json").map_err(|e| {
+            error!("Failed to read code index: {}", e);
+            McpError::internal_error(
+                "Failed to read code index",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+        let index_store: CodeIndex = serde_json::from_str(&index_str).map_err(|e| {
+            McpError::internal_error(
+                "Failed to parse code index",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
 
         let search_limit = limit.unwrap_or(10) as usize;
         let show_deps = show_dependencies.unwrap_or(false);
@@ -395,7 +398,7 @@ impl RemoteTools {
         // Search through blocks
         let mut matching_blocks = Vec::new();
 
-        for block in &index.blocks {
+        for block in &index_store.index.blocks {
             let mut score = 0u32;
             let mut matched_keywords = std::collections::HashSet::new();
 

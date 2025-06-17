@@ -1,6 +1,8 @@
 use clap::Parser;
+use stakpak_api::ClientConfig;
 use std::{env, io::Write, path::Path};
 
+mod code_index;
 mod commands;
 mod config;
 mod utils;
@@ -16,6 +18,8 @@ use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::check_update;
 use utils::local_context::analyze_local_context;
+
+use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
 #[command(name = "stakpak")]
@@ -127,6 +131,23 @@ async fn main() {
                 }
                 None => {
                     let local_context = analyze_local_context().await.ok();
+                    let api_config: ClientConfig = config.clone().into();
+                    match get_or_build_local_code_index(&api_config, None).await {
+                        Ok(_) => {
+                            tokio::spawn(async move {
+                                match start_code_index_watcher(&api_config, None) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        eprintln!("Failed to start code index watcher: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to build code index: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
 
                     match (cli.r#async, cli.print || cli.approve) {
                         // Async mode: run continuously until no more tool calls
