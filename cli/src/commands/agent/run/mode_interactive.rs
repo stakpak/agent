@@ -215,7 +215,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             tool_call_result.result.clone(),
                         ));
 
-                        eprintln!("messages: {:?}", messages);
                         send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
                         if !tools_queue.is_empty() {
