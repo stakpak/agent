@@ -12,6 +12,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(InputEvent::InputChangedNewline)
             }
+            KeyCode::Char('!') => Some(InputEvent::ShellMode),
             KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
             KeyCode::Backspace => Some(InputEvent::InputBackspace),
             KeyCode::Enter => Some(InputEvent::InputSubmitted),
