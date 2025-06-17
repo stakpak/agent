@@ -3,8 +3,8 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_shell_message, push_status_message,
-    push_styled_message, render_system_message,
+    push_error_message, push_help_message, push_status_message, push_styled_message,
+    render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
@@ -68,6 +68,7 @@ pub fn update(
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
+        InputEvent::ShellMode => handle_shell_mode(state),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -112,13 +113,7 @@ pub fn update(
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
-            if full_command.contains("sudo") || full_command.contains("ssh") {
-                state.is_dialog_open = false;
-                state.is_tool_call_shell_command = true;
-                push_shell_message(state);
-            } else {
-                state.is_dialog_open = true;
-            }
+            state.is_dialog_open = true;
         }
 
         InputEvent::Loading(is_loading) => {
@@ -171,7 +166,7 @@ pub fn update(
         }
 
         InputEvent::ShellCompleted(_code) => {
-            if state.is_tool_call_shell_command {
+            if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
             }
@@ -193,6 +188,18 @@ pub fn update(
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
+}
+
+fn handle_shell_mode(state: &mut AppState) {
+    state.show_shell_mode = !state.show_shell_mode;
+    if state.show_shell_mode {
+        state.is_dialog_open = false;
+    }
+    if !state.show_shell_mode && state.dialog_command.is_some() {
+        state.is_dialog_open = true;
+    }
+    state.input.clear();
+    state.cursor_position = 0;
 }
 
 fn handle_tab(_state: &mut AppState) {}
@@ -226,14 +233,6 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     let pos = state.cursor_position.min(state.input.len());
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
-
-    if state.input.starts_with('!') {
-        state.input = "".to_string();
-        state.cursor_position = 0;
-        state.show_shell_mode = !state.show_shell_mode;
-        state.show_helper_dropdown = false;
-        return;
-    }
 
     if state.input.starts_with('/') {
         state.show_helper_dropdown = true;
@@ -301,21 +300,12 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
-    } else if state.is_tool_call_shell_command {
-        if let Some(tool_call) = &state.dialog_command {
-            let command = state
-                .active_shell_command
-                .as_ref()
-                .map(|cmd| cmd.command.clone())
-                .unwrap_or_default();
-            if command.contains("sudo") || command.contains("ssh") {
-                let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-                let truncated_command = extract_truncated_command_arguments(tool_call);
-                render_bash_block_rejected(&truncated_command, state);
-                state.is_dialog_open = false;
-                state.dialog_command = None;
-                state.is_tool_call_shell_command = false;
-            }
+    } else if state.show_shell_mode {
+        state.show_shell_mode = false;
+        state.input.clear();
+        state.cursor_position = 0;
+        if state.dialog_command.is_some() {
+            state.is_dialog_open = true
         }
     }
 
@@ -371,7 +361,6 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
-
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));

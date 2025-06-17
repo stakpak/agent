@@ -70,6 +70,7 @@ pub enum InputEvent {
     StreamToolResult(ToolCallResultProgress),
     Loading(bool),
     InputChanged(char),
+    ShellMode,
     GetStatus(String),
     Error(String),
     SetSessions(Vec<SessionInfo>),
