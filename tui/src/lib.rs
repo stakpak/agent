@@ -44,16 +44,7 @@ pub async fn run_tui(
         }
     });
 
-    let (shell_tx, mut shell_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
-
-    tokio::spawn({
-        let internal_tx = internal_tx.clone();
-        async move {
-            while let Some(event) = shell_rx.recv().await {
-                let _ = internal_tx.send(event).await;
-            }
-        }
-    });
+    let shell_event_tx = internal_tx.clone(); 
 
     let mut spinner_interval = interval(Duration::from_millis(100));
     // get terminal width
@@ -68,11 +59,11 @@ pub async fn run_tui(
                    if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
                    InputEvent::ShellInputRequest(_) | InputEvent::ShellCompleted(_)) {
             // These are shell events, forward them to the shell channel
-            let _ = shell_tx.send(event).await;
+            let _ = shell_event_tx.send(event).await;
             continue;
         }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size, &shell_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size, &shell_event_tx);
                        terminal.draw(|f| view::view(f, &state))?;
                        continue;
                    }
@@ -109,7 +100,7 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
                    }
                }
                Some(event) = internal_rx.recv() => {
@@ -146,7 +137,7 @@ pub async fn run_tui(
                            }
                        }
 
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
                    }
                }
                _ = spinner_interval.tick(), if state.loading => {
