@@ -966,14 +966,14 @@ pub struct BuildCodeIndexToolArgs {
     pub documents: Vec<SimpleDocument>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IndexError {
     pub uri: String,
     pub message: String,
     pub details: Option<serde_json::Value>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildIndexOutput {
     pub blocks: Vec<Block>,
     pub errors: Vec<IndexError>,

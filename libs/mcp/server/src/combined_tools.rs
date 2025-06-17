@@ -148,16 +148,6 @@ impl CombinedTools {
             .local_code_search(keywords, limit, show_dependencies)
             .await
     }
-
-    #[tool(description = BUILD_LOCAL_CODE_INDEX_DESCRIPTION)]
-    pub async fn build_local_code_index(
-        &self,
-        #[tool(param)]
-        #[schemars(description = BUILD_LOCAL_CODE_INDEX_DIRECTORY_PARAM_DESCRIPTION)]
-        directory: String,
-    ) -> Result<CallToolResult, McpError> {
-        self.remote_tools.build_local_code_index(directory).await
-    }
 }
 
 #[tool(tool_box)]
