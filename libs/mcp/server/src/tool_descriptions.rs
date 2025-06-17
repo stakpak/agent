@@ -37,9 +37,9 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
 
 pub const REMOTE_CODE_SEARCH_DESCRIPTION: &str = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem.";
 
-pub const BUILD_LOCAL_CODE_INDEX_DESCRIPTION: &str = "Build an index of infrastructure configurations in the specified directory. This supports indexing of Terraform, Kubernetes, Dockerfile, and Github Actions.";
-
-pub const LOCAL_CODE_SEARCH_DESCRIPTION: &str = "Search for code blocks in the local index created by build_local_code_index using multiple keywords. This tool searches through the locally indexed code blocks using text matching against names, types, content, and file paths. Blocks matching multiple keywords are ranked higher in the results. It can also show dependencies and dependents of matching blocks. Requires a local index file at .stakpak/code_index.json.";
+pub const LOCAL_CODE_SEARCH_DESCRIPTION: &str = r#"Search for local code blocks using multiple keywords.
+IMPORTANT: this tool ONLY search through local Terraform, Kubernetes, Dockerfile, and Github Actions code.
+This tool searches through the locally indexed code blocks using text matching against names, types, content, and file paths. Blocks matching multiple keywords are ranked higher in the results. It can also show dependencies and dependents of matching blocks. If no index is found, it will build one first."#;
 
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
@@ -70,9 +70,6 @@ pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to incl
 pub const REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
 pub const REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
     "The maximum number of results to return (default: 10)";
-
-pub const BUILD_LOCAL_CODE_INDEX_DIRECTORY_PARAM_DESCRIPTION: &str =
-    "The directory to analyze and build an index from";
 
 pub const LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword.";
 pub const LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
