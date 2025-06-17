@@ -173,7 +173,6 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             if state.is_tool_call_shell_command {
                 let result = shell_command_to_tool_call(state);
-                eprintln!("result: {:?}", result);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
             }
             state.active_shell_command = None;
