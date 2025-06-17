@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
 
 /// Read .gitignore patterns from the specified base directory
@@ -42,7 +42,7 @@ pub fn should_include_entry(entry: &DirEntry, base_dir: &str, ignore_patterns: &
 
     // For files, also check if they are supported file types
     if is_file {
-        is_supported_file(entry)
+        is_supported_file(entry.path())
     } else {
         true // Allow directories to be traversed
     }
@@ -58,11 +58,9 @@ pub fn matches_gitignore_pattern(pattern: &str, path: &str) -> bool {
         if pattern.starts_with('*') && pattern.ends_with('*') {
             let middle = &pattern[1..pattern.len() - 1];
             path.contains(middle)
-        } else if pattern.starts_with('*') {
-            let suffix = &pattern[1..];
+        } else if let Some(suffix) = pattern.strip_prefix('*') {
             path.ends_with(suffix)
-        } else if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
+        } else if let Some(prefix) = pattern.strip_suffix('*') {
             path.starts_with(prefix)
         } else {
             // Pattern contains * but not at start/end, do basic glob matching
@@ -105,14 +103,11 @@ pub fn pattern_matches_glob(pattern: &str, text: &str) -> bool {
 }
 
 /// Check if a directory entry represents a supported file type
-pub fn is_supported_file(entry: &DirEntry) -> bool {
-    let file_name = entry.file_name().to_str();
-    let is_file = entry.file_type().is_file();
-
-    match file_name {
+pub fn is_supported_file(file_path: &Path) -> bool {
+    match file_path.file_name().and_then(|name| name.to_str()) {
         Some(name) => {
             // Only allow supported files
-            if is_file {
+            if file_path.is_file() {
                 name.ends_with(".tf")
                     || name.ends_with(".tfvars")
                     || name.ends_with(".yaml")
