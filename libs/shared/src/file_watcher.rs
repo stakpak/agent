@@ -204,17 +204,12 @@ impl FileWatcher {
     fn path_to_uri(&self, path: &Path) -> String {
         // Use canonical path to ensure consistency across all platforms
         let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let canonical_watch_dir = self
-            .watch_dir
-            .canonicalize()
-            .unwrap_or_else(|_| self.watch_dir.clone());
 
-        let relative_path = canonical_path
-            .strip_prefix(&canonical_watch_dir)
-            .unwrap_or(&canonical_path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        format!("file:///{}", relative_path)
+        // Create absolute URI instead of relative
+        format!(
+            "file://{}",
+            canonical_path.to_string_lossy().replace('\\', "/")
+        )
     }
 
     /// Hash file content
@@ -227,6 +222,7 @@ impl FileWatcher {
 
 /// Internal event processor that handles raw events and produces processed events
 struct InternalEventProcessor {
+    #[allow(dead_code)]
     watch_dir: PathBuf,
     watched_files: HashMap<String, FileBuffer>,
     filter: Arc<dyn FileFilter>,
@@ -340,17 +336,12 @@ impl InternalEventProcessor {
     fn path_to_uri(&self, path: &Path) -> String {
         // Use canonical path to ensure consistency across all platforms
         let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let canonical_watch_dir = self
-            .watch_dir
-            .canonicalize()
-            .unwrap_or_else(|_| self.watch_dir.clone());
 
-        let relative_path = canonical_path
-            .strip_prefix(&canonical_watch_dir)
-            .unwrap_or(&canonical_path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        format!("file:///{}", relative_path)
+        // Create absolute URI instead of relative
+        format!(
+            "file://{}",
+            canonical_path.to_string_lossy().replace('\\', "/")
+        )
     }
 
     /// Hash file content

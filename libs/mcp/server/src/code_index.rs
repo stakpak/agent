@@ -13,13 +13,161 @@ use walkdir::WalkDir;
 use crate::utils::{self, is_supported_file, read_gitignore_patterns, should_include_entry};
 use chrono::{DateTime, Utc};
 
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant, interval};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileOperation {
+    Created,
+    Modified,
+    Deleted,
+}
+
+impl std::fmt::Display for FileOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileOperation::Created => write!(f, "created"),
+            FileOperation::Modified => write!(f, "modified"),
+            FileOperation::Deleted => write!(f, "deleted"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CodeIndex {
     pub last_updated: DateTime<Utc>,
     pub index: BuildIndexOutput,
 }
 
-const INDEX_FRESHNESS_MINUTES: i64 = 5;
+const INDEX_FRESHNESS_MINUTES: i64 = 10;
+
+const DEBOUNCE_PROCESS_INTERVAL_SECONDS: u64 = 5;
+const DEBOUNCE_DURATION_SECONDS: u64 = 15;
+
+#[derive(Debug, Clone)]
+struct PendingUpdate {
+    operation: FileOperation,
+    file_uri: String,
+    api_config: ClientConfig,
+    directory: Option<String>,
+    last_update_time: Instant,
+}
+
+#[derive(Debug)]
+enum DebounceMessage {
+    ScheduleUpdate(PendingUpdate),
+}
+
+struct DebounceActor {
+    receiver: mpsc::Receiver<DebounceMessage>,
+    pending_updates: HashMap<String, PendingUpdate>,
+}
+
+impl DebounceActor {
+    fn new() -> (Self, mpsc::Sender<DebounceMessage>) {
+        let (sender, receiver) = mpsc::channel(100);
+        let actor = Self {
+            receiver,
+            pending_updates: HashMap::new(),
+        };
+        (actor, sender)
+    }
+
+    async fn run(mut self) {
+        let mut process_interval = interval(Duration::from_secs(DEBOUNCE_PROCESS_INTERVAL_SECONDS)); // Check every 5 seconds
+
+        loop {
+            tokio::select! {
+                // Handle incoming messages
+                message = self.receiver.recv() => {
+                    match message {
+                        Some(DebounceMessage::ScheduleUpdate(update)) => {
+                            self.handle_schedule_update(update).await;
+                        }
+                        None => {
+                            debug!("Debounce actor channel closed, shutting down");
+                            break;
+                        }
+                    }
+                }
+
+                // Periodic processing of pending updates
+                _ = process_interval.tick() => {
+                    self.process_pending_updates().await;
+                }
+            }
+        }
+    }
+
+    async fn handle_schedule_update(&mut self, update: PendingUpdate) {
+        let key = format!("{}:{}", update.operation, update.file_uri);
+        debug!(
+            "Actor scheduling debounced update for {} operation on {}",
+            update.operation, update.file_uri
+        );
+        self.pending_updates.insert(key, update);
+    }
+
+    async fn process_pending_updates(&mut self) {
+        let now = Instant::now();
+        let mut to_process = Vec::new();
+        let mut to_remove = Vec::new();
+
+        // Find updates that are ready to process
+        for (key, update) in &self.pending_updates {
+            if now.duration_since(update.last_update_time)
+                >= Duration::from_secs(DEBOUNCE_DURATION_SECONDS)
+            {
+                to_process.push(update.clone());
+                to_remove.push(key.clone());
+            }
+        }
+
+        // Remove processed updates from pending map
+        for key in to_remove {
+            self.pending_updates.remove(&key);
+        }
+
+        // Process updates sequentially
+        for update in to_process {
+            info!(
+                "Actor processing debounced update for {} operation on {}",
+                update.operation, update.file_uri
+            );
+
+            if let Err(e) = execute_code_index_update(
+                &update.api_config,
+                &update.directory,
+                update.operation,
+                &update.file_uri,
+            )
+            .await
+            {
+                error!("Failed to process debounced update: {}", e);
+            }
+        }
+    }
+}
+
+// Global actor sender
+static DEBOUNCE_ACTOR_SENDER: OnceLock<mpsc::Sender<DebounceMessage>> = OnceLock::new();
+
+fn get_debounce_actor_sender() -> &'static mpsc::Sender<DebounceMessage> {
+    DEBOUNCE_ACTOR_SENDER.get_or_init(|| {
+        let (actor, sender) = DebounceActor::new();
+
+        // Spawn the actor
+        tokio::spawn(async move {
+            info!("Starting debounce actor");
+            actor.run().await;
+            info!("Debounce actor shutdown");
+        });
+
+        sender
+    })
+}
 
 pub async fn get_or_build_local_code_index(
     api_config: &ClientConfig,
@@ -160,13 +308,11 @@ fn process_directory(base_dir: &str) -> Result<Vec<SimpleDocument>, String> {
         let path = entry.path();
         let content = std::fs::read_to_string(path).map_err(|_| "Failed to read file")?;
 
+        // Get absolute path and create consistent URI
+        let absolute_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
         documents.push(SimpleDocument {
-            uri: format!(
-                "file:///{}",
-                path.to_string_lossy()
-                    .trim_start_matches('.')
-                    .trim_start_matches('/')
-            ),
+            uri: format!("file://{}", absolute_path.to_string_lossy()),
             content,
         });
     }
@@ -249,22 +395,14 @@ async fn handle_code_index_update_event(
 ) -> Result<(), String> {
     match event {
         FileWatchEvent::Created { file } => {
-            info!("File created: {}", file.uri);
-            // TODO: Implement incremental index update for created file
-            update_code_index_placeholder(api_config, directory, "created", &file.uri).await
+            update_code_index(api_config, directory, FileOperation::Created, &file.uri).await
         }
         FileWatchEvent::Modified {
             file,
             old_content: _,
-        } => {
-            info!("File modified: {}", file.uri);
-            // TODO: Implement incremental index update for modified file
-            update_code_index_placeholder(api_config, directory, "modified", &file.uri).await
-        }
+        } => update_code_index(api_config, directory, FileOperation::Modified, &file.uri).await,
         FileWatchEvent::Deleted { file } => {
-            info!("File deleted: {}", file.uri);
-            // TODO: Implement incremental index update for deleted file
-            update_code_index_placeholder(api_config, directory, "deleted", &file.uri).await
+            update_code_index(api_config, directory, FileOperation::Deleted, &file.uri).await
         }
         FileWatchEvent::Raw { event } => {
             debug!("Raw filesystem event: {:?}", event);
@@ -274,46 +412,314 @@ async fn handle_code_index_update_event(
     }
 }
 
-async fn update_code_index_placeholder(
-    _api_config: &ClientConfig,
-    _directory: &Option<String>,
-    _operation: &str,
-    _file_uri: &str,
+/// Find all document URIs that the given document depends on
+fn find_document_dependencies(index: &BuildIndexOutput, document_uri: &str) -> HashSet<String> {
+    index
+        .blocks
+        .iter()
+        .filter(|block| block.document_uri == document_uri)
+        .flat_map(|block| &block.dependencies)
+        .filter(|dep| dep.satisfied)
+        .filter_map(|dep| dep.key.as_ref())
+        .filter_map(|dep_key| {
+            index
+                .blocks
+                .iter()
+                .find(|other_block| {
+                    other_block.key == *dep_key && other_block.document_uri != document_uri
+                })
+                .map(|other_block| other_block.document_uri.clone())
+        })
+        .collect::<HashSet<String>>()
+}
+
+/// Find all document URIs that depend on the given document
+fn find_document_dependents(index: &BuildIndexOutput, document_uri: &str) -> HashSet<String> {
+    // Find all blocks in this document
+    let document_block_keys: HashSet<String> = index
+        .blocks
+        .iter()
+        .filter(|block| block.document_uri == document_uri)
+        .map(|block| block.key.clone())
+        .collect();
+
+    // Find all blocks that depend on any block in this document
+    index
+        .blocks
+        .iter()
+        .filter(|block| block.document_uri != document_uri)
+        .filter(|block| {
+            block.dependencies.iter().any(|dep| {
+                dep.satisfied
+                    && dep
+                        .key
+                        .as_ref()
+                        .map(|dep_key| document_block_keys.contains(dep_key))
+                        .unwrap_or(false)
+            })
+        })
+        .map(|block| block.document_uri.clone())
+        .collect()
+}
+
+/// Read the content of a file, handling file:// URIs
+fn read_file_content(uri: &str) -> Result<String, String> {
+    let file_path = if uri.starts_with("file://") {
+        uri.strip_prefix("file://").unwrap_or(uri)
+    } else {
+        uri
+    };
+
+    std::fs::read_to_string(file_path)
+        .map_err(|e| format!("Failed to read file {}: {}", file_path, e))
+}
+
+/// Convert a file path to a file:// URI format
+fn path_to_uri(path: &str) -> String {
+    if path.starts_with("file://") {
+        path.to_string()
+    } else {
+        // Convert to absolute path for consistency
+        let path_buf = std::path::Path::new(path);
+        let absolute_path = path_buf.canonicalize().unwrap_or_else(|_| {
+            // If canonicalize fails, try to make it absolute relative to current dir
+            if path_buf.is_absolute() {
+                path_buf.to_path_buf()
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join(path_buf)
+            }
+        });
+        format!("file://{}", absolute_path.to_string_lossy())
+    }
+}
+
+/// Merge new index results into existing index, replacing blocks for specified documents
+fn merge_index_results(
+    existing_index: &mut BuildIndexOutput,
+    new_index: BuildIndexOutput,
+    updated_document_uris: &HashSet<String>,
+) {
+    // Remove all blocks from documents that were re-indexed
+    existing_index
+        .blocks
+        .retain(|block| !updated_document_uris.contains(&block.document_uri));
+
+    // Add all new blocks
+    existing_index.blocks.extend(new_index.blocks);
+
+    // Merge errors and warnings (keep existing ones for non-updated documents)
+    existing_index
+        .errors
+        .retain(|error| !updated_document_uris.contains(&error.uri));
+    existing_index.errors.extend(new_index.errors);
+
+    existing_index
+        .warnings
+        .retain(|warning| !updated_document_uris.contains(&warning.uri));
+    existing_index.warnings.extend(new_index.warnings);
+}
+
+async fn update_code_index(
+    api_config: &ClientConfig,
+    directory: &Option<String>,
+    operation: FileOperation,
+    file_uri: &str,
 ) -> Result<(), String> {
-    // Log to debug file
-    // let debug_message = format!(
-    //     "[{}] {} file: {}\n",
-    //     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
-    //     operation,
-    //     file_uri
-    // );
+    // Use the actor-based debouncing mechanism
+    let actor_sender = get_debounce_actor_sender();
 
-    // if let Err(e) = std::fs::OpenOptions::new()
-    //     .create(true)
-    //     .append(true)
-    //     .open("debug.log")
-    //     .and_then(|mut file| std::io::Write::write_all(&mut file, debug_message.as_bytes()))
-    // {
-    //     warn!("Failed to write to debug.log: {}", e);
-    // }
+    let pending_update = PendingUpdate {
+        operation,
+        file_uri: file_uri.to_string(),
+        api_config: api_config.clone(),
+        directory: directory.clone(),
+        last_update_time: Instant::now(),
+    };
 
-    // TODO: Implement the following logic:
-    // 1. For created/modified files:
-    //    - Read the file content
-    //    - Call the build_code_index API for just this file
-    //    - Merge the result into the existing index
-    //    - Update the timestamp
-    //    - Save the updated index
-    //
-    // 2. For deleted files:
-    //    - Remove the file's blocks from the existing index
-    //    - Update the timestamp
-    //    - Save the updated index
-    //
-    // 3. Consider debouncing to avoid too frequent updates
-    //    - Could batch updates and process them every few seconds
-    //    - Or use a more sophisticated strategy based on file type/size
+    debug!(
+        "Sending update to debounce actor for {} operation on {}",
+        operation, file_uri
+    );
 
+    actor_sender
+        .send(DebounceMessage::ScheduleUpdate(pending_update))
+        .await
+        .map_err(|e| format!("Failed to send message to debounce actor: {}", e))?;
+
+    Ok(())
+}
+
+async fn execute_code_index_update(
+    api_config: &ClientConfig,
+    _directory: &Option<String>,
+    operation: FileOperation,
+    file_uri: &str,
+) -> Result<(), String> {
+    info!(
+        "Executing code index update for {} operation on {}",
+        operation, file_uri
+    );
+
+    // Load existing index
+    let mut existing_index = match load_existing_index() {
+        Ok(index) => index,
+        Err(e) => {
+            warn!(
+                "Failed to load existing index for incremental update: {}. Building fresh index.",
+                e
+            );
+            return Ok(()); // Let the next request trigger a full rebuild
+        }
+    };
+
+    let file_uri_normalized = path_to_uri(file_uri);
+    let mut documents_to_reindex = HashSet::new();
+
+    match operation {
+        FileOperation::Created | FileOperation::Modified => {
+            // Add the changed document
+            documents_to_reindex.insert(file_uri_normalized.clone());
+
+            // Find dependencies and dependents to maintain consistency
+            let dependencies =
+                find_document_dependencies(&existing_index.index, &file_uri_normalized);
+            let dependents = find_document_dependents(&existing_index.index, &file_uri_normalized);
+
+            documents_to_reindex.extend(dependencies);
+            documents_to_reindex.extend(dependents);
+
+            info!(
+                "Re-indexing {} documents due to {} {}",
+                documents_to_reindex.len(),
+                operation,
+                file_uri
+            );
+
+            // Read content for all documents that need re-indexing
+            let mut documents = Vec::new();
+            for doc_uri in &documents_to_reindex {
+                match read_file_content(doc_uri) {
+                    Ok(content) => {
+                        documents.push(SimpleDocument {
+                            uri: doc_uri.clone(),
+                            content,
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Failed to read document {} for re-indexing: {}", doc_uri, e);
+                        // Continue with other documents
+                    }
+                }
+            }
+
+            if documents.is_empty() {
+                warn!("No documents to re-index");
+                return Ok(());
+            }
+
+            // Call the indexing API
+            let client = Client::new(api_config)?;
+            let arguments = serde_json::to_value(BuildCodeIndexToolArgs { documents })
+                .map_err(|e| format!("Failed to convert documents to JSON: {}", e))?;
+
+            let response = client
+                .call_mcp_tool(&ToolsCallParams {
+                    name: "build_code_index".to_string(),
+                    arguments,
+                })
+                .await
+                .map_err(|e| format!("Failed to build code index: {}", e))?;
+
+            let response_text = response
+                .iter()
+                .map(|r| {
+                    if let Some(RawTextContent { text }) = r.as_text() {
+                        text.clone()
+                    } else {
+                        "".to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("");
+
+            let new_index: BuildIndexOutput = serde_json::from_str(&response_text)
+                .map_err(|e| format!("Failed to parse build index output: {}", e))?;
+
+            // Merge the results
+            merge_index_results(&mut existing_index.index, new_index, &documents_to_reindex);
+        }
+        FileOperation::Deleted => {
+            // Find all block keys from the deleted document
+            let deleted_block_keys: HashSet<String> = existing_index
+                .index
+                .blocks
+                .iter()
+                .filter(|block| block.document_uri == file_uri_normalized)
+                .map(|block| block.key.clone())
+                .collect();
+
+            info!(
+                "Marking dependencies as unsatisfied due to deletion of {} (affected {} blocks)",
+                file_uri,
+                deleted_block_keys.len()
+            );
+
+            // Mark dependencies pointing to deleted blocks as unsatisfied
+            let mut unsatisfied_count = 0;
+            for block in &mut existing_index.index.blocks {
+                if block.document_uri != file_uri_normalized {
+                    for dep in &mut block.dependencies {
+                        if dep.satisfied {
+                            if let Some(dep_key) = &dep.key {
+                                if deleted_block_keys.contains(dep_key) {
+                                    dep.satisfied = false;
+                                    unsatisfied_count += 1;
+                                    debug!(
+                                        "Marked dependency {} -> {} as unsatisfied",
+                                        block.key, dep_key
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if unsatisfied_count > 0 {
+                info!("Marked {} dependencies as unsatisfied", unsatisfied_count);
+            }
+
+            // Remove blocks from the deleted file
+            existing_index
+                .index
+                .blocks
+                .retain(|block| block.document_uri != file_uri_normalized);
+            existing_index
+                .index
+                .errors
+                .retain(|error| error.uri != file_uri_normalized);
+            existing_index
+                .index
+                .warnings
+                .retain(|warning| warning.uri != file_uri_normalized);
+        }
+    }
+
+    // Update timestamp
+    existing_index.last_updated = Utc::now();
+
+    // Save updated index
+    let index_json = serde_json::to_string_pretty(&existing_index)
+        .map_err(|e| format!("Failed to serialize updated code index: {}", e))?;
+
+    LocalStore::write_session_data("code_index.json", &index_json)?;
+
+    info!(
+        "Successfully updated code index for {} operation on {}",
+        operation, file_uri
+    );
     Ok(())
 }
 

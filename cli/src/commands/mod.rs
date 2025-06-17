@@ -325,7 +325,7 @@ impl Commands {
                         .unwrap()
                         .to_string_lossy()
                         .replace('\\', "/");
-                    let document_uri = format!("file:///{}", document_path);
+                    let document_uri = format!("file://{}", document_path);
 
                     documents.push(Document {
                         content,

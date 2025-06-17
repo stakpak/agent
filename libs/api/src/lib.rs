@@ -817,7 +817,11 @@ Score: {:.2}%
             "#,
                     result.flow_version.flow_name,
                     result.flow_version.version_id,
-                    result.block.document_uri.strip_prefix("file:///").unwrap(),
+                    result
+                        .block
+                        .document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&result.block.document_uri),
                     result.block.start_point.row,
                     result.block.start_point.column,
                     result.similarity * 100.0,
@@ -963,7 +967,9 @@ impl std::fmt::Display for EditInfo {
 >>>>>>> REPLACE
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.old_str,
                     self.new_str
                 )
@@ -978,7 +984,9 @@ impl std::fmt::Display for EditInfo {
 {}
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.new_str
                 )
             }
@@ -995,7 +1003,9 @@ impl std::fmt::Display for EditInfo {
 >>>>>>> REPLACE
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.old_str
                 )
             }

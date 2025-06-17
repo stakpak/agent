@@ -171,7 +171,7 @@ impl RemoteTools {
             for edit in generation_result.edits.unwrap_or_default() {
                 let file_path = Path::new(
                     edit.document_uri
-                        .strip_prefix("file:///")
+                        .strip_prefix("file://")
                         .unwrap_or(&edit.document_uri),
                 );
 
@@ -476,7 +476,7 @@ impl RemoteTools {
         for (i, (block, score)) in matching_blocks.iter().enumerate() {
             let file_path = block
                 .document_uri
-                .strip_prefix("file:///")
+                .strip_prefix("file://")
                 .unwrap_or(&block.document_uri);
 
             // result.push_str(&format!(

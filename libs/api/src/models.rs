@@ -637,7 +637,7 @@ pub struct ReadDocumentCommandArgs {
     /// Detailed reasoning for why you need to read this document
     pub reasoning: String,
     pub target: Option<FlowName>,
-    /// The uri of the document to read in the format `file:///path/to/document`
+    /// The uri of the document to read in the format `file://path/to/document`
     pub document_uri: String,
 }
 
