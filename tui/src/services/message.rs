@@ -355,64 +355,6 @@ fn format_simple_value(value: &Value) -> String {
     }
 }
 
-// Helper function to wrap text to specified width
-pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-
-    if text.chars().count() <= width {
-        return vec![text.to_string()];
-    }
-
-    let mut lines = Vec::new();
-    let mut current_line = String::new();
-    let mut current_width = 0;
-
-    for word in text.split_whitespace() {
-        let word_len = word.chars().count();
-
-        // If adding this word would exceed the width
-        if current_width + word_len + (if current_width > 0 { 1 } else { 0 }) > width {
-            if !current_line.is_empty() {
-                lines.push(current_line);
-                current_line = String::new();
-                current_width = 0;
-            }
-
-            // If a single word is longer than width, we need to break it
-            if word_len > width {
-                let mut remaining = word;
-                while !remaining.is_empty() {
-                    let chunk_size = std::cmp::min(width, remaining.chars().count());
-                    let chunk: String = remaining.chars().take(chunk_size).collect();
-                    lines.push(chunk.clone());
-                    remaining = &remaining[chunk.len()..];
-                }
-                continue;
-            }
-        }
-
-        if current_width > 0 {
-            current_line.push(' ');
-            current_width += 1;
-        }
-
-        current_line.push_str(word);
-        current_width += word_len;
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
-}
-
 // Helper function to extract what the command is trying to do (bubble title)
 pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     let command = command.trim();
