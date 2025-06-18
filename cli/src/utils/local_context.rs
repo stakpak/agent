@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -14,6 +15,7 @@ pub struct LocalContext {
     pub working_directory: String,
     pub file_structure: HashMap<String, FileInfo>,
     pub git_info: Option<GitInfo>,
+    pub current_datetime_utc: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -34,6 +36,11 @@ pub struct GitInfo {
 impl fmt::Display for LocalContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "# System Details")?;
+        writeln!(
+            f,
+            "Current Date/Time: {}",
+            self.current_datetime_utc.format("%Y-%m-%d %H:%M:%S UTC")
+        )?;
         writeln!(f, "Operating System: {}", self.operating_system)?;
         writeln!(f, "Shell Type: {}", self.shell_type)?;
         writeln!(
@@ -126,6 +133,7 @@ fn format_file_size(size: u64) -> String {
 }
 
 pub async fn analyze_local_context() -> Result<LocalContext, Box<dyn std::error::Error>> {
+    let current_datetime_utc = Utc::now();
     let operating_system = get_operating_system();
     let shell_type = get_shell_type();
     let is_container = detect_container_environment();
@@ -140,6 +148,7 @@ pub async fn analyze_local_context() -> Result<LocalContext, Box<dyn std::error:
         working_directory,
         file_structure,
         git_info,
+        current_datetime_utc,
     })
 }
 
