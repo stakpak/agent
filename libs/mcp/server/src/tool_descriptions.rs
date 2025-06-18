@@ -37,6 +37,8 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
 
 pub const SMART_SEARCH_CODE_DESCRIPTION: &str = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem.";
 
+pub const SEARCH_DOCS_DESCRIPTION: &str = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources.";
+
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
 pub const WORK_DIR_PARAM_DESCRIPTION: &str = "Optional working directory for command execution";
@@ -66,3 +68,8 @@ pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to incl
 pub const SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
 pub const SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
     "The maximum number of results to return (default: 10)";
+
+// pub const SEARCH_DOCS_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant technical documentation on the internet, the more detailed the query the better the results will be";
+pub const SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION: &str =
+    "The maximum number of results to return (default: 5, max: 5)";
+pub const SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in the documentation. Searches against the title, description, and content of documentation chunks.";
