@@ -362,6 +362,52 @@ impl RemoteTools {
 
         Ok(CallToolResult::success(response))
     }
+
+    #[tool(description = SEARCH_DOCS_DESCRIPTION)]
+    pub async fn search_docs(
+        &self,
+        // #[tool(param)]
+        // #[schemars(description = SEARCH_DOCS_QUERY_PARAM_DESCRIPTION)]
+        // query: Option<String>,
+        #[tool(param)]
+        #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+        #[tool(param)]
+        #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
+        limit: Option<u32>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        // Cap the limit to a maximum of 5
+        let limit = limit.map(|l| l.min(5)).or(Some(5));
+
+        let response = match client
+            .call_mcp_tool(&ToolsCallParams {
+                name: "search_docs".to_string(),
+                arguments: json!({
+                    "keywords": keywords,
+                    "limit": limit,
+                }),
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("SEARCH_DOCS_ERROR"),
+                    Content::text(format!("Failed to search for docs: {}", e)),
+                ]));
+            }
+        };
+
+        Ok(CallToolResult::success(response))
+    }
 }
 
 #[tool(tool_box)]
