@@ -85,7 +85,7 @@ bump_version() {
     echo "$major.$minor.$patch"
 }
 
-# Function to update version in Cargo.toml
+# Function to update version in Cargo.toml and Cargo.lock
 update_cargo_version() {
     local new_version=$1
     local temp_file=$(mktemp)
@@ -95,6 +95,15 @@ update_cargo_version() {
     mv "$temp_file" Cargo.toml
     
     print_success "Updated Cargo.toml version to $new_version"
+    
+    # Update Cargo.lock to reflect the new version
+    print_info "Updating Cargo.lock..."
+    if cargo update --workspace; then
+        print_success "Updated Cargo.lock"
+    else
+        print_error "Failed to update Cargo.lock"
+        exit 1
+    fi
 }
 
 # Function to check if git working directory is clean
@@ -118,7 +127,7 @@ commit_and_push() {
     local version=$1
     
     print_info "Adding changes to git..."
-    git add Cargo.toml
+    git add Cargo.toml Cargo.lock
     
     # Add any other uncommitted changes if they exist
     if [[ -n $(git status --porcelain) ]]; then
