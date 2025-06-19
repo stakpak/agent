@@ -1,4 +1,4 @@
-use crate::services::helper_block::push_styled_message;
+use crate::services::helper_block::{push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::{
@@ -8,11 +8,9 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{ShellCommand, ShellEvent, run_background_shell_command};
-
-use crate::services::helper_block::push_error_message;
-#[cfg(unix)]
-use crate::services::shell_mode::run_pty_command;
+use crate::services::shell_mode::{
+    ShellCommand, ShellEvent, run_background_shell_command, run_pty_command,
+};
 
 #[derive(Debug)]
 pub struct SessionInfo {
@@ -207,21 +205,14 @@ impl AppState {
             Color::Rgb(160, 92, 158),
         );
 
-        // Use PTY for sudo commands
-        let shell_cmd = if command.contains("sudo") || command.contains("ssh") {
-            #[cfg(unix)]
-            {
-                match run_pty_command(command.clone(), shell_tx) {
-                    Ok(cmd) => cmd,
-                    Err(e) => {
-                        push_error_message(self, &format!("Failed to run command: {}", e));
-                        return;
-                    }
+        // Use PTY for interactive commands (sudo, ssh, etc.)
+        let shell_cmd = if command.contains("sudo") || command.contains("ssh") || command.contains("vim") || command.contains("nano") {
+            match run_pty_command(command.clone(), shell_tx.clone()) {
+                Ok(cmd) => cmd,
+                Err(e) => {
+                    push_error_message(self, &format!("Failed to run PTY command: {}, falling back to background command", e));
+                    run_background_shell_command(command.clone(), shell_tx)
                 }
-            }
-            #[cfg(not(unix))]
-            {
-                run_background_shell_command(command.clone(), shell_tx)
             }
         } else {
             run_background_shell_command(command.clone(), shell_tx)

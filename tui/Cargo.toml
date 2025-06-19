@@ -16,10 +16,9 @@ tui-markdown = "0.3.5"
 chrono = "0.4"
 console = "0.15"
 ansi-to-tui = "7.0.0"
+portable-pty = "0.8"
 
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
 
-[target.'cfg(unix)'.dependencies]
-portable-pty = "0.8"
