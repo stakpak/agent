@@ -2,6 +2,7 @@ use stakpak_api::models::{BuildCodeIndexInput, BuildCodeIndexOutput, CodeIndex, 
 use stakpak_api::{Client, ClientConfig};
 use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::indexing::IndexingStatus;
 
 use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
@@ -36,6 +37,7 @@ impl std::fmt::Display for FileOperation {
 }
 
 const INDEX_FRESHNESS_MINUTES: i64 = 10;
+const MAX_AUTO_INDEX_FILES: usize = 200;
 
 const DEBOUNCE_PROCESS_INTERVAL_SECONDS: u64 = 5;
 const DEBOUNCE_DURATION_SECONDS: u64 = 15;
@@ -166,23 +168,89 @@ fn get_debounce_actor_sender() -> &'static mpsc::Sender<DebounceMessage> {
 pub async fn get_or_build_local_code_index(
     api_config: &ClientConfig,
     directory: Option<String>,
+    index_big_project: bool,
 ) -> Result<CodeIndex, String> {
+    // Set the directory to use
+    let dir = directory.unwrap_or_else(|| {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    });
+
+    // First, count supported files to see if we should proceed
+    let file_count = count_supported_files(&dir)?;
+
+    if file_count > MAX_AUTO_INDEX_FILES && !index_big_project {
+        // Store the indexing status
+        let status = IndexingStatus {
+            indexed: false,
+            reason: format!(
+                "Directory contains {} supported files (>{} threshold). Use --index-big-project to enable indexing.",
+                file_count, MAX_AUTO_INDEX_FILES
+            ),
+            file_count,
+            timestamp: Utc::now(),
+        };
+        store_indexing_status(&status)?;
+
+        warn!("Skipping code indexing: {}", status.reason);
+        return Err(status.reason);
+    }
+
     // Try to load existing index
     match load_existing_index() {
         Ok(index) if is_index_fresh(&index) => {
             // Index exists and is fresh (less than 10 minutes old)
+            let status = IndexingStatus {
+                indexed: true,
+                reason: "Using existing fresh index".to_string(),
+                file_count,
+                timestamp: index.last_updated,
+            };
+            store_indexing_status(&status)?;
             Ok(index)
         }
         Ok(_) => {
             // Index exists but is stale, rebuild it
             warn!("Code index is older than 10 minutes, rebuilding...");
-            rebuild_and_load_index(api_config, directory).await
+            rebuild_and_load_index(api_config, Some(dir), file_count).await
         }
         Err(_) => {
             // No index exists or failed to load, build a new one
-            rebuild_and_load_index(api_config, directory).await
+            rebuild_and_load_index(api_config, Some(dir), file_count).await
         }
     }
+}
+
+/// Count supported files in directory
+fn count_supported_files(base_dir: &str) -> Result<usize, String> {
+    let mut count = 0;
+    let ignore_patterns = read_gitignore_patterns(base_dir);
+
+    for entry in WalkDir::new(base_dir)
+        .into_iter()
+        .filter_entry(|e| should_include_entry(e, base_dir, &ignore_patterns))
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file() && is_supported_file(entry.path()) {
+            count += 1;
+            // Early exit if we've already exceeded the threshold to avoid counting millions of files
+            if count > MAX_AUTO_INDEX_FILES * 2 {
+                break;
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+/// Store indexing status for use by tools
+fn store_indexing_status(status: &IndexingStatus) -> Result<(), String> {
+    let status_json = serde_json::to_string_pretty(status)
+        .map_err(|e| format!("Failed to serialize indexing status: {}", e))?;
+    LocalStore::write_session_data("indexing_status.json", &status_json)
+        .map_err(|e| format!("Failed to store indexing status: {}", e))?;
+    Ok(())
 }
 
 /// Load existing index from local storage
@@ -216,9 +284,21 @@ fn is_index_fresh(index: &CodeIndex) -> bool {
 async fn rebuild_and_load_index(
     api_config: &ClientConfig,
     directory: Option<String>,
+    file_count: usize,
 ) -> Result<CodeIndex, String> {
     build_local_code_index(api_config, directory).await?;
-    load_existing_index()
+    let index = load_existing_index()?;
+
+    // Store successful indexing status
+    let status = IndexingStatus {
+        indexed: true,
+        reason: format!("Successfully indexed {} files", file_count),
+        file_count,
+        timestamp: index.last_updated,
+    };
+    store_indexing_status(&status)?;
+
+    Ok(index)
 }
 
 /// Build local code index
