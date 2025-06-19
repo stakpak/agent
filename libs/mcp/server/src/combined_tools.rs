@@ -148,6 +148,19 @@ impl CombinedTools {
             .local_code_search(keywords, limit, show_dependencies)
             .await
     }
+
+    #[tool(description = SEARCH_DOCS_DESCRIPTION)]
+    pub async fn search_docs(
+        &self,
+        #[tool(param)]
+        #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+        #[tool(param)]
+        #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
+        limit: Option<u32>,
+    ) -> Result<CallToolResult, McpError> {
+        self.remote_tools.search_docs(keywords, limit).await
+    }
 }
 
 #[tool(tool_box)]

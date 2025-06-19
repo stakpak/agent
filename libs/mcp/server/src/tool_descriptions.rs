@@ -41,6 +41,8 @@ pub const LOCAL_CODE_SEARCH_DESCRIPTION: &str = r#"Search for local code blocks 
 IMPORTANT: this tool ONLY search through local Terraform, Kubernetes, Dockerfile, and Github Actions code.
 This tool searches through the locally indexed code blocks using text matching against names, types, content, and file paths. Blocks matching multiple keywords are ranked higher in the results. It can also show dependencies and dependents of matching blocks. If no index is found, it will build one first."#;
 
+pub const SEARCH_DOCS_DESCRIPTION: &str = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources.";
+
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
 pub const WORK_DIR_PARAM_DESCRIPTION: &str = "Optional working directory for command execution";
@@ -70,6 +72,11 @@ pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to incl
 pub const REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
 pub const REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
     "The maximum number of results to return (default: 10)";
+
+// pub const SEARCH_DOCS_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant technical documentation on the internet, the more detailed the query the better the results will be";
+pub const SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION: &str =
+    "The maximum number of results to return (default: 5, max: 5)";
+pub const SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in the documentation. Searches against the title, description, and content of documentation chunks.";
 
 pub const LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword.";
 pub const LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
