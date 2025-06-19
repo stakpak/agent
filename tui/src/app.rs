@@ -8,12 +8,11 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{
-    ShellCommand, ShellEvent, run_background_shell_command, run_pty_command,
-};
+use crate::services::shell_mode::{ShellCommand, ShellEvent, run_background_shell_command};
 
-#[cfg(unix)]
 use crate::services::helper_block::push_error_message;
+#[cfg(unix)]
+use crate::services::shell_mode::run_pty_command;
 
 #[derive(Debug)]
 pub struct SessionInfo {
