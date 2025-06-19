@@ -231,6 +231,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "notes",
                     "progress",
                     "local_context",
+                    "todo",
                 ];
                 let mut found = false;
 
