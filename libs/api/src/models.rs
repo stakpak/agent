@@ -637,7 +637,7 @@ pub struct ReadDocumentCommandArgs {
     /// Detailed reasoning for why you need to read this document
     pub reasoning: String,
     pub target: Option<FlowName>,
-    /// The uri of the document to read in the format `file:///path/to/document`
+    /// The uri of the document to read in the format `file://path/to/document`
     pub document_uri: String,
 }
 
@@ -959,4 +959,29 @@ pub struct AgentTask {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AgentTaskOutput {
     pub results: Vec<AgentTask>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildCodeIndexInput {
+    pub documents: Vec<SimpleDocument>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct IndexError {
+    pub uri: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildCodeIndexOutput {
+    pub blocks: Vec<Block>,
+    pub errors: Vec<IndexError>,
+    pub warnings: Vec<IndexError>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CodeIndex {
+    pub last_updated: DateTime<Utc>,
+    pub index: BuildCodeIndexOutput,
 }
