@@ -37,7 +37,7 @@ impl std::fmt::Display for FileOperation {
 }
 
 const INDEX_FRESHNESS_MINUTES: i64 = 10;
-const MAX_AUTO_INDEX_FILES: usize = 500;
+const MAX_AUTO_INDEX_FILES: usize = 200;
 
 const DEBOUNCE_PROCESS_INTERVAL_SECONDS: u64 = 5;
 const DEBOUNCE_DURATION_SECONDS: u64 = 15;
