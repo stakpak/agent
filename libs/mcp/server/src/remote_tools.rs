@@ -7,6 +7,7 @@ use serde_json::json;
 use stakpak_api::models::{CodeIndex, SimpleDocument};
 use stakpak_api::{Client, ClientConfig, GenerationResult, ToolsCallParams};
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::indexing::IndexingStatus;
 
 use std::fs::{self};
 use std::io::Write;
@@ -424,13 +425,40 @@ impl RemoteTools {
         #[schemars(description = LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION)]
         show_dependencies: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
+        // First check indexing status
+        match LocalStore::read_session_data("indexing_status.json") {
+            Ok(status_str) => {
+                if !status_str.is_empty() {
+                    match serde_json::from_str::<IndexingStatus>(&status_str) {
+                        Ok(status) => {
+                            if !status.indexed {
+                                return Ok(CallToolResult::success(vec![Content::text(format!(
+                                    "❌ Local code search is not available: {}\n\nTo enable local code search for large projects, restart the CLI with the --index-big-project flag:\n\nstakpak --index-big-project",
+                                    status.reason
+                                ))]));
+                            }
+                        }
+                        Err(_) => {} // Continue with normal flow if we can't parse status
+                    }
+                }
+            }
+            Err(_) => {} // Continue with normal flow if no status file
+        }
+
         let index_str = LocalStore::read_session_data("code_index.json").map_err(|e| {
             error!("Failed to read code index: {}", e);
             McpError::internal_error(
-                "Failed to read code index",
+                "Failed to read code index - the project may not be indexed yet or indexing may have been skipped",
                 Some(json!({ "error": e.to_string() })),
             )
         })?;
+
+        if index_str.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "❌ Local code search is not available: No code index found.\n\nThis usually means:\n1. The project is too large and indexing was skipped (use --index-big-project flag)\n2. No supported files were found in this directory\n3. The project hasn't been indexed yet\n\nRestart the CLI with --index-big-project if you want to index a large project.",
+            )]));
+        }
+
         let index_store: CodeIndex = serde_json::from_str(&index_str).map_err(|e| {
             McpError::internal_error(
                 "Failed to parse code index",

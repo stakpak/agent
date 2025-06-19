@@ -57,6 +57,10 @@ struct Cli {
     #[arg(long = "disable-secret-redaction", default_value_t = false)]
     disable_secret_redaction: bool,
 
+    /// Allow indexing of large projects (more than 500 supported files)
+    #[arg(long = "index-big-project", default_value_t = false)]
+    index_big_project: bool,
+
     /// Prompt to run the agent with in non-interactive mode
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -132,8 +136,11 @@ async fn main() {
                 None => {
                     let local_context = analyze_local_context().await.ok();
                     let api_config: ClientConfig = config.clone().into();
-                    match get_or_build_local_code_index(&api_config, None).await {
+                    match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
+                        .await
+                    {
                         Ok(_) => {
+                            // Indexing was successful, start the file watcher
                             tokio::spawn(async move {
                                 match start_code_index_watcher(&api_config, None) {
                                     Ok(_) => {}
@@ -142,6 +149,10 @@ async fn main() {
                                     }
                                 }
                             });
+                        }
+                        Err(e) if e.contains("threshold") && e.contains("--index-big-project") => {
+                            // This is the expected error when file count exceeds limit
+                            // Continue silently without file watcher
                         }
                         Err(e) => {
                             eprintln!("Failed to build code index: {}", e);
