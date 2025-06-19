@@ -76,8 +76,8 @@ pub const REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
 // pub const SEARCH_DOCS_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant technical documentation on the internet, the more detailed the query the better the results will be";
 pub const SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION: &str =
     "The maximum number of results to return (default: 5, max: 5)";
-pub const SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in the documentation. Searches against the title, description, and content of documentation chunks.";
-pub const SEARCH_DOCS_KEYWORDS_IN_URL_PARAM_DESCRIPTION: &str = "List of keywords that must be included in the source URL of the documentation chunks. This is useful for filtering out documentation sources that are not relevant to the query.";
+pub const SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in the documentation. Searches against the url, title, description, and content of documentation chunks.";
+pub const SEARCH_DOCS_EXCLUDE_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to exclude from the search results. This is useful for filtering out documentation sources that are not relevant to the query.";
 
 pub const LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword.";
 pub const LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =

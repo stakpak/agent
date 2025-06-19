@@ -156,14 +156,14 @@ impl CombinedTools {
         #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
         keywords: Vec<String>,
         #[tool(param)]
-        #[schemars(description = SEARCH_DOCS_KEYWORDS_IN_URL_PARAM_DESCRIPTION)]
-        keywords_included_in_url: Option<Vec<String>>,
+        #[schemars(description = SEARCH_DOCS_EXCLUDE_KEYWORDS_PARAM_DESCRIPTION)]
+        exclude_keywords: Option<Vec<String>>,
         #[tool(param)]
         #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
     ) -> Result<CallToolResult, McpError> {
         self.remote_tools
-            .search_docs(keywords, keywords_included_in_url, limit)
+            .search_docs(keywords, exclude_keywords, limit)
             .await
     }
 }
