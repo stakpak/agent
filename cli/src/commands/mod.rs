@@ -136,6 +136,10 @@ pub enum Commands {
         /// Tool mode to use (local, remote, combined)
         #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
         tool_mode: ToolMode,
+
+        /// Allow indexing of large projects (more than 500 supported files)
+        #[arg(long = "index-big-project", default_value_t = false)]
+        index_big_project: bool,
     },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
@@ -149,12 +153,16 @@ impl Commands {
             Commands::Mcp {
                 disable_secret_redaction,
                 tool_mode,
+                index_big_project,
             } => {
                 let api_config: ClientConfig = config.clone().into();
                 match tool_mode {
                     ToolMode::RemoteOnly | ToolMode::Combined => {
-                        match get_or_build_local_code_index(&api_config, None).await {
+                        match get_or_build_local_code_index(&api_config, None, index_big_project)
+                            .await
+                        {
                             Ok(_) => {
+                                // Indexing was successful, start the file watcher
                                 tokio::spawn(async move {
                                     match start_code_index_watcher(&api_config, None) {
                                         Ok(_) => {}
@@ -163,6 +171,12 @@ impl Commands {
                                         }
                                     }
                                 });
+                            }
+                            Err(e)
+                                if e.contains("threshold") && e.contains("--index-big-project") =>
+                            {
+                                // This is the expected error when file count exceeds limit
+                                // Continue silently without file watcher
                             }
                             Err(e) => {
                                 eprintln!("Failed to build code index: {}", e);
