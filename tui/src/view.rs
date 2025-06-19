@@ -281,8 +281,12 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 }
 
 fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
-    // Make a copy of input to avoid borrowing issues
-    let input = state.input.clone();
+    // Mask input if in shell mode and waiting for shell input (password)
+    let input = if state.show_shell_mode && state.waiting_for_shell_input {
+        "*".repeat(state.input.chars().count())
+    } else {
+        state.input.clone()
+    };
     let available_width = area.width.saturating_sub(4) as usize; // -4 for borders and padding
 
     // Ensure the cursor position is valid
@@ -300,11 +304,18 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     for (segment_idx, segment) in line_segments.iter().enumerate() {
         let mut current_line = Vec::new();
         // Add prompt to first line only
-        let prompt = if segment_idx == 0 { "> " } else { "" };
-        let prompt_width = prompt.len();
-        current_line.push(Span::raw(prompt));
+        if state.show_shell_mode {
+            current_line.push(Span::styled(
+                " ! ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if segment_idx == 0 {
+            current_line.push(Span::raw("> "));
+        }
 
-        let mut current_width = prompt_width;
+        let mut current_width = 0;
 
         // Process this line segment
         let mut word_segments = Vec::new();
@@ -366,7 +377,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
 
             // Check if this segment would exceed line width
             let needs_wrap = !text.trim().is_empty()
-                && current_width > prompt_width
+                && current_width > 0
                 && current_width + text_width > available_width;
 
             if needs_wrap {
@@ -438,15 +449,18 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             ),
         ]));
     }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if state.show_shell_mode {
+            Style::default().fg(Color::Rgb(160, 92, 158))
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
 
     // Render the input widget
     let input_widget = Paragraph::new(lines)
         .style(Style::default())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
+        .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     f.render_widget(input_widget, area);
