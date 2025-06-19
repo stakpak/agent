@@ -4,10 +4,11 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stakpak_api::models::SimpleDocument;
+use stakpak_api::models::{CodeIndex, SimpleDocument};
 use stakpak_api::{Client, ClientConfig, GenerationResult, ToolsCallParams};
+use stakpak_shared::local_store::LocalStore;
 
-use std::fs;
+use std::fs::{self};
 use std::io::Write;
 use std::path::Path;
 use tracing::{error, warn};
@@ -170,7 +171,7 @@ impl RemoteTools {
             for edit in generation_result.edits.unwrap_or_default() {
                 let file_path = Path::new(
                     edit.document_uri
-                        .strip_prefix("file:///")
+                        .strip_prefix("file://")
                         .unwrap_or(&edit.document_uri),
                 );
 
@@ -323,14 +324,14 @@ impl RemoteTools {
         }
     }
 
-    #[tool(description = SMART_SEARCH_CODE_DESCRIPTION)]
-    pub async fn smart_search_code(
+    #[tool(description = REMOTE_CODE_SEARCH_DESCRIPTION)]
+    pub async fn remote_code_search(
         &self,
         #[tool(param)]
-        #[schemars(description = SEARCH_QUERY_PARAM_DESCRIPTION)]
+        #[schemars(description = REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION)]
         query: String,
         #[tool(param)]
-        #[schemars(description = SEARCH_LIMIT_PARAM_DESCRIPTION)]
+        #[schemars(description = REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
     ) -> Result<CallToolResult, McpError> {
         let client = Client::new(&self.api_config).map_err(|e| {
@@ -354,13 +355,210 @@ impl RemoteTools {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
-                    Content::text("SMART_SEARCH_CODE_ERROR"),
+                    Content::text("REMOTE_CODE_SEARCH_ERROR"),
                     Content::text(format!("Failed to search for code: {}", e)),
                 ]));
             }
         };
 
         Ok(CallToolResult::success(response))
+    }
+
+    #[tool(description = LOCAL_CODE_SEARCH_DESCRIPTION)]
+    pub async fn local_code_search(
+        &self,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
+        limit: Option<u32>,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION)]
+        show_dependencies: Option<bool>,
+    ) -> Result<CallToolResult, McpError> {
+        let index_str = LocalStore::read_session_data("code_index.json").map_err(|e| {
+            error!("Failed to read code index: {}", e);
+            McpError::internal_error(
+                "Failed to read code index",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+        let index_store: CodeIndex = serde_json::from_str(&index_str).map_err(|e| {
+            McpError::internal_error(
+                "Failed to parse code index",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let search_limit = limit.unwrap_or(10) as usize;
+        let show_deps = show_dependencies.unwrap_or(false);
+        let keywords_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();
+
+        // Search through blocks
+        let mut matching_blocks = Vec::new();
+
+        for block in &index_store.index.blocks {
+            let mut score = 0u32;
+            let mut matched_keywords = std::collections::HashSet::new();
+
+            // For each keyword, check matches and accumulate scores
+            for keyword in &keywords_lower {
+                let mut keyword_matched = false;
+
+                // Check name match
+                if let Some(name) = &block.name {
+                    if name.to_lowercase().contains(keyword) {
+                        score += 10;
+                        keyword_matched = true;
+                    }
+                }
+
+                // Check type match
+                if let Some(type_name) = &block.r#type {
+                    if type_name.to_lowercase().contains(keyword) {
+                        score += 8;
+                        keyword_matched = true;
+                    }
+                }
+
+                // Check kind match
+                if block.kind.to_lowercase().contains(keyword) {
+                    score += 6;
+                    keyword_matched = true;
+                }
+
+                // Check file path match
+                if block.document_uri.to_lowercase().contains(keyword) {
+                    score += 4;
+                    keyword_matched = true;
+                }
+
+                // Check code content match
+                if block.code.to_lowercase().contains(keyword) {
+                    score += 2;
+                    keyword_matched = true;
+                }
+
+                if keyword_matched {
+                    matched_keywords.insert(keyword.clone());
+                }
+            }
+
+            // Bonus points for matching multiple keywords
+            if matched_keywords.len() > 1 {
+                let multi_keyword_bonus = (matched_keywords.len() - 1) as u32 * 5;
+                score += multi_keyword_bonus;
+            }
+
+            if score > 0 {
+                matching_blocks.push((block, score));
+            }
+        }
+
+        // Sort by score descending
+        matching_blocks.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Limit results
+        matching_blocks.truncate(search_limit);
+
+        if matching_blocks.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No code blocks found matching keywords: {:?}",
+                keywords
+            ))]));
+        }
+
+        let mut result = String::new();
+        result.push_str(&format!(
+            "Found {} matching code blocks for keywords: {:?}\n\n",
+            matching_blocks.len(),
+            keywords
+        ));
+
+        for (i, (block, score)) in matching_blocks.iter().enumerate() {
+            let file_path = block
+                .document_uri
+                .strip_prefix("file://")
+                .unwrap_or(&block.document_uri);
+
+            // result.push_str(&format!(
+            //     "{}. {}#L{}-L{} (Score: {})\n",
+            //     i + 1,
+            //     block
+            //         .document_uri
+            //         .strip_prefix("file:///")
+            //         .unwrap_or(&block.document_uri),
+            //     block.start_point.row + 1,
+            //     block.end_point.row + 1,
+            //     score
+            // ));
+            result.push_str(&format!("{}. {} (Score: {})\n", i + 1, file_path, score));
+
+            // Redact secrets in the code before displaying
+            let redacted_code = self
+                .secret_manager
+                .redact_and_store_secrets(&block.code, Some(file_path));
+
+            // Show code with line numbers
+            let code_lines: Vec<&str> = redacted_code.lines().collect();
+            // let start_line_num = block.start_point.row + 1;
+
+            result.push_str("   Code:\n");
+            result.push_str("   ```\n");
+            for line in code_lines.iter() {
+                // let line_num = start_line_num + i;
+                // result.push_str(&format!("   {:4}: {}\n", line_num, line));
+                result.push_str(&format!("   {}\n", line));
+            }
+            result.push_str("   ```\n");
+
+            if show_deps {
+                if !block.dependencies.is_empty() {
+                    result.push_str(&format!(
+                        "   Dependencies ({}):\n",
+                        block.dependencies.len()
+                    ));
+                    for dep in &block.dependencies {
+                        // skip unsatisfied dependencies because there are still bugs with
+                        if !dep.satisfied {
+                            continue;
+                        }
+
+                        let mut min_length = usize::MAX;
+                        let mut shortest_reference = Vec::new();
+                        for selector in dep.selectors.iter() {
+                            for reference in selector.references.iter() {
+                                if reference.len() < min_length {
+                                    min_length = reference.len();
+                                    shortest_reference = reference.clone();
+                                }
+                            }
+                        }
+
+                        result.push_str(&format!(
+                            "     - {}\n",
+                            shortest_reference
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect::<Vec<String>>()
+                                .join("/")
+                        ));
+                    }
+                }
+
+                if !block.dependents.is_empty() {
+                    result.push_str(&format!("   Dependents ({}):\n", block.dependents.len()));
+                    for dep in &block.dependents {
+                        result.push_str(&format!("     - {}\n", dep.key));
+                    }
+                }
+            }
+
+            result.push('\n');
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 }
 

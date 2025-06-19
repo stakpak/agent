@@ -3076,7 +3076,6 @@ dependencies = [
  "clap",
  "config",
  "futures-util",
- "notify",
  "regex",
  "reqwest",
  "rmcp",
@@ -3144,6 +3143,7 @@ dependencies = [
  "serde_json",
  "stakpak-api",
  "stakpak-shared",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",
@@ -3153,12 +3153,19 @@ dependencies = [
 name = "stakpak-shared"
 version = "0.1.96"
 dependencies = [
+ "chrono",
+ "futures-util",
+ "notify",
  "once_cell",
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
  "toml",
+ "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

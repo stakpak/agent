@@ -70,6 +70,26 @@ async fn init_gitleaks_if_needed(redact_secrets: bool) {
     }
 }
 
+// /// Initialize code index in background if needed for remote/combined modes
+// async fn init_code_index_if_needed(tool_mode: &ToolMode, api_config: &ClientConfig) {
+//     match tool_mode {
+//         ToolMode::RemoteOnly | ToolMode::Combined => {
+//             let api_config = api_config.clone();
+//             tokio::spawn(async move {
+//                 match get_or_build_local_code_index(&api_config, None).await {
+//                     Ok(_) => if let Ok(_handle) = start_code_index_watcher(&api_config, None) {},
+//                     Err(_) => {
+//                         // Index will be built on first use if initialization fails
+//                     }
+//                 }
+//             });
+//         }
+//         ToolMode::LocalOnly => {
+//             // No code index needed for local-only mode
+//         }
+//     }
+// }
+
 /// Create graceful shutdown handler
 async fn create_shutdown_handler(shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>) {
     if let Some(mut shutdown_rx) = shutdown_rx {
