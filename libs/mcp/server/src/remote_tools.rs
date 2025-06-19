@@ -374,6 +374,9 @@ impl RemoteTools {
         #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
         keywords: Vec<String>,
         #[tool(param)]
+        #[schemars(description = SEARCH_DOCS_KEYWORDS_IN_URL_PARAM_DESCRIPTION)]
+        keywords_included_in_url: Option<Vec<String>>,
+        #[tool(param)]
         #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
     ) -> Result<CallToolResult, McpError> {
@@ -394,6 +397,7 @@ impl RemoteTools {
                 arguments: json!({
                     "keywords": keywords,
                     "limit": limit,
+                    "keywords_included_in_url": keywords_included_in_url,
                 }),
             })
             .await
