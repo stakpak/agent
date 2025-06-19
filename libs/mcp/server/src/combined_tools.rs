@@ -162,7 +162,9 @@ impl CombinedTools {
         #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
     ) -> Result<CallToolResult, McpError> {
-        self.remote_tools.search_docs(keywords, limit).await
+        self.remote_tools
+            .search_docs(keywords, keywords_included_in_url, limit)
+            .await
     }
 }
 
