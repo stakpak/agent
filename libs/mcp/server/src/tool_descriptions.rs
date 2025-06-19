@@ -35,7 +35,11 @@ pub const GENERATE_CODE_DESCRIPTION: &str = "Advanced Generate/Edit devops confi
 
 IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files.";
 
-pub const SMART_SEARCH_CODE_DESCRIPTION: &str = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem.";
+pub const REMOTE_CODE_SEARCH_DESCRIPTION: &str = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem.";
+
+pub const LOCAL_CODE_SEARCH_DESCRIPTION: &str = r#"Search for local code blocks using multiple keywords.
+IMPORTANT: this tool ONLY search through local Terraform, Kubernetes, Dockerfile, and Github Actions code.
+This tool searches through the locally indexed code blocks using text matching against names, types, content, and file paths. Blocks matching multiple keywords are ranked higher in the results. It can also show dependencies and dependents of matching blocks. If no index is found, it will build one first."#;
 
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
@@ -63,6 +67,12 @@ pub const SAVE_FILES_PARAM_DESCRIPTION: &str =
     "Whether to save the generated files to the filesystem (default: false)";
 pub const CONTEXT_PARAM_DESCRIPTION: &str = "Optional list of file paths to include as context for the generation. CRITICAL: When generating code in multiple steps (breaking down large projects), always include previously generated files from earlier steps to ensure consistent references, imports, and overall project coherence. Add any files you want to edit, or that you want to use as context for the generation (default: empty)";
 
-pub const SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
-pub const SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
+pub const REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION: &str = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be";
+pub const REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
     "The maximum number of results to return (default: 10)";
+
+pub const LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword.";
+pub const LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION: &str =
+    "Maximum number of results to return (default: 10)";
+pub const LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION: &str =
+    "Whether to show dependencies and dependents for each matching block (default: false)";

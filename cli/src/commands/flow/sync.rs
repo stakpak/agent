@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    hash::{DefaultHasher, Hash, Hasher},
+    collections::HashSet,
     path::Path,
     sync::{
         Arc,
@@ -10,7 +9,6 @@ use std::{
 };
 
 use futures_util::future::BoxFuture;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
 use rust_socketio::{
     Payload,
     asynchronous::{Client as SocketClient, ClientBuilder},
@@ -18,23 +16,16 @@ use rust_socketio::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::{sync::mpsc, time::sleep};
-use walkdir::WalkDir;
 
 use crate::{
-    commands::flow::{clone, create_edit, is_supported_file},
+    commands::flow::{clone, create_edit},
     config::AppConfig,
 };
 use stakpak_api::{
-    Client, Edit,
+    Client,
     models::{Document, FlowRef},
 };
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct DocumentBuffer {
-    pub content: String,
-    pub uri: String,
-    pub hash: u64,
-}
+use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct DocumentsChange {
@@ -43,9 +34,28 @@ pub struct DocumentsChange {
     pub touched_document_uris: HashSet<String>,
 }
 
-pub enum Change {
-    Internal(Event),
-    Remote(DocumentsChange),
+pub fn is_supported_file(file_path: &Path) -> bool {
+    let is_file = file_path.is_file();
+    let file_name = file_path.file_name().and_then(|n| n.to_str());
+
+    match file_name {
+        Some(name) => {
+            // Skip hidden files/dirs that aren't just "."
+            if name.starts_with('.') && name.len() > 1 {
+                return false;
+            }
+            // Only allow supported files
+            if is_file {
+                name.ends_with(".tf")
+                    || name.ends_with(".yaml")
+                    || name.ends_with(".yml")
+                    || name.to_lowercase().contains("dockerfile")
+            } else {
+                true // Allow directories to be traversed
+            }
+        }
+        None => false,
+    }
 }
 
 pub async fn sync(
@@ -61,104 +71,63 @@ pub async fn sync(
         .map(|d| Path::new(&d).to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    // Initialize state
-    let mut watched_files = initialize_watched_files(&dir);
-    let (tx, mut rx) = mpsc::channel(32);
+    // Create and start the file watcher with our filter
+    let (_file_watcher, mut file_events) =
+        create_and_start_watcher(dir.clone(), is_supported_file).await?;
 
-    // Set up watchers
-    let mut watcher = setup_file_watcher(tx.clone())?;
-    watcher
-        .watch(&dir, RecursiveMode::Recursive)
-        .map_err(|e| e.to_string())?;
+    // Set up remote change subscription
+    let (change_tx, mut change_rx) = mpsc::channel(32);
+    subscribe_to_remote_changes(config, flow_ref, change_tx).await?;
 
-    subscribe_to_remote_changes(config, flow_ref, tx.clone()).await?;
+    println!("🔄 Started syncing changes...");
 
     // Main event loop
-    while let Some(change) = rx.recv().await {
-        match change {
-            Change::Internal(event) => {
-                handle_internal_change(event, &dir, &mut watched_files, client, flow_ref)
-                    .await
-                    .ok();
+    loop {
+        tokio::select! {
+            // Handle processed file events
+            Some(file_event) = file_events.recv() => {
+                if let Err(e) = handle_file_event(file_event, client, flow_ref).await {
+                    eprintln!("Error handling file event: {}", e);
+                }
             }
-            Change::Remote(change) => {
-                handle_remote_change(change, &dir, &mut watched_files);
+            // Handle remote changes
+            Some(remote_change) = change_rx.recv() => {
+                handle_remote_change(remote_change, &dir);
             }
+            else => break,
         }
     }
 
     Ok(())
 }
 
-fn initialize_watched_files(dir: &Path) -> HashMap<String, DocumentBuffer> {
-    #[allow(clippy::unwrap_used)]
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.path().is_file()
-                && is_supported_file(entry.path().file_name().unwrap().to_str(), true)
-        })
-        .filter_map(|entry| {
-            let path = entry.path();
-            hash_file(path).ok().map(|hash| {
-                let uri = get_uri(dir, path);
-                (
-                    uri.clone(),
-                    DocumentBuffer {
-                        content: std::fs::read_to_string(path).unwrap(),
-                        uri,
-                        hash,
-                    },
-                )
-            })
-        })
-        .collect()
-}
-
-fn setup_file_watcher(tx: mpsc::Sender<Change>) -> Result<RecommendedWatcher, String> {
-    RecommendedWatcher::new(
-        move |result| {
-            if let Ok(event) = result {
-                let _ = tx.blocking_send(Change::Internal(event));
-            }
-        },
-        Config::default(),
-    )
-    .map_err(|e| format!("Failed to create watcher: {}", e))
-}
-
-async fn handle_internal_change(
-    event: Event,
-    dir: &Path,
-    watched_files: &mut HashMap<String, DocumentBuffer>,
+async fn handle_file_event(
+    event: FileWatchEvent,
     client: &Client,
     flow_ref: &FlowRef,
 ) -> Result<(), String> {
-    let Some(event_path) = event.paths.first() else {
-        return Ok(());
-    };
-
-    #[allow(clippy::unwrap_used)]
-    if !is_supported_file(
-        event_path.file_name().unwrap().to_str(),
-        event_path.is_file(),
-    ) {
-        return Ok(());
-    }
-
     let mut edits = Vec::new();
 
-    // Handle deletions and renames
-    if matches!(
-        event.kind,
-        notify::EventKind::Modify(ModifyKind::Name(_)) | notify::EventKind::Remove(_)
-    ) {
-        process_deleted_files(dir, watched_files, &mut edits);
+    match event {
+        FileWatchEvent::Modified { file, old_content } => {
+            println!("📝 File modified: {}", file.uri);
+            // Create delete and insert edits for the modification
+            edits.push(create_edit(&file.uri, &old_content, "delete"));
+            edits.push(create_edit(&file.uri, &file.content, "insert"));
+        }
+        FileWatchEvent::Created { file } => {
+            println!("📄 File created: {}", file.uri);
+            edits.push(create_edit(&file.uri, &file.content, "insert"));
+        }
+        FileWatchEvent::Deleted { file } => {
+            println!("🗑️ File deleted: {}", file.uri);
+            edits.push(create_edit(&file.uri, &file.content, "delete"));
+        }
+        FileWatchEvent::Raw { .. } => {
+            // Handle raw events if needed
+            return Ok(());
+        }
     }
-
-    // Handle modifications
-    process_modified_files(&event, dir, watched_files, &mut edits);
 
     if !edits.is_empty() {
         println!("🚀 Pushing changes...");
@@ -168,119 +137,37 @@ async fn handle_internal_change(
     Ok(())
 }
 
-fn process_deleted_files(
-    dir: &Path,
-    watched_files: &mut HashMap<String, DocumentBuffer>,
-    edits: &mut Vec<Edit>,
-) {
-    let invalid_paths: Vec<_> = watched_files
-        .keys()
-        .filter(|path| {
-            let absolute_path = Path::new(dir).join(path.strip_prefix("file:///").unwrap_or(path));
-
-            std::fs::read_to_string(absolute_path).is_err()
-        })
-        .cloned()
-        .collect();
-
-    for path in invalid_paths {
-        if let Some(buffer) = watched_files.get(&path) {
-            edits.push(create_edit(&buffer.uri, &buffer.content, "delete"));
-        }
-        watched_files.remove(&path);
-    }
-}
-
-fn process_modified_files(
-    event: &Event,
-    dir: &Path,
-    watched_files: &mut HashMap<String, DocumentBuffer>,
-    edits: &mut Vec<Edit>,
-) {
-    for path in &event.paths {
-        if let Ok(hash) = hash_file(path) {
-            let uri = get_uri(dir, path);
-            if let Some(buffer) = watched_files.get(&uri) {
-                if buffer.hash != hash {
-                    #[allow(clippy::unwrap_used)]
-                    let new_content = std::fs::read_to_string(path).unwrap();
-                    edits.extend([
-                        create_edit(&uri, &buffer.content, "delete"),
-                        create_edit(&uri, &new_content, "insert"),
-                    ]);
-                    watched_files.insert(
-                        uri.clone(),
-                        DocumentBuffer {
-                            content: new_content,
-                            uri,
-                            hash,
-                        },
-                    );
-                }
-            }
-        }
-    }
-}
-
-fn handle_remote_change(
-    change: DocumentsChange,
-    dir: &Path,
-    watched_files: &mut HashMap<String, DocumentBuffer>,
-) {
-    println!("🔄 Syncing changes...");
+fn handle_remote_change(change: DocumentsChange, dir: &Path) {
+    println!("🔄 Syncing remote changes...");
     let document_uris: HashSet<String> = change.documents.iter().map(|d| d.uri.clone()).collect();
+
+    // Handle deleted files
     for uri in change.touched_document_uris {
         if !document_uris.contains(&uri) {
-            let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
-            if watched_files.contains_key(&uri) {
-                watched_files.remove(&uri);
-            }
+            let absolute_path = Path::new(dir).join(uri.strip_prefix("file://").unwrap_or(&uri));
             std::fs::remove_file(&absolute_path).ok();
         }
     }
+
+    // Handle created/modified files
     for doc in change.documents {
         let uri = doc.uri.clone();
-        let absolute_path = Path::new(dir).join(uri.strip_prefix("file:///").unwrap_or(&uri));
+        let absolute_path = Path::new(dir).join(uri.strip_prefix("file://").unwrap_or(&uri));
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = absolute_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+
         #[allow(clippy::unwrap_used)]
         std::fs::write(&absolute_path, &doc.content).unwrap();
-
-        if let Ok(hash) = hash_file(&absolute_path) {
-            watched_files.insert(
-                uri.clone(),
-                DocumentBuffer {
-                    content: doc.content,
-                    uri,
-                    hash,
-                },
-            );
-        }
     }
-}
-
-fn hash_file(path: &Path) -> Result<u64, String> {
-    std::fs::read_to_string(path)
-        .map(|content| {
-            let mut hasher = DefaultHasher::new();
-            content.hash(&mut hasher);
-            hasher.finish()
-        })
-        .map_err(|_| "Cannot read file".to_string())
-}
-
-fn get_uri(dir: &Path, path: &Path) -> String {
-    #[allow(clippy::unwrap_used)]
-    let path = path
-        .strip_prefix(dir)
-        .unwrap()
-        .to_string_lossy()
-        .replace('\\', "/");
-    format!("file:///{}", path)
 }
 
 async fn subscribe_to_remote_changes(
     config: &AppConfig,
     flow_ref: &FlowRef,
-    tx: mpsc::Sender<Change>,
+    tx: mpsc::Sender<DocumentsChange>,
 ) -> Result<(), String> {
     let socket_client = setup_socket_client(config, tx).await?;
     wait_for_subscription(&socket_client, flow_ref).await?;
@@ -289,7 +176,7 @@ async fn subscribe_to_remote_changes(
 
 async fn setup_socket_client(
     config: &AppConfig,
-    tx: mpsc::Sender<Change>,
+    tx: mpsc::Sender<DocumentsChange>,
 ) -> Result<Arc<SocketClient>, String> {
     ClientBuilder::new(config.api_endpoint.clone())
         .namespace("/v1/flows")
@@ -311,7 +198,7 @@ async fn setup_socket_client(
                                 #[allow(clippy::unwrap_used)]
                                 text.first().unwrap().clone(),
                             ) {
-                                let _ = tx.send(Change::Remote(status)).await;
+                                let _ = tx.send(status).await;
                             }
                         }
                     }

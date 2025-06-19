@@ -140,9 +140,9 @@ async fn process_directory(
         let path = entry.path();
         let content = std::fs::read_to_string(path).map_err(|_| "Failed to read file")?;
         let document_uri = format!(
-            "file:///{}",
-            path.strip_prefix(base_dir)
-                .map_err(|e| format!("Failed to strip prefix: {}", e))?
+            "file://{}",
+            path.canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf())
                 .to_string_lossy()
                 .replace('\\', "/")
         );

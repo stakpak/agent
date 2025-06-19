@@ -1,9 +1,13 @@
-use crate::{config::AppConfig, utils::network};
+use crate::{
+    code_index::{get_or_build_local_code_index, start_code_index_watcher},
+    config::AppConfig,
+    utils::network,
+};
 use agent::{AgentCommands, get_or_create_session, run_agent};
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push, sync};
 use stakpak_api::{
-    Client,
+    Client, ClientConfig,
     models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
 };
 use stakpak_mcp_server::{MCPServerConfig, ToolMode};
@@ -146,6 +150,29 @@ impl Commands {
                 disable_secret_redaction,
                 tool_mode,
             } => {
+                let api_config: ClientConfig = config.clone().into();
+                match tool_mode {
+                    ToolMode::RemoteOnly | ToolMode::Combined => {
+                        match get_or_build_local_code_index(&api_config, None).await {
+                            Ok(_) => {
+                                tokio::spawn(async move {
+                                    match start_code_index_watcher(&api_config, None) {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            eprintln!("Failed to start code index watcher: {}", e);
+                                        }
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to build code index: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    ToolMode::LocalOnly => {}
+                }
+
                 let bind_address = network::find_available_bind_address_descending().await?;
                 println!("MCP server started at http://{}", bind_address);
                 stakpak_mcp_server::start_server(
@@ -325,7 +352,7 @@ impl Commands {
                         .unwrap()
                         .to_string_lossy()
                         .replace('\\', "/");
-                    let document_uri = format!("file:///{}", document_path);
+                    let document_uri = format!("file://{}", document_path);
 
                     documents.push(Document {
                         content,
