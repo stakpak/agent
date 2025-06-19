@@ -1,4 +1,3 @@
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tokio::sync::mpsc;
@@ -144,6 +143,7 @@ pub fn run_pty_command(
     command: String,
     output_tx: mpsc::Sender<ShellEvent>,
 ) -> Result<ShellCommand, Box<dyn std::error::Error>> {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read;
 
     let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(100);
