@@ -1,4 +1,4 @@
-use crate::services::helper_block::{push_error_message, push_styled_message};
+use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::{
@@ -11,6 +11,9 @@ use uuid::Uuid;
 use crate::services::shell_mode::{
     ShellCommand, ShellEvent, run_background_shell_command, run_pty_command,
 };
+
+#[cfg(unix)]
+use crate::services::helper_block::push_error_message;
 
 #[derive(Debug)]
 pub struct SessionInfo {
