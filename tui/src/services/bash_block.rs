@@ -88,6 +88,7 @@ fn wrap_text_simple(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_styled_block_ansi_to_tui(
     content: &str,
     _outside_title: &str,
@@ -206,11 +207,7 @@ pub fn render_styled_block_ansi_to_tui(
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
-                    let padding_needed = if total_content_width <= inner_width {
-                        inner_width - total_content_width
-                    } else {
-                        0
-                    };
+                    let padding_needed = inner_width.saturating_sub(total_content_width);
                     let padding = " ".repeat(padding_needed);
 
                     let mut line_spans = vec![
@@ -406,11 +403,7 @@ pub fn render_result_block(
         + tool_call.function.name.len()
         + extract_truncated_command_arguments(tool_call).len()
         + 3; // "● " + " (" + ")"
-    let header_padding = if header_content_width <= inner_width {
-        inner_width - header_content_width
-    } else {
-        0
-    };
+    let header_padding = inner_width.saturating_sub(header_content_width);
     header_spans.push(Span::from(" ".repeat(header_padding)));
     header_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
 
@@ -485,11 +478,7 @@ pub fn render_result_block(
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
-                    let padding_needed = if total_content_width <= inner_width {
-                        inner_width - total_content_width
-                    } else {
-                        0
-                    };
+                    let padding_needed = inner_width.saturating_sub(total_content_width);
                     let padding = " ".repeat(padding_needed);
 
                     let mut line_spans = vec![
