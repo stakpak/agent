@@ -21,6 +21,7 @@ pub enum MessageContent {
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
+    PlainText(String),
     BashBubble {
         title: String,
         content: Vec<String>,
@@ -69,6 +70,13 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::Markdown(text.into()),
+        }
+    }
+
+    pub fn plain_text(text: impl Into<String>) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::PlainText(text.into()),
         }
     }
 }
@@ -196,6 +204,12 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
             }
             MessageContent::Markdown(markdown) => {
                 all_lines.extend(get_wrapped_markdown_lines(markdown, width));
+            }
+            MessageContent::PlainText(text) => {
+                all_lines.push((
+                    Line::from(vec![Span::styled(text, Style::default())]),
+                    Style::default(),
+                ));
             }
             MessageContent::BashBubble {
                 title,
@@ -339,64 +353,6 @@ fn format_simple_value(value: &Value) -> String {
         Value::Object(_) => "object".to_string(),
         Value::Array(arr) => format!("[{}]", arr.len()),
     }
-}
-
-// Helper function to wrap text to specified width
-pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-
-    if text.chars().count() <= width {
-        return vec![text.to_string()];
-    }
-
-    let mut lines = Vec::new();
-    let mut current_line = String::new();
-    let mut current_width = 0;
-
-    for word in text.split_whitespace() {
-        let word_len = word.chars().count();
-
-        // If adding this word would exceed the width
-        if current_width + word_len + (if current_width > 0 { 1 } else { 0 }) > width {
-            if !current_line.is_empty() {
-                lines.push(current_line);
-                current_line = String::new();
-                current_width = 0;
-            }
-
-            // If a single word is longer than width, we need to break it
-            if word_len > width {
-                let mut remaining = word;
-                while !remaining.is_empty() {
-                    let chunk_size = std::cmp::min(width, remaining.chars().count());
-                    let chunk: String = remaining.chars().take(chunk_size).collect();
-                    lines.push(chunk.clone());
-                    remaining = &remaining[chunk.len()..];
-                }
-                continue;
-            }
-        }
-
-        if current_width > 0 {
-            current_line.push(' ');
-            current_width += 1;
-        }
-
-        current_line.push_str(word);
-        current_width += word_len;
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
 }
 
 // Helper function to extract what the command is trying to do (bubble title)

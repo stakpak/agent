@@ -241,3 +241,17 @@ pub fn render_loading_spinner(state: &AppState) -> Line {
             .add_modifier(Modifier::BOLD),
     )])
 }
+
+pub fn push_styled_message(
+    state: &mut AppState,
+    message: &str,
+    color: Color,
+    icon: &str,
+    icon_color: Color,
+) {
+    let line = Line::from(vec![
+        Span::styled(icon.to_string(), Style::default().fg(icon_color)),
+        Span::styled(message.to_string(), Style::default().fg(color)),
+    ]);
+    state.messages.push(Message::styled(line));
+}
