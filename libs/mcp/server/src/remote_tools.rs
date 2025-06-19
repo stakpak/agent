@@ -367,15 +367,12 @@ impl RemoteTools {
     #[tool(description = SEARCH_DOCS_DESCRIPTION)]
     pub async fn search_docs(
         &self,
-        // #[tool(param)]
-        // #[schemars(description = SEARCH_DOCS_QUERY_PARAM_DESCRIPTION)]
-        // query: Option<String>,
         #[tool(param)]
         #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
         keywords: Vec<String>,
         #[tool(param)]
-        #[schemars(description = SEARCH_DOCS_KEYWORDS_IN_URL_PARAM_DESCRIPTION)]
-        keywords_included_in_url: Option<Vec<String>>,
+        #[schemars(description = SEARCH_DOCS_EXCLUDE_KEYWORDS_PARAM_DESCRIPTION)]
+        exclude_keywords: Option<Vec<String>>,
         #[tool(param)]
         #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
@@ -396,8 +393,8 @@ impl RemoteTools {
                 name: "search_docs".to_string(),
                 arguments: json!({
                     "keywords": keywords,
+                    "exclude_keywords": exclude_keywords,
                     "limit": limit,
-                    "keywords_included_in_url": keywords_included_in_url,
                 }),
             })
             .await
