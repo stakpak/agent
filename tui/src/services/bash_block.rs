@@ -1,15 +1,256 @@
+use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
-    wrap_text,
 };
+use ansi_to_tui::IntoText;
+use console::strip_ansi_codes;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
 
-use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
+// Helper function to wrap text while preserving ANSI codes
+fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
+    // Convert to ratatui text first to parse ANSI codes
+    let ratatui_text = match text.into_text() {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            // Fallback: just split by width using stripped text
+            let stripped = strip_ansi_codes(text);
+            return wrap_text_simple(&stripped, width);
+        }
+    };
+
+    let mut wrapped_lines = Vec::new();
+
+    for line in ratatui_text.lines {
+        if line.spans.is_empty() {
+            wrapped_lines.push(String::new());
+            continue;
+        }
+
+        let mut current_line = String::new();
+        let mut current_width = 0;
+
+        for span in line.spans {
+            let span_text = &span.content;
+            let span_display_width = strip_ansi_codes(span_text).chars().count();
+
+            if current_width + span_display_width <= width {
+                // Span fits on current line
+                current_line.push_str(span_text);
+                current_width += span_display_width;
+            } else if current_width == 0 {
+                // Span is too long for any line, just add it
+                current_line.push_str(span_text);
+                wrapped_lines.push(current_line.clone());
+                current_line.clear();
+                current_width = 0;
+            } else {
+                // Start a new line
+                wrapped_lines.push(current_line.clone());
+                current_line = span_text.to_string();
+                current_width = span_display_width;
+            }
+        }
+
+        if !current_line.is_empty() || current_width > 0 {
+            wrapped_lines.push(current_line);
+        }
+    }
+
+    if wrapped_lines.is_empty() {
+        wrapped_lines.push(String::new());
+    }
+
+    wrapped_lines
+}
+
+// Simple fallback text wrapping
+fn wrap_text_simple(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut lines = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut start = 0;
+
+    while start < chars.len() {
+        let end = std::cmp::min(start + width, chars.len());
+        let line: String = chars[start..end].iter().collect();
+        lines.push(line);
+        start = end;
+    }
+
+    lines
+}
+
+pub fn render_styled_block_ansi_to_tui(
+    content: &str,
+    _outside_title: &str,
+    bubble_title: &str,
+    _colors: Option<BubbleColors>,
+    state: &mut AppState,
+    terminal_size: Size,
+    _tool_type: &str,
+    message_id: Option<Uuid>,
+) -> Uuid {
+    let terminal_width = terminal_size.width as usize;
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Create cyan-colored borders
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(Color::Cyan),
+    )]);
+
+    // Strip ANSI codes for title border calculation
+    let stripped_title = strip_ansi_codes(bubble_title);
+    let title_border = {
+        let title_width = stripped_title.chars().count();
+        if title_width <= inner_width {
+            let remaining_dashes = inner_width + 2 - title_width;
+            Line::from(vec![Span::styled(
+                format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮",
+                Style::default().fg(Color::Cyan),
+            )])
+        } else {
+            let truncated_title = stripped_title.chars().take(inner_width).collect::<String>();
+            Line::from(vec![Span::styled(
+                format!("╭{}─╮", truncated_title),
+                Style::default().fg(Color::Cyan),
+            )])
+        }
+    };
+
+    // Convert ANSI content to ratatui Text
+    let ratatui_text = content
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::from(content));
+
+    // Create lines with compact style similar to result blocks
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    // Use compact indentation similar to result blocks
+    let line_indent = "  "; // 2 spaces like result blocks
+
+    for text_line in ratatui_text.lines {
+        if text_line.spans.is_empty() {
+            // Empty line with border
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::from(format!(" {}", " ".repeat(inner_width))),
+                Span::styled(" │", Style::default().fg(Color::Cyan)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+            continue;
+        }
+
+        // Check if line needs wrapping
+        let display_width: usize = text_line
+            .spans
+            .iter()
+            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .sum();
+
+        // Add compact indentation to content width calculation
+        let content_display_width = display_width + line_indent.len();
+
+        if content_display_width <= inner_width {
+            // Line fits, add with compact style
+            let padding_needed = inner_width - content_display_width;
+            let padding = " ".repeat(padding_needed);
+
+            let mut line_spans = vec![
+                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::from(format!(" {}", line_indent)),
+            ];
+            line_spans.extend(text_line.spans);
+            line_spans.push(Span::from(padding));
+            line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            // Line needs wrapping - use available width minus indentation
+            let available_for_content = inner_width - line_indent.len();
+            let original_line: String = text_line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            let wrapped_lines = wrap_ansi_text(&original_line, available_for_content);
+
+            for wrapped_line in wrapped_lines {
+                let wrapped_ratatui = wrapped_line
+                    .clone()
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
+
+                if let Some(first_line) = wrapped_ratatui.lines.first() {
+                    let wrapped_display_width: usize = first_line
+                        .spans
+                        .iter()
+                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .sum();
+
+                    let total_content_width = wrapped_display_width + line_indent.len();
+                    let padding_needed = if total_content_width <= inner_width {
+                        inner_width - total_content_width
+                    } else {
+                        0
+                    };
+                    let padding = " ".repeat(padding_needed);
+
+                    let mut line_spans = vec![
+                        Span::styled("│", Style::default().fg(Color::Cyan)),
+                        Span::from(format!(" {}", line_indent)),
+                    ];
+                    line_spans.extend(first_line.spans.clone());
+                    line_spans.push(Span::from(padding));
+                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+
+                    formatted_lines.push(Line::from(line_spans));
+                }
+            }
+        }
+    }
+
+    formatted_lines.push(bottom_border);
+
+    let message_id = message_id.unwrap_or_else(Uuid::new_v4);
+
+    // Convert to owned lines for storage
+    let owned_lines: Vec<Line<'static>> = formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+
+    // Store as StyledBlock (same as result block) instead of BashBubble
+    state.messages.push(Message {
+        id: message_id,
+        content: MessageContent::StyledBlock(owned_lines), // Changed from BashBubble to StyledBlock
+    });
+    message_id
+}
 
 pub fn extract_bash_block_info(
     tool_call: &ToolCall,
@@ -75,64 +316,17 @@ pub fn render_styled_block(
     tool_type: &str,
     message_id: Option<Uuid>,
 ) -> Uuid {
-    let terminal_width = terminal_size.width as usize;
-    let content_width = if terminal_width > 4 {
-        terminal_width - 4
-    } else {
-        40
-    };
-    let content_lines = content.split('\n').collect::<Vec<_>>();
-    let inner_width = content_width;
-    let horizontal_line = "─".repeat(inner_width + 2);
-    let bottom_border = format!("╰{}╯", horizontal_line);
-    let title_border = {
-        let title_width = bubble_title.chars().count();
-        if title_width <= inner_width {
-            let remaining_dashes = inner_width + 2 - title_width;
-            format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮"
-        } else {
-            let truncated_title = bubble_title.chars().take(inner_width).collect::<String>();
-            format!("╭{}─╮", truncated_title)
-        }
-    };
-    let mut bubble_lines = vec![];
-    bubble_lines.push(title_border);
-    for line in &content_lines {
-        let trimmed_line = line.trim_end();
-        if trimmed_line.is_empty() {
-            let padding = " ".repeat(inner_width);
-            bubble_lines.push(format!("│ {} │", padding));
-            continue;
-        }
-        let wrapped_lines = wrap_text(trimmed_line, inner_width);
-        for wrapped_line in wrapped_lines {
-            let line_char_count = wrapped_line.chars().count();
-            let padding_needed = inner_width - line_char_count;
-            let padding = " ".repeat(padding_needed);
-            let formatted_line = format!("│ {}{} │", wrapped_line, padding);
-            bubble_lines.push(formatted_line);
-        }
-    }
-    bubble_lines.push(bottom_border);
-
-    let default_colors = BubbleColors {
-        border_color: Color::Cyan,
-        title_color: Color::White,
-        content_color: Color::Gray,
-        tool_type: "unknown".to_string(),
-    };
-
-    let message_id = message_id.unwrap_or_else(Uuid::new_v4);
-    state.messages.push(Message {
-        id: message_id,
-        content: MessageContent::BashBubble {
-            title: outside_title.to_string(),
-            content: bubble_lines,
-            colors: colors.clone().unwrap_or(default_colors),
-            tool_type: tool_type.to_string(),
-        },
-    });
-    message_id
+    // Just delegate to the ANSI-aware version
+    render_styled_block_ansi_to_tui(
+        content,
+        outside_title,
+        bubble_title,
+        colors,
+        state,
+        terminal_size,
+        tool_type,
+        message_id,
+    )
 }
 
 pub fn render_bash_block(
@@ -143,7 +337,7 @@ pub fn render_bash_block(
     terminal_size: Size,
 ) -> Uuid {
     let (command, outside_title, bubble_title, colors) = extract_bash_block_info(tool_call, output);
-    render_styled_block(
+    render_styled_block_ansi_to_tui(
         &command,
         &outside_title,
         &bubble_title,
@@ -155,21 +349,40 @@ pub fn render_bash_block(
     )
 }
 
+// FIXED: render_result_block with ANSI support and cyan borders
 pub fn render_result_block(
     tool_call: &ToolCall,
     result: &str,
     state: &mut AppState,
     terminal_size: Size,
 ) {
+    let terminal_width = terminal_size.width as usize;
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+
     let mut lines = Vec::new();
 
-    // Get terminal width for wrapping calculation
-    let terminal_width: usize = terminal_size.width as usize;
-    let prefix_width = 6; // "    └ " or "      "
-    let available_width = terminal_width.saturating_sub(prefix_width);
+    // Create cyan-colored top border
+    let horizontal_line = "─".repeat(inner_width + 2);
+    let top_border = Line::from(vec![Span::styled(
+        format!("╭{}╮", horizontal_line),
+        Style::default().fg(Color::Cyan),
+    )]);
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(Color::Cyan),
+    )]);
 
-    // Header line with approved colors (green bullet, white text)
-    lines.push(Line::from(vec![
+    lines.push(top_border);
+
+    // Header line with border
+    let mut header_spans = vec![
+        Span::styled("│", Style::default().fg(Color::Cyan)),
+        Span::from(" "),
         Span::styled(
             "● ",
             Style::default()
@@ -186,31 +399,117 @@ pub fn render_result_block(
             format!(" ({})", extract_truncated_command_arguments(tool_call)),
             Style::default().fg(Color::Gray),
         ),
-    ]));
+    ];
 
-    // Show the command output with proper wrapping
-    let output_pad = "    "; // 4 spaces for indentation
-    for (i, line) in result.lines().enumerate() {
-        let prefix = if i == 0 { "└ " } else { "  " };
+    // Calculate padding for header
+    let header_content_width = 2
+        + tool_call.function.name.len()
+        + extract_truncated_command_arguments(tool_call).len()
+        + 3; // "● " + " (" + ")"
+    let header_padding = if header_content_width <= inner_width {
+        inner_width - header_content_width
+    } else {
+        0
+    };
+    header_spans.push(Span::from(" ".repeat(header_padding)));
+    header_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
 
-        // Wrap long lines
-        let wrapped_lines = wrap_text(line, available_width);
+    lines.push(Line::from(header_spans));
 
-        for (j, wrapped_line) in wrapped_lines.iter().enumerate() {
-            let line_prefix = if j == 0 {
-                format!("{output_pad}{prefix}")
-            } else {
-                format!("{output_pad}  ") // Continue indent for wrapped lines
-            };
+    // Convert result to ratatui Text with ANSI support
+    let result_text = match result.into_text() {
+        Ok(text) => text,
+        Err(_) => ratatui::text::Text::from(result),
+    };
 
-            lines.push(Line::from(vec![
-                Span::styled(line_prefix, Style::default().fg(Color::Gray)),
-                Span::styled(wrapped_line.clone(), Style::default().fg(Color::Gray)),
-            ]));
+    // Use compact indentation like bash blocks
+    let line_indent = "  "; // 2 spaces for compact style
+
+    for text_line in result_text.lines.iter() {
+        if text_line.spans.is_empty() {
+            // Empty line with border
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::from(format!(" {}", " ".repeat(inner_width))),
+                Span::styled(" │", Style::default().fg(Color::Cyan)),
+            ];
+            lines.push(Line::from(line_spans));
+            continue;
+        }
+
+        // Check if line fits within available width
+        let display_width: usize = text_line
+            .spans
+            .iter()
+            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .sum();
+
+        let content_display_width = display_width + line_indent.len();
+
+        if content_display_width <= inner_width {
+            // Line fits, add with compact style and border
+            let padding_needed = inner_width - content_display_width;
+            let padding = " ".repeat(padding_needed);
+
+            let mut line_spans = vec![
+                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::from(format!(" {}", line_indent)),
+            ];
+            line_spans.extend(text_line.spans.clone());
+            line_spans.push(Span::from(padding));
+            line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+
+            lines.push(Line::from(line_spans));
+        } else {
+            // Line needs wrapping - use available width minus indentation
+            let available_for_content = inner_width - line_indent.len();
+            let original_line: String = text_line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            let wrapped_lines = wrap_ansi_text(&original_line, available_for_content);
+
+            for wrapped_line in wrapped_lines {
+                let wrapped_ratatui = wrapped_line
+                    .clone()
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
+
+                if let Some(first_line) = wrapped_ratatui.lines.first() {
+                    let wrapped_display_width: usize = first_line
+                        .spans
+                        .iter()
+                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .sum();
+
+                    let total_content_width = wrapped_display_width + line_indent.len();
+                    let padding_needed = if total_content_width <= inner_width {
+                        inner_width - total_content_width
+                    } else {
+                        0
+                    };
+                    let padding = " ".repeat(padding_needed);
+
+                    let mut line_spans = vec![
+                        Span::styled("│", Style::default().fg(Color::Cyan)),
+                        Span::from(format!(" {}", line_indent)),
+                    ];
+                    line_spans.extend(first_line.spans.clone());
+                    line_spans.push(Span::from(padding));
+                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+
+                    lines.push(Line::from(line_spans));
+                }
+            }
         }
     }
 
-    let mut owned_lines: Vec<Line<'static>> = lines
+    lines.push(bottom_border);
+
+    // Convert to owned lines
+    let owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
             let owned_spans: Vec<Span<'static>> = line
@@ -221,7 +520,6 @@ pub fn render_result_block(
             Line::from(owned_spans)
         })
         .collect();
-    owned_lines.push(Line::from(""));
 
     state.messages.push(Message {
         id: Uuid::new_v4(),
@@ -233,7 +531,6 @@ pub fn render_result_block(
 pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
     let mut lines = Vec::new();
 
-    // Header - similar to regular bash block
     lines.push(Line::from(vec![
         Span::styled(
             "● ",
@@ -254,13 +551,12 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
 
-    // Add the rejection line
     lines.push(Line::from(vec![Span::styled(
         "  L No (tell Stakpak what to do differently)",
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     )]));
 
-    let mut owned_lines: Vec<Line<'static>> = lines
+    let owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
             let owned_spans: Vec<Span<'static>> = line
@@ -271,7 +567,6 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
             Line::from(owned_spans)
         })
         .collect();
-    owned_lines.push(Line::from(""));
 
     state.messages.push(Message {
         id: Uuid::new_v4(),

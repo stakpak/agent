@@ -118,17 +118,35 @@ impl CombinedTools {
             .await
     }
 
-    #[tool(description = SMART_SEARCH_CODE_DESCRIPTION)]
-    pub async fn smart_search_code(
+    #[tool(description = REMOTE_CODE_SEARCH_DESCRIPTION)]
+    pub async fn remote_code_search(
         &self,
         #[tool(param)]
-        #[schemars(description = SEARCH_QUERY_PARAM_DESCRIPTION)]
+        #[schemars(description = REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION)]
         query: String,
         #[tool(param)]
-        #[schemars(description = SEARCH_LIMIT_PARAM_DESCRIPTION)]
+        #[schemars(description = REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
         limit: Option<u32>,
     ) -> Result<CallToolResult, McpError> {
-        self.remote_tools.smart_search_code(query, limit).await
+        self.remote_tools.remote_code_search(query, limit).await
+    }
+
+    #[tool(description = LOCAL_CODE_SEARCH_DESCRIPTION)]
+    pub async fn local_code_search(
+        &self,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
+        limit: Option<u32>,
+        #[tool(param)]
+        #[schemars(description = LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION)]
+        show_dependencies: Option<bool>,
+    ) -> Result<CallToolResult, McpError> {
+        self.remote_tools
+            .local_code_search(keywords, limit, show_dependencies)
+            .await
     }
 
     #[tool(description = SEARCH_DOCS_DESCRIPTION)]

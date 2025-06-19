@@ -20,7 +20,7 @@ pub async fn clone(
         .into_iter()
         .chain(documents.additional_documents)
     {
-        let path = doc.uri.strip_prefix("file:///").unwrap_or(&doc.uri);
+        let path = doc.uri.strip_prefix("file://").unwrap_or(&doc.uri);
         let full_path = std::path::Path::new(&base_dir).join(path);
 
         path_map

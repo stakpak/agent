@@ -649,6 +649,36 @@ impl Client {
         }
     }
 
+    pub async fn build_code_index(
+        &self,
+        input: &BuildCodeIndexInput,
+    ) -> Result<BuildCodeIndexOutput, String> {
+        let url = format!("{}/commands/build_code_index", self.base_url,);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<BuildCodeIndexOutput>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
     pub async fn call_mcp_tool(&self, input: &ToolsCallParams) -> Result<Vec<Content>, String> {
         let url = format!("{}/mcp", self.base_url);
 
@@ -817,7 +847,11 @@ Score: {:.2}%
             "#,
                     result.flow_version.flow_name,
                     result.flow_version.version_id,
-                    result.block.document_uri.strip_prefix("file:///").unwrap(),
+                    result
+                        .block
+                        .document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&result.block.document_uri),
                     result.block.start_point.row,
                     result.block.start_point.column,
                     result.similarity * 100.0,
@@ -963,7 +997,9 @@ impl std::fmt::Display for EditInfo {
 >>>>>>> REPLACE
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.old_str,
                     self.new_str
                 )
@@ -978,7 +1014,9 @@ impl std::fmt::Display for EditInfo {
 {}
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.new_str
                 )
             }
@@ -995,7 +1033,9 @@ impl std::fmt::Display for EditInfo {
 >>>>>>> REPLACE
 ```"#,
                     self.reasoning,
-                    self.document_uri.strip_prefix("file:///").unwrap(),
+                    self.document_uri
+                        .strip_prefix("file://")
+                        .unwrap_or(&self.document_uri),
                     self.old_str
                 )
             }
