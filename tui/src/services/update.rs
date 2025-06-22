@@ -168,7 +168,7 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call(state);
-                let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(result, false));
             }
             state.active_shell_command = None;
             state.show_shell_mode = false;
@@ -256,9 +256,11 @@ fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
+        state.ondemand_shell_mode = state.dialog_command.is_none();
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         state.is_dialog_open = true;
+        state.ondemand_shell_mode = false;
     }
     state.input.clear();
     state.cursor_position = 0;
@@ -411,6 +413,12 @@ fn handle_input_submitted(
             state.run_shell_command(command, shell_tx);
         }
         return;
+    }
+
+    if state.ondemand_shell_mode {
+        let result = shell_command_to_tool_call(state);
+        let _ = output_tx.try_send(OutputEvent::SendToolResult(result, true));
+        state.ondemand_shell_mode = false;
     }
 
     if state.show_sessions_dialog {
