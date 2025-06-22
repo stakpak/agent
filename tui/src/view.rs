@@ -38,13 +38,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     };
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
-    let dialog_height = if state.show_sessions_dialog {
-        11
-    } else if state.is_dialog_open {
-        3
-    } else {
-        0
-    };
+    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
     let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
         1
     } else {
@@ -232,6 +226,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "progress",
                     "local_context",
                     "todo",
+                    "application_analysis",
                 ];
                 let mut found = false;
 
@@ -264,8 +259,12 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                 }
 
                 if !found && lines_added < height {
-                    visible_lines.push(line.clone());
-                    lines_added += 1;
+                    if line_text.trim() == "SPACING_MARKER" {
+                        visible_lines.push(Line::from(""));
+                    } else {
+                        visible_lines.push(line.clone());
+                        lines_added += 1;
+                    }
                 }
             }
         } else if lines_added < height {
