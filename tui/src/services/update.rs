@@ -170,11 +170,13 @@ pub fn update(
                 let result = shell_command_to_tool_call(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result, false));
             }
-            state.active_shell_command = None;
+            if !state.ondemand_shell_mode {
+                state.active_shell_command = None;
+                state.active_shell_command_output = None;
+            }
             state.show_shell_mode = false;
             state.input.clear();
             state.cursor_position = 0;
-            state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -417,6 +419,7 @@ fn handle_input_submitted(
 
     if state.ondemand_shell_mode {
         let result = shell_command_to_tool_call(state);
+        eprintln!("result: {:?}", result);
         let _ = output_tx.try_send(OutputEvent::SendToolResult(result, true));
         state.ondemand_shell_mode = false;
     }
@@ -686,11 +689,12 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 }
 
 pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
-    let id = state
-        .dialog_command
-        .as_ref()
-        .map(|cmd| cmd.id.clone())
-        .unwrap_or_default();
+    let id = if let Some(cmd) = &state.dialog_command {
+        cmd.id.clone()
+    } else {
+        format!("tool_{}", Uuid::new_v4())
+    };
+
     let command = state
         .active_shell_command
         .as_ref()
