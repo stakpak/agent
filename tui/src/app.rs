@@ -105,6 +105,12 @@ pub enum InputEvent {
     ShellInputRequest(String),
     ShellCompleted(i32),
     HandlePaste(String),
+    InputDelete,
+    InputDeleteWord,
+    InputCursorStart,
+    InputCursorEnd,
+    InputCursorPrevWord,
+    InputCursorNextWord,
 }
 
 #[derive(Debug)]
