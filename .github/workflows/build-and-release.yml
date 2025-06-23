@@ -129,6 +129,38 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION }}
             ghcr.io/${{ github.repository }}:latest
 
+  docker_warden:
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract tag version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .warden
+          push: true
+          build-args: |
+            BASE_IMAGE_TAG=${{ steps.get_version.outputs.VERSION }}
+          tags: |
+            ghcr.io/${{ github.repository }}-warden:${{ steps.get_version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}-warden:latest
+
   homebrew:
     needs: release
     if: startsWith(github.ref, 'refs/tags/')
