@@ -166,6 +166,16 @@ impl CombinedTools {
             .search_docs(keywords, exclude_keywords, limit)
             .await
     }
+
+    #[tool(description = SEARCH_MEMORY_DESCRIPTION)]
+    pub async fn search_memory(
+        &self,
+        #[tool(param)]
+        #[schemars(description = SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+    ) -> Result<CallToolResult, McpError> {
+        self.remote_tools.search_memory(keywords).await
+    }
 }
 
 #[tool(tool_box)]
