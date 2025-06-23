@@ -23,6 +23,12 @@ brew tap stakpak/stakpak
 brew install stakpak
 ```
 
+To update it you can use
+
+```bash
+brew update
+brew upgrade stakpak
+```
 ### Binary Release
 
 Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/agent/releases).
