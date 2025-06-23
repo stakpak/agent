@@ -73,9 +73,11 @@ RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
 
-WORKDIR /agent/
+# Create agent user and group
+RUN groupadd -r agent && useradd -r -g agent -s /bin/bash -m agent && mkdir -p /agent && chown -R agent:agent /agent
+# Create docker group and add agent user to it
+RUN groupadd -r docker && usermod -aG docker agent
 
-# Create docker group
-RUN groupadd -r docker
+WORKDIR /agent/
 
 ENTRYPOINT ["/usr/local/bin/stakpak"]

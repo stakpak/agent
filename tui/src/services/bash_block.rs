@@ -43,11 +43,20 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                 current_line.push_str(span_text);
                 current_width += span_display_width;
             } else if current_width == 0 {
-                // Span is too long for any line, just add it
-                current_line.push_str(span_text);
-                wrapped_lines.push(current_line.clone());
-                current_line.clear();
-                current_width = 0;
+                // Span is too long for a line by itself, so we must wrap it.
+                let wrapped_span = wrap_text_simple(span_text, width);
+                let num_wrapped = wrapped_span.len();
+                if num_wrapped > 0 {
+                    // Add all but the last part as full lines.
+                    if let Some((last, elements)) = wrapped_span.split_last() {
+                        for element in elements {
+                            wrapped_lines.push(element.clone());
+                        }
+                        // The last part becomes the current line.
+                        current_line = last.clone();
+                        current_width = current_line.chars().count();
+                    }
+                }
             } else {
                 // Start a new line
                 wrapped_lines.push(current_line.clone());
@@ -88,6 +97,7 @@ fn wrap_text_simple(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_styled_block_ansi_to_tui(
     content: &str,
     _outside_title: &str,
@@ -206,11 +216,7 @@ pub fn render_styled_block_ansi_to_tui(
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
-                    let padding_needed = if total_content_width <= inner_width {
-                        inner_width - total_content_width
-                    } else {
-                        0
-                    };
+                    let padding_needed = inner_width.saturating_sub(total_content_width);
                     let padding = " ".repeat(padding_needed);
 
                     let mut line_spans = vec![
@@ -349,7 +355,6 @@ pub fn render_bash_block(
     )
 }
 
-// FIXED: render_result_block with ANSI support and cyan borders
 pub fn render_result_block(
     tool_call: &ToolCall,
     result: &str,
@@ -366,22 +371,21 @@ pub fn render_result_block(
 
     let mut lines = Vec::new();
 
-    // Create cyan-colored top border
     let horizontal_line = "─".repeat(inner_width + 2);
     let top_border = Line::from(vec![Span::styled(
         format!("╭{}╮", horizontal_line),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(Color::Gray),
     )]);
     let bottom_border = Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal_line),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(Color::Gray),
     )]);
 
     lines.push(top_border);
 
     // Header line with border
     let mut header_spans = vec![
-        Span::styled("│", Style::default().fg(Color::Cyan)),
+        Span::styled("│", Style::default().fg(Color::Gray)),
         Span::from(" "),
         Span::styled(
             "● ",
@@ -406,13 +410,9 @@ pub fn render_result_block(
         + tool_call.function.name.len()
         + extract_truncated_command_arguments(tool_call).len()
         + 3; // "● " + " (" + ")"
-    let header_padding = if header_content_width <= inner_width {
-        inner_width - header_content_width
-    } else {
-        0
-    };
+    let header_padding = inner_width.saturating_sub(header_content_width);
     header_spans.push(Span::from(" ".repeat(header_padding)));
-    header_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+    header_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
 
     lines.push(Line::from(header_spans));
 
@@ -429,9 +429,9 @@ pub fn render_result_block(
         if text_line.spans.is_empty() {
             // Empty line with border
             let line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::styled("│", Style::default().fg(Color::Gray)),
                 Span::from(format!(" {}", " ".repeat(inner_width))),
-                Span::styled(" │", Style::default().fg(Color::Cyan)),
+                Span::styled(" │", Style::default().fg(Color::Gray)),
             ];
             lines.push(Line::from(line_spans));
             continue;
@@ -452,12 +452,12 @@ pub fn render_result_block(
             let padding = " ".repeat(padding_needed);
 
             let mut line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::styled("│", Style::default().fg(Color::Gray)),
                 Span::from(format!(" {}", line_indent)),
             ];
             line_spans.extend(text_line.spans.clone());
             line_spans.push(Span::from(padding));
-            line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+            line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
 
             lines.push(Line::from(line_spans));
         } else {
@@ -485,20 +485,16 @@ pub fn render_result_block(
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
-                    let padding_needed = if total_content_width <= inner_width {
-                        inner_width - total_content_width
-                    } else {
-                        0
-                    };
+                    let padding_needed = inner_width.saturating_sub(total_content_width);
                     let padding = " ".repeat(padding_needed);
 
                     let mut line_spans = vec![
-                        Span::styled("│", Style::default().fg(Color::Cyan)),
+                        Span::styled("│", Style::default().fg(Color::Gray)),
                         Span::from(format!(" {}", line_indent)),
                     ];
                     line_spans.extend(first_line.spans.clone());
                     line_spans.push(Span::from(padding));
-                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
 
                     lines.push(Line::from(line_spans));
                 }
@@ -507,6 +503,7 @@ pub fn render_result_block(
     }
 
     lines.push(bottom_border);
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
     // Convert to owned lines
     let owned_lines: Vec<Line<'static>> = lines
@@ -555,6 +552,8 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
         "  L No (tell Stakpak what to do differently)",
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     )]));
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
     let owned_lines: Vec<Line<'static>> = lines
         .into_iter()

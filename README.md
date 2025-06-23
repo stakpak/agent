@@ -23,6 +23,12 @@ brew tap stakpak/stakpak
 brew install stakpak
 ```
 
+To update it you can use
+
+```bash
+brew update
+brew upgrade stakpak
+```
 ### Binary Release
 
 Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/agent/releases).
@@ -128,3 +134,11 @@ stakpak mcp --tool-mode remote
 # Combined mode (default - all tools)
 stakpak mcp
 ```
+---
+## ⭐ Like what we're building?
+
+If our Agent saves you time or makes your DevOps life easier,  
+**consider giving us a star on GitHub — it really helps!**  
+
+[![Star on GitHub](https://img.shields.io/github/stars/stakpak/agent?style=social)](https://github.com/stakpak/agent/stargazers)
+---
