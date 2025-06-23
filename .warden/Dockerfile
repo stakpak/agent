@@ -1,6 +1,6 @@
 ARG BASE_IMAGE_TAG=latest
 
-FROM --platform=linux/amd64 ghcr.io/stakpak/agent:${BASE_IMAGE_TAG}
+FROM ghcr.io/stakpak/agent:${BASE_IMAGE_TAG}
 
 # Update package list and install required packages in a single layer for optimization
 RUN apt-get update && \
