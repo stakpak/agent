@@ -410,7 +410,7 @@ impl Commands {
             }
             Commands::Version => {
                 println!(
-                    "stakpak v{} (https://github.com/stakpak/cli)",
+                    "stakpak v{} (https://github.com/stakpak/agent)",
                     env!("CARGO_PKG_VERSION")
                 );
             }
