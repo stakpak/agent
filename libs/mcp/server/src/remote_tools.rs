@@ -412,6 +412,49 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
+    #[tool(description = SEARCH_MEMORY_DESCRIPTION)]
+    pub async fn search_memory(
+        &self,
+        #[tool(param)]
+        #[schemars(description = SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION)]
+        keywords: Vec<String>,
+        // #[tool(param)]
+        // #[schemars(description = SEARCH_MEMORY_LIMIT_PARAM_DESCRIPTION)]
+        // limit: Option<u32>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        // // Cap the limit to a maximum of 5
+        // let limit = limit.map(|l| l.min(5)).or(Some(5));
+
+        let response = match client
+            .call_mcp_tool(&ToolsCallParams {
+                name: "search_memory".to_string(),
+                arguments: json!({
+                    "keywords": keywords,
+                    // "limit": limit,
+                }),
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("SEARCH_MEMORY_ERROR"),
+                    Content::text(format!("Failed to search for memory: {}", e)),
+                ]));
+            }
+        };
+
+        Ok(CallToolResult::success(response))
+    }
+
     #[tool(description = LOCAL_CODE_SEARCH_DESCRIPTION)]
     pub async fn local_code_search(
         &self,
