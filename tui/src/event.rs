@@ -14,15 +14,53 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputChangedNewline)
                 }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::InputDelete)
+                }
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::InputDeleteWord)
+                }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::InputCursorStart)
+                }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::InputCursorEnd)
+                }
+                KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::CursorRight)
+                }
+                KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::CursorLeft)
+                }
                 KeyCode::Char('!') => Some(InputEvent::ShellMode),
                 KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
-                KeyCode::Backspace => Some(InputEvent::InputBackspace),
+                KeyCode::Backspace => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::InputDelete)
+                    } else {
+                        Some(InputEvent::InputBackspace)
+                    }
+                }
                 KeyCode::Enter => Some(InputEvent::InputSubmitted),
                 KeyCode::Esc => Some(InputEvent::HandleEsc),
                 KeyCode::Up => Some(InputEvent::Up),
                 KeyCode::Down => Some(InputEvent::Down),
-                KeyCode::Left => Some(InputEvent::CursorLeft),
-                KeyCode::Right => Some(InputEvent::CursorRight),
+                KeyCode::Left => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::InputCursorPrevWord)
+                    } else {
+                        Some(InputEvent::CursorLeft)
+                    }
+                }
+                KeyCode::Right => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::InputCursorNextWord)
+                    } else {
+                        Some(InputEvent::CursorRight)
+                    }
+                }
+                KeyCode::Home => Some(InputEvent::InputCursorStart),
+                KeyCode::End => Some(InputEvent::InputCursorEnd),
                 KeyCode::PageUp => Some(InputEvent::PageUp),
                 KeyCode::PageDown => Some(InputEvent::PageDown),
                 KeyCode::Tab => Some(InputEvent::Tab),

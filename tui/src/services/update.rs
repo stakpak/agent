@@ -185,6 +185,46 @@ pub fn update(
             state.cursor_position += text.len();
             state.is_pasting = false;
         }
+        InputEvent::InputCursorStart => {
+            state.cursor_position = 0;
+        }
+        InputEvent::InputCursorEnd => {
+            state.cursor_position = state.input.len();
+        }
+        InputEvent::InputDelete => {
+            state.input.clear();
+            state.cursor_position = 0;
+        }
+        InputEvent::InputDeleteWord => {
+            if state.cursor_position > 0 {
+                let start = state.input[..state.cursor_position]
+                    .trim_end()
+                    .rfind(char::is_whitespace)
+                    .map_or(0, |i| i + 1);
+                state.input.drain(start..state.cursor_position);
+                state.cursor_position = start;
+            }
+        }
+        InputEvent::InputCursorPrevWord => {
+            let mut pos = state.cursor_position;
+            while pos > 0 && state.input.as_bytes()[pos - 1].is_ascii_whitespace() {
+                pos -= 1;
+            }
+            while pos > 0 && !state.input.as_bytes()[pos - 1].is_ascii_whitespace() {
+                pos -= 1;
+            }
+            state.cursor_position = pos;
+        }
+        InputEvent::InputCursorNextWord => {
+            let mut pos = state.cursor_position;
+            while pos < state.input.len() && !state.input.as_bytes()[pos].is_ascii_whitespace() {
+                pos += 1;
+            }
+            while pos < state.input.len() && state.input.as_bytes()[pos].is_ascii_whitespace() {
+                pos += 1;
+            }
+            state.cursor_position = pos;
+        }
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
