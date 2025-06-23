@@ -134,3 +134,11 @@ stakpak mcp --tool-mode remote
 # Combined mode (default - all tools)
 stakpak mcp
 ```
+---
+## ⭐ Like what we're building?
+
+If our Agent saves you time or makes your DevOps life easier,  
+**consider giving us a star on GitHub — it really helps!**  
+
+[![Star on GitHub](https://img.shields.io/github/stars/stakpak/agent?style=social)](https://github.com/stakpak/agent/stargazers)
+---
