@@ -1,6 +1,6 @@
 use crate::commands::agent::run::checkpoint::{
-    extract_checkpoint_messages_and_tool_calls, get_checkpoint_messages,
-    get_messages_from_checkpoint_output,
+    extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
+    get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
     add_local_context, convert_tools_map, tool_result, user_message,
@@ -32,7 +32,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
-
     let ctx_clone = ctx.clone();
     let bind_address = network::find_available_bind_address_descending().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
@@ -222,6 +221,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             send_tool_call(&input_tx, &tool_call).await?;
                             continue;
                         }
+                    }
+                    OutputEvent::Memorize => {
+                        let checkpoint_id = extract_checkpoint_id_from_messages(&messages);
+                        if let Some(checkpoint_id) = checkpoint_id {
+                            let client_clone = client.clone();
+                            tokio::spawn(async move {
+                                if let Ok(checkpoint_id) = Uuid::parse_str(&checkpoint_id) {
+                                    let _ = client_clone.memorize_session(checkpoint_id).await;
+                                }
+                            });
+                        }
+                        continue;
                     }
                 }
                 send_input_event(&input_tx, InputEvent::Loading(true)).await?;
