@@ -20,6 +20,8 @@ pub mod norbert_v1;
 pub mod stuart_v1;
 pub use models::Block;
 
+#[derive(Clone, Debug)]
+
 pub struct Client {
     client: ReqwestClient,
     base_url: String,
@@ -715,6 +717,27 @@ impl Client {
                 Err("Failed to deserialize response:".into())
             }
         }
+    }
+
+    pub async fn memorize_session(&self, checkpoint_id: Uuid) -> Result<(), String> {
+        let url = format!(
+            "{}/agents/sessions/checkpoints/{}/extract-memory",
+            self.base_url, checkpoint_id
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        Ok(())
     }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
