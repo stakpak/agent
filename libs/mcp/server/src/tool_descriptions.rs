@@ -43,7 +43,7 @@ This tool searches through the locally indexed code blocks using text matching a
 
 pub const SEARCH_DOCS_DESCRIPTION: &str = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources.";
 
-pub const SEARCH_MEMORY_DESCRIPTION: &str = "Search memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment.";
+pub const SEARCH_MEMORY_DESCRIPTION: &str = "Search your memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment.";
 
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
@@ -88,4 +88,4 @@ pub const LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION: &str =
     "Whether to show dependencies and dependents for each matching block (default: false)";
 
 pub const SEARCH_MEMORY_LIMIT_PARAM_DESCRIPTION: &str = "The maximum number of results to return";
-pub const SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in the memory. Searches against the url, title, description, and content of memory content.";
+pub const SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in your memory. Searches against the title, tags, and content of your memory.";
