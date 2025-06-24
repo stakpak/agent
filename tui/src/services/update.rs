@@ -3,8 +3,8 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_status_message, push_styled_message,
-    render_system_message,
+    push_error_message, push_help_message, push_memorize_message, push_status_message,
+    push_styled_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
@@ -423,6 +423,14 @@ fn handle_input_submitted(
                 state.loading_type = LoadingType::Sessions;
                 state.loading = true;
                 let _ = output_tx.try_send(OutputEvent::ListSessions);
+                state.input.clear();
+                state.cursor_position = 0;
+                state.show_helper_dropdown = false;
+                return;
+            }
+            "/memorize" => {
+                push_memorize_message(state);
+                let _ = output_tx.try_send(OutputEvent::Memorize);
                 state.input.clear();
                 state.cursor_position = 0;
                 state.show_helper_dropdown = false;

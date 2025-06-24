@@ -63,6 +63,31 @@ pub fn push_status_message(state: &mut AppState) {
     });
 }
 
+pub fn push_memorize_message(state: &mut AppState) {
+    let lines = vec![
+        Line::from(vec![Span::styled(
+            "📝 Memorizing conversation history...",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "We're extracting important information from your conversation in the background.",
+            Style::default().fg(Color::White),
+        )]),
+        Line::from(vec![Span::styled(
+            "Feel free to continue talking to the agent while this happens!",
+            Style::default().fg(Color::Green),
+        )]),
+        Line::from(""),
+    ];
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+    });
+}
+
 pub fn push_help_message(state: &mut AppState) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
@@ -132,6 +157,7 @@ pub fn push_help_message(state: &mut AppState) {
         ("/help", "show this help overlay"),
         ("/status", "show account status"),
         ("/sessions", "show list of sessions"),
+        ("/memorize", "memorize the conversation history"),
         ("/quit", "quit the app"),
     ];
     for (cmd, desc) in commands {

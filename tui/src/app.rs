@@ -121,6 +121,7 @@ pub enum OutputEvent {
     ListSessions,
     SwitchToSession(String),
     SendToolResult(ToolCallResult),
+    Memorize,
 }
 
 impl AppState {
