@@ -121,3 +121,39 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         tool_calls.map(|t| t.to_vec()).unwrap_or_default(),
     ))
 }
+
+pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
+    let checkpoint_id = messages
+        .last()
+        .and_then(|msg| msg.content.as_ref())
+        .as_ref()
+        .and_then(|content| match content {
+            MessageContent::String(text) => {
+                if let Some(start) = text.find("<checkpoint_id>") {
+                    if let Some(end) = text.find("</checkpoint_id>") {
+                        let start_pos = start + "<checkpoint_id>".len();
+                        Some(text[start_pos..end].to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            MessageContent::Array(items) => {
+                for item in items {
+                    if let Some(text) = &item.text {
+                        if let Some(start) = text.find("<checkpoint_id>") {
+                            if let Some(end) = text.find("</checkpoint_id>") {
+                                let start_pos = start + "<checkpoint_id>".len();
+                                return Some(text[start_pos..end].to_string());
+                            }
+                        }
+                    }
+                }
+                None
+            }
+        });
+
+    checkpoint_id
+}

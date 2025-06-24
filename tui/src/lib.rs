@@ -26,7 +26,7 @@ pub async fn run_tui(
     execute!(std::io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let all_helpers = vec!["/help", "/status", "/sessions", "/quit"];
+    let all_helpers = vec!["/help", "/status", "/sessions", "/memorize", "/quit"];
     let mut state = AppState::new(all_helpers.clone(), latest_version);
 
     // Internal channel for event handling
