@@ -7,8 +7,11 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use crate::config::AppConfig;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LocalContext {
+    pub machine_name: String,
     pub operating_system: String,
     pub shell_type: String,
     pub is_container: bool,
@@ -36,6 +39,7 @@ pub struct GitInfo {
 impl fmt::Display for LocalContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "# System Details")?;
+        writeln!(f, "Machine Name: {}", self.machine_name)?;
         writeln!(
             f,
             "Current Date/Time: {}",
@@ -132,7 +136,9 @@ fn format_file_size(size: u64) -> String {
     }
 }
 
-pub async fn analyze_local_context() -> Result<LocalContext, Box<dyn std::error::Error>> {
+pub async fn analyze_local_context(
+    config: &AppConfig,
+) -> Result<LocalContext, Box<dyn std::error::Error>> {
     let current_datetime_utc = Utc::now();
     let operating_system = get_operating_system();
     let shell_type = get_shell_type();
@@ -142,6 +148,10 @@ pub async fn analyze_local_context() -> Result<LocalContext, Box<dyn std::error:
     let git_info = Some(get_git_info(&working_directory));
 
     Ok(LocalContext {
+        machine_name: config
+            .machine_name
+            .clone()
+            .unwrap_or("unknown-machine".to_string()),
         operating_system,
         shell_type,
         is_container,
