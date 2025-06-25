@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub api_endpoint: String,
     pub api_key: Option<String>,
     pub mcp_server_host: Option<String>,
+    pub machine_name: Option<String>,
 }
 
 impl From<AppConfig> for ClientConfig {
@@ -38,7 +39,9 @@ impl AppConfig {
             .build()
             .unwrap_or_else(|_| Config::default());
 
-        config.try_deserialize()
+        let deserialized_config: Self = config.try_deserialize()?;
+
+        Ok(deserialized_config)
     }
 
     pub fn save(&self) -> Result<(), String> {
