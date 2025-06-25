@@ -31,6 +31,16 @@ pub enum Commands {
     /// Logout from Stakpak
     Logout,
 
+    /// Set configuration values
+    Set {
+        /// Set machine name for device identification
+        #[arg(long = "machine-name")]
+        machine_name: Option<String>,
+    },
+
+    /// Show current configuration
+    Config,
+
     /// Get current account
     Account,
 
@@ -216,6 +226,33 @@ impl Commands {
                 updated_config
                     .save()
                     .map_err(|e| format!("Failed to save config: {}", e))?;
+            }
+            Commands::Set { machine_name } => {
+                let mut updated_config = config.clone();
+
+                if let Some(name) = machine_name {
+                    updated_config.machine_name = Some(name.clone());
+                    updated_config
+                        .save()
+                        .map_err(|e| format!("Failed to save config: {}", e))?;
+                    println!("Machine name set to: {}", name);
+                } else {
+                    println!("No configuration option provided. Available options:");
+                    println!("  --machine-name <name>  Set machine name for device identification");
+                }
+            }
+            Commands::Config => {
+                println!("Current configuration:");
+                println!(
+                    "  Machine name: {}",
+                    config.machine_name.as_deref().unwrap_or("(not set)")
+                );
+                println!("  API endpoint: {}", config.api_endpoint);
+                let api_key_display = match &config.api_key {
+                    Some(key) if !key.is_empty() => "***".to_string(),
+                    _ => "(not set)".to_string(),
+                };
+                println!("  API key: {}", api_key_display);
             }
             Commands::Account => {
                 let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
