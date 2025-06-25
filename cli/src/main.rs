@@ -1,4 +1,5 @@
 use clap::Parser;
+use names::{self, Name};
 use stakpak_api::ClientConfig;
 use std::{env, io::Write, path::Path};
 
@@ -93,6 +94,8 @@ async fn main() {
 
     match AppConfig::load() {
         Ok(mut config) => {
+            let mut config_updated = false;
+
             if config.api_key.is_none() {
                 println!();
                 println!("Stakpak API Key not found!");
@@ -113,15 +116,27 @@ async fn main() {
                     }
                 };
 
-                let mut updated_config = config.clone();
-                updated_config.api_key = Some(api_key.trim().to_string());
-                if let Err(e) = updated_config.save() {
+                config.api_key = Some(api_key.trim().to_string());
+                config_updated = true;
+                println!("API Key saved successfully!");
+            }
+
+            if config.machine_name.is_none() {
+                // Generate a random machine name
+                let random_name = names::Generator::with_naming(Name::Numbered)
+                    .next()
+                    .unwrap_or_else(|| "unknown-machine".to_string());
+
+                config.machine_name = Some(random_name);
+                config_updated = true;
+            }
+
+            if config_updated {
+                if let Err(e) = config.save() {
                     eprintln!("Failed to save config: {}", e);
                 }
-                println!("API Key saved successfully!");
-
-                config = updated_config;
             }
+
             match cli.command {
                 Some(command) => {
                     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
@@ -134,7 +149,7 @@ async fn main() {
                     }
                 }
                 None => {
-                    let local_context = analyze_local_context().await.ok();
+                    let local_context = analyze_local_context(&config).await.ok();
                     let api_config: ClientConfig = config.clone().into();
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
                         .await
