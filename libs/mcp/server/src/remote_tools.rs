@@ -455,6 +455,42 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
+    #[tool(description = READ_RULEBOOK_DESCRIPTION)]
+    pub async fn read_rulebook(
+        &self,
+        #[tool(param)]
+        #[schemars(description = READ_RULEBOOK_URI_PARAM_DESCRIPTION)]
+        uri: String,
+    ) -> Result<CallToolResult, McpError> {
+        let client = Client::new(&self.api_config).map_err(|e| {
+            error!("Failed to create client: {}", e);
+            McpError::internal_error(
+                "Failed to create client",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let response = match client
+            .call_mcp_tool(&ToolsCallParams {
+                name: "read_rulebook".to_string(),
+                arguments: json!({
+                    "uri": uri,
+                }),
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("READ_RULEBOOK_ERROR"),
+                    Content::text(format!("Failed to read rulebook: {}", e)),
+                ]));
+            }
+        };
+
+        Ok(CallToolResult::success(response))
+    }
+
     #[tool(description = LOCAL_CODE_SEARCH_DESCRIPTION)]
     pub async fn local_code_search(
         &self,
