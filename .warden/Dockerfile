@@ -1,12 +1,15 @@
 ARG BASE_IMAGE_TAG=latest
 
 FROM ghcr.io/stakpak/agent:${BASE_IMAGE_TAG}
+LABEL org.opencontainers.image.source="https://github.com/stakpak/agent" \
+    org.opencontainers.image.description="Stakpak Agent Warden Wrapper" \
+    maintainer="contact@stakpak.dev"
+
+USER root
 
 # Update package list and install required packages in a single layer for optimization
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
     openssl \
     redsocks \
     gettext-base \
@@ -14,8 +17,7 @@ RUN apt-get update && \
     iproute2 \
     netcat-openbsd \
     net-tools \
-    procps \
-    sudo && \
+    procps && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -24,9 +26,7 @@ RUN mkdir -p /etc/redsocks
 COPY redsocks.conf /etc/redsocks/redsocks.conf.template
 
 # Configure sudo to allow package management but deny network configuration
-RUN echo "# Allow agent user to manage packages" > /etc/sudoers.d/agent && \
-    echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg, /usr/bin/snap" >> /etc/sudoers.d/agent && \
-    echo "# Explicitly deny network configuration commands" >> /etc/sudoers.d/agent && \
+RUN echo "# Explicitly deny network configuration commands" >> /etc/sudoers.d/agent && \
     echo "agent ALL=(ALL) !/usr/sbin/iptables*, !/sbin/iptables*, !/usr/bin/iptables*" >> /etc/sudoers.d/agent && \
     echo "agent ALL=(ALL) !/usr/sbin/ip6tables*, !/sbin/ip6tables*, !/usr/bin/ip6tables*" >> /etc/sudoers.d/agent && \
     echo "agent ALL=(ALL) !/usr/sbin/iptables-save, !/usr/sbin/iptables-restore" >> /etc/sudoers.d/agent && \

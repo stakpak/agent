@@ -22,6 +22,7 @@ RUN apt-get update -y && apt-get install -y \
     wget \
     jq \
     dnsutils \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
@@ -47,10 +48,11 @@ RUN cd /tmp && \
     unzip awscliv2.zip && \
     ./aws/install && \
     rm -rf aws awscliv2.zip
-# Install do cli
+
+# Install digital ocean cli
 RUN cd /tmp && \
     ARCH=$(uname -m) && \
-    DOCTL_VERSION=1.119.0 && \
+    DOCTL_VERSION=$(curl -s https://api.github.com/repos/digitalocean/doctl/releases/latest | jq -r '.tag_name' | sed 's/^v//') && \
     if [ "$ARCH" = "x86_64" ]; then \
     DOCTL_ARCH="amd64"; \
     elif [ "$ARCH" = "aarch64" ]; then \
@@ -62,13 +64,32 @@ RUN cd /tmp && \
     tar xf "doctl-${DOCTL_VERSION}-linux-${DOCTL_ARCH}.tar.gz" && \
     mv doctl /usr/local/bin && \
     rm "doctl-${DOCTL_VERSION}-linux-${DOCTL_ARCH}.tar.gz"
+
 # Install gcloud cli
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
     apt-get update -y && \
     apt-get install google-cloud-cli -y
+
 # Install azure cli
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+# Install terraform cli
+RUN cd /tmp && \
+    ARCH=$(uname -m) && \
+    TERRAFORM_VERSION=$(curl -s https://api.releases.hashicorp.com/v1/releases/terraform | jq -r '.[0].version') && \
+    if [ "$ARCH" = "x86_64" ]; then \
+    TERRAFORM_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then \
+    TERRAFORM_ARCH="arm64"; \
+    else \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    curl -LO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip" && \
+    unzip "terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip" && \
+    mv terraform /usr/local/bin && \
+    rm "terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
+
 
 COPY --from=builder /usr/src/app/target/release/stakpak /usr/local/bin
 RUN chmod +x /usr/local/bin/stakpak
@@ -78,6 +99,15 @@ RUN groupadd -r agent && useradd -r -g agent -s /bin/bash -m agent && mkdir -p /
 # Create docker group and add agent user to it
 RUN groupadd -r docker && usermod -aG docker agent
 
+
+# Configure sudo to allow package management
+RUN echo "# Allow agent user to manage packages" > /etc/sudoers.d/agent && \
+    echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg, /usr/bin/snap" >> /etc/sudoers.d/agent && \
+    chmod 440 /etc/sudoers.d/agent
+
+
 WORKDIR /agent/
+
+USER agent
 
 ENTRYPOINT ["/usr/local/bin/stakpak"]
