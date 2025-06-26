@@ -1,4 +1,5 @@
 use crate::utils::local_context::LocalContext;
+use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool,
 };
@@ -54,6 +55,34 @@ pub fn add_local_context<'a>(
                 user_input, local_context
             );
             (formatted_input, Some(local_context))
+        } else {
+            (user_input.to_string(), None)
+        }
+    } else {
+        (user_input.to_string(), None)
+    }
+}
+
+pub fn add_rulebooks(
+    messages: &[ChatMessage],
+    user_input: &str,
+    rulebooks: &Option<Vec<ListRuleBook>>,
+) -> (String, Option<String>) {
+    if let Some(rulebooks) = rulebooks {
+        let rulebooks_text = "# User Rule Books:\n".to_string()
+            + &rulebooks
+                .iter()
+                .map(|rulebook| format!("  - {}", rulebook.to_text().replace('\n', "\n    ")))
+                .collect::<Vec<String>>()
+                .join("\n");
+
+        // only add local context if this is the first message
+        if messages.is_empty() {
+            let formatted_input = format!(
+                "{}\n\n<rulebooks>\n{}\n</rulebooks>",
+                user_input, rulebooks_text
+            );
+            (formatted_input, Some(rulebooks_text))
         } else {
             (user_input.to_string(), None)
         }
