@@ -26,6 +26,12 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputCursorEnd)
                 }
+                KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    Some(InputEvent::InputCursorNextWord)
+                }
+                KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    Some(InputEvent::InputCursorPrevWord)
+                }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::CursorRight)
                 }
@@ -33,6 +39,12 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::CursorLeft)
                 }
                 KeyCode::Char('!') => Some(InputEvent::ShellMode),
+                KeyCode::Char('<') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    Some(InputEvent::InputCursorPrevWord)
+                }
+                KeyCode::Char('>') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    Some(InputEvent::InputCursorNextWord)
+                }
                 KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
                 KeyCode::Backspace => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -46,14 +58,18 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Up => Some(InputEvent::Up),
                 KeyCode::Down => Some(InputEvent::Down),
                 KeyCode::Left => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if key.modifiers.contains(KeyModifiers::ALT)
+                        || key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
                         Some(InputEvent::InputCursorPrevWord)
                     } else {
                         Some(InputEvent::CursorLeft)
                     }
                 }
                 KeyCode::Right => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if key.modifiers.contains(KeyModifiers::ALT)
+                        || key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
                         Some(InputEvent::InputCursorNextWord)
                     } else {
                         Some(InputEvent::CursorRight)

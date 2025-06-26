@@ -207,19 +207,41 @@ pub fn update(
         }
         InputEvent::InputCursorPrevWord => {
             let mut pos = state.cursor_position;
-            while pos > 0 && state.input.as_bytes()[pos - 1].is_ascii_whitespace() {
-                pos -= 1;
+            // Skip any whitespace before the cursor
+            while pos > 0 {
+                let ch = state.input[..pos].chars().next_back();
+                if let Some(c) = ch {
+                    if c.is_whitespace() {
+                        pos -= c.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
-            while pos > 0 && !state.input.as_bytes()[pos - 1].is_ascii_whitespace() {
-                pos -= 1;
+            // Skip the previous word
+            while pos > 0 {
+                let ch = state.input[..pos].chars().next_back();
+                if let Some(c) = ch {
+                    if !c.is_whitespace() {
+                        pos -= c.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
             state.cursor_position = pos;
         }
         InputEvent::InputCursorNextWord => {
             let mut pos = state.cursor_position;
+            // Skip current word forwards (if we're in the middle of a word)
             while pos < state.input.len() && !state.input.as_bytes()[pos].is_ascii_whitespace() {
                 pos += 1;
             }
+            // Skip whitespace forwards
             while pos < state.input.len() && state.input.as_bytes()[pos].is_ascii_whitespace() {
                 pos += 1;
             }
