@@ -3,7 +3,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
 };
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -12,7 +12,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
@@ -23,6 +23,7 @@ pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub local_context: Option<LocalContext>,
     pub redact_secrets: bool,
+    pub rulebooks: Option<Vec<ListRuleBook>>,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -119,6 +120,15 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             send_input_event(
                                 &input_tx,
                                 InputEvent::InputSubmittedWith(local_context.to_string()),
+                            )
+                            .await?;
+                        }
+                        let (user_input, rulebooks_text) =
+                            add_rulebooks(&messages, &user_input, &config.rulebooks);
+                        if let Some(rulebooks_text) = rulebooks_text {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::InputSubmittedWith(rulebooks_text),
                             )
                             .await?;
                         }

@@ -1,12 +1,12 @@
 use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
 use crate::commands::agent::run::helpers::{
-    add_local_context, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
 };
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use stakpak_shared::local_store::LocalStore;
@@ -18,6 +18,7 @@ pub struct RunAsyncConfig {
     pub local_context: Option<LocalContext>,
     pub verbose: bool,
     pub redact_secrets: bool,
+    pub rulebooks: Option<Vec<ListRuleBook>>,
 }
 
 pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), String> {
@@ -85,6 +86,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     if !config.prompt.is_empty() {
         let (user_input, _local_context) =
             add_local_context(&chat_messages, &config.prompt, &config.local_context);
+        let (user_input, _rulebooks_text) =
+            add_rulebooks(&chat_messages, &user_input, &config.rulebooks);
         chat_messages.push(user_message(user_input));
     }
 
