@@ -99,9 +99,9 @@ async fn main() {
             if config.api_key.is_none() {
                 println!();
                 println!("Stakpak API Key not found!");
-                println!("1. Login to Stakpak from here: https://stakpak.dev/auth/signin");
-                println!("2. Go to your profile in the top right corner, and click on 'API Keys'");
-                println!("3. Create a new API Key, and copy it");
+                println!(
+                    "- Go to https://stakpak.dev/generate-api-key. Get your api key and paste it below"
+                );
                 print!("Enter your API Key: ");
                 if let Err(e) = std::io::stdout().flush() {
                     eprintln!("Failed to flush stdout: {}", e);
