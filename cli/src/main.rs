@@ -151,7 +151,12 @@ async fn main() {
                 None => {
                     let local_context = analyze_local_context(&config).await.ok();
                     let api_config: ClientConfig = config.clone().into();
-                    let client = Client::new(&api_config).unwrap();
+                    let client = if let Ok(client) = Client::new(&api_config) {
+                        client
+                    } else {
+                        eprintln!("Failed to create client");
+                        std::process::exit(1);
+                    };
                     let rulebooks = client.list_rulebooks().await.ok();
 
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
