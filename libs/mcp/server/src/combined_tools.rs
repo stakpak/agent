@@ -176,6 +176,16 @@ impl CombinedTools {
     ) -> Result<CallToolResult, McpError> {
         self.remote_tools.search_memory(keywords).await
     }
+
+    #[tool(description = READ_RULEBOOK_DESCRIPTION)]
+    pub async fn read_rulebook(
+        &self,
+        #[tool(param)]
+        #[schemars(description = READ_RULEBOOK_URI_PARAM_DESCRIPTION)]
+        uri: String,
+    ) -> Result<CallToolResult, McpError> {
+        self.remote_tools.read_rulebook(uri).await
+    }
 }
 
 #[tool(tool_box)]

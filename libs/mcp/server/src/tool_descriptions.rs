@@ -45,6 +45,8 @@ pub const SEARCH_DOCS_DESCRIPTION: &str = "Web search for technical documentatio
 
 pub const SEARCH_MEMORY_DESCRIPTION: &str = "Search your memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment.";
 
+pub const READ_RULEBOOK_DESCRIPTION: &str = "Read and retrieve the contents of a rulebook using its URI. This tool allows you to access and read rulebooks that contain play books, guidelines, policies, or rules defined by the user.";
+
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
 pub const WORK_DIR_PARAM_DESCRIPTION: &str = "Optional working directory for command execution";
@@ -89,3 +91,6 @@ pub const LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION: &str =
 
 pub const SEARCH_MEMORY_LIMIT_PARAM_DESCRIPTION: &str = "The maximum number of results to return";
 pub const SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to search for in your memory. Searches against the title, tags, and content of your memory.";
+
+pub const READ_RULEBOOK_URI_PARAM_DESCRIPTION: &str =
+    "The URI of the rulebook to read. This should be a valid URI pointing to a rulebook document.";
