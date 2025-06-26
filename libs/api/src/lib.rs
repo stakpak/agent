@@ -4,6 +4,7 @@ use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
 use rmcp::model::Content;
 use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
+use url::Url;
 pub mod models;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -86,6 +87,63 @@ impl Client {
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetMyAccountResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String> {
+        let url = format!("{}/rules", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<ListRulebooksResponse>(value.clone()) {
+            Ok(response) => Ok(response.results),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
+        // URL encode the URI to handle special characters
+        let base_url = Url::parse(&format!("{}/rules/", self.base_url))
+            .map_err(|e| format!("Invalid base URL: {}", e))?;
+        let url = base_url
+            .join(uri)
+            .map_err(|e| format!("Failed to construct URL: {}", e))?;
+
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        if !response.status().is_success() {
+            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
+            return Err(error.error.message);
+        }
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<RuleBook>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);
@@ -753,6 +811,53 @@ impl GetMyAccountResponse {
         format!(
             "ID: {}\nUsername: {}\nName: {} {}",
             self.id, self.username, self.first_name, self.last_name
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum RuleBookVisibility {
+    #[default]
+    Public,
+    Private,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ListRuleBook {
+    pub id: String,
+    pub uri: String,
+    pub description: String,
+    pub visibility: RuleBookVisibility,
+    pub tags: Vec<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ListRulebooksResponse {
+    pub results: Vec<ListRuleBook>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RuleBook {
+    pub id: String,
+    pub uri: String,
+    pub description: String,
+    pub content: String,
+    pub visibility: RuleBookVisibility,
+    pub tags: Vec<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl ListRuleBook {
+    pub fn to_text(&self) -> String {
+        format!(
+            "URI: {}\nDescription: {}\nTags: {}\n",
+            self.uri,
+            self.description,
+            self.tags.join(", ")
         )
     }
 }
