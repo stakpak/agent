@@ -3205,7 +3205,6 @@ dependencies = [
  "rust_socketio",
  "serde",
  "serde_json",
- "sha2",
  "stakpak-api",
  "stakpak-mcp-client",
  "stakpak-mcp-server",
@@ -3234,6 +3233,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stakpak-shared",
+ "url",
  "uuid",
 ]
 
@@ -3244,13 +3244,10 @@ dependencies = [
  "anyhow",
  "futures",
  "rmcp",
- "serde",
  "serde_json",
- "stakpak-mcp-server",
  "stakpak-shared",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3276,7 +3273,6 @@ name = "stakpak-shared"
 version = "0.1.106"
 dependencies = [
  "chrono",
- "futures-util",
  "notify",
  "once_cell",
  "regex",
@@ -3285,7 +3281,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
- "tracing",
  "uuid",
  "walkdir",
 ]

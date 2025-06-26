@@ -1,6 +1,6 @@
 use clap::Parser;
 use names::{self, Name};
-use stakpak_api::ClientConfig;
+use stakpak_api::{Client, ClientConfig};
 use std::{env, io::Write, path::Path};
 
 mod code_index;
@@ -151,6 +151,14 @@ async fn main() {
                 None => {
                     let local_context = analyze_local_context(&config).await.ok();
                     let api_config: ClientConfig = config.clone().into();
+                    let client = if let Ok(client) = Client::new(&api_config) {
+                        client
+                    } else {
+                        eprintln!("Failed to create client");
+                        std::process::exit(1);
+                    };
+                    let rulebooks = client.list_rulebooks().await.ok();
+
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
                         .await
                     {
@@ -185,6 +193,7 @@ async fn main() {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
+                                rulebooks,
                             },
                         )
                         .await
@@ -206,6 +215,7 @@ async fn main() {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
+                                rulebooks,
                             },
                         )
                         .await
@@ -224,6 +234,7 @@ async fn main() {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
+                                rulebooks,
                             },
                         )
                         .await
