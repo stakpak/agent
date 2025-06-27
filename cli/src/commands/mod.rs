@@ -16,6 +16,7 @@ use walkdir::WalkDir;
 
 pub mod agent;
 pub mod flow;
+pub mod warden;
 
 #[derive(Subcommand, PartialEq)]
 pub enum Commands {
@@ -155,6 +156,18 @@ pub enum Commands {
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
     Agent(AgentCommands),
+
+    /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
+    Warden {
+        /// Environment variables to pass to container
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        env: Vec<String>,
+        /// Additional volumes to mount
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        volume: Vec<String>,
+        #[command(subcommand)]
+        command: Option<warden::WardenCommands>,
+    },
 }
 
 impl Commands {
@@ -532,6 +545,21 @@ impl Commands {
                     .map_err(|e| format!("Failed to write checkpoint file: {}", e))?;
 
                 println!("[Saved checkpoint ID to .stakpak_apply_checkpoint]");
+            }
+            Commands::Warden {
+                env,
+                volume,
+                command,
+            } => {
+                match command {
+                    Some(warden_command) => {
+                        warden::WardenCommands::run(warden_command, config).await?;
+                    }
+                    None => {
+                        // Default behavior: run warden with preconfigured setup
+                        warden::run_default_warden(config, volume, env).await?;
+                    }
+                }
             }
         }
         Ok(())
