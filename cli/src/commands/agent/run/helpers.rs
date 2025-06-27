@@ -69,12 +69,18 @@ pub fn add_rulebooks(
     rulebooks: &Option<Vec<ListRuleBook>>,
 ) -> (String, Option<String>) {
     if let Some(rulebooks) = rulebooks {
-        let rulebooks_text = "# User Rule Books:\n".to_string()
-            + &rulebooks
-                .iter()
-                .map(|rulebook| format!("  - {}", rulebook.to_text().replace('\n', "\n    ")))
-                .collect::<Vec<String>>()
-                .join("\n");
+        let rulebooks_text = if !rulebooks.is_empty() {
+            format!(
+                "# User Rule Books:\n{}",
+                rulebooks
+                    .iter()
+                    .map(|rulebook| format!("  - {}", rulebook.to_text().replace('\n', "\n    ")))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            )
+        } else {
+            "# No User Rule Books available".to_string()
+        };
 
         // only add local context if this is the first message
         if messages.is_empty() {
