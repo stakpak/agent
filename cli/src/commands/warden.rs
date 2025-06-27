@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::utils::plugins::{PluginConfig, get_plugin_path};
 use clap::Subcommand;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -48,14 +49,10 @@ pub enum WardenCommands {
 
 impl WardenCommands {
     pub async fn run(self, _config: AppConfig) -> Result<(), String> {
-        // Check if warden binary is available
-        if !is_warden_available() {
-            return Err(
-                "warden binary not found in PATH. Please install warden first.".to_string(),
-            );
-        }
+        // Get warden path (will download if not available)
+        let warden_path = get_warden_plugin_path().await;
 
-        let mut cmd = Command::new("warden");
+        let mut cmd = Command::new(warden_path);
         let mut needs_tty = false;
 
         match self {
@@ -126,12 +123,20 @@ impl WardenCommands {
     }
 }
 
-fn is_warden_available() -> bool {
-    Command::new("warden")
-        .arg("--help")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+async fn get_warden_plugin_path() -> String {
+    let warden_config = PluginConfig {
+        name: "warden".to_string(),
+        base_url: "https://warden-cli-releases.s3.amazonaws.com/".to_string(),
+        targets: vec![
+            "linux-x86_64".to_string(),
+            "darwin-x86_64".to_string(),
+            "darwin-aarch64".to_string(),
+            "windows-x86_64".to_string(),
+        ],
+        version: None,
+    };
+
+    get_plugin_path(warden_config).await
 }
 
 /// Execute warden command with proper TTY handling and streaming
@@ -226,13 +231,11 @@ pub async fn run_default_warden(
     extra_volumes: Vec<String>,
     extra_env: Vec<String>,
 ) -> Result<(), String> {
-    // Check if warden binary is available
-    if !is_warden_available() {
-        return Err("warden binary not found in PATH. Please install warden first.".to_string());
-    }
+    // Get warden path (will download if not available)
+    let warden_path = get_warden_plugin_path().await;
 
     // Run warden with default configuration
-    let mut cmd = Command::new("warden");
+    let mut cmd = Command::new(warden_path);
     cmd.arg("run");
 
     // Use stakpak image with current CLI version
