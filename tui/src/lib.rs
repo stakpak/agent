@@ -133,7 +133,7 @@ pub async fn run_tui(
                        if let InputEvent::InputSubmitted = event {
                            if state.show_shell_mode && !state.waiting_for_shell_input {
                            } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
-                               let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone()));
+                               let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                            }
                        }
 
