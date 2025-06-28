@@ -78,6 +78,11 @@ impl Client {
             header::HeaderValue::from_str(&format!("Bearer {}", config.api_key.clone().unwrap()))
                 .expect("Invalid API key format"),
         );
+        headers.insert(
+            header::USER_AGENT,
+            header::HeaderValue::from_str(&format!("Stakpak/{}", env!("CARGO_PKG_VERSION")))
+                .expect("Invalid user agent format"),
+        );
 
         let client = ReqwestClient::builder()
             .default_headers(headers)
