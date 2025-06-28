@@ -168,7 +168,7 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call(state);
-                let _ = output_tx.try_send(OutputEvent::SendToolResult(result, false));
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
             }
             if !state.ondemand_shell_mode {
                 state.active_shell_command = None;
@@ -420,7 +420,7 @@ fn handle_input_submitted(
     if state.ondemand_shell_mode {
         let result = shell_command_to_tool_call(state);
         eprintln!("result: {:?}", result);
-        let _ = output_tx.try_send(OutputEvent::SendToolResult(result, true));
+        let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
         state.ondemand_shell_mode = false;
     }
 
