@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use eventsource_stream::Eventsource;
-use reqwest::{Client as ReqwestClient, Error as ReqwestError, header};
+use reqwest::{Client as ReqwestClient, Error as ReqwestError, Response, header};
 use rmcp::model::Content;
 use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
@@ -42,11 +42,31 @@ struct ApiError {
 
 #[derive(Deserialize)]
 struct ApiErrorDetail {
-    // key: String,
+    key: String,
     message: String,
 }
 
 impl Client {
+    async fn handle_response_error(&self, response: Response) -> Result<Response, String> {
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            match response.json::<ApiError>().await {
+                Ok(response) => {
+                    if response.error.key == "EXCEEDED_API_LIMIT" {
+                        Err(format!(
+                            "{}.\n\nPlease top up your account at https://stakpak.dev/george/settings/billing to keep Stakpaking.",
+                            response.error.message
+                        ))
+                    } else {
+                        Err(response.error.message)
+                    }
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+    }
+
     pub fn new(config: &ClientConfig) -> Result<Self, String> {
         if config.api_key.is_none() {
             return Err("API Key not found, please login".into());
@@ -80,10 +100,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetMyAccountResponse>(value.clone()) {
@@ -106,10 +123,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<ListRulebooksResponse>(value.clone()) {
@@ -137,10 +151,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<RuleBook>(value.clone()) {
@@ -163,10 +174,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowsResponse>(value.clone()) {
@@ -193,10 +201,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowResponse>(value.clone()) {
@@ -229,10 +234,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<CreateFlowResponse>(value.clone()) {
@@ -262,10 +264,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<SaveEditsResponse>(value.clone()) {
@@ -291,10 +290,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GetFlowDocumentsResponse>(value.clone()) {
@@ -338,10 +334,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<QueryBlocksResponse>(value.clone()) {
@@ -364,10 +357,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<Vec<AgentSession>>(value.clone()) {
@@ -390,10 +380,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
@@ -429,10 +416,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<AgentSession>(value.clone()) {
@@ -456,10 +440,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<RunAgentOutput>(value.clone()) {
@@ -485,10 +466,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<RunAgentOutput>(value.clone()) {
@@ -517,10 +495,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<RunAgentOutput>(value.clone()) {
@@ -561,10 +536,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<TranspileOutput>(value.clone()) {
@@ -596,10 +568,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<AgentTaskOutput>(value.clone()) {
@@ -629,10 +598,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
@@ -663,10 +629,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {
             event
                 .map_err(|_| "Failed to read response".to_string())
@@ -693,10 +656,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<GenerateCodeOutput>(value.clone()) {
@@ -723,10 +683,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<BuildCodeIndexOutput>(value.clone()) {
@@ -760,10 +717,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
+        let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
@@ -790,11 +744,7 @@ impl Client {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
-        if !response.status().is_success() {
-            let error: ApiError = response.json().await.map_err(|e| e.to_string())?;
-            return Err(error.error.message);
-        }
-
+        let _ = self.handle_response_error(response).await?;
         Ok(())
     }
 }
