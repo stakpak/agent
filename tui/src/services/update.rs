@@ -68,7 +68,6 @@ pub fn update(
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
-        InputEvent::ShellMode => handle_shell_mode(state),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -305,6 +304,10 @@ fn handle_dropdown_down(state: &mut AppState) {
 fn handle_input_changed(state: &mut AppState, c: char) {
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
+        return;
+    }
+    if c == '!' && state.input.is_empty() {
+        handle_shell_mode(state);
         return;
     }
 
