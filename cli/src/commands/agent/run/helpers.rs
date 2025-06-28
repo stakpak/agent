@@ -1,7 +1,7 @@
 use crate::utils::local_context::LocalContext;
 use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
-    ChatMessage, FunctionDefinition, MessageContent, Role, Tool,
+    ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
 
 pub fn convert_tools_map(
@@ -95,4 +95,34 @@ pub fn add_rulebooks(
     } else {
         (user_input.to_string(), None)
     }
+}
+
+pub fn tool_call_history_message(tool_calls: &[ToolCallResult]) -> Option<ChatMessage> {
+    if tool_calls.is_empty() {
+        return None;
+    }
+    let history = tool_calls
+        .iter()
+        .enumerate()
+        .map(|(i, tc)| {
+            format!(
+                "Command {}: {}\nResult: {}",
+                i + 1,
+                tc.call.function.arguments,
+                tc.result
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    Some(ChatMessage {
+        role: Role::Assistant,
+        content: Some(MessageContent::String(format!(
+            "Here is the history of commands run before this message:\n{}",
+            history
+        ))),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    })
 }

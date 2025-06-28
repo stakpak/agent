@@ -167,14 +167,23 @@ pub fn update(
 
         InputEvent::ShellCompleted(_code) => {
             if state.dialog_command.is_some() {
-                let result = shell_command_to_tool_call(state);
+                let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+                state.show_shell_mode = false;
+                state.dialog_command = None;
             }
+            if state.ondemand_shell_mode {
+                let new_tool_call_result = shell_command_to_tool_call_result(state);
+                if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                    tool_calls.push(new_tool_call_result);
+                }
+            }
+
             if !state.ondemand_shell_mode {
                 state.active_shell_command = None;
                 state.active_shell_command_output = None;
             }
-            state.show_shell_mode = false;
+
             state.input.clear();
             state.cursor_position = 0;
             state.messages.push(Message::plain_text(""));
@@ -259,6 +268,9 @@ fn handle_shell_mode(state: &mut AppState) {
     if state.show_shell_mode {
         state.is_dialog_open = false;
         state.ondemand_shell_mode = state.dialog_command.is_none();
+        if state.ondemand_shell_mode {
+            state.shell_tool_calls = Some(Vec::new());
+        }
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         state.is_dialog_open = true;
@@ -417,13 +429,6 @@ fn handle_input_submitted(
         return;
     }
 
-    if state.ondemand_shell_mode {
-        let result = shell_command_to_tool_call(state);
-        eprintln!("result: {:?}", result);
-        let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
-        state.ondemand_shell_mode = false;
-    }
-
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
@@ -536,6 +541,7 @@ fn handle_input_submitted(
 }
 
 fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_height: usize) {
+    state.shell_tool_calls = None;
     let input_height = 3;
     let total_lines = state.messages.len() * 2;
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -688,7 +694,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.streaming_tool_result_id = None;
 }
 
-pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
+pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
     let id = if let Some(cmd) = &state.dialog_command {
         cmd.id.clone()
     } else {
