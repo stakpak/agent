@@ -3,7 +3,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_message, tool_result,
+    user_message,
 };
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -113,7 +114,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
-                    OutputEvent::UserMessage(user_input) => {
+                    OutputEvent::UserMessage(user_input, tool_calls_results) => {
                         let (user_input, local_context) =
                             add_local_context(&messages, &user_input, &config.local_context);
                         if let Some(local_context) = local_context {
@@ -131,6 +132,12 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 InputEvent::InputSubmittedWith(rulebooks_text),
                             )
                             .await?;
+                        }
+                        if let Some(tool_call_results) = &tool_calls_results {
+                            if let Some(history_msg) = tool_call_history_message(tool_call_results)
+                            {
+                                messages.push(history_msg);
+                            }
                         }
                         messages.push(user_message(user_input));
                     }

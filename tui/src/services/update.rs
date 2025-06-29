@@ -68,7 +68,6 @@ pub fn update(
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
-        InputEvent::ShellMode => handle_shell_mode(state),
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
@@ -167,14 +166,25 @@ pub fn update(
 
         InputEvent::ShellCompleted(_code) => {
             if state.dialog_command.is_some() {
-                let result = shell_command_to_tool_call(state);
+                let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+                state.show_shell_mode = false;
+                state.dialog_command = None;
             }
-            state.active_shell_command = None;
-            state.show_shell_mode = false;
+            if state.ondemand_shell_mode {
+                let new_tool_call_result = shell_command_to_tool_call_result(state);
+                if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                    tool_calls.push(new_tool_call_result);
+                }
+            }
+
+            if !state.ondemand_shell_mode {
+                state.active_shell_command = None;
+                state.active_shell_command_output = None;
+            }
+
             state.input.clear();
             state.cursor_position = 0;
-            state.active_shell_command_output = None;
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -256,9 +266,14 @@ fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
+        state.ondemand_shell_mode = state.dialog_command.is_none();
+        if state.ondemand_shell_mode {
+            state.shell_tool_calls = Some(Vec::new());
+        }
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         state.is_dialog_open = true;
+        state.ondemand_shell_mode = false;
     }
     state.input.clear();
     state.cursor_position = 0;
@@ -289,6 +304,10 @@ fn handle_dropdown_down(state: &mut AppState) {
 fn handle_input_changed(state: &mut AppState, c: char) {
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
+        return;
+    }
+    if c == '!' && state.input.is_empty() {
+        handle_shell_mode(state);
         return;
     }
 
@@ -525,6 +544,7 @@ fn handle_input_submitted(
 }
 
 fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_height: usize) {
+    state.shell_tool_calls = None;
     let input_height = 3;
     let total_lines = state.messages.len() * 2;
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -677,12 +697,13 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.streaming_tool_result_id = None;
 }
 
-pub fn shell_command_to_tool_call(state: &mut AppState) -> ToolCallResult {
-    let id = state
-        .dialog_command
-        .as_ref()
-        .map(|cmd| cmd.id.clone())
-        .unwrap_or_default();
+pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
+    let id = if let Some(cmd) = &state.dialog_command {
+        cmd.id.clone()
+    } else {
+        format!("tool_{}", Uuid::new_v4())
+    };
+
     let command = state
         .active_shell_command
         .as_ref()
