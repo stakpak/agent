@@ -28,9 +28,6 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
 
 pub const CREATE_DESCRIPTION: &str = "Create a new file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist.";
 
-pub const INSERT_DESCRIPTION: &str =
-    "Insert text at a specific line number in a file. Line numbers are 1-indexed.";
-
 pub const GENERATE_CODE_DESCRIPTION: &str = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
 
 IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files.";
@@ -47,6 +44,11 @@ pub const SEARCH_MEMORY_DESCRIPTION: &str = "Search your memory for relevant inf
 
 pub const READ_RULEBOOK_DESCRIPTION: &str = "Read and retrieve the contents of a rulebook using its URI. This tool allows you to access and read rulebooks that contain play books, guidelines, policies, or rules defined by the user.";
 
+pub const GENERATE_PASSWORD_DESCRIPTION: &str = "Generate a secure password with the specified constraints. The password will be generated using the following constraints:
+- Length of the password (default: 15)
+- No symbols (default: false)
+";
+
 // Parameter descriptions
 pub const COMMAND_PARAM_DESCRIPTION: &str = "The shell command to execute";
 pub const WORK_DIR_PARAM_DESCRIPTION: &str = "Optional working directory for command execution";
@@ -58,13 +60,11 @@ pub const FILE_PATH_PARAM_DESCRIPTION: &str = "The path to the file to modify";
 pub const OLD_STR_PARAM_DESCRIPTION: &str =
     "The exact text to replace (must match exactly, including whitespace and indentation)";
 pub const NEW_STR_PARAM_DESCRIPTION: &str = "The new text to insert in place of the old text. When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style.";
+pub const REPLACE_ALL_PARAM_DESCRIPTION: &str =
+    "Whether to replace all occurrences of the old text in the file (default: false)";
 
 pub const CREATE_PATH_PARAM_DESCRIPTION: &str = "The path where the new file should be created";
 pub const FILE_TEXT_PARAM_DESCRIPTION: &str = "The content to write to the new file, when creating code, ensure the new text has proper syntax, indentation, and follows the codebase style.";
-
-pub const INSERT_LINE_PARAM_DESCRIPTION: &str =
-    "The line number where text should be inserted (1-indexed)";
-pub const INSERT_TEXT_PARAM_DESCRIPTION: &str = "The text to insert";
 
 pub const GENERATE_PROMPT_PARAM_DESCRIPTION: &str = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify the paths of the files to be created or modified if you want to save changes to the filesystem.";
 pub const PROVISIONER_PARAM_DESCRIPTION: &str =
@@ -94,3 +94,8 @@ pub const SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION: &str = "List of keywords to 
 
 pub const READ_RULEBOOK_URI_PARAM_DESCRIPTION: &str =
     "The URI of the rulebook to read. This should be a valid URI pointing to a rulebook document.";
+
+pub const LENGTH_PARAM_DESCRIPTION: &str = "The length of the password to generate";
+
+pub const NO_SYMBOLS_PARAM_DESCRIPTION: &str =
+    "Whether to disallow symbols in the password (default: false)";

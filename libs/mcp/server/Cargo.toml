@@ -15,7 +15,7 @@ rmcp = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 axum = "0.8.4"
-
+npwg = "0.4.5"
 
 [dev-dependencies]
 tempfile = "3.8"
