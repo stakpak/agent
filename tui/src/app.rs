@@ -61,6 +61,8 @@ pub struct AppState {
     pub waiting_for_shell_input: bool,
     pub is_tool_call_shell_command: bool,
     pub is_pasting: bool,
+    pub ondemand_shell_mode: bool,
+    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
 }
 
 #[derive(Debug)]
@@ -115,13 +117,13 @@ pub enum InputEvent {
 
 #[derive(Debug)]
 pub enum OutputEvent {
-    UserMessage(String),
+    UserMessage(String, Option<Vec<ToolCallResult>>),
     AcceptTool(ToolCall),
     RejectTool(ToolCall),
     ListSessions,
     SwitchToSession(String),
-    SendToolResult(ToolCallResult),
     Memorize,
+    SendToolResult(ToolCallResult),
 }
 
 impl AppState {
@@ -200,6 +202,8 @@ impl AppState {
             waiting_for_shell_input: false,
             is_tool_call_shell_command: false,
             is_pasting: false,
+            ondemand_shell_mode: false,
+            shell_tool_calls: None,
         }
     }
 

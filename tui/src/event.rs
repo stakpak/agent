@@ -38,7 +38,6 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::CursorLeft)
                 }
-                KeyCode::Char('!') => Some(InputEvent::ShellMode),
                 KeyCode::Char('<') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorPrevWord)
                 }
