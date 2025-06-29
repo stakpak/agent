@@ -97,14 +97,13 @@ pub fn add_rulebooks(
     }
 }
 
-pub fn tool_call_history_message(tool_calls: &[ToolCallResult]) -> Option<ChatMessage> {
+pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String> {
     if tool_calls.is_empty() {
         return None;
     }
     let history = tool_calls
         .iter()
         .map(|tc| {
-            // Try to parse the command from JSON
             let command = if let Ok(json) =
                 serde_json::from_str::<serde_json::Value>(&tc.call.function.arguments)
             {
@@ -125,15 +124,8 @@ pub fn tool_call_history_message(tool_calls: &[ToolCallResult]) -> Option<ChatMe
         })
         .collect::<Vec<_>>()
         .join("\n");
-
-    Some(ChatMessage {
-        role: Role::Assistant,
-        content: Some(MessageContent::String(format!(
-            "Here is the history of commands run before this message:\n{}",
-            history
-        ))),
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-    })
+    Some(format!(
+        "Here is the history of commands run before this message:\n{}",
+        history
+    ))
 }

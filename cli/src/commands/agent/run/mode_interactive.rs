@@ -3,7 +3,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_message, tool_result,
+    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_string, tool_result,
     user_message,
 };
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -133,13 +133,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             )
                             .await?;
                         }
+                        let mut user_input_with_history = user_input.clone();
                         if let Some(tool_call_results) = &tool_calls_results {
-                            if let Some(history_msg) = tool_call_history_message(tool_call_results)
-                            {
-                                messages.push(history_msg);
+                            if let Some(history_str) = tool_call_history_string(tool_call_results) {
+                                user_input_with_history =
+                                    format!("{}\n\n{}", user_input_with_history, history_str);
                             }
                         }
-                        messages.push(user_message(user_input));
+                        messages.push(user_message(user_input_with_history));
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;

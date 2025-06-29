@@ -236,12 +236,14 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
     for msg in messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
-                if text.starts_with("Here is the history of commands") && text.contains("```shell")
-                {
+                if text.contains("history of commands") && text.contains("```shell") {
                     let mut remaining = text.as_str();
                     while let Some(start) = remaining.find("```shell") {
                         let before = &remaining[..start];
                         if !before.trim().is_empty() {
+                            if before.contains("Here is the history of commands") {
+                                all_lines.push((Line::from(""), Style::default()));
+                            }
                             all_lines.extend(get_wrapped_plain_lines(before, style, width));
                         }
                         let after_start = &remaining[start + "```shell".len()..];
