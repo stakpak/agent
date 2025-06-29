@@ -105,22 +105,23 @@ pub fn tool_call_history_message(tool_calls: &[ToolCallResult]) -> Option<ChatMe
         .iter()
         .map(|tc| {
             // Try to parse the command from JSON
-            let command = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tc.call.function.arguments) {
-                json.get("command").and_then(|v| v.as_str()).unwrap_or(&tc.call.function.arguments).to_string()
+            let command = if let Ok(json) =
+                serde_json::from_str::<serde_json::Value>(&tc.call.function.arguments)
+            {
+                json.get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&tc.call.function.arguments)
+                    .to_string()
             } else {
                 tc.call.function.arguments.clone()
             };
-           
+
             let output = if tc.result.trim().is_empty() {
                 "No output".to_string()
             } else {
                 tc.result.clone()
             };
-            format!(
-                "```shell\n$ {}\n{}\n```",
-                command,
-                output
-            )
+            format!("```shell\n$ {}\n{}\n```", command, output)
         })
         .collect::<Vec<_>>()
         .join("\n");
