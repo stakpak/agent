@@ -172,7 +172,8 @@ impl RemoteTools {
             for edit in generation_result.edits.unwrap_or_default() {
                 let file_path = Path::new(
                     edit.document_uri
-                        .strip_prefix("file://")
+                        .strip_prefix("file:///")
+                        .or_else(|| edit.document_uri.strip_prefix("file://"))
                         .unwrap_or(&edit.document_uri),
                 );
 
