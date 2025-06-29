@@ -115,6 +115,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
+                        let mut user_input_with_history = user_input.clone();
+                        if let Some(tool_call_results) = &tool_calls_results {
+                            if let Some(history_str) = tool_call_history_string(tool_call_results) {
+                                user_input_with_history =
+                                    format!("{}\n\n{}", history_str, user_input_with_history);
+                            }
+                        }
+
                         let (user_input, local_context) =
                             add_local_context(&messages, &user_input, &config.local_context);
                         if let Some(local_context) = local_context {
@@ -124,7 +132,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             )
                             .await?;
                         }
-                        let (user_input, rulebooks_text) =
+                        let (_user_input, rulebooks_text) =
                             add_rulebooks(&messages, &user_input, &config.rulebooks);
                         if let Some(rulebooks_text) = rulebooks_text {
                             send_input_event(
@@ -133,13 +141,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             )
                             .await?;
                         }
-                        let mut user_input_with_history = user_input.clone();
-                        if let Some(tool_call_results) = &tool_calls_results {
-                            if let Some(history_str) = tool_call_history_string(tool_call_results) {
-                                user_input_with_history =
-                                    format!("{}\n\n{}", user_input_with_history, history_str);
-                            }
-                        }
+
                         messages.push(user_message(user_input_with_history));
                     }
                     OutputEvent::AcceptTool(tool_call) => {

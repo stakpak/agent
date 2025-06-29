@@ -124,8 +124,5 @@ pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String>
         })
         .collect::<Vec<_>>()
         .join("\n");
-    Some(format!(
-        "Here is the history of commands run before this message:\n{}",
-        history
-    ))
+    Some(format!("Here's my shell history:\n{}", history))
 }
