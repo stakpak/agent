@@ -268,7 +268,7 @@ fn handle_shell_mode(state: &mut AppState) {
     if state.show_shell_mode {
         state.is_dialog_open = false;
         state.ondemand_shell_mode = state.dialog_command.is_none();
-        if state.ondemand_shell_mode {
+        if state.ondemand_shell_mode  && state.shell_tool_calls.is_none() {
             state.shell_tool_calls = Some(Vec::new());
         }
     }
