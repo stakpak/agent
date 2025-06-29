@@ -230,7 +230,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "scratchpad",
                     "report",
                     "current_context",
-                    "rulebook",
+                    "rulebooks",
                 ];
                 let mut found = false;
 
@@ -310,7 +310,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         // Add prompt to first line only
         if state.show_shell_mode {
             current_line.push(Span::styled(
-                " ! ",
+                " $ ",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
