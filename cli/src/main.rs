@@ -17,7 +17,7 @@ use commands::{
 };
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use utils::check_update::{check_update, get_latest_cli_version};
+use utils::check_update::{auto_update, check_update};
 use utils::local_context::analyze_local_context;
 
 use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
@@ -137,17 +137,8 @@ async fn main() {
                 }
             }
 
-            let latest_version: String = get_latest_cli_version().await.unwrap();
-            let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-            if current_version != latest_version {
-                println!("🚀 Update available!  v{}  →  {} ✨   ", current_version, latest_version);
-                println!("Would you like to update? (y/n)");
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
-                if input.trim() == "y" {
-                    let _ = std::process::Command::new("brew").arg("tap").arg("stakpak/stakpak").output();
-                    let _ = std::process::Command::new("brew").arg("upgrade").arg("stakpak").output();
-                }
+            if let Err(e) = auto_update().await {
+                eprintln!("Auto-update failed: {}", e);
             }
 
             match cli.command {
