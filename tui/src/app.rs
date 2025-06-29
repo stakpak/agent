@@ -214,7 +214,7 @@ impl AppState {
             self,
             &command,
             Color::Rgb(180, 180, 180),
-            "! ",
+            "$ ",
             Color::Rgb(160, 92, 158),
         );
 

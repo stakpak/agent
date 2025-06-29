@@ -29,7 +29,7 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     };
 
     let line = Line::from(vec![Span::styled(
-        "Press Enter to continue, '!' to run the command yourself or Esc to cancel and reprompt",
+        "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
