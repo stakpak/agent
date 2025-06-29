@@ -1,6 +1,6 @@
 use serde_json;
 use stakpak_shared::local_store::LocalStore;
-use stakpak_shared::secrets::{redact_secrets, restore_secrets};
+use stakpak_shared::secrets::{redact_password, redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use tracing::{error, warn};
 
@@ -81,6 +81,21 @@ impl SecretManager {
         // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
         let existing_redaction_map = self.load_session_redaction_map();
         let redaction_result = redact_secrets(content, path, &existing_redaction_map);
+
+        // Add new redactions to session map
+        self.add_to_session_redaction_map(&redaction_result.redaction_map);
+
+        redaction_result.redacted_string
+    }
+
+    pub fn redact_and_store_password(&self, content: &str, password: &str) -> String {
+        if !self.redact_secrets {
+            return content.to_string();
+        }
+
+        // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
+        let existing_redaction_map = self.load_session_redaction_map();
+        let redaction_result = redact_password(content, password, &existing_redaction_map);
 
         // Add new redactions to session map
         self.add_to_session_redaction_map(&redaction_result.redaction_map);

@@ -381,6 +381,9 @@ impl LocalTools {
         #[tool(param)]
         #[schemars(description = NEW_STR_PARAM_DESCRIPTION)]
         new_str: String,
+        #[tool(param)]
+        #[schemars(description = REPLACE_ALL_PARAM_DESCRIPTION)]
+        replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
@@ -406,14 +409,14 @@ impl LocalTools {
             Ok(content) => {
                 let matches: Vec<_> = content.match_indices(&actual_old_str).collect();
 
-                match matches.len() {
-                    0 => Ok(CallToolResult::error(vec![
+                match (matches.len(), replace_all) {
+                    (0, _) => Ok(CallToolResult::error(vec![
                         Content::text("NO_MATCH"),
                         Content::text(
                             "No match found for replacement text. Please check your text and try again.",
                         ),
                     ])),
-                    1 => {
+                    (1, _) => {
                         let new_content = content.replace(&actual_old_str, &actual_new_str);
                         match fs::write(&path, new_content) {
                             Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
@@ -426,7 +429,20 @@ impl LocalTools {
                             ])),
                         }
                     }
-                    n => Ok(CallToolResult::error(vec![
+                    (n, Some(true)) => {
+                        let new_content = content.replace(&actual_old_str, &actual_new_str);
+                        match fs::write(&path, new_content) {
+                            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+                                "Successfully replaced {} occurrences of text in {}",
+                                n, path
+                            ))])),
+                            Err(e) => Ok(CallToolResult::error(vec![
+                                Content::text("WRITE_ERROR"),
+                                Content::text(format!("Cannot write to file: {}", e)),
+                            ])),
+                        }
+                    }
+                    (n, _) => Ok(CallToolResult::error(vec![
                         Content::text("MULTIPLE_MATCHES"),
                         Content::text(format!(
                             "Found {} matches for replacement text. Please provide more context to make a unique match.",
@@ -493,90 +509,46 @@ impl LocalTools {
         }
     }
 
-    #[tool(description = INSERT_DESCRIPTION)]
-    pub fn insert(
+    #[tool(description = GENERATE_PASSWORD_DESCRIPTION)]
+    pub async fn generate_password(
         &self,
         #[tool(param)]
-        #[schemars(description = FILE_PATH_PARAM_DESCRIPTION)]
-        path: String,
+        #[schemars(description = LENGTH_PARAM_DESCRIPTION)]
+        length: Option<usize>,
         #[tool(param)]
-        #[schemars(description = INSERT_LINE_PARAM_DESCRIPTION)]
-        insert_line: u32,
-        #[tool(param)]
-        #[schemars(description = INSERT_TEXT_PARAM_DESCRIPTION)]
-        new_str: String,
+        #[schemars(description = NO_SYMBOLS_PARAM_DESCRIPTION)]
+        no_symbols: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let path_obj = Path::new(&path);
+        let length = length.unwrap_or(15);
+        let no_symbols = no_symbols.unwrap_or(false);
 
-        if !path_obj.exists() {
+        let mut config = npwg::PasswordGeneratorConfig::default();
+        config.length = length;
+
+        if no_symbols {
+            config.excluded_chars = npwg::config::DEFINE
+                .iter()
+                .find(|(name, _)| *name == "symbol3")
+                .map(|(_, chars)| chars.chars().collect())
+                .unwrap_or_default();
+        }
+
+        let password = if let Ok(password) = npwg::generator::generate_password(&config).await {
+            password
+        } else {
             return Ok(CallToolResult::error(vec![
-                Content::text("FILE_NOT_FOUND"),
-                Content::text(format!("File not found: {}", path)),
+                Content::text("FAILED_TO_GENERATE_PASSWORD"),
+                Content::text(format!("Failed to generate password")),
             ]));
-        }
+        };
 
-        if path_obj.is_dir() {
-            return Ok(CallToolResult::error(vec![
-                Content::text("IS_DIRECTORY"),
-                Content::text(format!("Cannot edit directory: {}", path)),
-            ]));
-        }
+        let redacted_password = self
+            .secret_manager
+            .redact_and_store_password(&password, &password);
 
-        match fs::read_to_string(&path) {
-            Ok(content) => {
-                let mut lines: Vec<&str> = content.lines().collect();
-                let insert_idx = if insert_line == 0 {
-                    0
-                } else {
-                    (insert_line - 1) as usize
-                };
-
-                if insert_idx > lines.len() {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("INVALID_LINE"),
-                        Content::text(format!(
-                            "Line number {} is beyond file length {}",
-                            insert_line,
-                            lines.len()
-                        )),
-                    ]));
-                }
-
-                // Restore secrets in the text to insert
-                let actual_new_str = self.secret_manager.restore_secrets_in_string(&new_str);
-
-                // Split new_str by lines and insert each line
-                let new_lines: Vec<&str> = actual_new_str.lines().collect();
-                for (i, line) in new_lines.iter().enumerate() {
-                    lines.insert(insert_idx + i, line);
-                }
-
-                let new_content = lines.join("\n");
-                // Preserve original file ending (with or without final newline)
-                let final_content = if content.ends_with('\n') && !new_content.ends_with('\n') {
-                    format!("{}\n", new_content)
-                } else {
-                    new_content
-                };
-
-                match fs::write(&path, final_content) {
-                    Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
-                        "Successfully inserted {} lines at line {} in {}",
-                        new_lines.len(),
-                        insert_line,
-                        path
-                    ))])),
-                    Err(e) => Ok(CallToolResult::error(vec![
-                        Content::text("WRITE_ERROR"),
-                        Content::text(format!("Cannot write to file: {}", e)),
-                    ])),
-                }
-            }
-            Err(e) => Ok(CallToolResult::error(vec![
-                Content::text("READ_ERROR"),
-                Content::text(format!("Cannot read file: {}", e)),
-            ])),
-        }
+        Ok(CallToolResult::success(vec![Content::text(
+            &redacted_password,
+        )]))
     }
 }
 

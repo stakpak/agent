@@ -63,8 +63,12 @@ impl CombinedTools {
         #[tool(param)]
         #[schemars(description = NEW_STR_PARAM_DESCRIPTION)]
         new_str: String,
+        #[tool(param)]
+        #[schemars(description = REPLACE_ALL_PARAM_DESCRIPTION)]
+        replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        self.local_tools.str_replace(path, old_str, new_str)
+        self.local_tools
+            .str_replace(path, old_str, new_str, replace_all)
     }
 
     #[tool(description = CREATE_DESCRIPTION)]
@@ -80,20 +84,17 @@ impl CombinedTools {
         self.local_tools.create(path, file_text)
     }
 
-    #[tool(description = INSERT_DESCRIPTION)]
-    pub fn insert(
+    #[tool(description = GENERATE_PASSWORD_DESCRIPTION)]
+    pub async fn generate_password(
         &self,
         #[tool(param)]
-        #[schemars(description = FILE_PATH_PARAM_DESCRIPTION)]
-        path: String,
+        #[schemars(description = LENGTH_PARAM_DESCRIPTION)]
+        length: Option<usize>,
         #[tool(param)]
-        #[schemars(description = INSERT_LINE_PARAM_DESCRIPTION)]
-        insert_line: u32,
-        #[tool(param)]
-        #[schemars(description = INSERT_TEXT_PARAM_DESCRIPTION)]
-        new_str: String,
+        #[schemars(description = NO_SYMBOLS_PARAM_DESCRIPTION)]
+        no_symbols: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        self.local_tools.insert(path, insert_line, new_str)
+        self.local_tools.generate_password(length, no_symbols).await
     }
 
     // Remote tools delegation
