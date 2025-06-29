@@ -59,7 +59,7 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
                 return existing_path;
             } else {
                 println!(
-                    "{} v{} is outdated (target: v{}), updating...",
+                    "{} {} is outdated (target: v{}), updating...",
                     config.name, current_version, target_version
                 );
             }
@@ -70,7 +70,7 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
     match download_and_install_plugin(&config).await {
         Ok(path) => {
             println!(
-                "Successfully installed {} v{} to {}",
+                "Successfully installed {} v{} -> {}",
                 config.name, target_version, path
             );
             path
@@ -226,11 +226,7 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
     // Determine the appropriate download URL based on OS and architecture
     let (download_url, binary_name, is_zip) = get_download_info(config)?;
 
-    // Check if plugin already exists and is executable
     let plugin_path = plugins_dir.join(&binary_name);
-    if plugin_path.exists() && is_executable(&plugin_path) {
-        return Ok(plugin_path.to_string_lossy().to_string());
-    }
 
     println!("Downloading {} plugin...", config.name);
 
