@@ -136,7 +136,8 @@ pub fn update(
             let mut redacted_line = redaction_result.redacted_string;
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
-                output.push_str(&redacted_line);
+                let text = format!("{}\n", redacted_line);
+                output.push_str(&text);
                 *output = truncate_output(output);
             }
 
