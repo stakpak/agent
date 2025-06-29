@@ -189,12 +189,112 @@ pub fn get_wrapped_bash_bubble_lines<'a>(
     lines
 }
 
+fn render_shell_bubble_with_unicode_border(
+    command: &str,
+    output_lines: &[String],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let border_width = width.max(20); // Minimum width for the bubble
+    let horizontal = "─".repeat(border_width - 2);
+    // Top border
+    lines.push(Line::from(vec![Span::styled(
+        format!("╭{}╮", horizontal),
+        Style::default().fg(Color::Magenta),
+    )]));
+    // Command line
+    let cmd_line = format!("$ {}", &command[1..].trim());
+    let cmd_content_width = cmd_line.len();
+    let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
+    lines.push(Line::from(vec![
+        Span::styled("│ ", Style::default().fg(Color::Magenta)),
+        Span::styled(cmd_line, Style::default().fg(Color::LightYellow)),
+        Span::from(" ".repeat(cmd_padding)),
+        Span::styled(" │", Style::default().fg(Color::Magenta)),
+    ]));
+    // Output lines
+    for out in output_lines {
+        let padded = format!("{:<width$}", out, width = border_width - 4);
+        lines.push(Line::from(vec![
+            Span::styled("│ ", Style::default().fg(Color::Magenta)),
+            Span::styled(padded, Style::default().fg(Color::Rgb(180, 180, 180))),
+            Span::styled(" │", Style::default().fg(Color::Magenta)),
+        ]));
+    }
+    // Bottom border
+    lines.push(Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal),
+        Style::default().fg(Color::Magenta),
+    )]));
+    // Blank line after bubble
+    lines.push(Line::from(""));
+    lines
+}
+
 pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line<'_>, Style)> {
     let mut all_lines = Vec::new();
     for msg in messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
-                all_lines.extend(get_wrapped_plain_lines(text, style, width));
+                if text.starts_with("Here is the history of commands") && text.contains("```shell")
+                {
+                    let mut remaining = text.as_str();
+                    while let Some(start) = remaining.find("```shell") {
+                        let before = &remaining[..start];
+                        if !before.trim().is_empty() {
+                            all_lines.extend(get_wrapped_plain_lines(before, style, width));
+                        }
+                        let after_start = &remaining[start + "```shell".len()..];
+                        if let Some(end) = after_start.find("```") {
+                            let shell_block = &after_start[..end];
+                            let mut lines = Vec::new();
+                            let mut current_command: Option<String> = None;
+                            let mut current_output = Vec::new();
+                            for line in shell_block.lines() {
+                                if line.trim().starts_with('$') {
+                                    if let Some(cmd) = current_command.take() {
+                                        lines.push(render_shell_bubble_with_unicode_border(
+                                            &cmd,
+                                            &current_output,
+                                            width,
+                                        ));
+                                        current_output.clear();
+                                    }
+                                    current_command = Some(line.trim().to_string());
+                                } else {
+                                    current_output.push(line.to_string());
+                                }
+                            }
+                            if let Some(cmd) = current_command {
+                                lines.push(render_shell_bubble_with_unicode_border(
+                                    &cmd,
+                                    &current_output,
+                                    width,
+                                ));
+                            }
+                            for bubble in lines {
+                                for l in bubble {
+                                    all_lines.push((l, Style::default()));
+                                }
+                            }
+                            remaining = &after_start[end + "```".len()..];
+                        } else {
+                            if !after_start.trim().is_empty() {
+                                all_lines.extend(get_wrapped_plain_lines(
+                                    after_start,
+                                    style,
+                                    width,
+                                ));
+                            }
+                            break;
+                        }
+                    }
+                    if !remaining.trim().is_empty() {
+                        all_lines.extend(get_wrapped_plain_lines(remaining, style, width));
+                    }
+                } else {
+                    all_lines.extend(get_wrapped_plain_lines(text, style, width));
+                }
             }
             MessageContent::Styled(line) => {
                 all_lines.extend(get_wrapped_styled_lines(line, width));
@@ -219,7 +319,7 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
             } => {
                 all_lines.extend(get_wrapped_bash_bubble_lines(title, content, colors));
             }
-        }
+        };
     }
     all_lines
 }

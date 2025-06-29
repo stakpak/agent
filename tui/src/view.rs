@@ -227,6 +227,10 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "local_context",
                     "todo",
                     "application_analysis",
+                    "scratchpad",
+                    "report",
+                    "current_context",
+                    "rulebook",
                 ];
                 let mut found = false;
 
@@ -410,7 +414,6 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         current_pos += segment.len() + 1; // +1 for newline
     }
 
-    // If cursor is at the very end and we haven't rendered it yet
     if cursor_pos == input.len() && !cursor_rendered {
         // If the last line is empty, add cursor there
         if let Some(last_line) = lines.last_mut() {
