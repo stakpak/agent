@@ -63,6 +63,7 @@ pub struct AppState {
     pub is_pasting: bool,
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub dialog_message_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -204,6 +205,7 @@ impl AppState {
             is_pasting: false,
             ondemand_shell_mode: false,
             shell_tool_calls: None,
+            dialog_message_id: None,
         }
     }
 
