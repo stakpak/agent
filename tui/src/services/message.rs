@@ -236,8 +236,7 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
     for msg in messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
-                if text.starts_with("Here is the history of commands") && text.contains("```shell")
-                {
+                if text.contains("Here's my shell history:") && text.contains("```shell") {
                     let mut remaining = text.as_str();
                     while let Some(start) = remaining.find("```shell") {
                         let before = &remaining[..start];
