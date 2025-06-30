@@ -9,11 +9,54 @@ use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 pub enum ContentAlignment {
     Left,
     Center,
+}
+
+// Add this function to calculate actual display width accounting for ANSI and Unicode
+fn calculate_display_width(text: &str) -> usize {
+    // Strip ANSI codes first, then calculate Unicode width
+    let stripped = strip_ansi_codes(text);
+    stripped.width()
+}
+
+// Add this improved simple text wrapping function
+fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let stripped = strip_ansi_codes(text);
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for ch in stripped.chars() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+
+        if current_width + char_width > width && !current_line.is_empty() {
+            lines.push(current_line.clone());
+            current_line.clear();
+            current_width = 0;
+        }
+
+        current_line.push(ch);
+        current_width += char_width;
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
 }
 
 // Helper function to wrap text while preserving ANSI codes
@@ -24,7 +67,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
         Err(_) => {
             // Fallback: just split by width using stripped text
             let stripped = strip_ansi_codes(text);
-            return wrap_text_simple(&stripped, width);
+            return wrap_text_simple_unicode(&stripped, width); // CHANGED: use Unicode version
         }
     };
 
@@ -41,7 +84,8 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
 
         for span in line.spans {
             let span_text = &span.content;
-            let span_display_width = strip_ansi_codes(span_text).chars().count();
+            // CHANGED: Use the improved display width calculation
+            let span_display_width = calculate_display_width(span_text);
 
             if current_width + span_display_width <= width {
                 // Span fits on current line
@@ -49,7 +93,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                 current_width += span_display_width;
             } else if current_width == 0 {
                 // Span is too long for a line by itself, so we must wrap it.
-                let wrapped_span = wrap_text_simple(span_text, width);
+                let wrapped_span = wrap_text_simple_unicode(span_text, width); // CHANGED: use Unicode version
                 let num_wrapped = wrapped_span.len();
                 if num_wrapped > 0 {
                     // Add all but the last part as full lines.
@@ -59,7 +103,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                         }
                         // The last part becomes the current line.
                         current_line = last.clone();
-                        current_width = current_line.chars().count();
+                        current_width = calculate_display_width(&current_line); // CHANGED: use new function
                     }
                 }
             } else {
@@ -80,26 +124,6 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
     }
 
     wrapped_lines
-}
-
-// Simple fallback text wrapping
-fn wrap_text_simple(text: &str, width: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-
-    let mut lines = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let mut start = 0;
-
-    while start < chars.len() {
-        let end = std::cmp::min(start + width, chars.len());
-        let line: String = chars[start..end].iter().collect();
-        lines.push(line);
-        start = end;
-    }
-
-    lines
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -187,7 +211,7 @@ pub fn render_styled_block_ansi_to_tui(
         let display_width: usize = text_line
             .spans
             .iter()
-            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .map(|span| calculate_display_width(&span.content))
             .sum();
 
         // Add compact indentation to content width calculation
@@ -237,7 +261,7 @@ pub fn render_styled_block_ansi_to_tui(
                     let wrapped_display_width: usize = first_line
                         .spans
                         .iter()
-                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .map(|span| calculate_display_width(&span.content))
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
@@ -477,7 +501,7 @@ pub fn render_result_block(
         let display_width: usize = text_line
             .spans
             .iter()
-            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .map(|span| calculate_display_width(&span.content))
             .sum();
 
         let content_display_width = display_width + line_indent.len();
@@ -517,7 +541,7 @@ pub fn render_result_block(
                     let wrapped_display_width: usize = first_line
                         .spans
                         .iter()
-                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .map(|span| calculate_display_width(&span.content))
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
