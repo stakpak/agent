@@ -231,7 +231,6 @@ fn render_shell_bubble_with_unicode_border(
     lines
 }
 
-
 fn convert_to_owned_lines(borrowed_lines: Vec<(Line<'_>, Style)>) -> Vec<(Line<'static>, Style)> {
     borrowed_lines
         .into_iter()
@@ -249,12 +248,14 @@ fn convert_line_to_owned(line: Line<'_>) -> Line<'static> {
     Line::from(owned_spans)
 }
 
-
-pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line<'static>, Style)> {
+pub fn get_wrapped_message_lines(
+    messages: &[Message],
+    width: usize,
+) -> Vec<(Line<'static>, Style)> {
     let mut all_lines = Vec::new();
     let mut agent_mode_removed = false;
     let mut checkpoint_id_removed = false;
-    
+
     for msg in messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
@@ -323,7 +324,8 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                             remaining = &after_start[end + "```".len()..];
                         } else {
                             if !after_start.trim().is_empty() {
-                                let borrowed_lines = get_wrapped_plain_lines(after_start, style, width);
+                                let borrowed_lines =
+                                    get_wrapped_plain_lines(after_start, style, width);
                                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                                 all_lines.extend(owned_lines);
                             }
