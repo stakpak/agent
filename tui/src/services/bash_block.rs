@@ -11,6 +11,11 @@ use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
 
+pub enum ContentAlignment {
+    Left,
+    Center,
+}
+
 // Helper function to wrap text while preserving ANSI codes
 fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
     // Convert to ratatui text first to parse ANSI codes
@@ -102,11 +107,12 @@ pub fn render_styled_block_ansi_to_tui(
     content: &str,
     _outside_title: &str,
     bubble_title: &str,
-    _colors: Option<BubbleColors>,
+    colors: Option<BubbleColors>,
     state: &mut AppState,
     terminal_size: Size,
     _tool_type: &str,
     message_id: Option<Uuid>,
+    content_alignment: Option<ContentAlignment>,
 ) -> Uuid {
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
@@ -118,10 +124,17 @@ pub fn render_styled_block_ansi_to_tui(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Create cyan-colored borders
+    // Determine colors
+    let (border_color, _title_color, content_color) = if let Some(ref c) = colors {
+        (c.border_color, c.title_color, c.content_color)
+    } else {
+        (Color::Cyan, Color::Cyan, Color::Cyan)
+    };
+
+    // Create colored borders
     let bottom_border = Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal_line),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(border_color),
     )]);
 
     // Strip ANSI codes for title border calculation
@@ -132,13 +145,13 @@ pub fn render_styled_block_ansi_to_tui(
             let remaining_dashes = inner_width + 2 - title_width;
             Line::from(vec![Span::styled(
                 format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮",
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(border_color),
             )])
         } else {
             let truncated_title = stripped_title.chars().take(inner_width).collect::<String>();
             Line::from(vec![Span::styled(
                 format!("╭{}─╮", truncated_title),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(border_color),
             )])
         }
     };
@@ -155,13 +168,16 @@ pub fn render_styled_block_ansi_to_tui(
     // Use compact indentation similar to result blocks
     let line_indent = "  "; // 2 spaces like result blocks
 
+    // Determine alignment
+    let alignment = content_alignment.unwrap_or(ContentAlignment::Left);
+
     for text_line in ratatui_text.lines {
         if text_line.spans.is_empty() {
             // Empty line with border
             let line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::styled("│", Style::default().fg(border_color)),
                 Span::from(format!(" {}", " ".repeat(inner_width))),
-                Span::styled(" │", Style::default().fg(Color::Cyan)),
+                Span::styled(" │", Style::default().fg(border_color)),
             ];
             formatted_lines.push(Line::from(line_spans));
             continue;
@@ -180,15 +196,24 @@ pub fn render_styled_block_ansi_to_tui(
         if content_display_width <= inner_width {
             // Line fits, add with compact style
             let padding_needed = inner_width - content_display_width;
-            let padding = " ".repeat(padding_needed);
-
+            let (left_pad, right_pad) = match alignment {
+                ContentAlignment::Left => (0, padding_needed),
+                ContentAlignment::Center => {
+                    (padding_needed / 2, padding_needed - (padding_needed / 2))
+                }
+            };
             let mut line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
-                Span::from(format!(" {}", line_indent)),
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(format!(" {}{}", line_indent, " ".repeat(left_pad))),
             ];
-            line_spans.extend(text_line.spans);
-            line_spans.push(Span::from(padding));
-            line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+            for s in &text_line.spans {
+                line_spans.push(Span::styled(
+                    s.content.clone(),
+                    Style::default().fg(content_color),
+                ));
+            }
+            line_spans.push(Span::from(" ".repeat(right_pad)));
+            line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
 
             formatted_lines.push(Line::from(line_spans));
         } else {
@@ -217,15 +242,24 @@ pub fn render_styled_block_ansi_to_tui(
 
                     let total_content_width = wrapped_display_width + line_indent.len();
                     let padding_needed = inner_width.saturating_sub(total_content_width);
-                    let padding = " ".repeat(padding_needed);
-
+                    let (left_pad, right_pad) = match alignment {
+                        ContentAlignment::Left => (0, padding_needed),
+                        ContentAlignment::Center => {
+                            (padding_needed / 2, padding_needed - (padding_needed / 2))
+                        }
+                    };
                     let mut line_spans = vec![
-                        Span::styled("│", Style::default().fg(Color::Cyan)),
-                        Span::from(format!(" {}", line_indent)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(format!(" {}{}", line_indent, " ".repeat(left_pad))),
                     ];
-                    line_spans.extend(first_line.spans.clone());
-                    line_spans.push(Span::from(padding));
-                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+                    for s in &first_line.spans {
+                        line_spans.push(Span::styled(
+                            s.content.clone(),
+                            Style::default().fg(content_color),
+                        ));
+                    }
+                    line_spans.push(Span::from(" ".repeat(right_pad)));
+                    line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
 
                     formatted_lines.push(Line::from(line_spans));
                 }
@@ -332,6 +366,7 @@ pub fn render_styled_block(
         terminal_size,
         tool_type,
         message_id,
+        None,
     )
 }
 
@@ -351,6 +386,7 @@ pub fn render_bash_block(
         state,
         terminal_size,
         &tool_call.function.name,
+        None,
         None,
     )
 }
@@ -570,5 +606,12 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
+    });
+}
+
+pub fn add_spacing_marker(state: &mut AppState) {
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(vec![Line::from(vec![Span::from("SPACING_MARKER")])]),
     });
 }

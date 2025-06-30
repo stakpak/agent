@@ -1,12 +1,13 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::bash_block::{
-    render_bash_block, render_bash_block_rejected, render_styled_block,
+    ContentAlignment, add_spacing_marker, render_bash_block, render_bash_block_rejected,
+    render_styled_block, render_styled_block_ansi_to_tui,
 };
 use crate::services::helper_block::{
     push_error_message, push_help_message, push_memorize_message, push_status_message,
     push_styled_message, render_system_message,
 };
-use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
+use crate::services::message::{BubbleColors, Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use stakpak_shared::helper::truncate_output;
@@ -111,7 +112,28 @@ pub fn update(
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
+
+            let confirmation_colors = BubbleColors {
+                border_color: Color::Yellow,
+                title_color: Color::Yellow,
+                content_color: Color::White,
+                tool_type: "".to_string(),
+            };
+            add_spacing_marker(state);
+            let dialog_id = render_styled_block_ansi_to_tui(
+                "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
+                "Confirmation",
+                "Confirmation",
+                Some(confirmation_colors),
+                state,
+                terminal_size,
+                &tool_call.function.name,
+                None,
+                Some(ContentAlignment::Center),
+            );
+
             state.pending_bash_message_id = Some(message_id);
+            state.dialog_message_id = Some(dialog_id);
             state.is_dialog_open = true;
         }
 
@@ -374,6 +396,10 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
+        // Remove the pending bash bubble
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
@@ -440,6 +466,9 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
