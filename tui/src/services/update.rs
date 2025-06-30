@@ -1,13 +1,13 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::bash_block::{
-    ContentAlignment, add_spacing_marker, render_bash_block, render_bash_block_rejected,
-    render_styled_block, render_styled_block_ansi_to_tui,
+    add_spacing_marker, push_confirmation_message, render_bash_block, render_bash_block_rejected,
+    render_styled_block,
 };
 use crate::services::helper_block::{
     push_error_message, push_help_message, push_memorize_message, push_status_message,
     push_styled_message, render_system_message,
 };
-use crate::services::message::{BubbleColors, Message, MessageContent, get_wrapped_message_lines};
+use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use stakpak_shared::helper::truncate_output;
@@ -62,14 +62,14 @@ pub fn update(
         }
         InputEvent::DropdownUp => handle_dropdown_up(state),
         InputEvent::DropdownDown => handle_dropdown_down(state),
-        InputEvent::InputChanged(c) => handle_input_changed(state, c),
+        InputEvent::InputChanged(c) => handle_input_changed(state, c, terminal_size),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
-        InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
+        InputEvent::InputChangedNewline => handle_input_changed(state, '\n', terminal_size),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
         }
@@ -113,27 +113,9 @@ pub fn update(
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
 
-            let confirmation_colors = BubbleColors {
-                border_color: Color::Yellow,
-                title_color: Color::Yellow,
-                content_color: Color::White,
-                tool_type: "".to_string(),
-            };
             add_spacing_marker(state);
-            let dialog_id = render_styled_block_ansi_to_tui(
-                "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
-                "Confirmation",
-                "Confirmation",
-                Some(confirmation_colors),
-                state,
-                terminal_size,
-                &tool_call.function.name,
-                None,
-                Some(ContentAlignment::Center),
-            );
-
+            push_confirmation_message(state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
-            state.dialog_message_id = Some(dialog_id);
             state.is_dialog_open = true;
         }
 
@@ -285,10 +267,13 @@ pub fn update(
     adjust_scroll(state, message_area_height, message_area_width);
 }
 
-fn handle_shell_mode(state: &mut AppState) {
+fn handle_shell_mode(state: &mut AppState, terminal_size: Size) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         state.ondemand_shell_mode = state.dialog_command.is_none();
         if state.ondemand_shell_mode && state.shell_tool_calls.is_none() {
             state.shell_tool_calls = Some(Vec::new());
@@ -297,6 +282,7 @@ fn handle_shell_mode(state: &mut AppState) {
     if !state.show_shell_mode && state.dialog_command.is_some() {
         state.is_dialog_open = true;
         state.ondemand_shell_mode = false;
+        push_confirmation_message(state, terminal_size);
     }
     state.input.clear();
     state.cursor_position = 0;
@@ -324,13 +310,13 @@ fn handle_dropdown_down(state: &mut AppState) {
     }
 }
 
-fn handle_input_changed(state: &mut AppState, c: char) {
+fn handle_input_changed(state: &mut AppState, c: char, terminal_size: Size) {
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
     if c == '$' && state.input.is_empty() {
-        handle_shell_mode(state);
+        handle_shell_mode(state, terminal_size);
         return;
     }
 
