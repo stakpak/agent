@@ -62,6 +62,10 @@ struct Cli {
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
 
+    /// Disable official rulebooks in the agent's context
+    #[arg(long = "disable-official-rulebooks", default_value_t = false)]
+    disable_official_rulebooks: bool,
+
     /// Prompt to run the agent with in non-interactive mode
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -157,7 +161,15 @@ async fn main() {
                         eprintln!("Failed to create client");
                         std::process::exit(1);
                     };
-                    let rulebooks = client.list_rulebooks().await.ok();
+                    let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
+                        rulebooks
+                            .into_iter()
+                            .filter(|rulebook| {
+                                !cli.disable_official_rulebooks
+                                    || !rulebook.uri.starts_with("stakpak://stakpak.dev/")
+                            })
+                            .collect()
+                    });
 
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
                         .await
