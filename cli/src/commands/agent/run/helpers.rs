@@ -71,7 +71,7 @@ pub fn add_rulebooks(
     if let Some(rulebooks) = rulebooks {
         let rulebooks_text = if !rulebooks.is_empty() {
             format!(
-                "# User Rule Books:\n{}",
+                "# My Rule Books:\n{}",
                 rulebooks
                     .iter()
                     .map(|rulebook| format!("  - {}", rulebook.to_text().replace('\n', "\n    ")))
@@ -79,7 +79,7 @@ pub fn add_rulebooks(
                     .join("\n")
             )
         } else {
-            "# No User Rule Books available".to_string()
+            "# No Rule Books Available".to_string()
         };
 
         // only add local context if this is the first message
