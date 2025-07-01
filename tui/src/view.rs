@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -92,6 +93,10 @@ pub fn view(f: &mut Frame, state: &AppState) {
         render_sessions_dialog(f, state);
         return;
     }
+    if state.is_dialog_open {
+        render_confirmation_dialog(f, state);
+        return;
+    }
 
     if !state.is_dialog_open {
         render_multiline_input(f, state, input_area);
@@ -165,48 +170,18 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         let loading_line = render_loading_spinner(state);
         all_lines.push((loading_line, Style::default()));
     }
-    let total_lines = all_lines.len();
-    let max_scroll = total_lines.saturating_sub(height);
 
-    let scroll = if state.stay_at_bottom {
-        max_scroll
-    } else {
-        state.scroll.min(max_scroll)
-    };
+    // Pre-process ALL lines completely and consistently
+    let mut processed_lines: Vec<Line> = Vec::new();
 
-    let mut visible_lines = Vec::new();
-    let mut lines_added = 0;
+    for (i, (line, _style)) in all_lines.iter().enumerate() {
+        let line_text = spans_to_string(line);
+        let mut should_add_spacing = false;
 
-    // Process only the lines we need, and ensure we don't exceed height
-    for i in 0..height {
-        if lines_added >= height {
-            break; // Prevent overflow
-        }
-
-        if let Some((line, _)) = all_lines.get(scroll + i) {
-            let line_text = spans_to_string(line);
-
-            if line_text.contains("<checkpoint_id>") {
-                let processed = process_checkpoint_patterns(
-                    &[(line.clone(), Style::default())],
-                    f.area().width as usize,
-                );
-                // Add processed lines but respect height limit
-                for (processed_line, _) in processed {
-                    if lines_added < height {
-                        visible_lines.push(processed_line);
-                        lines_added += 1;
-                    }
-                }
-            } else if line_text.contains("<agent_mode>") {
-                let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
-                // Add processed lines but respect height limit
-                for (processed_line, _) in processed {
-                    if lines_added < height {
-                        visible_lines.push(processed_line);
-                        lines_added += 1;
-                    }
-                }
+        // Check if we need spacing before this line (but not for the first line)
+        if i > 0 {
+            if line_text.contains("<checkpoint_id>") || line_text.contains("<agent_mode>") {
+                should_add_spacing = true;
             } else {
                 let section_tags = [
                     "planning",
@@ -220,54 +195,121 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
                     "report",
                     "current_context",
                     "rulebooks",
+                    "current_analysis",
                 ];
-                let mut found = false;
 
                 for tag in &section_tags {
-                    let closing_tag = format!("</{}>", tag);
-                    if line_text.trim() == closing_tag {
-                        // Add empty line instead of skipping
-                        if lines_added < height {
-                            visible_lines.push(Line::from(""));
-                            lines_added += 1;
-                        }
-                        found = true;
-                        break;
-                    }
                     if line_text.contains(&format!("<{}>", tag)) {
-                        let processed = process_section_title_patterns(
-                            &[(line.clone(), Style::default())],
-                            tag,
-                        );
-                        // Add processed lines but respect height limit
-                        for (processed_line, _) in processed {
-                            if lines_added < height {
-                                visible_lines.push(processed_line);
-                                lines_added += 1;
-                            }
-                        }
-                        found = true;
+                        should_add_spacing = true;
                         break;
-                    }
-                }
-
-                if !found && lines_added < height {
-                    if line_text.trim() == "SPACING_MARKER" {
-                        visible_lines.push(Line::from(""));
-                    } else {
-                        visible_lines.push(line.clone());
-                        lines_added += 1;
                     }
                 }
             }
-        } else if lines_added < height {
-            visible_lines.push(Line::from(""));
-            lines_added += 1;
+        }
+
+        // Add spacing before the line if needed
+        if should_add_spacing {
+            processed_lines.push(Line::from(""));
+        }
+
+        // Process the line and add all resulting lines
+        if line_text.contains("<checkpoint_id>") {
+            let processed = process_checkpoint_patterns(
+                &[(line.clone(), Style::default())],
+                f.area().width as usize,
+            );
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+        } else if line_text.contains("<agent_mode>") {
+            let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+        } else {
+            let section_tags = [
+                "planning",
+                "reasoning",
+                "notes",
+                "progress",
+                "local_context",
+                "todo",
+                "application_analysis",
+                "scratchpad",
+                "report",
+                "current_context",
+                "rulebooks",
+                "current_analysis",
+            ];
+            let mut found = false;
+
+            for tag in &section_tags {
+                let closing_tag = format!("</{}>", tag);
+                if line_text.trim() == closing_tag {
+                    processed_lines.push(Line::from(""));
+                    found = true;
+                    break;
+                }
+                if line_text.contains(&format!("<{}>", tag)) {
+                    let processed =
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                    for (processed_line, _) in processed {
+                        processed_lines.push(processed_line);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                if line_text.trim() == "SPACING_MARKER" {
+                    processed_lines.push(Line::from(""));
+                } else {
+                    processed_lines.push(line.clone());
+                }
+            }
         }
     }
 
-    // Ensure we don't exceed the allocated height
-    visible_lines.truncate(height);
+    let total_lines = processed_lines.len();
+
+    // Handle edge case where we have no content
+    if total_lines == 0 {
+        let message_widget =
+            Paragraph::new(Vec::<Line>::new()).wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(message_widget, area);
+        return;
+    }
+
+    let max_scroll = total_lines.saturating_sub(height);
+
+    // Prevent snapping by adjusting scroll relative to the processed content
+    let original_total = all_lines.len();
+    let processed_total = total_lines;
+
+    let scroll = if state.stay_at_bottom {
+        max_scroll
+    } else {
+        // Scale the scroll position to account for processed content size difference
+        let adjusted_scroll = if original_total > 0 {
+            (state.scroll * processed_total) / original_total
+        } else {
+            state.scroll
+        };
+        adjusted_scroll.min(max_scroll)
+    };
+
+    // Create visible lines with simple, consistent indexing
+    let mut visible_lines = Vec::new();
+
+    for i in 0..height {
+        let line_index = scroll + i;
+        if line_index < processed_lines.len() {
+            visible_lines.push(processed_lines[line_index].clone());
+        } else {
+            visible_lines.push(Line::from(""));
+        }
+    }
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
