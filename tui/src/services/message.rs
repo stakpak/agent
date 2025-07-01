@@ -231,17 +231,60 @@ fn render_shell_bubble_with_unicode_border(
     lines
 }
 
-pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Line<'_>, Style)> {
+fn convert_to_owned_lines(borrowed_lines: Vec<(Line<'_>, Style)>) -> Vec<(Line<'static>, Style)> {
+    borrowed_lines
+        .into_iter()
+        .map(|(line, style)| (convert_line_to_owned(line), style))
+        .collect()
+}
+
+// Helper function to convert a single borrowed line to owned
+fn convert_line_to_owned(line: Line<'_>) -> Line<'static> {
+    let owned_spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .map(|span| Span::styled(span.content.into_owned(), span.style))
+        .collect();
+    Line::from(owned_spans)
+}
+
+pub fn get_wrapped_message_lines(
+    messages: &[Message],
+    width: usize,
+) -> Vec<(Line<'static>, Style)> {
     let mut all_lines = Vec::new();
+    let mut agent_mode_removed = false;
+    let mut checkpoint_id_removed = false;
+
     for msg in messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
-                if text.contains("Here's my shell history:") && text.contains("```shell") {
-                    let mut remaining = text.as_str();
+                let mut cleaned = text.to_string();
+
+                if !agent_mode_removed {
+                    if let Some(start) = cleaned.find("<agent_mode>") {
+                        if let Some(end) = cleaned.find("</agent_mode>") {
+                            cleaned.replace_range(start..end + "</agent_mode>".len(), "");
+                        }
+                    }
+                }
+                if !checkpoint_id_removed {
+                    if let Some(start) = cleaned.find("<checkpoint_id>") {
+                        if let Some(end) = cleaned.find("</checkpoint_id>") {
+                            cleaned.replace_range(start..end + "</checkpoint_id>".len(), "");
+                        }
+                    }
+                }
+
+                if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
+                    let mut remaining = cleaned.as_str();
                     while let Some(start) = remaining.find("```shell") {
                         let before = &remaining[..start];
                         if !before.trim().is_empty() {
-                            all_lines.extend(get_wrapped_plain_lines(before, style, width));
+                            // Convert borrowed lines to owned
+                            let borrowed_lines = get_wrapped_plain_lines(before, style, width);
+                            let owned_lines = convert_to_owned_lines(borrowed_lines);
+                            all_lines.extend(owned_lines);
                         }
                         let after_start = &remaining[start + "```shell".len()..];
                         if let Some(end) = after_start.find("```") {
@@ -273,42 +316,51 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                             }
                             for bubble in lines {
                                 for l in bubble {
-                                    all_lines.push((l, Style::default()));
+                                    // Convert to owned line
+                                    let owned_line = convert_line_to_owned(l);
+                                    all_lines.push((owned_line, Style::default()));
                                 }
                             }
                             remaining = &after_start[end + "```".len()..];
                         } else {
                             if !after_start.trim().is_empty() {
-                                all_lines.extend(get_wrapped_plain_lines(
-                                    after_start,
-                                    style,
-                                    width,
-                                ));
+                                let borrowed_lines =
+                                    get_wrapped_plain_lines(after_start, style, width);
+                                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                                all_lines.extend(owned_lines);
                             }
                             break;
                         }
                     }
                     if !remaining.trim().is_empty() {
-                        all_lines.extend(get_wrapped_plain_lines(remaining, style, width));
+                        let borrowed_lines = get_wrapped_plain_lines(remaining, style, width);
+                        let owned_lines = convert_to_owned_lines(borrowed_lines);
+                        all_lines.extend(owned_lines);
                     }
                 } else {
-                    all_lines.extend(get_wrapped_plain_lines(text, style, width));
+                    let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
                 }
             }
             MessageContent::Styled(line) => {
-                all_lines.extend(get_wrapped_styled_lines(line, width));
+                let borrowed_lines = get_wrapped_styled_lines(line, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
             }
             MessageContent::StyledBlock(lines) => {
-                all_lines.extend(get_wrapped_styled_block_lines(lines, width));
+                let borrowed_lines = get_wrapped_styled_block_lines(lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
             }
             MessageContent::Markdown(markdown) => {
-                all_lines.extend(get_wrapped_markdown_lines(markdown, width));
+                let borrowed_lines = get_wrapped_markdown_lines(markdown, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
             }
             MessageContent::PlainText(text) => {
-                all_lines.push((
-                    Line::from(vec![Span::styled(text, Style::default())]),
-                    Style::default(),
-                ));
+                let owned_line = Line::from(vec![Span::styled(text.clone(), Style::default())]);
+                all_lines.push((owned_line, Style::default()));
             }
             MessageContent::BashBubble {
                 title,
@@ -316,9 +368,13 @@ pub fn get_wrapped_message_lines(messages: &[Message], width: usize) -> Vec<(Lin
                 colors,
                 tool_type: _,
             } => {
-                all_lines.extend(get_wrapped_bash_bubble_lines(title, content, colors));
+                let borrowed_lines = get_wrapped_bash_bubble_lines(title, content, colors);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
             }
         };
+        agent_mode_removed = false;
+        checkpoint_id_removed = false;
     }
     all_lines
 }
