@@ -118,11 +118,10 @@ pub fn update(
             state.pending_bash_message_id = Some(message_id);
             state.is_dialog_open = true;
         }
-
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, terminal_size),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -315,7 +314,8 @@ fn handle_input_changed(state: &mut AppState, c: char, terminal_size: Size) {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
-    if c == '$' && state.input.is_empty() {
+    if c == '$' && (state.input.is_empty() || state.is_dialog_open) {
+        state.input.clear();
         handle_shell_mode(state, terminal_size);
         return;
     }
@@ -376,7 +376,7 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>, terminal_size: Size) {
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
@@ -399,7 +399,8 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         state.input.clear();
         state.cursor_position = 0;
         if state.dialog_command.is_some() {
-            state.is_dialog_open = true
+            state.is_dialog_open = true;
+            push_confirmation_message(state, terminal_size);
         }
     }
 
