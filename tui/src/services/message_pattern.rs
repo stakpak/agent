@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "---------------------------------------Checkpoint ID: test123---------------------------------------"
+            "-----------------------------------------checkpoint test123-----------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
 
@@ -385,7 +385,7 @@ mod tests {
         assert_eq!(processed[0].0.spans[0].content, "Test ");
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
+            "-------------------------------------------checkpoint abc-------------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
         assert_eq!(processed[0].0.spans[2].content, " message");
@@ -410,7 +410,7 @@ mod tests {
         // Should have checkpoint transformation applied
         let text = spans_to_string(&processed[0].0);
         assert!(
-            text.contains("-----------------------------------------Checkpoint abc-----------------------------------------")
+            text.contains("-------------------------------------------checkpoint abc-------------------------------------------")
         ); // Checkpoint should be uppercase
         assert!(text.contains("Start"));
         assert!(text.contains("end"));
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3); // "Start ", "ABC", " end"
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------------------Checkpoint abc-----------------------------------------"
+            "-------------------------------------------checkpoint abc-------------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
     }
