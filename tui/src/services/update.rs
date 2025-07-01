@@ -1,6 +1,7 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::bash_block::{
-    render_bash_block, render_bash_block_rejected, render_styled_block,
+    add_spacing_marker, push_confirmation_message, render_bash_block, render_bash_block_rejected,
+    render_styled_block,
 };
 use crate::services::helper_block::{
     push_error_message, push_help_message, push_memorize_message, push_status_message,
@@ -61,14 +62,14 @@ pub fn update(
         }
         InputEvent::DropdownUp => handle_dropdown_up(state),
         InputEvent::DropdownDown => handle_dropdown_down(state),
-        InputEvent::InputChanged(c) => handle_input_changed(state, c),
+        InputEvent::InputChanged(c) => handle_input_changed(state, c, terminal_size),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
-        InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
+        InputEvent::InputChangedNewline => handle_input_changed(state, '\n', terminal_size),
         InputEvent::InputSubmittedWith(s) => {
             handle_input_submitted_with(state, s, message_area_height)
         }
@@ -111,14 +112,16 @@ pub fn update(
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
+
+            add_spacing_marker(state);
+            push_confirmation_message(state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
             state.is_dialog_open = true;
         }
-
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, terminal_size),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -263,10 +266,13 @@ pub fn update(
     adjust_scroll(state, message_area_height, message_area_width);
 }
 
-fn handle_shell_mode(state: &mut AppState) {
+fn handle_shell_mode(state: &mut AppState, terminal_size: Size) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         state.ondemand_shell_mode = state.dialog_command.is_none();
         if state.ondemand_shell_mode && state.shell_tool_calls.is_none() {
             state.shell_tool_calls = Some(Vec::new());
@@ -275,6 +281,7 @@ fn handle_shell_mode(state: &mut AppState) {
     if !state.show_shell_mode && state.dialog_command.is_some() {
         state.is_dialog_open = true;
         state.ondemand_shell_mode = false;
+        push_confirmation_message(state, terminal_size);
     }
     state.input.clear();
     state.cursor_position = 0;
@@ -302,13 +309,14 @@ fn handle_dropdown_down(state: &mut AppState) {
     }
 }
 
-fn handle_input_changed(state: &mut AppState, c: char) {
+fn handle_input_changed(state: &mut AppState, c: char, terminal_size: Size) {
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
-    if c == '$' && state.input.is_empty() {
-        handle_shell_mode(state);
+    if c == '$' && (state.input.is_empty() || state.is_dialog_open) {
+        state.input.clear();
+        handle_shell_mode(state, terminal_size);
         return;
     }
 
@@ -368,12 +376,16 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>, terminal_size: Size) {
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
+        // Remove the pending bash bubble
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
@@ -387,7 +399,8 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         state.input.clear();
         state.cursor_position = 0;
         if state.dialog_command.is_some() {
-            state.is_dialog_open = true
+            state.is_dialog_open = true;
+            push_confirmation_message(state, terminal_size);
         }
     }
 
@@ -440,6 +453,9 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
+        if let Some(id) = state.dialog_message_id.take() {
+            state.messages.retain(|m| m.id != id);
+        }
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;

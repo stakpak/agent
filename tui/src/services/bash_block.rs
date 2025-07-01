@@ -9,7 +9,55 @@ use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
+
+pub enum ContentAlignment {
+    Left,
+    Center,
+}
+
+// Add this function to calculate actual display width accounting for ANSI and Unicode
+fn calculate_display_width(text: &str) -> usize {
+    // Strip ANSI codes first, then calculate Unicode width
+    let stripped = strip_ansi_codes(text);
+    stripped.width()
+}
+
+// Add this improved simple text wrapping function
+fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let stripped = strip_ansi_codes(text);
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for ch in stripped.chars() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+
+        if current_width + char_width > width && !current_line.is_empty() {
+            lines.push(current_line.clone());
+            current_line.clear();
+            current_width = 0;
+        }
+
+        current_line.push(ch);
+        current_width += char_width;
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
 
 // Helper function to wrap text while preserving ANSI codes
 fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
@@ -19,7 +67,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
         Err(_) => {
             // Fallback: just split by width using stripped text
             let stripped = strip_ansi_codes(text);
-            return wrap_text_simple(&stripped, width);
+            return wrap_text_simple_unicode(&stripped, width); // CHANGED: use Unicode version
         }
     };
 
@@ -36,7 +84,8 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
 
         for span in line.spans {
             let span_text = &span.content;
-            let span_display_width = strip_ansi_codes(span_text).chars().count();
+            // CHANGED: Use the improved display width calculation
+            let span_display_width = calculate_display_width(span_text);
 
             if current_width + span_display_width <= width {
                 // Span fits on current line
@@ -44,7 +93,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                 current_width += span_display_width;
             } else if current_width == 0 {
                 // Span is too long for a line by itself, so we must wrap it.
-                let wrapped_span = wrap_text_simple(span_text, width);
+                let wrapped_span = wrap_text_simple_unicode(span_text, width); // CHANGED: use Unicode version
                 let num_wrapped = wrapped_span.len();
                 if num_wrapped > 0 {
                     // Add all but the last part as full lines.
@@ -54,7 +103,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                         }
                         // The last part becomes the current line.
                         current_line = last.clone();
-                        current_width = current_line.chars().count();
+                        current_width = calculate_display_width(&current_line); // CHANGED: use new function
                     }
                 }
             } else {
@@ -77,36 +126,17 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
     wrapped_lines
 }
 
-// Simple fallback text wrapping
-fn wrap_text_simple(text: &str, width: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-
-    let mut lines = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let mut start = 0;
-
-    while start < chars.len() {
-        let end = std::cmp::min(start + width, chars.len());
-        let line: String = chars[start..end].iter().collect();
-        lines.push(line);
-        start = end;
-    }
-
-    lines
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn render_styled_block_ansi_to_tui(
     content: &str,
     _outside_title: &str,
     bubble_title: &str,
-    _colors: Option<BubbleColors>,
+    colors: Option<BubbleColors>,
     state: &mut AppState,
     terminal_size: Size,
     _tool_type: &str,
     message_id: Option<Uuid>,
+    content_alignment: Option<ContentAlignment>,
 ) -> Uuid {
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
@@ -118,10 +148,17 @@ pub fn render_styled_block_ansi_to_tui(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Create cyan-colored borders
+    // Determine colors
+    let (border_color, _title_color, content_color) = if let Some(ref c) = colors {
+        (c.border_color, c.title_color, c.content_color)
+    } else {
+        (Color::Cyan, Color::Cyan, Color::Cyan)
+    };
+
+    // Create colored borders
     let bottom_border = Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal_line),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(border_color),
     )]);
 
     // Strip ANSI codes for title border calculation
@@ -132,13 +169,13 @@ pub fn render_styled_block_ansi_to_tui(
             let remaining_dashes = inner_width + 2 - title_width;
             Line::from(vec![Span::styled(
                 format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮",
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(border_color),
             )])
         } else {
             let truncated_title = stripped_title.chars().take(inner_width).collect::<String>();
             Line::from(vec![Span::styled(
                 format!("╭{}─╮", truncated_title),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(border_color),
             )])
         }
     };
@@ -155,13 +192,16 @@ pub fn render_styled_block_ansi_to_tui(
     // Use compact indentation similar to result blocks
     let line_indent = "  "; // 2 spaces like result blocks
 
+    // Determine alignment
+    let alignment = content_alignment.unwrap_or(ContentAlignment::Left);
+
     for text_line in ratatui_text.lines {
         if text_line.spans.is_empty() {
             // Empty line with border
             let line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
+                Span::styled("│", Style::default().fg(border_color)),
                 Span::from(format!(" {}", " ".repeat(inner_width))),
-                Span::styled(" │", Style::default().fg(Color::Cyan)),
+                Span::styled(" │", Style::default().fg(border_color)),
             ];
             formatted_lines.push(Line::from(line_spans));
             continue;
@@ -171,7 +211,7 @@ pub fn render_styled_block_ansi_to_tui(
         let display_width: usize = text_line
             .spans
             .iter()
-            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .map(|span| calculate_display_width(&span.content))
             .sum();
 
         // Add compact indentation to content width calculation
@@ -180,15 +220,24 @@ pub fn render_styled_block_ansi_to_tui(
         if content_display_width <= inner_width {
             // Line fits, add with compact style
             let padding_needed = inner_width - content_display_width;
-            let padding = " ".repeat(padding_needed);
-
+            let (left_pad, right_pad) = match alignment {
+                ContentAlignment::Left => (0, padding_needed),
+                ContentAlignment::Center => {
+                    (padding_needed / 2, padding_needed - (padding_needed / 2))
+                }
+            };
             let mut line_spans = vec![
-                Span::styled("│", Style::default().fg(Color::Cyan)),
-                Span::from(format!(" {}", line_indent)),
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(format!(" {}{}", line_indent, " ".repeat(left_pad))),
             ];
-            line_spans.extend(text_line.spans);
-            line_spans.push(Span::from(padding));
-            line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+            for s in &text_line.spans {
+                line_spans.push(Span::styled(
+                    s.content.clone(),
+                    Style::default().fg(content_color),
+                ));
+            }
+            line_spans.push(Span::from(" ".repeat(right_pad)));
+            line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
 
             formatted_lines.push(Line::from(line_spans));
         } else {
@@ -212,20 +261,29 @@ pub fn render_styled_block_ansi_to_tui(
                     let wrapped_display_width: usize = first_line
                         .spans
                         .iter()
-                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .map(|span| calculate_display_width(&span.content))
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
                     let padding_needed = inner_width.saturating_sub(total_content_width);
-                    let padding = " ".repeat(padding_needed);
-
+                    let (left_pad, right_pad) = match alignment {
+                        ContentAlignment::Left => (0, padding_needed),
+                        ContentAlignment::Center => {
+                            (padding_needed / 2, padding_needed - (padding_needed / 2))
+                        }
+                    };
                     let mut line_spans = vec![
-                        Span::styled("│", Style::default().fg(Color::Cyan)),
-                        Span::from(format!(" {}", line_indent)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(format!(" {}{}", line_indent, " ".repeat(left_pad))),
                     ];
-                    line_spans.extend(first_line.spans.clone());
-                    line_spans.push(Span::from(padding));
-                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Cyan)));
+                    for s in &first_line.spans {
+                        line_spans.push(Span::styled(
+                            s.content.clone(),
+                            Style::default().fg(content_color),
+                        ));
+                    }
+                    line_spans.push(Span::from(" ".repeat(right_pad)));
+                    line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
 
                     formatted_lines.push(Line::from(line_spans));
                 }
@@ -332,6 +390,7 @@ pub fn render_styled_block(
         terminal_size,
         tool_type,
         message_id,
+        None,
     )
 }
 
@@ -351,6 +410,7 @@ pub fn render_bash_block(
         state,
         terminal_size,
         &tool_call.function.name,
+        None,
         None,
     )
 }
@@ -441,7 +501,7 @@ pub fn render_result_block(
         let display_width: usize = text_line
             .spans
             .iter()
-            .map(|span| strip_ansi_codes(&span.content).chars().count())
+            .map(|span| calculate_display_width(&span.content))
             .sum();
 
         let content_display_width = display_width + line_indent.len();
@@ -481,7 +541,7 @@ pub fn render_result_block(
                     let wrapped_display_width: usize = first_line
                         .spans
                         .iter()
-                        .map(|span| strip_ansi_codes(&span.content).chars().count())
+                        .map(|span| calculate_display_width(&span.content))
                         .sum();
 
                     let total_content_width = wrapped_display_width + line_indent.len();
@@ -571,4 +631,32 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
     });
+}
+
+pub fn add_spacing_marker(state: &mut AppState) {
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(vec![Line::from(vec![Span::from("SPACING_MARKER")])]),
+    });
+}
+
+pub fn push_confirmation_message(state: &mut AppState, terminal_size: Size) {
+    let confirmation_colors = BubbleColors {
+        border_color: Color::Yellow,
+        title_color: Color::Yellow,
+        content_color: Color::White,
+        tool_type: "".to_string(),
+    };
+    let dialog_id = render_styled_block_ansi_to_tui(
+        "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
+        "Confirmation",
+        "Confirmation",
+        Some(confirmation_colors),
+        state,
+        terminal_size,
+        "confirmation",
+        None,
+        Some(ContentAlignment::Center),
+    );
+    state.dialog_message_id = Some(dialog_id);
 }

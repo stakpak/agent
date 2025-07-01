@@ -1,5 +1,4 @@
 use crate::app::AppState;
-use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::render_helper_dropdown;
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -21,12 +20,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
-    let input_height = if state.is_dialog_open {
-        input_lines as u16
-    } else {
-        (input_lines + 2) as u16
-    };
-
+    let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
         && !state.filtered_helpers.is_empty()
@@ -39,11 +33,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     let hint_height = if dropdown_showing { 0 } else { margin_height };
 
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
-    let dialog_margin = if state.is_dialog_open || state.show_sessions_dialog {
-        1
-    } else {
-        0
-    };
+    let dialog_margin = if state.show_sessions_dialog { 1 } else { 0 };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
@@ -80,11 +70,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
         width: 0,
         height: 0,
     };
+
     if !state.show_sessions_dialog {
         input_area = chunks[3];
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
         hint_area = chunks.get(5).copied().unwrap_or(input_area);
     }
+
     let message_area_width = message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
@@ -96,20 +88,17 @@ pub fn view(f: &mut Frame, state: &AppState) {
         message_area_height,
     );
 
-    if state.is_dialog_open {
-        render_confirmation_dialog(f, state);
+    if state.show_sessions_dialog {
+        render_sessions_dialog(f, state);
+        return;
     }
 
-    // Only render input, dropdown, and hint if dialog is not open and sessions dialog is not open
-    if !state.is_dialog_open && !state.show_sessions_dialog {
+    if !state.is_dialog_open {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         if !dropdown_showing {
             render_hint_or_shortcuts(f, state, hint_area);
         }
-    }
-    if state.show_sessions_dialog {
-        render_sessions_dialog(f, state);
     }
 }
 
