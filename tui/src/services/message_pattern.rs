@@ -94,14 +94,13 @@ pub fn process_lines_with_pattern<F>(
 where
     F: Fn(&str) -> (String, Style),
 {
-    let empty_line = (Line::from(""), Style::default());
-    vec![empty_line]
-        .into_iter()
-        .chain(lines.iter().map(|(line, style)| {
+    lines
+        .iter()
+        .map(|(line, style)| {
             let line_text = spans_to_string(line);
             let transformed_line = transform_line_with_pattern(&line_text, pattern, &transform_fn);
             (transformed_line, *style)
-        }))
+        })
         .collect()
 }
 
@@ -358,7 +357,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "---------------------------------------Checkpoint ID: test123---------------------------------------"
+            "-----------------------------------------checkpoint test123-----------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
 
@@ -386,7 +385,7 @@ mod tests {
         assert_eq!(processed[0].0.spans[0].content, "Test ");
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
+            "-------------------------------------------checkpoint abc-------------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
         assert_eq!(processed[0].0.spans[2].content, " message");
@@ -411,7 +410,7 @@ mod tests {
         // Should have checkpoint transformation applied
         let text = spans_to_string(&processed[0].0);
         assert!(
-            text.contains("-----------------------------------------Checkpoint ID: abc-----------------------------------------")
+            text.contains("-------------------------------------------checkpoint abc-------------------------------------------")
         ); // Checkpoint should be uppercase
         assert!(text.contains("Start"));
         assert!(text.contains("end"));
@@ -420,7 +419,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3); // "Start ", "ABC", " end"
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------------------Checkpoint ID: abc-----------------------------------------"
+            "-------------------------------------------checkpoint abc-------------------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
     }
