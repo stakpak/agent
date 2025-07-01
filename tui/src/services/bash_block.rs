@@ -12,6 +12,7 @@ use stakpak_shared::models::integrations::openai::ToolCall;
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 pub enum ContentAlignment {
     Left,
     Center,
@@ -631,32 +632,4 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
     });
-}
-
-pub fn add_spacing_marker(state: &mut AppState) {
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(vec![Line::from(vec![Span::from("SPACING_MARKER")])]),
-    });
-}
-
-pub fn push_confirmation_message(state: &mut AppState, terminal_size: Size) {
-    let confirmation_colors = BubbleColors {
-        border_color: Color::Yellow,
-        title_color: Color::Yellow,
-        content_color: Color::White,
-        tool_type: "".to_string(),
-    };
-    let dialog_id = render_styled_block_ansi_to_tui(
-        "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
-        "Confirmation",
-        "Confirmation",
-        Some(confirmation_colors),
-        state,
-        terminal_size,
-        "confirmation",
-        None,
-        Some(ContentAlignment::Center),
-    );
-    state.dialog_message_id = Some(dialog_id);
 }
