@@ -40,7 +40,7 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
     let url = "https://api.github.com/repos/stakpak/cli/releases/latest".to_string();
 
     let response = client.get(&url).send().await?;
-    
+
     if !response.status().is_success() {
         return Err("Failed to fetch release info".into());
     }
