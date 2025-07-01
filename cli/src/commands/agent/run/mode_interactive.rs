@@ -17,7 +17,7 @@ use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode};
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
-use stakpak_tui::{InputEvent, OutputEvent};
+use stakpak_tui::{Color, InputEvent, OutputEvent};
 use uuid::Uuid;
 
 pub struct RunInteractiveConfig {
@@ -130,7 +130,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if let Some(local_context) = local_context {
                             send_input_event(
                                 &input_tx,
-                                InputEvent::InputSubmittedWith(local_context.to_string()),
+                                InputEvent::InputSubmittedWithColor(
+                                    local_context.to_string(),
+                                    Color::DarkGray,
+                                ),
                             )
                             .await?;
                         }
@@ -141,7 +144,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if let Some(rulebooks_text) = rulebooks_text {
                             send_input_event(
                                 &input_tx,
-                                InputEvent::InputSubmittedWith(rulebooks_text),
+                                InputEvent::InputSubmittedWithColor(
+                                    rulebooks_text,
+                                    Color::DarkGray,
+                                ),
                             )
                             .await?;
                         }

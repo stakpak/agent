@@ -9,7 +9,7 @@ use crate::services::helper_block::{
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use ratatui::layout::Size;
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
     FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
@@ -71,7 +71,10 @@ pub fn update(
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n', terminal_size),
         InputEvent::InputSubmittedWith(s) => {
-            handle_input_submitted_with(state, s, message_area_height)
+            handle_input_submitted_with(state, s, None, message_area_height)
+        }
+        InputEvent::InputSubmittedWithColor(s, color) => {
+            handle_input_submitted_with(state, s, Some(color), message_area_height)
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
@@ -560,16 +563,23 @@ fn handle_input_submitted(
     }
 }
 
-fn handle_input_submitted_with(state: &mut AppState, s: String, message_area_height: usize) {
+fn handle_input_submitted_with(
+    state: &mut AppState,
+    s: String,
+    color: Option<Color>,
+    message_area_height: usize,
+) {
     state.shell_tool_calls = None;
     let input_height = 3;
     let total_lines = state.messages.len() * 2;
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.scroll == max_scroll;
-    state
-        .messages
-        .push(Message::assistant(None, s.clone(), None));
+    state.messages.push(Message::assistant(
+        None,
+        s.clone(),
+        color.map(|c| Style::default().fg(c)),
+    ));
     state.input.clear();
     state.cursor_position = 0;
     let total_lines = state.messages.len() * 2;
