@@ -115,6 +115,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
                         let mut user_input = user_input.clone();
 
                         // Add user shell history to the user input
@@ -265,7 +266,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         continue;
                     }
                 }
-                send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
                 let mut stream = client
                     .chat_completion_stream(messages.clone(), Some(tools.clone()))
@@ -282,9 +282,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         return Err(e.to_string());
                     }
                 };
-                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
                 messages.push(response.choices[0].message.clone());
+
+                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
                 // Send tool calls to TUI if present
                 if let Some(tool_calls) = &response.choices[0].message.tool_calls {
