@@ -3,6 +3,7 @@ mod event;
 mod terminal;
 mod view;
 pub use app::{AppState, InputEvent, OutputEvent, SessionInfo};
+pub use ratatui::style::Color;
 
 mod services;
 

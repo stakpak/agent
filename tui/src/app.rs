@@ -83,6 +83,7 @@ pub enum InputEvent {
     InputChangedNewline,
     InputSubmitted,
     InputSubmittedWith(String),
+    InputSubmittedWithColor(String, Color),
     ScrollUp,
     ScrollDown,
     PageUp,

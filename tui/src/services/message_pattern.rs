@@ -94,13 +94,14 @@ pub fn process_lines_with_pattern<F>(
 where
     F: Fn(&str) -> (String, Style),
 {
-    lines
-        .iter()
-        .map(|(line, style)| {
+    let empty_line = (Line::from(""), Style::default());
+    vec![empty_line]
+        .into_iter()
+        .chain(lines.iter().map(|(line, style)| {
             let line_text = spans_to_string(line);
             let transformed_line = transform_line_with_pattern(&line_text, pattern, &transform_fn);
             (transformed_line, *style)
-        })
+        }))
         .collect()
 }
 
@@ -110,7 +111,7 @@ pub fn process_checkpoint_patterns(
     terminal_width: usize,
 ) -> Vec<(Line<'static>, Style)> {
     let checkpoint_formatter = |content: &str| -> (String, Style) {
-        let checkpoint_text = format!("Checkpoint ID: {}", content);
+        let checkpoint_text = format!("checkpoint {}", content);
         let total_len = checkpoint_text.len();
         let terminal_width = terminal_width.max(total_len + 2); // Ensure at least enough space
 
