@@ -17,7 +17,7 @@ use commands::{
 };
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use utils::check_update::check_update;
+use utils::check_update::{auto_update, check_update};
 use utils::local_context::analyze_local_context;
 
 use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
@@ -135,6 +135,10 @@ async fn main() {
                 if let Err(e) = config.save() {
                     eprintln!("Failed to save config: {}", e);
                 }
+            }
+
+            if let Err(e) = auto_update().await {
+                eprintln!("Auto-update failed: {}", e);
             }
 
             match cli.command {
