@@ -74,7 +74,18 @@ pub fn add_rulebooks(
                 "# My Rule Books:\n{}",
                 rulebooks
                     .iter()
-                    .map(|rulebook| format!("  - {}", rulebook.to_text().replace('\n', "\n    ")))
+                    .map(|rulebook| {
+                        let text = rulebook.to_text();
+                        let mut lines = text.lines();
+                        let mut result = String::new();
+                        if let Some(first) = lines.next() {
+                            result.push_str(&format!("  - {}", first));
+                            for line in lines {
+                                result.push_str(&format!("\n    {}", line));
+                            }
+                        }
+                        result
+                    })
                     .collect::<Vec<String>>()
                     .join("\n")
             )
