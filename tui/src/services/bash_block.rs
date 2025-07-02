@@ -18,6 +18,47 @@ pub enum ContentAlignment {
     Center,
 }
 
+// Add this function to preprocess text and handle carriage returns
+fn preprocess_terminal_output(text: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current_line = String::new();
+
+    for ch in text.chars() {
+        match ch {
+            '\r' => {
+                // Carriage return - start overwriting the current line
+                current_line.clear();
+            }
+            '\n' => {
+                // Newline - finish the current line and start a new one
+                lines.push(current_line.clone());
+                current_line.clear();
+            }
+            _ => {
+                current_line.push(ch);
+            }
+        }
+    }
+
+    // Don't forget the last line if it doesn't end with newline
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    // Generic filtering: remove empty lines and lines that are just whitespace
+    let filtered_lines: Vec<String> = lines
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    // If we have no content after filtering, return the original to avoid losing everything
+    if filtered_lines.is_empty() && !text.trim().is_empty() {
+        return text.to_string();
+    }
+
+    filtered_lines.join("\n")
+}
+
 // Add this function to calculate actual display width accounting for ANSI and Unicode
 fn calculate_display_width(text: &str) -> usize {
     // Strip ANSI codes first, then calculate Unicode width
@@ -62,13 +103,16 @@ fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
 
 // Helper function to wrap text while preserving ANSI codes
 fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
+    // First preprocess to handle carriage returns and terminal control sequences
+    let preprocessed = preprocess_terminal_output(text);
+
     // Convert to ratatui text first to parse ANSI codes
-    let ratatui_text = match text.into_text() {
+    let ratatui_text = match preprocessed.into_text() {
         Ok(parsed) => parsed,
         Err(_) => {
             // Fallback: just split by width using stripped text
-            let stripped = strip_ansi_codes(text);
-            return wrap_text_simple_unicode(&stripped, width); // CHANGED: use Unicode version
+            let stripped = strip_ansi_codes(&preprocessed);
+            return wrap_text_simple_unicode(&stripped, width);
         }
     };
 
@@ -85,7 +129,6 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
 
         for span in line.spans {
             let span_text = &span.content;
-            // CHANGED: Use the improved display width calculation
             let span_display_width = calculate_display_width(span_text);
 
             if current_width + span_display_width <= width {
@@ -94,7 +137,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                 current_width += span_display_width;
             } else if current_width == 0 {
                 // Span is too long for a line by itself, so we must wrap it.
-                let wrapped_span = wrap_text_simple_unicode(span_text, width); // CHANGED: use Unicode version
+                let wrapped_span = wrap_text_simple_unicode(span_text, width);
                 let num_wrapped = wrapped_span.len();
                 if num_wrapped > 0 {
                     // Add all but the last part as full lines.
@@ -104,7 +147,7 @@ fn wrap_ansi_text(text: &str, width: usize) -> Vec<String> {
                         }
                         // The last part becomes the current line.
                         current_line = last.clone();
-                        current_width = calculate_display_width(&current_line); // CHANGED: use new function
+                        current_width = calculate_display_width(&current_line);
                     }
                 }
             } else {
@@ -181,10 +224,13 @@ pub fn render_styled_block_ansi_to_tui(
         }
     };
 
+    // Preprocess content to handle terminal control sequences
+    let preprocessed_content = preprocess_terminal_output(content);
+
     // Convert ANSI content to ratatui Text
-    let ratatui_text = content
+    let ratatui_text = preprocessed_content
         .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::from(content));
+        .unwrap_or_else(|_| ratatui::text::Text::from(preprocessed_content.clone()));
 
     // Create lines with compact style similar to result blocks
     let mut formatted_lines = Vec::new();
@@ -312,7 +358,7 @@ pub fn render_styled_block_ansi_to_tui(
     // Store as StyledBlock (same as result block) instead of BashBubble
     state.messages.push(Message {
         id: message_id,
-        content: MessageContent::StyledBlock(owned_lines), // Changed from BashBubble to StyledBlock
+        content: MessageContent::StyledBlock(owned_lines),
     });
     message_id
 }
@@ -477,10 +523,13 @@ pub fn render_result_block(
 
     lines.push(Line::from(header_spans));
 
+    // Preprocess result to handle terminal control sequences
+    let preprocessed_result = preprocess_terminal_output(result);
+
     // Convert result to ratatui Text with ANSI support
-    let result_text = match result.into_text() {
+    let result_text = match preprocessed_result.into_text() {
         Ok(text) => text,
-        Err(_) => ratatui::text::Text::from(result),
+        Err(_) => ratatui::text::Text::from(preprocessed_result.clone()),
     };
 
     // Use compact indentation like bash blocks
