@@ -34,6 +34,10 @@ struct Cli {
     #[arg(short = 'a', long = "async", default_value_t = false)]
     r#async: bool,
 
+    /// Maximum number of steps the agent can take in async mode
+    #[arg(short = 'm', long = "max-steps")]
+    max_steps: Option<usize>,
+
     /// Resume agent session at a specific checkpoint
     #[arg(short = 'c', long = "checkpoint")]
     checkpoint_id: Option<String>,
@@ -206,6 +210,7 @@ async fn main() {
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
                                 rulebooks,
+                                max_steps: cli.max_steps,
                             },
                         )
                         .await
