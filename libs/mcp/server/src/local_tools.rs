@@ -210,7 +210,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                 let _ = child.kill().await;
                 result.push_str(&format!(
                     "Command timed out after {} seconds\n",
-                    timeout.unwrap()
+                    timeout.unwrap_or_default()
                 ));
                 -1
             }
@@ -608,8 +608,10 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         let length = length.unwrap_or(15);
         let no_symbols = no_symbols.unwrap_or(false);
 
-        let mut config = npwg::PasswordGeneratorConfig::default();
-        config.length = length;
+        let mut config = npwg::PasswordGeneratorConfig {
+            length,
+            ..Default::default()
+        };
 
         if no_symbols {
             config.excluded_chars = npwg::config::DEFINE
@@ -624,7 +626,7 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         } else {
             return Ok(CallToolResult::error(vec![
                 Content::text("FAILED_TO_GENERATE_PASSWORD"),
-                Content::text(format!("Failed to generate password")),
+                Content::text("Failed to generate password"),
             ]));
         };
 
