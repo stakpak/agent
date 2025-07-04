@@ -1,11 +1,12 @@
+use crate::tool_container::ToolContainer;
 use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
+    Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool, tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::models::{CodeIndex, SimpleDocument};
-use stakpak_api::{Client, ClientConfig, GenerationResult, ToolsCallParams};
+use stakpak_api::{Client, GenerationResult, ToolsCallParams};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::indexing::IndexingStatus;
 
@@ -14,14 +15,78 @@ use std::io::Write;
 use std::path::Path;
 use tracing::{error, warn};
 
-use crate::secret_manager::SecretManager;
-use crate::tool_descriptions::*;
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GenerateCodeRequest {
+    #[schemars(
+        description = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify the paths of the files to be created or modified if you want to save changes to the filesystem."
+    )]
+    pub prompt: String,
+    #[schemars(
+        description = "Type of code to generate one of Dockerfile, Kubernetes, Terraform, GithubActions"
+    )]
+    pub provisioner: Provisioner,
+    #[schemars(
+        description = "Whether to save the generated files to the filesystem (default: false)"
+    )]
+    pub save_files: Option<bool>,
+    #[schemars(
+        description = "Optional list of file paths to include as context for the generation. CRITICAL: When generating code in multiple steps (breaking down large projects), always include previously generated files from earlier steps to ensure consistent references, imports, and overall project coherence. Add any files you want to edit, or that you want to use as context for the generation (default: empty)"
+    )]
+    pub context: Option<Vec<String>>,
+}
 
-/// Remote tools that require API access
-#[derive(Clone)]
-pub struct RemoteTools {
-    api_config: ClientConfig,
-    secret_manager: SecretManager,
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoteCodeSearchRequest {
+    #[schemars(
+        description = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be"
+    )]
+    pub query: String,
+    #[schemars(description = "The maximum number of results to return (default: 10)")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SearchDocsRequest {
+    #[schemars(
+        description = "List of keywords to search for in the documentation. Searches against the url, title, description, and content of documentation chunks."
+    )]
+    pub keywords: Vec<String>,
+    #[schemars(
+        description = "List of keywords to exclude from the search results. This is useful for filtering out documentation sources that are not relevant to the query."
+    )]
+    pub exclude_keywords: Option<Vec<String>>,
+    #[schemars(description = "The maximum number of results to return (default: 5, max: 5)")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SearchMemoryRequest {
+    #[schemars(
+        description = "List of keywords to search for in your memory. Searches against the title, tags, and content of your memory."
+    )]
+    pub keywords: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReadRulebookRequest {
+    #[schemars(
+        description = "The URI of the rulebook to read. This should be a valid URI pointing to a rulebook document."
+    )]
+    pub uri: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LocalCodeSearchRequest {
+    #[schemars(
+        description = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword."
+    )]
+    pub keywords: Vec<String>,
+    #[schemars(description = "Maximum number of results to return (default: 10)")]
+    pub limit: Option<u32>,
+    #[schemars(
+        description = "Whether to show dependencies and dependents for each matching block (default: false)"
+    )]
+    pub show_dependencies: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
@@ -50,32 +115,22 @@ impl std::fmt::Display for Provisioner {
     }
 }
 
-#[tool(tool_box)]
-impl RemoteTools {
-    pub fn new(api_config: ClientConfig, redact_secrets: bool) -> Self {
-        Self {
-            api_config,
-            secret_manager: SecretManager::new(redact_secrets),
-        }
-    }
-
-    #[tool(description = GENERATE_CODE_DESCRIPTION)]
+#[tool_router(router = tool_router_remote, vis = "pub")]
+impl ToolContainer {
+    #[tool(
+        description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
+IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files."
+    )]
     pub async fn generate_code(
         &self,
-        #[tool(param)]
-        #[schemars(description = GENERATE_PROMPT_PARAM_DESCRIPTION)]
-        prompt: String,
-        #[tool(param)]
-        #[schemars(description = PROVISIONER_PARAM_DESCRIPTION)]
-        provisioner: Provisioner,
-        #[tool(param)]
-        #[schemars(description = SAVE_FILES_PARAM_DESCRIPTION)]
-        save_files: Option<bool>,
-        #[tool(param)]
-        #[schemars(description = CONTEXT_PARAM_DESCRIPTION)]
-        context: Option<Vec<String>>,
+        Parameters(GenerateCodeRequest {
+            prompt,
+            provisioner,
+            save_files,
+            context,
+        }): Parameters<GenerateCodeRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.api_config).map_err(|e| {
+        let client = Client::new(&self.get_api_config()).map_err(|e| {
             error!("Failed to create client: {}", e);
             McpError::internal_error(
                 "Failed to create client",
@@ -99,7 +154,7 @@ impl RemoteTools {
                         Ok(content) => {
                             // Redact secrets in the file content
                             let redacted_content = self
-                                .secret_manager
+                                .get_secret_manager()
                                 .redact_and_store_secrets(&content, Some(&path));
                             SimpleDocument {
                                 uri,
@@ -214,7 +269,7 @@ impl RemoteTools {
                 }
 
                 let redacted_edit = self
-                    .secret_manager
+                    .get_secret_manager()
                     .redact_and_store_secrets(&edit.to_string(), file_path.to_str());
 
                 if edit.old_str.is_empty() {
@@ -326,17 +381,14 @@ impl RemoteTools {
         }
     }
 
-    #[tool(description = REMOTE_CODE_SEARCH_DESCRIPTION)]
+    #[tool(
+        description = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem."
+    )]
     pub async fn remote_code_search(
         &self,
-        #[tool(param)]
-        #[schemars(description = REMOTE_CODE_SEARCH_QUERY_PARAM_DESCRIPTION)]
-        query: String,
-        #[tool(param)]
-        #[schemars(description = REMOTE_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
-        limit: Option<u32>,
+        Parameters(RemoteCodeSearchRequest { query, limit }): Parameters<RemoteCodeSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.api_config).map_err(|e| {
+        let client = Client::new(&self.get_api_config()).map_err(|e| {
             error!("Failed to create client: {}", e);
             McpError::internal_error(
                 "Failed to create client",
@@ -366,20 +418,18 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
-    #[tool(description = SEARCH_DOCS_DESCRIPTION)]
+    #[tool(
+        description = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources."
+    )]
     pub async fn search_docs(
         &self,
-        #[tool(param)]
-        #[schemars(description = SEARCH_DOCS_KEYWORDS_PARAM_DESCRIPTION)]
-        keywords: Vec<String>,
-        #[tool(param)]
-        #[schemars(description = SEARCH_DOCS_EXCLUDE_KEYWORDS_PARAM_DESCRIPTION)]
-        exclude_keywords: Option<Vec<String>>,
-        #[tool(param)]
-        #[schemars(description = SEARCH_DOCS_LIMIT_PARAM_DESCRIPTION)]
-        limit: Option<u32>,
+        Parameters(SearchDocsRequest {
+            keywords,
+            exclude_keywords,
+            limit,
+        }): Parameters<SearchDocsRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.api_config).map_err(|e| {
+        let client = Client::new(&self.get_api_config()).map_err(|e| {
             error!("Failed to create client: {}", e);
             McpError::internal_error(
                 "Failed to create client",
@@ -413,17 +463,14 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
-    #[tool(description = SEARCH_MEMORY_DESCRIPTION)]
+    #[tool(
+        description = "Search your memory for relevant information from previous conversations and code generation steps to accelerate request fulfillment."
+    )]
     pub async fn search_memory(
         &self,
-        #[tool(param)]
-        #[schemars(description = SEARCH_MEMORY_KEYWORDS_PARAM_DESCRIPTION)]
-        keywords: Vec<String>,
-        // #[tool(param)]
-        // #[schemars(description = SEARCH_MEMORY_LIMIT_PARAM_DESCRIPTION)]
-        // limit: Option<u32>,
+        Parameters(SearchMemoryRequest { keywords }): Parameters<SearchMemoryRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.api_config).map_err(|e| {
+        let client = Client::new(&self.get_api_config()).map_err(|e| {
             error!("Failed to create client: {}", e);
             McpError::internal_error(
                 "Failed to create client",
@@ -456,14 +503,14 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
-    #[tool(description = READ_RULEBOOK_DESCRIPTION)]
+    #[tool(
+        description = "Read and retrieve the contents of a rulebook using its URI. This tool allows you to access and read rulebooks that contain play books, guidelines, policies, or rules defined by the user."
+    )]
     pub async fn read_rulebook(
         &self,
-        #[tool(param)]
-        #[schemars(description = READ_RULEBOOK_URI_PARAM_DESCRIPTION)]
-        uri: String,
+        Parameters(ReadRulebookRequest { uri }): Parameters<ReadRulebookRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.api_config).map_err(|e| {
+        let client = Client::new(&self.get_api_config()).map_err(|e| {
             error!("Failed to create client: {}", e);
             McpError::internal_error(
                 "Failed to create client",
@@ -492,18 +539,16 @@ impl RemoteTools {
         Ok(CallToolResult::success(response))
     }
 
-    #[tool(description = LOCAL_CODE_SEARCH_DESCRIPTION)]
+    #[tool(description = "Search for local code blocks using multiple keywords.
+IMPORTANT: this tool ONLY search through local Terraform, Kubernetes, Dockerfile, and Github Actions code.
+This tool searches through the locally indexed code blocks using text matching against names, types, content, and file paths. Blocks matching multiple keywords are ranked higher in the results. It can also show dependencies and dependents of matching blocks. If no index is found, it will build one first.")]
     pub async fn local_code_search(
         &self,
-        #[tool(param)]
-        #[schemars(description = LOCAL_CODE_SEARCH_KEYWORDS_PARAM_DESCRIPTION)]
-        keywords: Vec<String>,
-        #[tool(param)]
-        #[schemars(description = LOCAL_CODE_SEARCH_LIMIT_PARAM_DESCRIPTION)]
-        limit: Option<u32>,
-        #[tool(param)]
-        #[schemars(description = LOCAL_CODE_SEARCH_SHOW_DEPENDENCIES_PARAM_DESCRIPTION)]
-        show_dependencies: Option<bool>,
+        Parameters(LocalCodeSearchRequest {
+            keywords,
+            limit,
+            show_dependencies,
+        }): Parameters<LocalCodeSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         // First check indexing status
         match LocalStore::read_session_data("indexing_status.json") {
@@ -652,7 +697,7 @@ impl RemoteTools {
 
             // Redact secrets in the code before displaying
             let redacted_code = self
-                .secret_manager
+                .get_secret_manager()
                 .redact_and_store_secrets(&block.code, Some(file_path));
 
             // Show code with line numbers
@@ -714,27 +759,5 @@ impl RemoteTools {
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
-    }
-}
-
-#[tool(tool_box)]
-impl ServerHandler for RemoteTools {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(
-                "This server provides remote tools for code generation and smart search using Stakpak API.".to_string(),
-            ),
-        }
-    }
-
-    async fn initialize(
-        &self,
-        _request: InitializeRequestParam,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, McpError> {
-        Ok(self.get_info())
     }
 }

@@ -5,15 +5,12 @@ use rmcp::transport::streamable_http_server::{
 
 use stakpak_api::ClientConfig;
 
-pub mod combined_tools;
 pub mod local_tools;
 pub mod remote_tools;
 pub mod secret_manager;
-pub mod tool_descriptions;
+pub mod tool_container;
 
-pub use combined_tools::CombinedTools;
-pub use local_tools::LocalTools;
-pub use remote_tools::RemoteTools;
+pub use tool_container::ToolContainer;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
@@ -161,7 +158,13 @@ pub async fn start_server(
     match config.tool_mode {
         ToolMode::LocalOnly => {
             let service = StreamableHttpService::new(
-                move || LocalTools::new(config.redact_secrets),
+                move || {
+                    Ok(ToolContainer::new(
+                        config.api.clone(),
+                        config.redact_secrets,
+                        ToolContainer::tool_router_local(),
+                    ))
+                },
                 LocalSessionManager::default().into(),
                 Default::default(),
             );
@@ -173,7 +176,13 @@ pub async fn start_server(
         }
         ToolMode::RemoteOnly => {
             let service = StreamableHttpService::new(
-                move || RemoteTools::new(config.api.clone(), config.redact_secrets),
+                move || {
+                    Ok(ToolContainer::new(
+                        config.api.clone(),
+                        config.redact_secrets,
+                        ToolContainer::tool_router_remote(),
+                    ))
+                },
                 LocalSessionManager::default().into(),
                 Default::default(),
             );
@@ -185,7 +194,13 @@ pub async fn start_server(
         }
         ToolMode::Combined => {
             let service = StreamableHttpService::new(
-                move || CombinedTools::new(config.api.clone(), config.redact_secrets),
+                move || {
+                    Ok(ToolContainer::new(
+                        config.api.clone(),
+                        config.redact_secrets,
+                        ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
+                    ))
+                },
                 LocalSessionManager::default().into(),
                 Default::default(),
             );
