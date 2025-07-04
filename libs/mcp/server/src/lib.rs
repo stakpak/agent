@@ -11,6 +11,7 @@ pub mod secret_manager;
 pub mod tool_container;
 
 pub use tool_container::ToolContainer;
+use tracing::error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
@@ -155,62 +156,38 @@ pub async fn start_server(
 ) -> Result<()> {
     init_gitleaks_if_needed(config.redact_secrets).await;
 
-    match config.tool_mode {
-        ToolMode::LocalOnly => {
-            let service = StreamableHttpService::new(
-                move || {
-                    Ok(ToolContainer::new(
-                        config.api.clone(),
-                        config.redact_secrets,
-                        ToolContainer::tool_router_local(),
-                    ))
-                },
-                LocalSessionManager::default().into(),
-                Default::default(),
-            );
-            let router = axum::Router::new().nest_service("/mcp", service);
-            let tcp_listener = tokio::net::TcpListener::bind(config.bind_address).await?;
-            axum::serve(tcp_listener, router)
-                .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
-                .await?;
-        }
-        ToolMode::RemoteOnly => {
-            let service = StreamableHttpService::new(
-                move || {
-                    Ok(ToolContainer::new(
-                        config.api.clone(),
-                        config.redact_secrets,
-                        ToolContainer::tool_router_remote(),
-                    ))
-                },
-                LocalSessionManager::default().into(),
-                Default::default(),
-            );
-            let router = axum::Router::new().nest_service("/mcp", service);
-            let tcp_listener = tokio::net::TcpListener::bind(config.bind_address).await?;
-            axum::serve(tcp_listener, router)
-                .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
-                .await?;
-        }
-        ToolMode::Combined => {
-            let service = StreamableHttpService::new(
-                move || {
-                    Ok(ToolContainer::new(
-                        config.api.clone(),
-                        config.redact_secrets,
-                        ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
-                    ))
-                },
-                LocalSessionManager::default().into(),
-                Default::default(),
-            );
-            let router = axum::Router::new().nest_service("/mcp", service);
-            let tcp_listener = tokio::net::TcpListener::bind(config.bind_address).await?;
-            axum::serve(tcp_listener, router)
-                .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
-                .await?;
-        }
+    let tool_container = match config.tool_mode {
+        ToolMode::LocalOnly => ToolContainer::new(
+            None,
+            config.redact_secrets,
+            ToolContainer::tool_router_local(),
+        ),
+        ToolMode::RemoteOnly => ToolContainer::new(
+            Some(config.api),
+            config.redact_secrets,
+            ToolContainer::tool_router_remote(),
+        ),
+        ToolMode::Combined => ToolContainer::new(
+            Some(config.api),
+            config.redact_secrets,
+            ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
+        ),
     }
+    .map_err(|e| {
+        error!("Failed to create tool container: {}", e);
+        anyhow::anyhow!("Failed to create tool container: {}", e)
+    })?;
+
+    let service = StreamableHttpService::new(
+        move || Ok(tool_container.to_owned()),
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let tcp_listener = tokio::net::TcpListener::bind(config.bind_address).await?;
+    axum::serve(tcp_listener, router)
+        .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
+        .await?;
 
     Ok(())
 }

@@ -1,15 +1,14 @@
+use crate::secret_manager::SecretManager;
 use rmcp::tool_handler;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
     service::RequestContext, tool_router,
 };
-use stakpak_api::ClientConfig;
-
-use crate::secret_manager::SecretManager;
+use stakpak_api::{Client, ClientConfig};
 
 #[derive(Clone)]
 pub struct ToolContainer {
-    pub api_config: ClientConfig,
+    pub client: Option<Client>,
     pub secret_manager: SecretManager,
     pub tool_router: ToolRouter<Self>,
 }
@@ -17,23 +16,29 @@ pub struct ToolContainer {
 #[tool_router]
 impl ToolContainer {
     pub fn new(
-        api_config: ClientConfig,
+        api_config: Option<ClientConfig>,
         redact_secrets: bool,
         tool_router: ToolRouter<Self>,
-    ) -> Self {
-        Self {
-            api_config,
+    ) -> Result<Self, String> {
+        let client = if let Some(api_config) = api_config {
+            Some(Client::new(&api_config)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            client,
             secret_manager: SecretManager::new(redact_secrets),
             tool_router,
-        }
+        })
     }
 
     pub fn get_secret_manager(&self) -> &SecretManager {
         &self.secret_manager
     }
 
-    pub fn get_api_config(&self) -> &ClientConfig {
-        &self.api_config
+    pub fn get_client(&self) -> Option<&Client> {
+        self.client.as_ref()
     }
 }
 

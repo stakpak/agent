@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_api::models::{CodeIndex, SimpleDocument};
-use stakpak_api::{Client, GenerationResult, ToolsCallParams};
+use stakpak_api::{GenerationResult, ToolsCallParams};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::indexing::IndexingStatus;
 
@@ -120,14 +120,6 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
             context,
         }): Parameters<GenerateCodeRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.get_api_config()).map_err(|e| {
-            error!("Failed to create client: {}", e);
-            McpError::internal_error(
-                "Failed to create client",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
-
         let output_format = if save_files.unwrap_or(false) {
             "json"
         } else {
@@ -166,7 +158,14 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
             Vec::new()
         };
 
-        let response = match client
+        let response = match self
+            .get_client()
+            .ok_or_else(|| {
+                McpError::internal_error(
+                    "Client not found",
+                    Some(json!({ "error": "Client not found" })),
+                )
+            })?
             .call_mcp_tool(&ToolsCallParams {
                 name: "generate_code".to_string(),
                 arguments: json!({
@@ -382,18 +381,17 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
             limit,
         }): Parameters<SearchDocsRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.get_api_config()).map_err(|e| {
-            error!("Failed to create client: {}", e);
-            McpError::internal_error(
-                "Failed to create client",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
-
         // Cap the limit to a maximum of 5
         let limit = limit.map(|l| l.min(5)).or(Some(5));
 
-        let response = match client
+        let response = match self
+            .get_client()
+            .ok_or_else(|| {
+                McpError::internal_error(
+                    "Client not found",
+                    Some(json!({ "error": "Client not found" })),
+                )
+            })?
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_docs".to_string(),
                 arguments: json!({
@@ -423,18 +421,17 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
         &self,
         Parameters(SearchMemoryRequest { keywords }): Parameters<SearchMemoryRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.get_api_config()).map_err(|e| {
-            error!("Failed to create client: {}", e);
-            McpError::internal_error(
-                "Failed to create client",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
-
         // // Cap the limit to a maximum of 5
         // let limit = limit.map(|l| l.min(5)).or(Some(5));
 
-        let response = match client
+        let response = match self
+            .get_client()
+            .ok_or_else(|| {
+                McpError::internal_error(
+                    "Client not found",
+                    Some(json!({ "error": "Client not found" })),
+                )
+            })?
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_memory".to_string(),
                 arguments: json!({
@@ -463,15 +460,14 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
         &self,
         Parameters(ReadRulebookRequest { uri }): Parameters<ReadRulebookRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.get_api_config()).map_err(|e| {
-            error!("Failed to create client: {}", e);
-            McpError::internal_error(
-                "Failed to create client",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
-
-        let response = match client
+        let response = match self
+            .get_client()
+            .ok_or_else(|| {
+                McpError::internal_error(
+                    "Client not found",
+                    Some(json!({ "error": "Client not found" })),
+                )
+            })?
             .call_mcp_tool(&ToolsCallParams {
                 name: "read_rulebook".to_string(),
                 arguments: json!({
