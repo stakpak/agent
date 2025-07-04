@@ -1,10 +1,13 @@
+use crate::tool_container::ToolContainer;
 use rand::Rng;
-use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
-};
+use rmcp::service::RequestContext;
+use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
+use rmcp::{RoleServer, tool_router};
+use serde::Deserialize;
 
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::fs;
 
 use std::path::Path;
@@ -13,41 +16,85 @@ use tokio::process::Command;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::secret_manager::SecretManager;
-use crate::tool_descriptions::*;
-use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
-
-/// Local tools that work without API access
-#[derive(Clone)]
-pub struct LocalTools {
-    secret_manager: SecretManager,
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunCommandRequest {
+    #[schemars(description = "The shell command to execute")]
+    pub command: String,
+    #[schemars(description = "Optional working directory for command execution")]
+    pub work_dir: Option<String>,
 }
 
-#[tool(tool_box)]
-impl LocalTools {
-    pub fn new(redact_secrets: bool) -> Self {
-        Self {
-            secret_manager: SecretManager::new(redact_secrets),
-        }
-    }
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ViewRequest {
+    #[schemars(description = "The path to the file or directory to view")]
+    pub path: String,
+    #[schemars(
+        description = "Optional line range to view [start_line, end_line]. Line numbers are 1-indexed. Use -1 for end_line to read to end of file."
+    )]
+    pub view_range: Option<[i32; 2]>,
+}
 
-    #[tool(description = RUN_COMMAND_DESCRIPTION)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct StrReplaceRequest {
+    #[schemars(description = "The path to the file to modify")]
+    pub path: String,
+    #[schemars(
+        description = "The exact text to replace (must match exactly, including whitespace and indentation)"
+    )]
+    pub old_str: String,
+    #[schemars(
+        description = "The new text to insert in place of the old text. When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+    )]
+    pub new_str: String,
+    #[schemars(
+        description = "Whether to replace all occurrences of the old text in the file (default: false)"
+    )]
+    pub replace_all: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateRequest {
+    #[schemars(description = "The path where the new file should be created")]
+    pub path: String,
+    #[schemars(
+        description = "The content to write to the new file, when creating code, ensure the new text has proper syntax, indentation, and follows the codebase style."
+    )]
+    pub file_text: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GeneratePasswordRequest {
+    #[schemars(description = "The length of the password to generate")]
+    pub length: Option<usize>,
+    #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
+    pub no_symbols: Option<bool>,
+}
+
+#[tool_router(router = tool_router_local, vis = "pub")]
+impl ToolContainer {
+    #[tool(
+        description = "A system command execution tool that allows running shell commands with full system access. 
+
+SECRET HANDLING: 
+- Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
+- You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
+- Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
+
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
+    )]
     pub async fn run_command(
         &self,
-        peer: rmcp::Peer<RoleServer>,
-        #[tool(param)]
-        #[schemars(description = COMMAND_PARAM_DESCRIPTION)]
-        command: String,
-        #[tool(param)]
-        #[schemars(description = WORK_DIR_PARAM_DESCRIPTION)]
-        work_dir: Option<String>,
+        ctx: RequestContext<RoleServer>,
+        Parameters(RunCommandRequest { command, work_dir }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
         const MAX_LINES: usize = 300;
 
         let command_clone = command.clone();
 
         // Restore secrets in the command before execution
-        let actual_command = self.secret_manager.restore_secrets_in_string(&command);
+        let actual_command = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&command);
 
         let mut child = Command::new("sh")
             .arg("-c")
@@ -91,7 +138,7 @@ impl LocalTools {
                     stderr_buf.clear();
                     result.push_str(&format!("{}\n", line));
                     // Send notification but continue processing
-                    let _ = peer.notify_progress(ProgressNotificationParam {
+                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                         progress_token: ProgressToken(NumberOrString::Number(0)),
                         progress: 50,
                         total: Some(100),
@@ -113,7 +160,7 @@ impl LocalTools {
                     if line.is_empty() {
                         continue;
                     }
-                    let _ = peer.notify_progress(ProgressNotificationParam {
+                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                         progress_token: ProgressToken(NumberOrString::Number(0)),
                         progress: 50,
                         total: Some(100),
@@ -186,22 +233,28 @@ impl LocalTools {
             return Ok(CallToolResult::success(vec![Content::text("No output")]));
         }
 
-        let redacted_output = self.secret_manager.redact_and_store_secrets(&result, None);
+        let redacted_output = self
+            .get_secret_manager()
+            .redact_and_store_secrets(&result, None);
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
         )]))
     }
 
-    #[tool(description = VIEW_DESCRIPTION)]
+    #[tool(
+        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges.
+
+SECRET HANDLING:
+- File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
+- These placeholders represent actual secret values that are safely stored for later use
+- You can reference these placeholders when working with the file content
+
+A maximum of 300 lines will be shown at a time, the rest will be truncated."
+    )]
     pub fn view(
         &self,
-        #[tool(param)]
-        #[schemars(description = PATH_PARAM_DESCRIPTION)]
-        path: String,
-        #[tool(param)]
-        #[schemars(description = VIEW_RANGE_PARAM_DESCRIPTION)]
-        view_range: Option<[i32; 2]>,
+        Parameters(ViewRequest { path, view_range }): Parameters<ViewRequest>,
     ) -> Result<CallToolResult, McpError> {
         const MAX_LINES: usize = 300;
 
@@ -355,7 +408,7 @@ impl LocalTools {
                     };
 
                     let redacted_result = self
-                        .secret_manager
+                        .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(&path));
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
@@ -369,21 +422,24 @@ impl LocalTools {
         }
     }
 
-    #[tool(description = STR_REPLACE_DESCRIPTION)]
+    #[tool(
+        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation.
+
+SECRET HANDLING:
+- You can use secret placeholders like [REDACTED_SECRET:rule-id:hash] in both old_str and new_str parameters
+- These placeholders will be automatically restored to actual secret values before performing the replacement
+- This allows you to safely work with secret values without exposing them
+
+When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+    )]
     pub fn str_replace(
         &self,
-        #[tool(param)]
-        #[schemars(description = FILE_PATH_PARAM_DESCRIPTION)]
-        path: String,
-        #[tool(param)]
-        #[schemars(description = OLD_STR_PARAM_DESCRIPTION)]
-        old_str: String,
-        #[tool(param)]
-        #[schemars(description = NEW_STR_PARAM_DESCRIPTION)]
-        new_str: String,
-        #[tool(param)]
-        #[schemars(description = REPLACE_ALL_PARAM_DESCRIPTION)]
-        replace_all: Option<bool>,
+        Parameters(StrReplaceRequest {
+            path,
+            old_str,
+            new_str,
+            replace_all,
+        }): Parameters<StrReplaceRequest>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
@@ -402,8 +458,12 @@ impl LocalTools {
         }
 
         // Restore secrets in the input strings
-        let actual_old_str = self.secret_manager.restore_secrets_in_string(&old_str);
-        let actual_new_str = self.secret_manager.restore_secrets_in_string(&new_str);
+        let actual_old_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&old_str);
+        let actual_new_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&new_str);
 
         match fs::read_to_string(&path) {
             Ok(content) => {
@@ -458,15 +518,12 @@ impl LocalTools {
         }
     }
 
-    #[tool(description = CREATE_DESCRIPTION)]
+    #[tool(
+        description = "Create a new file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist."
+    )]
     pub fn create(
         &self,
-        #[tool(param)]
-        #[schemars(description = CREATE_PATH_PARAM_DESCRIPTION)]
-        path: String,
-        #[tool(param)]
-        #[schemars(description = FILE_TEXT_PARAM_DESCRIPTION)]
-        file_text: String,
+        Parameters(CreateRequest { path, file_text }): Parameters<CreateRequest>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
@@ -490,7 +547,9 @@ impl LocalTools {
         }
 
         // Restore secrets in the file content before writing
-        let actual_file_text = self.secret_manager.restore_secrets_in_string(&file_text);
+        let actual_file_text = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&file_text);
 
         match fs::write(&path, actual_file_text) {
             Ok(_) => {
@@ -509,15 +568,17 @@ impl LocalTools {
         }
     }
 
-    #[tool(description = GENERATE_PASSWORD_DESCRIPTION)]
+    #[tool(
+        description = "Generate a secure password with the specified constraints. The password will be generated using the following constraints:
+- Length of the password (default: 15)
+- No symbols (default: false)
+"
+    )]
     pub async fn generate_password(
         &self,
-        #[tool(param)]
-        #[schemars(description = LENGTH_PARAM_DESCRIPTION)]
-        length: Option<usize>,
-        #[tool(param)]
-        #[schemars(description = NO_SYMBOLS_PARAM_DESCRIPTION)]
-        no_symbols: Option<bool>,
+        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
+            GeneratePasswordRequest,
+        >,
     ) -> Result<CallToolResult, McpError> {
         let length = length.unwrap_or(15);
         let no_symbols = no_symbols.unwrap_or(false);
@@ -543,34 +604,11 @@ impl LocalTools {
         };
 
         let redacted_password = self
-            .secret_manager
+            .get_secret_manager()
             .redact_and_store_password(&password, &password);
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
         )]))
-    }
-}
-
-#[tool(tool_box)]
-impl ServerHandler for LocalTools {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(
-                "This server provides local tools for file operations and command execution."
-                    .to_string(),
-            ),
-        }
-    }
-
-    async fn initialize(
-        &self,
-        _request: InitializeRequestParam,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, McpError> {
-        Ok(self.get_info())
     }
 }
