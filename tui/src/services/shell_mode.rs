@@ -2,12 +2,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tokio::sync::mpsc;
 
+/// The shell prompt prefix used in the TUI
+pub const SHELL_PROMPT_PREFIX: &str = "$ ";
+
 #[derive(Debug, Clone)]
 pub enum ShellEvent {
     Output(String),
     Error(String),
     InputRequest(String), // For password prompts
     Completed(i32),       // Exit code
+    Clear,                // Clear the output display
 }
 
 #[derive(Clone)]
@@ -15,6 +19,12 @@ pub struct ShellCommand {
     pub id: String,
     pub command: String,
     pub stdin_tx: mpsc::Sender<String>,
+}
+
+/// Check if a command is a clear command (with optional arguments/whitespace)
+fn is_clear_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    trimmed == "clear" || trimmed.starts_with("clear ") || trimmed.starts_with("clear\t")
 }
 
 /// Run a shell command in the background while keeping the TUI active
@@ -30,6 +40,17 @@ pub fn run_background_shell_command(
         command: command.clone(),
         stdin_tx: stdin_tx.clone(),
     };
+
+    // Check if this is a clear command
+    if is_clear_command(&command) {
+        // Send clear event instead of running the command
+        let output_tx_clone = output_tx.clone();
+        std::thread::spawn(move || {
+            let _ = output_tx_clone.blocking_send(ShellEvent::Clear);
+            let _ = output_tx_clone.blocking_send(ShellEvent::Completed(0));
+        });
+        return shell_cmd;
+    }
 
     // Spawn command in a separate thread
     std::thread::spawn(move || {
@@ -154,6 +175,17 @@ pub fn run_pty_command(
         command: command.clone(),
         stdin_tx: stdin_tx.clone(),
     };
+
+    // Check if this is a clear command
+    if is_clear_command(&command) {
+        // Send clear event instead of running the command
+        let output_tx_clone = output_tx.clone();
+        std::thread::spawn(move || {
+            let _ = output_tx_clone.blocking_send(ShellEvent::Clear);
+            let _ = output_tx_clone.blocking_send(ShellEvent::Completed(0));
+        });
+        return Ok(shell_cmd);
+    }
 
     std::thread::spawn(move || {
         let pty_system = native_pty_system();

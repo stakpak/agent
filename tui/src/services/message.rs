@@ -1,4 +1,5 @@
 use crate::services::markdown::render_markdown_to_lines;
+use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -203,7 +204,7 @@ fn render_shell_bubble_with_unicode_border(
         Style::default().fg(Color::Magenta),
     )]));
     // Command line
-    let cmd_line = format!("$ {}", &command[1..].trim());
+    let cmd_line = format!("{}{}", SHELL_PROMPT_PREFIX, &command[1..].trim());
     let cmd_content_width = cmd_line.len();
     let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
     lines.push(Line::from(vec![
@@ -293,7 +294,7 @@ pub fn get_wrapped_message_lines(
                             let mut current_command: Option<String> = None;
                             let mut current_output = Vec::new();
                             for line in shell_block.lines() {
-                                if line.trim().starts_with('$') {
+                                if line.trim().starts_with(SHELL_PROMPT_PREFIX.trim()) {
                                     if let Some(cmd) = current_command.take() {
                                         lines.push(render_shell_bubble_with_unicode_border(
                                             &cmd,
