@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::helper_block::render_loading_spinner;
-use crate::services::helper_dropdown::render_helper_dropdown;
+use crate::services::helper_dropdown::{render_autocomplete_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::get_wrapped_message_lines;
 use crate::services::message_pattern::{
@@ -18,6 +18,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
+const DROPDOWN_MAX_HEIGHT: usize = 8;
+
 pub fn view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
@@ -25,10 +27,16 @@ pub fn view(f: &mut Frame, state: &AppState) {
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
-        && !state.filtered_helpers.is_empty()
-        && state.input.starts_with('/');
+        && ((state.autocomplete.is_active() && !state.autocomplete.filtered_files.is_empty())
+            || (!state.autocomplete.is_active()
+                && !state.filtered_helpers.is_empty()
+                && state.input.starts_with('/')));
     let dropdown_height = if dropdown_showing {
-        state.filtered_helpers.len() as u16
+        if state.autocomplete.is_active() {
+            DROPDOWN_MAX_HEIGHT as u16
+        } else {
+            state.filtered_helpers.len() as u16
+        }
     } else {
         0
     };
@@ -102,6 +110,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
     if !state.is_dialog_open {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
+        render_autocomplete_dropdown(f, state, dropdown_area);
         if !dropdown_showing {
             render_hint_or_shortcuts(f, state, hint_area);
         }

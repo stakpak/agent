@@ -1,3 +1,4 @@
+use crate::services::auto_complete::AutoComplete;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
@@ -66,6 +67,7 @@ pub struct AppState {
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
     pub dialog_message_id: Option<Uuid>,
+    pub autocomplete: AutoComplete,
 }
 
 #[derive(Debug)]
@@ -210,6 +212,7 @@ impl AppState {
             ondemand_shell_mode: false,
             shell_tool_calls: None,
             dialog_message_id: None,
+            autocomplete: AutoComplete::new(),
         }
     }
 
