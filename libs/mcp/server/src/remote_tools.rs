@@ -36,16 +36,6 @@ pub struct GenerateCodeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct RemoteCodeSearchRequest {
-    #[schemars(
-        description = "The natural language query to find relevant code blocks, the more detailed the query the better the results will be"
-    )]
-    pub query: String,
-    #[schemars(description = "The maximum number of results to return (default: 10)")]
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchDocsRequest {
     #[schemars(
         description = "List of keywords to search for in the documentation. Searches against the url, title, description, and content of documentation chunks."
@@ -379,43 +369,6 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
         } else {
             Ok(CallToolResult::success(response))
         }
-    }
-
-    #[tool(
-        description = "Query remote configurations and infrastructure as code indexed in Stakpak using natural language. This function uses a smart retrival system to find relevant code blocks with a relevance score, not just keyword matching. This function is useful for finding code blocks that are not in your local filesystem."
-    )]
-    pub async fn remote_code_search(
-        &self,
-        Parameters(RemoteCodeSearchRequest { query, limit }): Parameters<RemoteCodeSearchRequest>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = Client::new(&self.get_api_config()).map_err(|e| {
-            error!("Failed to create client: {}", e);
-            McpError::internal_error(
-                "Failed to create client",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
-
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "smart_search_code".to_string(),
-                arguments: json!({
-                    "query": query,
-                    "limit": limit,
-                }),
-            })
-            .await
-        {
-            Ok(response) => response,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("REMOTE_CODE_SEARCH_ERROR"),
-                    Content::text(format!("Failed to search for code: {}", e)),
-                ]));
-            }
-        };
-
-        Ok(CallToolResult::success(response))
     }
 
     #[tool(
