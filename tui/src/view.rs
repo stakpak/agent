@@ -9,6 +9,7 @@ use crate::services::message_pattern::{
     spans_to_string,
 };
 use crate::services::sessions_dialog::render_sessions_dialog;
+use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
@@ -341,7 +342,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         // Add prompt to first line only
         if state.show_shell_mode {
             current_line.push(Span::styled(
-                " $ ",
+                " ".to_string() + SHELL_PROMPT_PREFIX,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),

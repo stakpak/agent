@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{ShellCommand, ShellEvent, run_background_shell_command};
+use crate::services::shell_mode::{
+    SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent, run_background_shell_command,
+};
 
 use crate::services::helper_block::push_error_message;
 #[cfg(unix)]
@@ -108,6 +110,7 @@ pub enum InputEvent {
     ShellError(String),
     ShellInputRequest(String),
     ShellCompleted(i32),
+    ShellClear,
     HandlePaste(String),
     InputDelete,
     InputDeleteWord,
@@ -217,7 +220,7 @@ impl AppState {
             self,
             &command,
             Color::Rgb(180, 180, 180),
-            "$ ",
+            SHELL_PROMPT_PREFIX,
             Color::Rgb(160, 92, 158),
         );
 
@@ -262,6 +265,9 @@ impl AppState {
                     ShellEvent::Completed(code) => {
                         let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
                         break;
+                    }
+                    ShellEvent::Clear => {
+                        let _ = input_tx.send(InputEvent::ShellClear).await;
                     }
                 }
             }

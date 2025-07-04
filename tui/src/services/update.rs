@@ -7,6 +7,7 @@ use crate::services::helper_block::{
     push_styled_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
+use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use stakpak_shared::helper::truncate_output;
@@ -190,6 +191,45 @@ pub fn update(
             state.cursor_position = 0;
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::ShellClear => {
+            // Clear the shell output buffer
+            if let Some(output) = state.active_shell_command_output.as_mut() {
+                output.clear();
+            }
+
+            // Find the last non-shell message to determine where current shell session started
+            let mut last_non_shell_index = None;
+            for (i, message) in state.messages.iter().enumerate().rev() {
+                let is_shell_message = match &message.content {
+                    MessageContent::Styled(line) => line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                        .starts_with(SHELL_PROMPT_PREFIX),
+                    MessageContent::Plain(text, _) => text.starts_with(SHELL_PROMPT_PREFIX),
+                    MessageContent::PlainText(_) => true,
+                    _ => false,
+                };
+
+                if !is_shell_message {
+                    last_non_shell_index = Some(i);
+                    break;
+                }
+            }
+
+            // If we found a non-shell message, clear everything after it (the current shell session)
+            if let Some(index) = last_non_shell_index {
+                // Keep messages up to and including the last non-shell message
+                state.messages.truncate(index + 1);
+            } else {
+                // If no non-shell messages found, clear all messages (entire session is shell)
+                state.messages.clear();
+            }
+
+            // Scroll to the bottom to show the cleared state
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
