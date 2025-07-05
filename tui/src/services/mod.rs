@@ -1,3 +1,4 @@
+pub mod auto_complete;
 pub mod bash_block;
 pub mod confirmation_dialog;
 pub mod helper_block;

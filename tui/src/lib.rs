@@ -132,12 +132,12 @@ pub async fn run_tui(
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                        if let InputEvent::InputSubmitted = event {
-                           if state.show_shell_mode && !state.waiting_for_shell_input {
+                        if state.show_helper_dropdown && state.autocomplete.is_active() {
+                        }else if state.show_shell_mode && !state.waiting_for_shell_input {
                            } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
                                let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                            }
                        }
-
                        services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
                    }
                }
