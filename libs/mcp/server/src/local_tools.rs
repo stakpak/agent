@@ -20,8 +20,10 @@ use uuid::Uuid;
 pub struct RunCommandRequest {
     #[schemars(description = "The shell command to execute")]
     pub command: String,
-    #[schemars(description = "Optional working directory for command execution")]
-    pub work_dir: Option<String>,
+    #[schemars(description = "Optional description of the command to execute")]
+    pub description: Option<String>,
+    #[schemars(description = "Optional timeout for the command execution in seconds")]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -85,7 +87,11 @@ If the command's output exceeds 300 lines the result will be truncated and the f
     pub async fn run_command(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(RunCommandRequest { command, work_dir }): Parameters<RunCommandRequest>,
+        Parameters(RunCommandRequest {
+            command,
+            description: _,
+            timeout,
+        }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
         const MAX_LINES: usize = 300;
 
@@ -99,7 +105,6 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         let mut child = Command::new("sh")
             .arg("-c")
             .arg(actual_command)
-            .current_dir(work_dir.unwrap_or(".".to_string()))
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -127,69 +132,89 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
 
-        // Read from both streams concurrently
-        loop {
-            tokio::select! {
-                Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
-                    if n == 0 {
-                        break;
+        // Helper function to stream output and wait for process completion
+        let stream_and_wait = async {
+            // Read from both streams concurrently
+            loop {
+                tokio::select! {
+                    Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
+                        if n == 0 {
+                            break;
+                        }
+                        let line = stderr_buf.trim_end_matches('\n').to_string();
+                        stderr_buf.clear();
+                        result.push_str(&format!("{}\n", line));
+                        // Send notification but continue processing
+                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 50,
+                            total: Some(100),
+                            message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                id: progress_id,
+                                message: line,
+                            }).unwrap_or_default()),
+                        }).await;
                     }
-                    let line = stderr_buf.trim_end_matches('\n').to_string();
-                    stderr_buf.clear();
-                    result.push_str(&format!("{}\n", line));
-                    // Send notification but continue processing
-                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                        progress_token: ProgressToken(NumberOrString::Number(0)),
-                        progress: 50,
-                        total: Some(100),
-                        message: Some(serde_json::to_string(&ToolCallResultProgress {
-                            id: progress_id,
-                            message: line,
-                        }).unwrap_or_default()),
-                    }).await;
+                    Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
+                        if n == 0 {
+                            break;
+                        }
+                        let line = stdout_buf.trim_end_matches('\n').to_string();
+                        stdout_buf.clear();
+                        result.push_str(&format!("{}\n", line));
+                        // Send notification but continue processing
+                        // skip if message is empty
+                        if line.is_empty() {
+                            continue;
+                        }
+                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 50,
+                            total: Some(100),
+                            message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                id: progress_id,
+                                message: format!("{}\n", line),
+                            }).unwrap_or_default()),
+                        }).await;
+                    }
+                    else => break,
                 }
-                Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
-                    if n == 0 {
-                        break;
-                    }
-                    let line = stdout_buf.trim_end_matches('\n').to_string();
-                    stdout_buf.clear();
-                    result.push_str(&format!("{}\n", line));
-                    // Send notification but continue processing
-                    // skip if message is empty
-                    if line.is_empty() {
-                        continue;
-                    }
-                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                        progress_token: ProgressToken(NumberOrString::Number(0)),
-                        progress: 50,
-                        total: Some(100),
-                        message: Some(serde_json::to_string(&ToolCallResultProgress {
-                            id: progress_id,
-                            message: format!("{}\n", line),
-                        }).unwrap_or_default()),
-                    }).await;
-                }
-                else => break,
             }
-        }
 
-        // Wait for the process to complete
-        let exit_code = child
-            .wait()
-            .await
-            .map_err(|e| {
+            // Wait for the process to complete
+            child.wait().await
+        };
+
+        // Execute with timeout if provided
+        let execution_result = if let Some(timeout_secs) = timeout {
+            let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+            tokio::time::timeout(timeout_duration, stream_and_wait).await
+        } else {
+            Ok(stream_and_wait.await)
+        };
+
+        let exit_code = match execution_result {
+            Ok(Ok(exit_status)) => exit_status.code().unwrap_or(-1),
+            Ok(Err(e)) => {
                 error!("Failed to wait for command: {}", e);
-                McpError::internal_error(
+                return Err(McpError::internal_error(
                     "Failed to wait for command",
                     Some(json!({
                         "command": command_clone,
                         "error": e.to_string()
                     })),
-                )
-            })?
-            .code()
-            .unwrap_or(-1);
+                ));
+            }
+            Err(_) => {
+                // Timeout occurred, kill the process
+                let _ = child.kill().await;
+                result.push_str(&format!(
+                    "Command timed out after {} seconds\n",
+                    timeout.unwrap_or_default()
+                ));
+                -1
+            }
+        };
 
         if exit_code != 0 {
             result.push_str(&format!("Command exited with code {}\n", exit_code));
@@ -583,8 +608,10 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         let length = length.unwrap_or(15);
         let no_symbols = no_symbols.unwrap_or(false);
 
-        let mut config = npwg::PasswordGeneratorConfig::default();
-        config.length = length;
+        let mut config = npwg::PasswordGeneratorConfig {
+            length,
+            ..Default::default()
+        };
 
         if no_symbols {
             config.excluded_chars = npwg::config::DEFINE
@@ -599,7 +626,7 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         } else {
             return Ok(CallToolResult::error(vec![
                 Content::text("FAILED_TO_GENERATE_PASSWORD"),
-                Content::text(format!("Failed to generate password")),
+                Content::text("Failed to generate password"),
             ]));
         };
 
