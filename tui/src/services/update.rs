@@ -1,4 +1,7 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
+use crate::services::auto_complete::{
+    find_at_trigger, get_current_word, handle_at_trigger, handle_file_selection, handle_tab_trigger,
+};
 use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
@@ -37,10 +40,7 @@ pub fn update(
                 if state.session_selected > 0 {
                     state.session_selected -= 1;
                 }
-            } else if state.show_helper_dropdown
-                && !state.filtered_helpers.is_empty()
-                && state.input.starts_with('/')
-            {
+            } else if state.show_helper_dropdown {
                 handle_dropdown_up(state);
             } else {
                 handle_scroll_up(state);
@@ -51,10 +51,7 @@ pub fn update(
                 if state.session_selected + 1 < state.sessions.len() {
                     state.session_selected += 1;
                 }
-            } else if state.show_helper_dropdown
-                && !state.filtered_helpers.is_empty()
-                && state.input.starts_with('/')
-            {
+            } else if state.show_helper_dropdown {
                 handle_dropdown_down(state);
             } else {
                 handle_scroll_down(state, message_area_height, message_area_width);
@@ -322,25 +319,57 @@ fn handle_shell_mode(state: &mut AppState) {
     state.cursor_position = 0;
 }
 
-fn handle_tab(_state: &mut AppState) {}
+fn handle_tab(state: &mut AppState) {
+    // Check if we're already in helper dropdown mode
+    if state.show_helper_dropdown {
+        // If in file autocomplete mode, handle file selection
+        if state.autocomplete.is_active() {
+            let selected_file = state
+                .autocomplete
+                .get_file_at_index(state.helper_selected)
+                .map(|s| s.to_string());
+            if let Some(selected_file) = selected_file {
+                handle_file_selection(state, &selected_file);
+            }
+            return;
+        }
+        // Handle regular helper selection (existing behavior)
+        return;
+    }
+    // Trigger file autocomplete with Tab
+    handle_tab_trigger(state);
+}
 
 fn handle_dropdown_up(state: &mut AppState) {
-    if state.show_helper_dropdown
-        && !state.filtered_helpers.is_empty()
-        && state.input.starts_with('/')
-        && state.helper_selected > 0
-    {
-        state.helper_selected -= 1;
+    if state.show_helper_dropdown && state.helper_selected > 0 {
+        if state.autocomplete.is_active() {
+            // File autocomplete mode
+            state.helper_selected -= 1;
+        } else {
+            // Regular helper mode
+            if !state.filtered_helpers.is_empty() && state.input.starts_with('/') {
+                state.helper_selected -= 1;
+            }
+        }
     }
 }
 
 fn handle_dropdown_down(state: &mut AppState) {
-    if state.show_helper_dropdown
-        && !state.filtered_helpers.is_empty()
-        && state.input.starts_with('/')
-        && state.helper_selected + 1 < state.filtered_helpers.len()
-    {
-        state.helper_selected += 1;
+    if state.show_helper_dropdown {
+        if state.autocomplete.is_active() {
+            // File autocomplete mode
+            if state.helper_selected + 1 < state.autocomplete.filtered_count() {
+                state.helper_selected += 1;
+            }
+        } else {
+            // Regular helper mode
+            if !state.filtered_helpers.is_empty()
+                && state.input.starts_with('/')
+                && state.helper_selected + 1 < state.filtered_helpers.len()
+            {
+                state.helper_selected += 1;
+            }
+        }
     }
 }
 
@@ -359,7 +388,26 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
 
+    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
+    if let Some(at_pos) = find_at_trigger(state) {
+        let is_valid_at = at_pos == 0
+            || state
+                .input
+                .chars()
+                .nth(at_pos.saturating_sub(1))
+                .map_or(false, |ch| ch.is_whitespace());
+        if is_valid_at {
+            handle_at_trigger(state);
+        }
+    }
+
+    // Handle existing / helper logic
     if state.input.starts_with('/') {
+        // Reset file autocomplete if we switch to command mode
+        if state.autocomplete.is_active() {
+            state.autocomplete.reset();
+        }
+
         state.show_helper_dropdown = true;
         state.filtered_helpers = state
             .helpers
@@ -373,9 +421,26 @@ fn handle_input_changed(state: &mut AppState, c: char) {
             state.helper_selected = 0;
         }
     } else {
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.helper_selected = 0;
+        // If we're in file autocomplete mode and typing after @, update the filter
+        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
+            let current_word = get_current_word(&state, Some('@'));
+            state.autocomplete.filter_files(&current_word);
+
+            if state.autocomplete.filtered_count() == 0 {
+                state.show_helper_dropdown = false;
+                state.autocomplete.reset();
+            } else {
+                state.helper_selected = state
+                    .helper_selected
+                    .min(state.autocomplete.filtered_count().saturating_sub(1));
+            }
+        } else {
+            // Regular behavior - hide helper dropdown
+            state.show_helper_dropdown = false;
+            state.filtered_helpers.clear();
+            state.helper_selected = 0;
+            state.autocomplete.reset();
+        }
     }
 }
 
@@ -391,6 +456,20 @@ fn handle_input_backspace(state: &mut AppState) {
         state.input.drain(remove_at..pos);
         state.cursor_position = remove_at;
     }
+
+    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
+    if let Some(at_pos) = find_at_trigger(state) {
+        let is_valid_at = at_pos == 0
+            || state
+                .input
+                .chars()
+                .nth(at_pos.saturating_sub(1))
+                .map_or(false, |ch| ch.is_whitespace());
+        if is_valid_at {
+            handle_at_trigger(state);
+        }
+    }
+
     if state.input.starts_with('/') {
         state.show_helper_dropdown = true;
         state.filtered_helpers = state
@@ -405,9 +484,32 @@ fn handle_input_backspace(state: &mut AppState) {
             state.helper_selected = 0;
         }
     } else {
-        state.show_helper_dropdown = false;
-        state.filtered_helpers.clear();
-        state.helper_selected = 0;
+        // Check if we're still in @ autocomplete mode
+        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
+            // Check if @ still exists
+            if find_at_trigger(&state).is_some() {
+                let current_word = get_current_word(&state, Some('@'));
+                state.autocomplete.filter_files(&current_word);
+
+                if state.autocomplete.filtered_count() == 0 {
+                    state.show_helper_dropdown = false;
+                    state.autocomplete.reset();
+                } else {
+                    state.helper_selected = state
+                        .helper_selected
+                        .min(state.autocomplete.filtered_count().saturating_sub(1));
+                }
+            } else {
+                // @ was deleted, exit autocomplete mode
+                state.show_helper_dropdown = false;
+                state.autocomplete.reset();
+            }
+        } else {
+            state.show_helper_dropdown = false;
+            state.filtered_helpers.clear();
+            state.helper_selected = 0;
+            state.autocomplete.reset();
+        }
     }
 }
 
@@ -417,10 +519,6 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
-        // Remove the pending bash bubble
-        if let Some(id) = state.dialog_message_id.take() {
-            state.messages.retain(|m| m.id != id);
-        }
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
@@ -429,6 +527,8 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
+        state.input.clear();
+        state.cursor_position = 0;
     } else if state.show_shell_mode {
         state.show_shell_mode = false;
         state.input.clear();
@@ -436,10 +536,10 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         if state.dialog_command.is_some() {
             state.is_dialog_open = true;
         }
+    } else {
+        state.input.clear();
+        state.cursor_position = 0;
     }
-
-    state.input.clear();
-    state.cursor_position = 0;
 }
 
 fn handle_input_submitted(
@@ -504,71 +604,61 @@ fn handle_input_submitted(
         }
 
         state.dialog_command = None;
-    } else if state.show_helper_dropdown && !state.filtered_helpers.is_empty() {
-        let selected = state.filtered_helpers[state.helper_selected];
-
-        match selected {
-            "/sessions" => {
-                state.loading_type = LoadingType::Sessions;
-                state.loading = true;
-                let _ = output_tx.try_send(OutputEvent::ListSessions);
-                state.input.clear();
-                state.cursor_position = 0;
-                state.show_helper_dropdown = false;
-                return;
+    } else if state.show_helper_dropdown {
+        if state.autocomplete.is_active() {
+            let selected_file = state
+                .autocomplete
+                .get_file_at_index(state.helper_selected)
+                .map(|s| s.to_string());
+            if let Some(selected_file) = selected_file {
+                handle_file_selection(state, &selected_file);
             }
-            "/memorize" => {
-                push_memorize_message(state);
-                let _ = output_tx.try_send(OutputEvent::Memorize);
-                state.input.clear();
-                state.cursor_position = 0;
-                state.show_helper_dropdown = false;
-                return;
-            }
-            "/help" => {
-                push_help_message(state);
-                state.input.clear();
-                state.cursor_position = 0;
-                state.show_helper_dropdown = false;
-                return;
-            }
-            "/status" => {
-                push_status_message(state);
-                state.input.clear();
-                state.cursor_position = 0;
-                state.show_helper_dropdown = false;
-                return;
-            }
-            "/quit" => {
-                state.show_helper_dropdown = false;
-                state.input.clear();
-                state.cursor_position = 0;
-                std::process::exit(0);
-            }
-            _ => {}
+            return;
         }
+        if !state.filtered_helpers.is_empty() {
+            let selected = state.filtered_helpers[state.helper_selected];
 
-        let total_lines = state.messages.len() * 2;
-        let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
-        let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        let was_at_bottom = state.scroll == max_scroll;
-        state
-            .messages
-            .push(Message::user(format!("> {}", selected), None));
-        state.input.clear();
-        state.cursor_position = 0;
-        state.show_helper_dropdown = false;
-        state.helper_selected = 0;
-        state.filtered_helpers = state.helpers.clone();
-        let total_lines = state.messages.len() * 2;
-        let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        if was_at_bottom {
-            state.scroll = max_scroll;
-            state.scroll_to_bottom = true;
-            state.stay_at_bottom = true;
+            match selected {
+                "/sessions" => {
+                    state.loading_type = LoadingType::Sessions;
+                    state.loading = true;
+                    let _ = output_tx.try_send(OutputEvent::ListSessions);
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/memorize" => {
+                    push_memorize_message(state);
+                    let _ = output_tx.try_send(OutputEvent::Memorize);
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/help" => {
+                    push_help_message(state);
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/status" => {
+                    push_status_message(state);
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/quit" => {
+                    state.show_helper_dropdown = false;
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    std::process::exit(1);
+                }
+                _ => {}
+            }
         }
-        state.loading = true;
-        state.spinner_frame = 0;
     } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
