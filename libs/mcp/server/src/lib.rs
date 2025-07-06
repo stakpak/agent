@@ -10,6 +10,7 @@ pub mod remote_tools;
 pub mod secret_manager;
 pub mod tool_container;
 
+use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
 use tracing::error;
 
@@ -54,6 +55,12 @@ pub struct MCPServerConfig {
     pub tool_mode: ToolMode,
 }
 
+pub struct MCPServerConfigWithoutBindAddress {
+    pub api: ClientConfig,
+    pub redact_secrets: bool,
+    pub tool_mode: ToolMode,
+}
+
 /// Initialize gitleaks configuration if secret redaction is enabled
 async fn init_gitleaks_if_needed(redact_secrets: bool) {
     if redact_secrets {
@@ -68,28 +75,8 @@ async fn init_gitleaks_if_needed(redact_secrets: bool) {
     }
 }
 
-// /// Initialize code index in background if needed for remote/combined modes
-// async fn init_code_index_if_needed(tool_mode: &ToolMode, api_config: &ClientConfig) {
-//     match tool_mode {
-//         ToolMode::RemoteOnly | ToolMode::Combined => {
-//             let api_config = api_config.clone();
-//             tokio::spawn(async move {
-//                 match get_or_build_local_code_index(&api_config, None).await {
-//                     Ok(_) => if let Ok(_handle) = start_code_index_watcher(&api_config, None) {},
-//                     Err(_) => {
-//                         // Index will be built on first use if initialization fails
-//                     }
-//                 }
-//             });
-//         }
-//         ToolMode::LocalOnly => {
-//             // No code index needed for local-only mode
-//         }
-//     }
-// }
-
 /// Create graceful shutdown handler
-async fn create_shutdown_handler(shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>) {
+async fn create_shutdown_handler(shutdown_rx: Option<Receiver<()>>) {
     if let Some(mut shutdown_rx) = shutdown_rx {
         let _ = shutdown_rx.recv().await;
     } else {
@@ -149,27 +136,28 @@ async fn create_shutdown_handler(shutdown_rx: Option<tokio::sync::broadcast::Rec
     }
 }
 
-/// npx @modelcontextprotocol/inspector cargo run mcp
-pub async fn start_server(
-    config: MCPServerConfig,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+/// Internal helper function that contains the common server initialization logic
+async fn start_server_internal(
+    api: ClientConfig,
+    redact_secrets: bool,
+    tool_mode: ToolMode,
+    tcp_listener: TcpListener,
+    shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets).await;
+    init_gitleaks_if_needed(redact_secrets).await;
 
-    let tool_container = match config.tool_mode {
-        ToolMode::LocalOnly => ToolContainer::new(
-            None,
-            config.redact_secrets,
-            ToolContainer::tool_router_local(),
-        ),
+    let tool_container = match tool_mode {
+        ToolMode::LocalOnly => {
+            ToolContainer::new(None, redact_secrets, ToolContainer::tool_router_local())
+        }
         ToolMode::RemoteOnly => ToolContainer::new(
-            Some(config.api),
-            config.redact_secrets,
+            Some(api),
+            redact_secrets,
             ToolContainer::tool_router_remote(),
         ),
         ToolMode::Combined => ToolContainer::new(
-            Some(config.api),
-            config.redact_secrets,
+            Some(api),
+            redact_secrets,
             ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
         ),
     }
@@ -184,7 +172,6 @@ pub async fn start_server(
         Default::default(),
     );
     let router = axum::Router::new().nest_service("/mcp", service);
-    let tcp_listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     axum::serve(tcp_listener, router)
         .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
         .await?;
@@ -192,11 +179,43 @@ pub async fn start_server(
     Ok(())
 }
 
+/// npx @modelcontextprotocol/inspector cargo run mcp
+pub async fn start_server(
+    config: MCPServerConfig,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    let tcp_listener = TcpListener::bind(config.bind_address).await?;
+    start_server_internal(
+        config.api,
+        config.redact_secrets,
+        config.tool_mode,
+        tcp_listener,
+        shutdown_rx,
+    )
+    .await
+}
+
+/// Start server with a pre-bound TcpListener to avoid port collision race conditions
+pub async fn start_server_with_listener(
+    config: MCPServerConfigWithoutBindAddress,
+    tcp_listener: TcpListener,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    start_server_internal(
+        config.api,
+        config.redact_secrets,
+        config.tool_mode,
+        tcp_listener,
+        shutdown_rx,
+    )
+    .await
+}
+
 /// Start server with local tools only (no API key required)
 pub async fn start_local_server(
     bind_address: String,
     redact_secrets: bool,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -218,7 +237,7 @@ pub async fn start_remote_server(
     api_config: ClientConfig,
     bind_address: String,
     redact_secrets: bool,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -237,7 +256,7 @@ pub async fn start_combined_server(
     api_config: ClientConfig,
     bind_address: String,
     redact_secrets: bool,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {

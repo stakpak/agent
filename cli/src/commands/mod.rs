@@ -10,7 +10,7 @@ use stakpak_api::{
     Client, ClientConfig,
     models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
 };
-use stakpak_mcp_server::{MCPServerConfig, ToolMode};
+use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -210,15 +210,16 @@ impl Commands {
                     ToolMode::LocalOnly => {}
                 }
 
-                let bind_address = network::find_available_bind_address_descending().await?;
+                let (bind_address, listener) =
+                    network::find_available_bind_address_with_listener().await?;
                 println!("MCP server started at http://{}", bind_address);
-                stakpak_mcp_server::start_server(
-                    MCPServerConfig {
+                start_server_with_listener(
+                    MCPServerConfigWithoutBindAddress {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
-                        bind_address: bind_address.clone(),
                         tool_mode,
                     },
+                    listener,
                     None,
                 )
                 .await
