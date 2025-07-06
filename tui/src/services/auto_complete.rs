@@ -1,3 +1,4 @@
+use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
 use std::fs;
 use std::path::Path;
 
@@ -24,35 +25,46 @@ impl AutoComplete {
     /// Load all files from current directory recursively
     pub fn load_files_from_directory(&mut self, dir: &Path) {
         self.file_suggestions.clear();
-        self.collect_files_recursive(dir, dir);
+        // Read gitignore patterns from the directory
+        let base_dir = dir.to_string_lossy();
+        let ignore_patterns = read_gitignore_patterns(&base_dir);
+        self.collect_files_recursive(dir, dir, &ignore_patterns);
     }
 
-    fn collect_files_recursive(&mut self, current_dir: &Path, base_dir: &Path) {
+    fn collect_files_recursive(
+        &mut self,
+        current_dir: &Path,
+        base_dir: &Path,
+        ignore_patterns: &[String],
+    ) {
         if let Ok(entries) = fs::read_dir(current_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
 
-                // Skip hidden files and common ignore patterns
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with('.')
-                        || name == "target"
-                        || name == "node_modules"
-                        || name.ends_with(".lock")
-                    {
-                        continue;
-                    }
+                // Get relative path from base directory for gitignore matching
+                let relative_path = match path.strip_prefix(base_dir) {
+                    Ok(rel_path) => rel_path,
+                    Err(_) => &path,
+                };
+                let path_str = relative_path.to_string_lossy();
+
+                // Check if path matches any gitignore pattern
+                let should_ignore = ignore_patterns
+                    .iter()
+                    .any(|pattern| matches_gitignore_pattern(pattern, &path_str));
+
+                if should_ignore {
+                    continue;
                 }
 
                 if path.is_file() {
-                    // Get relative path from base directory
-                    if let Ok(relative_path) = path.strip_prefix(base_dir) {
-                        if let Some(path_str) = relative_path.to_str() {
-                            self.file_suggestions.push(path_str.to_string());
-                        }
+                    // Add relative path from base directory
+                    if let Some(path_str) = relative_path.to_str() {
+                        self.file_suggestions.push(path_str.to_string());
                     }
                 } else if path.is_dir() {
                     // Recursively collect from subdirectories
-                    self.collect_files_recursive(&path, base_dir);
+                    self.collect_files_recursive(&path, base_dir, ignore_patterns);
                 }
             }
         }
