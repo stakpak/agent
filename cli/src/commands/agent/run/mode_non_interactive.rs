@@ -8,7 +8,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode};
+use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
 use stakpak_shared::models::integrations::openai::ChatMessage;
 
 pub struct RunNonInteractiveConfig {
@@ -28,20 +28,20 @@ pub async fn run_non_interactive(
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
     let ctx_clone = ctx.clone();
-    let bind_address = network::find_available_bind_address_descending().await?;
+    let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
 
     tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(
-            MCPServerConfig {
+        let _ = start_server_with_listener(
+            MCPServerConfigWithoutBindAddress {
                 api: ClientConfig {
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
                 redact_secrets: config.redact_secrets,
-                bind_address,
                 tool_mode: ToolMode::Combined,
             },
+            listener,
             None,
         )
         .await;

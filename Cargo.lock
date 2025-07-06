@@ -3686,6 +3686,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "names",
+ "rand 0.9.1",
  "regex",
  "reqwest",
  "rmcp",

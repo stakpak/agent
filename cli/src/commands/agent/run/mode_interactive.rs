@@ -15,7 +15,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode};
+use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
 use uuid::Uuid;
@@ -35,21 +35,21 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
     let ctx_clone = ctx.clone();
-    let bind_address = network::find_available_bind_address_descending().await?;
+    let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
 
     // Spawn MCP server task
     let mcp_handle = tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(
-            MCPServerConfig {
+        let _ = start_server_with_listener(
+            MCPServerConfigWithoutBindAddress {
                 api: ClientConfig {
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
                 redact_secrets: config.redact_secrets,
-                bind_address,
                 tool_mode: ToolMode::Combined,
             },
+            listener,
             Some(shutdown_rx),
         )
         .await;
