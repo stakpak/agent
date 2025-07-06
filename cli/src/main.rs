@@ -12,7 +12,7 @@ use commands::{
     Commands,
     agent::{
         self,
-        run::{RunAsyncConfig, RunInteractiveConfig, RunNonInteractiveConfig},
+        run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
     },
 };
 use config::AppConfig;
@@ -26,15 +26,15 @@ use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher}
 #[command(name = "stakpak")]
 #[command(about = "Stakpak CLI tool", long_about = None)]
 struct Cli {
-    /// Run the agent in non-interactive mode
+    /// Run the agent for a single step and print the response
     #[arg(short = 'p', long = "print", default_value_t = false)]
     print: bool,
 
-    /// Run the agent in asyncronous mode
+    /// Run the agent in async mode (multiple steps until completion)
     #[arg(short = 'a', long = "async", default_value_t = false)]
     r#async: bool,
 
-    /// Maximum number of steps the agent can take in async mode
+    /// Maximum number of steps the agent can take (default: 50 for --async, 1 for --print/--approve)
     #[arg(short = 'm', long = "max-steps")]
     max_steps: Option<usize>,
 
@@ -46,13 +46,13 @@ struct Cli {
     #[arg(short = 'w', long = "workdir")]
     workdir: Option<String>,
 
-    /// Approve the tool call in non-interactive mode
-    #[arg(long = "approve", default_value_t = false)]
-    approve: bool,
-
-    /// Enable verbose output in non-interactive mode
+    /// Enable verbose output
     #[arg(long = "verbose", default_value_t = false)]
     verbose: bool,
+
+    /// Output format: json or text
+    #[arg(short = 'o', long = "output", default_value_t = OutputFormat::Text)]
+    output_format: OutputFormat,
 
     /// Enable debug output
     #[arg(long = "debug", default_value_t = false)]
@@ -70,7 +70,7 @@ struct Cli {
     #[arg(long = "disable-official-rulebooks", default_value_t = false)]
     disable_official_rulebooks: bool,
 
-    /// Prompt to run the agent with in non-interactive mode
+    /// Prompt to run the agent with (required when using --print or --async)
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
 
@@ -199,9 +199,19 @@ async fn main() {
                         }
                     }
 
-                    match (cli.r#async, cli.print || cli.approve) {
-                        // Async mode: run continuously until no more tool calls
-                        (true, _) => match agent::run::run_async(
+                    // Determine if we should use async mode (either explicit --async or --print/--approve)
+                    let use_async_mode = cli.r#async || cli.print;
+
+                    // Determine max_steps: 1 for single-step mode (--print/--approve), user setting or default for --async
+                    let max_steps = if cli.print {
+                        Some(1) // Force single step for non-interactive-like behavior
+                    } else {
+                        cli.max_steps // Use user setting or default (50)
+                    };
+
+                    match use_async_mode {
+                        // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
+                        true => match agent::run::run_async(
                             config,
                             RunAsyncConfig {
                                 prompt: cli.prompt.unwrap_or_default(),
@@ -210,29 +220,8 @@ async fn main() {
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
                                 rulebooks,
-                                max_steps: cli.max_steps,
-                            },
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                eprintln!("Ops! something went wrong: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
-
-                        // Non-interactive mode: run one step at a time
-                        (false, true) => match agent::run::run_non_interactive(
-                            config,
-                            RunNonInteractiveConfig {
-                                prompt: cli.prompt.unwrap_or_default(),
-                                approve: cli.approve,
-                                verbose: cli.verbose,
-                                checkpoint_id: cli.checkpoint_id,
-                                local_context,
-                                redact_secrets: !cli.disable_secret_redaction,
-                                rulebooks,
+                                max_steps,
+                                output_format: cli.output_format,
                             },
                         )
                         .await
@@ -245,7 +234,7 @@ async fn main() {
                         },
 
                         // Interactive mode: run in TUI
-                        (false, false) => match agent::run::run_interactive(
+                        false => match agent::run::run_interactive(
                             config,
                             RunInteractiveConfig {
                                 checkpoint_id: cli.checkpoint_id,
