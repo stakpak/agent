@@ -32,6 +32,7 @@ pub fn update(
     output_tx: &Sender<OutputEvent>,
     terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
+    input_tx: &Sender<InputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -63,7 +64,7 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx, shell_tx);
+                handle_input_submitted(state, message_area_height, output_tx, shell_tx, input_tx);
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
@@ -547,6 +548,7 @@ fn handle_input_submitted(
     message_area_height: usize,
     output_tx: &Sender<OutputEvent>,
     shell_tx: &Sender<InputEvent>,
+    input_tx: &Sender<InputEvent>,
 ) {
     let input_height = 3;
     if state.show_shell_mode {
@@ -654,7 +656,9 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                     state.input.clear();
                     state.cursor_position = 0;
-                    std::process::exit(1);
+                    let _ = input_tx.try_send(InputEvent::Quit);
+                    return;
+                   
                 }
                 _ => {}
             }
