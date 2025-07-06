@@ -88,7 +88,7 @@ impl WardenCommands {
                 }
 
                 if let Some(command) = command {
-                    cmd.arg(format!("\"{}\"", command));
+                    cmd.arg(command);
                 }
             }
             WardenCommands::Logs {
