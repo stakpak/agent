@@ -9,7 +9,7 @@ use crate::utils::network;
 use serde_json::Value;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode};
+use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use std::time::Instant;
@@ -305,20 +305,20 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     // Initialize MCP server
     print_info("Initializing MCP server and client connections...");
     let ctx_clone = ctx.clone();
-    let bind_address = network::find_available_bind_address_descending().await?;
+    let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
     let redact_secrets = config.redact_secrets;
     tokio::spawn(async move {
-        let _ = stakpak_mcp_server::start_server(
-            MCPServerConfig {
+        let _ = start_server_with_listener(
+            MCPServerConfigWithoutBindAddress {
                 api: ClientConfig {
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
-                bind_address,
                 redact_secrets,
                 tool_mode: ToolMode::Combined,
             },
+            listener,
             None,
         )
         .await;
