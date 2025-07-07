@@ -18,6 +18,7 @@ impl ToolContainer {
     pub fn new(
         api_config: Option<ClientConfig>,
         redact_secrets: bool,
+        privacy_mode: bool,
         tool_router: ToolRouter<Self>,
     ) -> Result<Self, String> {
         let client = if let Some(api_config) = api_config {
@@ -28,7 +29,7 @@ impl ToolContainer {
 
         Ok(Self {
             client,
-            secret_manager: SecretManager::new(redact_secrets),
+            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             tool_router,
         })
     }

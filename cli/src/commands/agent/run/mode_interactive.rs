@@ -24,6 +24,7 @@ pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
     pub local_context: Option<LocalContext>,
     pub redact_secrets: bool,
+    pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
 }
 
@@ -47,6 +48,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
                 redact_secrets: config.redact_secrets,
+                privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
             },
             listener,
