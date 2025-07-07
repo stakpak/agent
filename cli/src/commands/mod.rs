@@ -15,6 +15,7 @@ use termimad::MadSkin;
 use walkdir::WalkDir;
 
 pub mod agent;
+pub mod auto_update;
 pub mod flow;
 pub mod warden;
 
@@ -168,6 +169,8 @@ pub enum Commands {
         #[command(subcommand)]
         command: Option<warden::WardenCommands>,
     },
+    /// Update Stakpak Agent to the latest version
+    Update,
 }
 
 impl Commands {
@@ -561,6 +564,9 @@ impl Commands {
                         warden::run_default_warden(config, volume, env).await?;
                     }
                 }
+            }
+            Commands::Update => {
+                auto_update::run_auto_update().await?;
             }
         }
         Ok(())
