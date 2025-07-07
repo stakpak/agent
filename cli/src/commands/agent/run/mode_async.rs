@@ -10,7 +10,7 @@ use crate::utils::network;
 
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
+use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use std::time::Instant;
@@ -43,9 +43,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
+    let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(false).await;
+    let mcp_auth_config_clone = mcp_auth_config.clone();
     tokio::spawn(async move {
-        let _ = start_server_with_listener(
-            MCPServerConfigWithoutBindAddress {
+        let _ = start_server(
+            MCPServerConfig {
                 api: ClientConfig {
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
@@ -53,16 +55,22 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
+                auth: mcp_auth_config_clone,
+                bind_address,
             },
-            listener,
+            Some(listener),
             None,
         )
         .await;
     });
 
-    let clients = ClientManager::new(ctx.mcp_server_host.unwrap_or(local_mcp_server_host), None)
-        .await
-        .map_err(|e| e.to_string())?;
+    let clients = ClientManager::new(
+        ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
+        mcp_auth_config.token,
+        None,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map(&tools_map);
 
