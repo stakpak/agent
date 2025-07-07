@@ -32,24 +32,45 @@ impl fmt::Display for RedactionResult {
 }
 
 /// Redacts secrets from the input string and returns both the redacted string and redaction mapping
+///
+/// When privacy_mode is enabled, also detects and redacts private data like IP addresses and AWS account IDs
 pub fn redact_secrets(
     content: &str,
     path: Option<&str>,
     old_redaction_map: &HashMap<String, String>,
+    privacy_mode: bool,
 ) -> RedactionResult {
-    let secrets = detect_secrets(content, path);
+    let mut secrets = detect_secrets(content, path, privacy_mode);
 
-    if secrets.is_empty() {
-        return RedactionResult::new(content.to_string(), HashMap::new());
-    }
-
-    let mut redacted_string = content.to_string();
     let mut redaction_map = old_redaction_map.clone();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
         .clone()
         .into_iter()
         .map(|(k, v)| (v, k))
         .collect();
+
+    for (original_secret, redaction_key) in &reverse_redaction_map {
+        // Extract rule_id from redaction_key format: [REDACTED_SECRET:rule_id:id]
+        let key_parts = redaction_key.split(':').collect::<Vec<&str>>();
+        if key_parts.len() == 3 {
+            let rule_id = key_parts[1].to_string();
+            if let Some(start) = content.find(original_secret) {
+                let end = start + original_secret.len();
+                secrets.push(DetectedSecret {
+                    rule_id,
+                    value: original_secret.clone(),
+                    start_pos: start,
+                    end_pos: end,
+                });
+            }
+        }
+    }
+
+    if secrets.is_empty() {
+        return RedactionResult::new(content.to_string(), HashMap::new());
+    }
+
+    let mut redacted_string = content.to_string();
 
     // Deduplicate overlapping secrets - keep the longest one
     let mut deduplicated_secrets: Vec<DetectedSecret> = Vec::new();
@@ -218,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_empty_input() {
-        let result = redact_secrets("", None, &HashMap::new());
+        let result = redact_secrets("", None, &HashMap::new(), false);
         assert_eq!(result.redacted_string, "");
         assert!(result.redaction_map.is_empty());
     }
@@ -248,7 +269,7 @@ mod tests {
     fn test_redact_secrets_with_api_key() {
         // Use a pattern that matches the generic-api-key rule
         let input = "export API_KEY=abc123def456ghi789jkl012mno345pqr678";
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the API key and redact it
         assert!(result.redaction_map.len() > 0);
@@ -261,7 +282,7 @@ mod tests {
     #[test]
     fn test_redact_secrets_with_aws_key() {
         let input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE";
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the AWS access key
         assert!(result.redaction_map.len() > 0);
@@ -276,7 +297,7 @@ mod tests {
         export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE
         export AWS_ACCESS_KEY_ID_2=AKIAIOSFODNN7EX23PLE
         "#;
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         assert_eq!(result.redaction_map.len(), 1);
     }
@@ -289,8 +310,8 @@ mod tests {
         let input_2 = r#"
         export SOME_OTHER_SECRET=AKIAIOSFODNN7EX23PLE
         "#;
-        let result_1 = redact_secrets(input_1, None, &HashMap::new());
-        let result_2 = redact_secrets(input_2, None, &result_1.redaction_map);
+        let result_1 = redact_secrets(input_1, None, &HashMap::new(), false);
+        let result_2 = redact_secrets(input_2, None, &result_1.redaction_map, false);
 
         assert_eq!(result_1.redaction_map, result_2.redaction_map);
     }
@@ -298,7 +319,7 @@ mod tests {
     #[test]
     fn test_redact_secrets_with_github_token() {
         let input = "GITHUB_TOKEN=ghp_1234567890abcdef1234567890abcdef12345678";
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the GitHub PAT
         assert!(result.redaction_map.len() > 0);
@@ -310,7 +331,7 @@ mod tests {
     #[test]
     fn test_no_secrets() {
         let input = "This is just a normal string with no secrets";
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should not detect any secrets
         assert_eq!(result.redaction_map.len(), 0);
@@ -369,7 +390,7 @@ mod tests {
 
             for input in test_inputs {
                 println!("\nTesting input: {}", input);
-                let result = redact_secrets(input, None, &HashMap::new());
+                let result = redact_secrets(input, None, &HashMap::new(), false);
                 println!("  Detected secrets: {}", result.redaction_map.len());
                 if result.redaction_map.len() > 0 {
                     println!("  Redacted: {}", result.redacted_string);
@@ -425,7 +446,7 @@ mod tests {
         }
 
         // Also test the full redact_secrets function
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
         println!(
             "Full function result: {} secrets detected",
             result.redaction_map.len()
@@ -577,7 +598,7 @@ mod tests {
             }
 
             // Test the full redact_secrets function
-            let result = redact_secrets(input, None, &HashMap::new());
+            let result = redact_secrets(input, None, &HashMap::new(), false);
             println!(
                 "  Full function detected: {} secrets",
                 result.redaction_map.len()
@@ -676,7 +697,7 @@ export PORT=3000
 
         println!("Original input:\n{}", input);
 
-        let result = redact_secrets(input, None, &HashMap::new());
+        let result = redact_secrets(input, None, &HashMap::new(), false);
 
         println!("Redacted output:\n{}", result.redacted_string);
         println!("\nDetected {} secrets:", result.redaction_map.len());
@@ -735,7 +756,7 @@ export PORT=3000
 
         // Test 1: Input with keywords should be processed
         let input_with_keywords = "export API_KEY=abc123def456ghi789jklmnop";
-        let result1 = redact_secrets(input_with_keywords, None, &HashMap::new());
+        let result1 = redact_secrets(input_with_keywords, None, &HashMap::new(), false);
         println!("\nTest 1 - Input WITH keywords:");
         println!("  Input: {}", input_with_keywords);
         println!(
@@ -746,7 +767,7 @@ export PORT=3000
 
         // Test 2: Input without any keywords should NOT be processed for that rule
         let input_without_keywords = "export DATABASE_URL=postgresql://user:pass@localhost/db";
-        let result2 = redact_secrets(input_without_keywords, None, &HashMap::new());
+        let result2 = redact_secrets(input_without_keywords, None, &HashMap::new(), false);
         println!("\nTest 2 - Input WITHOUT generic-api-key keywords:");
         println!("  Input: {}", input_without_keywords);
         println!(
@@ -762,7 +783,7 @@ export PORT=3000
             .find(|r| r.id == "aws-access-token")
             .unwrap();
         let aws_input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
-        let result3 = redact_secrets(aws_input, None, &HashMap::new());
+        let result3 = redact_secrets(aws_input, None, &HashMap::new(), false);
         println!("\nTest 3 - AWS input:");
         println!("  Input: {}", aws_input);
         println!("  AWS rule keywords: {:?}", aws_rule.keywords);
@@ -811,7 +832,7 @@ export PORT=3000
             config.rules.len()
         );
 
-        let result = redact_secrets(no_keywords_input, None, &HashMap::new());
+        let result = redact_secrets(no_keywords_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 2: Input with specific keywords should only process relevant rules
@@ -827,7 +848,7 @@ export PORT=3000
         }
         println!("  Rules that would be processed: {:?}", matching_rules);
 
-        let result = redact_secrets(specific_keywords_input, None, &HashMap::new());
+        let result = redact_secrets(specific_keywords_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 3: Verify that rules without keywords are always processed
@@ -864,31 +885,25 @@ export PORT=3000
 
     #[test]
     fn test_keyword_filtering_efficiency() {
-        println!("=== TESTING KEYWORD FILTERING EFFICIENCY ===");
+        println!("=== KEYWORD FILTERING EFFICIENCY TEST ===");
 
         let config = &*GITLEAKS_CONFIG;
+        println!("Total rules in config: {}", config.rules.len());
 
-        // Create input that contains no secret-related keywords at all
-        let non_secret_input =
-            "export DATABASE_CONNECTION=localhost:5432 LOG_LEVEL=info TIMEOUT=30";
+        // Test with input that has NO matching keywords
+        let non_secret_input = "export DATABASE_URL=localhost PORT=3000 DEBUG=true TIMEOUT=30";
+        println!("\nTesting non-secret input: {}", non_secret_input);
 
-        println!("Testing input with no secret keywords:");
-        println!("  Input: {}", non_secret_input);
-
-        // Count how many rules would be skipped due to keyword filtering
         let mut rules_skipped = 0;
         let mut rules_processed = 0;
 
         for rule in &config.rules {
-            if !rule.keywords.is_empty() && !contains_any_keyword(non_secret_input, &rule.keywords)
-            {
-                rules_skipped += 1;
-            } else {
+            if rule.keywords.is_empty() {
                 rules_processed += 1;
-                println!(
-                    "  Rule '{}' would be processed (keywords: {:?})",
-                    rule.id, rule.keywords
-                );
+            } else if contains_any_keyword(non_secret_input, &rule.keywords) {
+                rules_processed += 1;
+            } else {
+                rules_skipped += 1;
             }
         }
 
@@ -903,7 +918,7 @@ export PORT=3000
         );
 
         // Verify no secrets are detected
-        let result = redact_secrets(non_secret_input, None, &HashMap::new());
+        let result = redact_secrets(non_secret_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Now test with input that has relevant keywords
@@ -921,7 +936,7 @@ export PORT=3000
 
         println!("  Rules that match keywords: {}", rules_with_keywords);
 
-        let result = redact_secrets(secret_input, None, &HashMap::new());
+        let result = redact_secrets(secret_input, None, &HashMap::new(), false);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Assertions
@@ -960,7 +975,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", no_keyword_rules);
 
-        let no_keyword_secrets = detect_secrets(no_keyword_input, None);
+        let no_keyword_secrets = detect_secrets(no_keyword_input, None, false);
         println!(
             "Secrets detected: {} (expected: 0)",
             no_keyword_secrets.len()
@@ -981,7 +996,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", api_rules);
 
-        let api_secrets = detect_secrets(api_input, None);
+        let api_secrets = detect_secrets(api_input, None, false);
         println!("Secrets detected: {} (expected: 1)", api_secrets.len());
         assert!(api_secrets.len() >= 1, "Should detect at least 1 secrets");
         println!("✅ Test passed");
@@ -1000,7 +1015,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", aws_rules);
 
-        let aws_secrets = detect_secrets(aws_input, None);
+        let aws_secrets = detect_secrets(aws_input, None, false);
         println!("Secrets detected: {} (expected: 1)", aws_secrets.len());
 
         // Should detect AWS key
@@ -1079,7 +1094,7 @@ export PORT=3000
             }
 
             // Test full detection
-            let result = redact_secrets(input, None, &HashMap::new());
+            let result = redact_secrets(input, None, &HashMap::new(), false);
             println!(
                 "  Full detection result: {} secrets",
                 result.redaction_map.len()
@@ -1391,5 +1406,47 @@ export PORT=3000
         // Restore should bring back the original
         let restored = restore_secrets(&result.redacted_string, &result.redaction_map);
         assert_eq!(restored, content);
+    }
+
+    #[test]
+    fn test_redact_secrets_with_existing_redaction_map() {
+        // Test that secrets in the existing redaction map get redacted even if not detected by detect_secrets
+        let content = "The secret value is mysecretvalue123 and another is anothersecret456";
+
+        // First, test with empty map to prove the secret wouldn't normally be redacted
+        let result_empty = redact_secrets(content, None, &HashMap::new(), false);
+
+        // Verify that mysecretvalue123 is NOT redacted when using empty map
+        assert!(result_empty.redacted_string.contains("mysecretvalue123"));
+        // Now create an existing redaction map with one of the secrets
+        let mut existing_redaction_map = HashMap::new();
+        existing_redaction_map.insert(
+            "[REDACTED_SECRET:manual:abc123]".to_string(),
+            "mysecretvalue123".to_string(),
+        );
+
+        let result = redact_secrets(content, None, &existing_redaction_map, false);
+
+        // The secret from the existing map should be redacted
+        assert!(
+            result
+                .redacted_string
+                .contains("[REDACTED_SECRET:manual:abc123]")
+        );
+        assert!(!result.redacted_string.contains("mysecretvalue123"));
+
+        // The redaction map should contain the existing mapping
+        assert!(
+            result
+                .redaction_map
+                .contains_key("[REDACTED_SECRET:manual:abc123]")
+        );
+        assert_eq!(
+            result
+                .redaction_map
+                .get("[REDACTED_SECRET:manual:abc123]")
+                .unwrap(),
+            "mysecretvalue123"
+        );
     }
 }

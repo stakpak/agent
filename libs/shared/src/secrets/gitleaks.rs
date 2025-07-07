@@ -223,7 +223,14 @@ impl RegexCompilable for GitleaksConfig {
 }
 
 /// Lazy-loaded gitleaks configuration
-pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
+pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| create_gitleaks_config(false));
+
+/// Lazy-loaded gitleaks configuration with privacy rules
+pub static GITLEAKS_CONFIG_WITH_PRIVACY: Lazy<GitleaksConfig> =
+    Lazy::new(|| create_gitleaks_config(true));
+
+/// Creates a gitleaks configuration with optional privacy rules
+fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
     // Load main gitleaks configuration
     let config_str = include_str!("gitleaks.toml");
     let mut config: GitleaksConfig =
@@ -239,25 +246,21 @@ pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
 
     // Merge additional allowlist if present
     if let Some(additional_allowlist) = additional_config.allowlist {
-        match &mut config.allowlist {
-            Some(existing_allowlist) => {
-                // Merge regexes
-                if let Some(additional_regexes) = additional_allowlist.regexes {
-                    match &mut existing_allowlist.regexes {
-                        Some(existing_regexes) => existing_regexes.extend(additional_regexes),
-                        None => existing_allowlist.regexes = Some(additional_regexes),
-                    }
-                }
+        merge_allowlist(&mut config.allowlist, additional_allowlist);
+    }
 
-                // Merge stopwords
-                if let Some(additional_stopwords) = additional_allowlist.stopwords {
-                    match &mut existing_allowlist.stopwords {
-                        Some(existing_stopwords) => existing_stopwords.extend(additional_stopwords),
-                        None => existing_allowlist.stopwords = Some(additional_stopwords),
-                    }
-                }
-            }
-            None => config.allowlist = Some(additional_allowlist),
+    // Load privacy rules if enabled
+    if include_privacy_rules {
+        let privacy_config_str = include_str!("privacy_rules.toml");
+        let privacy_config: GitleaksConfig =
+            toml::from_str(privacy_config_str).expect("Failed to parse privacy_rules.toml");
+
+        // Merge privacy rules into the main configuration
+        config.rules.extend(privacy_config.rules);
+
+        // Merge privacy allowlist if present
+        if let Some(privacy_allowlist) = privacy_config.allowlist {
+            merge_allowlist(&mut config.allowlist, privacy_allowlist);
         }
     }
 
@@ -272,7 +275,31 @@ pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| {
         }
     }
     config
-});
+}
+
+/// Helper function to merge allowlists
+fn merge_allowlist(target: &mut Option<Allowlist>, source: Allowlist) {
+    match target {
+        Some(existing_allowlist) => {
+            // Merge regexes
+            if let Some(additional_regexes) = source.regexes {
+                match &mut existing_allowlist.regexes {
+                    Some(existing_regexes) => existing_regexes.extend(additional_regexes),
+                    None => existing_allowlist.regexes = Some(additional_regexes),
+                }
+            }
+
+            // Merge stopwords
+            if let Some(additional_stopwords) = source.stopwords {
+                match &mut existing_allowlist.stopwords {
+                    Some(existing_stopwords) => existing_stopwords.extend(additional_stopwords),
+                    None => existing_allowlist.stopwords = Some(additional_stopwords),
+                }
+            }
+        }
+        None => *target = Some(source),
+    }
+}
 
 /// Creates a simplified API key regex that works within Rust's regex engine limits
 pub fn create_simple_api_key_regex() -> Result<Regex, regex::Error> {
@@ -326,9 +353,15 @@ pub fn calculate_entropy(text: &str) -> f64 {
 /// 2. Check entropy thresholds to filter out low-entropy matches
 /// 3. Apply allowlists to exclude known false positives
 /// 4. Check keywords to ensure relevance
-pub fn detect_secrets(input: &str, path: Option<&str>) -> Vec<DetectedSecret> {
+///
+/// When privacy_mode is enabled, also detects private data like IP addresses and AWS account IDs
+pub fn detect_secrets(input: &str, path: Option<&str>, privacy_mode: bool) -> Vec<DetectedSecret> {
     let mut detected_secrets = Vec::new();
-    let config = &*GITLEAKS_CONFIG;
+    let config = if privacy_mode {
+        &*GITLEAKS_CONFIG_WITH_PRIVACY
+    } else {
+        &*GITLEAKS_CONFIG
+    };
 
     // Apply each compiled rule from the configuration
     for rule in &config.rules {
@@ -563,10 +596,16 @@ pub fn contains_any_keyword(input: &str, keywords: &[String]) -> bool {
 /// This function should be called during application startup to preload and compile
 /// the gitleaks rules, avoiding delays on the first call to detect_secrets.
 ///
+/// When privacy_mode is enabled, also loads privacy rules for detecting IP addresses and AWS account IDs
+///
 /// Returns the number of successfully compiled rules.
-pub fn initialize_gitleaks_config() -> usize {
+pub fn initialize_gitleaks_config(privacy_mode: bool) -> usize {
     // Force evaluation of the lazy static
-    let config = &*GITLEAKS_CONFIG;
+    let config = if privacy_mode {
+        &*GITLEAKS_CONFIG_WITH_PRIVACY
+    } else {
+        &*GITLEAKS_CONFIG
+    };
     config.rules.len()
 }
 
@@ -620,7 +659,7 @@ mod tests {
         // Use a more realistic API key that doesn't contain alphabet sequences
         let test_input =
             "ANTHROPIC_API_KEY=sk-ant-api03-Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA9bD2eG5kM8pR1tX4zB7";
-        let secrets = detect_secrets(test_input, None);
+        let secrets = detect_secrets(test_input, None, false);
 
         // Should detect the Anthropic API key
         let anthropic_secret = secrets.iter().find(|s| s.rule_id == "anthropic-api-key");
@@ -631,6 +670,234 @@ mod tests {
 
         if let Some(secret) = anthropic_secret {
             assert!(secret.value.starts_with("sk-ant-api03-"));
+        }
+    }
+
+    #[test]
+    fn test_privacy_mode_aws_account_id() {
+        let test_input = "AWS_ACCOUNT_ID=987654321098";
+
+        // Should not detect AWS account ID in regular mode
+        let secrets = detect_secrets(test_input, None, false);
+        assert!(!secrets.iter().any(|s| s.rule_id == "aws-account-id"));
+
+        // Should detect AWS account ID in privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        let aws_secret = secrets_privacy
+            .iter()
+            .find(|s| s.rule_id == "aws-account-id");
+        assert!(
+            aws_secret.is_some(),
+            "Should detect AWS account ID in privacy mode"
+        );
+
+        if let Some(secret) = aws_secret {
+            assert_eq!(secret.value, "987654321098");
+        }
+    }
+
+    #[test]
+    fn test_privacy_mode_public_ip() {
+        let test_input = "SERVER_IP=203.0.113.195";
+
+        // Should not detect public IP in regular mode
+        let secrets = detect_secrets(test_input, None, false);
+        assert!(!secrets.iter().any(|s| s.rule_id == "public-ipv4"));
+
+        // Should detect public IP in privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        let ip_secret = secrets_privacy.iter().find(|s| s.rule_id == "public-ipv4");
+        assert!(
+            ip_secret.is_some(),
+            "Should detect public IP in privacy mode"
+        );
+
+        if let Some(secret) = ip_secret {
+            assert_eq!(secret.value, "203.0.113.195");
+        }
+    }
+
+    #[test]
+    fn test_privacy_mode_private_ip_excluded() {
+        let test_input = "LOCAL_IP=192.168.1.1";
+
+        // Should not detect private IP even in privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        assert!(!secrets_privacy.iter().any(|s| s.rule_id == "public-ipv4"));
+    }
+
+    #[test]
+    fn test_privacy_mode_aws_arn() {
+        let test_input = "ARN=arn:aws:s3:::my-bucket/object";
+
+        // Should not detect AWS account ID in regular mode
+        let secrets = detect_secrets(test_input, None, false);
+        assert!(!secrets.iter().any(|s| s.rule_id == "aws-account-id"));
+
+        // Should detect AWS account ID in ARN in privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        // This specific ARN doesn't contain an account ID, so it shouldn't be detected
+        assert!(
+            !secrets_privacy
+                .iter()
+                .any(|s| s.rule_id == "aws-account-id")
+        );
+
+        // Test with an ARN that contains an account ID
+        let test_input_with_account = "ARN=arn:aws:iam::987654321098:role/MyRole";
+        let secrets_with_account = detect_secrets(test_input_with_account, None, true);
+        let aws_secret = secrets_with_account
+            .iter()
+            .find(|s| s.rule_id == "aws-account-id");
+        assert!(
+            aws_secret.is_some(),
+            "Should detect AWS account ID in ARN in privacy mode"
+        );
+
+        if let Some(secret) = aws_secret {
+            assert_eq!(secret.value, "987654321098");
+        }
+    }
+
+    #[test]
+    fn test_privacy_mode_initialization() {
+        // Test that privacy mode initialization works
+        let regular_count = initialize_gitleaks_config(false);
+        let privacy_count = initialize_gitleaks_config(true);
+
+        // Privacy mode should have more rules
+        assert!(
+            privacy_count > regular_count,
+            "Privacy mode should have more rules than regular mode"
+        );
+    }
+
+    #[test]
+    fn test_debug_privacy_mode_aws() {
+        let test_input = "AWS_ACCOUNT_ID=987654321098"; // Different from allowlist
+
+        // Test with privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        println!("Privacy mode detected {} secrets", secrets_privacy.len());
+        for secret in &secrets_privacy {
+            println!(
+                "  Rule: {}, Value: '{}', Pos: {}-{}",
+                secret.rule_id, secret.value, secret.start_pos, secret.end_pos
+            );
+        }
+
+        // Test without privacy mode
+        let secrets_regular = detect_secrets(test_input, None, false);
+        println!("Regular mode detected {} secrets", secrets_regular.len());
+        for secret in &secrets_regular {
+            println!(
+                "  Rule: {}, Value: '{}', Pos: {}-{}",
+                secret.rule_id, secret.value, secret.start_pos, secret.end_pos
+            );
+        }
+
+        // Check if privacy config loaded properly
+        let config_with_privacy = &*GITLEAKS_CONFIG_WITH_PRIVACY;
+        let aws_rule = config_with_privacy
+            .rules
+            .iter()
+            .find(|r| r.id == "aws-account-id");
+        println!("AWS rule found: {}", aws_rule.is_some());
+        if let Some(rule) = aws_rule {
+            println!("AWS rule keywords: {:?}", rule.keywords);
+            if let Some(regex) = &rule.compiled_regex {
+                println!("AWS rule regex compiled: yes");
+                let test_matches: Vec<_> = regex.find_iter(test_input).collect();
+                println!("Direct regex matches: {}", test_matches.len());
+                for mat in test_matches {
+                    println!("  Match: '{}'", mat.as_str());
+                }
+
+                // Test keyword filtering
+                let contains_keywords = contains_any_keyword(test_input, &rule.keywords);
+                println!("Contains keywords: {}", contains_keywords);
+
+                // Test capture groups
+                if let Some(captures) = regex.captures(test_input) {
+                    println!("Capture groups found: {}", captures.len());
+                    for (i, cap) in captures.iter().enumerate() {
+                        if let Some(cap) = cap {
+                            println!("  Capture {}: '{}'", i, cap.as_str());
+                        }
+                    }
+                } else {
+                    println!("No capture groups found");
+                }
+
+                // Test entropy if there are captures
+                for mat in regex.find_iter(test_input) {
+                    if let Some(captures) = regex.captures_at(test_input, mat.start()) {
+                        if let Some(capture) = captures.get(1) {
+                            let entropy = calculate_entropy(capture.as_str());
+                            println!(
+                                "  Entropy of first capture '{}': {:.2} (threshold: {:?})",
+                                capture.as_str(),
+                                entropy,
+                                rule.entropy
+                            );
+                        }
+                    }
+                }
+            } else {
+                println!("AWS rule regex compiled: no");
+            }
+        }
+    }
+
+    #[test]
+    fn test_debug_privacy_mode_ip() {
+        let test_input = "SERVER_IP=8.8.8.8";
+
+        // Test with privacy mode
+        let secrets_privacy = detect_secrets(test_input, None, true);
+        println!("Privacy mode detected {} secrets", secrets_privacy.len());
+        for secret in &secrets_privacy {
+            println!(
+                "  Rule: {}, Value: '{}', Pos: {}-{}",
+                secret.rule_id, secret.value, secret.start_pos, secret.end_pos
+            );
+        }
+
+        // Check if privacy config loaded properly
+        let config_with_privacy = &*GITLEAKS_CONFIG_WITH_PRIVACY;
+        let ip_rule = config_with_privacy
+            .rules
+            .iter()
+            .find(|r| r.id == "public-ipv4");
+        println!("IP rule found: {}", ip_rule.is_some());
+        if let Some(rule) = ip_rule {
+            println!("IP rule keywords: {:?}", rule.keywords);
+            if let Some(regex) = &rule.compiled_regex {
+                println!("IP rule regex compiled: yes");
+                let test_matches: Vec<_> = regex.find_iter(test_input).collect();
+                println!("Direct regex matches: {}", test_matches.len());
+                for mat in test_matches {
+                    println!("  Match: '{}'", mat.as_str());
+                }
+
+                // Test keyword filtering
+                let contains_keywords = contains_any_keyword(test_input, &rule.keywords);
+                println!("Contains keywords: {}", contains_keywords);
+
+                // Test capture groups
+                if let Some(captures) = regex.captures(test_input) {
+                    println!("Capture groups found: {}", captures.len());
+                    for (i, cap) in captures.iter().enumerate() {
+                        if let Some(cap) = cap {
+                            println!("  Capture {}: '{}'", i, cap.as_str());
+                        }
+                    }
+                } else {
+                    println!("No capture groups found");
+                }
+            } else {
+                println!("IP rule regex compiled: no");
+            }
         }
     }
 }
