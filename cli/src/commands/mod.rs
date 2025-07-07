@@ -145,6 +145,10 @@ pub enum Commands {
         #[arg(long = "disable-secret-redaction", default_value_t = false)]
         disable_secret_redaction: bool,
 
+        /// Enable privacy mode to redact private data like IP addresses and AWS account IDs
+        #[arg(long = "privacy-mode", default_value_t = false)]
+        privacy_mode: bool,
+
         /// Tool mode to use (local, remote, combined)
         #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
         tool_mode: ToolMode,
@@ -178,6 +182,7 @@ impl Commands {
         match self {
             Commands::Mcp {
                 disable_secret_redaction,
+                privacy_mode,
                 tool_mode,
                 index_big_project,
             } => {
@@ -220,6 +225,7 @@ impl Commands {
                     MCPServerConfigWithoutBindAddress {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
+                        privacy_mode,
                         tool_mode,
                     },
                     listener,

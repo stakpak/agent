@@ -8,11 +8,15 @@ use tracing::{error, warn};
 #[derive(Clone)]
 pub struct SecretManager {
     redact_secrets: bool,
+    privacy_mode: bool,
 }
 
 impl SecretManager {
-    pub fn new(redact_secrets: bool) -> Self {
-        Self { redact_secrets }
+    pub fn new(redact_secrets: bool, privacy_mode: bool) -> Self {
+        Self {
+            redact_secrets,
+            privacy_mode,
+        }
     }
 
     /// Load the redaction map from the session file
@@ -80,7 +84,8 @@ impl SecretManager {
 
         // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
         let existing_redaction_map = self.load_session_redaction_map();
-        let redaction_result = redact_secrets(content, path, &existing_redaction_map);
+        let redaction_result =
+            redact_secrets(content, path, &existing_redaction_map, self.privacy_mode);
 
         // Add new redactions to session map
         self.add_to_session_redaction_map(&redaction_result.redaction_map);

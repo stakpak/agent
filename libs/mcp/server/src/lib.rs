@@ -52,20 +52,24 @@ pub struct MCPServerConfig {
     pub api: ClientConfig,
     pub bind_address: String,
     pub redact_secrets: bool,
+    pub privacy_mode: bool,
     pub tool_mode: ToolMode,
 }
 
 pub struct MCPServerConfigWithoutBindAddress {
     pub api: ClientConfig,
     pub redact_secrets: bool,
+    pub privacy_mode: bool,
     pub tool_mode: ToolMode,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
-async fn init_gitleaks_if_needed(redact_secrets: bool) {
+async fn init_gitleaks_if_needed(redact_secrets: bool, privacy_mode: bool) {
     if redact_secrets {
-        tokio::spawn(async {
-            match std::panic::catch_unwind(stakpak_shared::secrets::initialize_gitleaks_config) {
+        tokio::spawn(async move {
+            match std::panic::catch_unwind(|| {
+                stakpak_shared::secrets::initialize_gitleaks_config(privacy_mode)
+            }) {
                 Ok(_rule_count) => {}
                 Err(_) => {
                     // Failed to initialize, will initialize on first use
@@ -140,24 +144,30 @@ async fn create_shutdown_handler(shutdown_rx: Option<Receiver<()>>) {
 async fn start_server_internal(
     api: ClientConfig,
     redact_secrets: bool,
+    privacy_mode: bool,
     tool_mode: ToolMode,
     tcp_listener: TcpListener,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(redact_secrets).await;
+    init_gitleaks_if_needed(redact_secrets, privacy_mode).await;
 
     let tool_container = match tool_mode {
-        ToolMode::LocalOnly => {
-            ToolContainer::new(None, redact_secrets, ToolContainer::tool_router_local())
-        }
+        ToolMode::LocalOnly => ToolContainer::new(
+            None,
+            redact_secrets,
+            privacy_mode,
+            ToolContainer::tool_router_local(),
+        ),
         ToolMode::RemoteOnly => ToolContainer::new(
             Some(api),
             redact_secrets,
+            privacy_mode,
             ToolContainer::tool_router_remote(),
         ),
         ToolMode::Combined => ToolContainer::new(
             Some(api),
             redact_secrets,
+            privacy_mode,
             ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
         ),
     }
@@ -188,6 +198,7 @@ pub async fn start_server(
     start_server_internal(
         config.api,
         config.redact_secrets,
+        config.privacy_mode,
         config.tool_mode,
         tcp_listener,
         shutdown_rx,
@@ -204,6 +215,7 @@ pub async fn start_server_with_listener(
     start_server_internal(
         config.api,
         config.redact_secrets,
+        config.privacy_mode,
         config.tool_mode,
         tcp_listener,
         shutdown_rx,
@@ -215,6 +227,7 @@ pub async fn start_server_with_listener(
 pub async fn start_local_server(
     bind_address: String,
     redact_secrets: bool,
+    privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
@@ -225,6 +238,7 @@ pub async fn start_local_server(
             },
             bind_address,
             redact_secrets,
+            privacy_mode,
             tool_mode: ToolMode::LocalOnly,
         },
         shutdown_rx,
@@ -237,6 +251,7 @@ pub async fn start_remote_server(
     api_config: ClientConfig,
     bind_address: String,
     redact_secrets: bool,
+    privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
@@ -244,6 +259,7 @@ pub async fn start_remote_server(
             api: api_config,
             bind_address,
             redact_secrets,
+            privacy_mode,
             tool_mode: ToolMode::RemoteOnly,
         },
         shutdown_rx,
@@ -256,6 +272,7 @@ pub async fn start_combined_server(
     api_config: ClientConfig,
     bind_address: String,
     redact_secrets: bool,
+    privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
     start_server(
@@ -263,6 +280,7 @@ pub async fn start_combined_server(
             api: api_config,
             bind_address,
             redact_secrets,
+            privacy_mode,
             tool_mode: ToolMode::Combined,
         },
         shutdown_rx,
