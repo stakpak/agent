@@ -2,7 +2,6 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::plugins::{PluginConfig, extract_tar_gz, extract_zip, get_download_info};
 use std::env;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -289,6 +288,7 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
     // 7. Set executable permissions on temp file (Unix systems)
     #[cfg(unix)]
     {
+        use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&temp_exe)
             .map_err(|e| format!("Failed to get temp file metadata: {}", e))?
             .permissions();
