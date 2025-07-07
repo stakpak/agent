@@ -274,7 +274,7 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
 }
 
 /// Determine download URL and binary name based on OS and architecture
-fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool), String> {
+pub fn get_download_info(config: &PluginConfig) -> Result<(String, String, bool), String> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
@@ -337,7 +337,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 /// Extract tar.gz archive
-fn extract_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
+pub fn extract_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
     let cursor = Cursor::new(archive_bytes);
     let tar = GzDecoder::new(cursor);
     let mut archive = Archive::new(tar);
@@ -350,7 +350,7 @@ fn extract_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
 }
 
 /// Extract zip archive
-fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
+pub fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
     let cursor = Cursor::new(archive_bytes);
     let mut archive =
         ZipArchive::new(cursor).map_err(|e| format!("Failed to read zip archive: {}", e))?;
