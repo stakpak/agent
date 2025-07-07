@@ -64,8 +64,8 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         if input.trim() == "y" {
-            println!("Updating via Homebrew...");
             run_auto_update().await?;
+            std::process::exit(0);
         } else if input.trim() == "n" {
             println!("Update cancelled!");
             println!("Proceeding to open Stakpak Agent...")

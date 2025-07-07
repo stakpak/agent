@@ -1,8 +1,9 @@
 use crate::utils::check_update::get_latest_cli_version;
-use crate::utils::plugins::{PluginConfig, get_plugin_path};
+use crate::utils::plugins::{PluginConfig, extract_tar_gz, extract_zip, get_download_info};
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::process::Command;
 
 #[allow(clippy::needless_return)]
@@ -11,27 +12,25 @@ pub async fn run_auto_update() -> Result<(), String> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
-    // 2. If macOS, check for Homebrew
-    if os == "macos" {
-        if is_homebrew_installed() && is_stakpak_homebrew_install() {
-            println!("Detected Homebrew installation. Updating via Homebrew...");
-            return update_via_brew();
-        } else {
-            println!("Detected direct binary installation on macOS. Updating binary...");
-            let version = get_latest_cli_version().await.unwrap_or_default();
-            return update_via_plugin_system(os, arch, Some(version)).await;
-        }
+    // 2. Check if current path is a binary or a directory
+    if is_homebrew_installed()
+        && is_stakpak_homebrew_install()
+        && is_current_binary_homebrew_managed()?
+    {
+        println!("Detected current binary is managed by Homebrew. Updating via Homebrew...");
+        update_via_brew()?;
+        Ok(())
     } else {
-        // 3. Other OS: use plugin system
-        println!("Detected {}. Updating binary via plugin system...", os);
+        println!("Detected direct binary installation. Updating binary...");
         let version = get_latest_cli_version().await.unwrap_or_default();
-        return update_via_plugin_system(os, arch, Some(version)).await;
+        update_binary_atomic(os, arch, Some(version)).await?;
+        Ok(())
     }
 }
 
 fn is_homebrew_installed() -> bool {
-    std::process::Command::new("brew")
-        .arg("--version")
+    Command::new("which")
+        .arg("brew")
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -49,13 +48,13 @@ fn is_stakpak_homebrew_install() -> bool {
 }
 
 fn update_via_brew() -> Result<(), String> {
-    let tap_status = Command::new("brew")
-        .arg("tap")
-        .arg("stakpak/stakpak")
+    // update brew
+    let update_status = Command::new("brew")
+        .arg("update")
         .status()
-        .map_err(|e| format!("Failed to run brew tap: {}", e))?;
-    if !tap_status.success() {
-        println!("brew tap failed!");
+        .map_err(|e| format!("Failed to run brew update: {}", e))?;
+    if !update_status.success() {
+        println!("brew update failed!");
     }
 
     let upgrade_status = Command::new("brew")
@@ -67,27 +66,190 @@ fn update_via_brew() -> Result<(), String> {
         println!("Update complete! Please restart the CLI to use the new version.");
         std::process::exit(0);
     } else {
-        println!("brew upgrade failed!");
-        std::process::exit(1);
+        Err("brew upgrade stakpak failed".to_string())
     }
 }
 
-async fn update_via_plugin_system(
-    os: &str,
-    arch: &str,
-    version: Option<String>,
-) -> Result<(), String> {
+fn is_current_binary_homebrew_managed() -> Result<bool, String> {
+    // Get current executable path
+    let current_exe =
+        env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
+
+    // Get Homebrew's stakpak path
+    match Command::new("brew").arg("--prefix").arg("stakpak").output() {
+        Ok(output) if output.status.success() => {
+            let homebrew_path_lossy = String::from_utf8_lossy(&output.stdout);
+            let homebrew_path = homebrew_path_lossy.trim();
+            let homebrew_binary = std::path::Path::new(homebrew_path)
+                .join("bin")
+                .join("stakpak");
+
+            // Compare canonical paths (resolves symlinks)
+            match (current_exe.canonicalize(), homebrew_binary.canonicalize()) {
+                (Ok(current_canonical), Ok(homebrew_canonical)) => {
+                    Ok(current_canonical == homebrew_canonical)
+                }
+                _ => {
+                    // If canonicalize fails, fall back to string comparison
+                    Ok(current_exe == homebrew_binary)
+                }
+            }
+        }
+        Ok(_) => {
+            // brew --prefix stakpak failed (stakpak not installed via brew)
+            Ok(false)
+        }
+        Err(_) => {
+            // brew command not found or failed
+            Ok(false)
+        }
+    }
+}
+
+fn get_binary_dir() -> Result<(PathBuf, PathBuf), String> {
+    let binary_path =
+        env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
+    let binary_dir = match binary_path.parent() {
+        Some(dir) => dir.to_path_buf(),
+        None => Err("Failed to determine the directory of the current executable".to_string())?,
+    };
+    Ok((binary_path, binary_dir))
+}
+
+async fn download_and_extract_binary(config: &PluginConfig) -> Result<String, String> {
+    // Determine the appropriate download URL based on OS and architecture
+    let (download_url, _binary_name, is_zip) = get_download_info(config)?;
+
+    let (_binary_path, binary_dir) = get_binary_dir()?;
+
+    println!("Downloading {}...", config.name);
+
+    // Download the archive
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download {}: {}", config.name, e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download {}: HTTP {}",
+            config.name,
+            response.status()
+        ));
+    }
+
+    let archive_bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read download response: {}", e))?;
+
+    // Create a temporary directory for extraction
+    let temp_dir = binary_dir.join("temp_update");
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to clean temp directory: {}", e))?;
+    }
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    // Extract the archive to temp directory
+    if is_zip {
+        extract_zip(&archive_bytes, &temp_dir)?;
+    } else {
+        extract_tar_gz(&archive_bytes, &temp_dir)?;
+    }
+
+    // Find the extracted binary
+    let extracted_binary = find_extracted_binary(&temp_dir, &config.name)?;
+
+    // Copy to a permanent location before cleaning up temp_dir
+    let permanent_extracted = binary_dir.join(format!("{}_downloaded", config.name));
+    fs::copy(&extracted_binary, &permanent_extracted)
+        .map_err(|e| format!("Failed to copy extracted binary: {}", e))?;
+
+    // Clean up temp directory immediately
+    fs::remove_dir_all(&temp_dir).map_err(|e| format!("Failed to clean temp directory: {}", e))?;
+
+    Ok(permanent_extracted.to_string_lossy().to_string())
+}
+
+fn find_extracted_binary(temp_dir: &PathBuf, binary_name: &str) -> Result<PathBuf, String> {
+    // Look for the binary in the temp directory and subdirectories
+    let mut binary_path = None;
+
+    // Check direct path
+    let direct_path = temp_dir.join(binary_name);
+    if direct_path.exists() {
+        binary_path = Some(direct_path);
+    }
+
+    // Check with .exe extension on Windows
+    #[cfg(windows)]
+    {
+        let exe_path = temp_dir.join(format!("{}.exe", binary_name));
+        if exe_path.exists() {
+            binary_path = Some(exe_path);
+        }
+    }
+
+    // If not found, search recursively
+    if binary_path.is_none() {
+        binary_path = search_for_binary(temp_dir, binary_name)?;
+    }
+
+    binary_path.ok_or_else(|| {
+        format!(
+            "Could not find extracted binary '{}' in temp directory",
+            binary_name
+        )
+    })
+}
+
+fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>, String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+
+        if path.is_file() {
+            let file_name = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+
+            if file_name == binary_name {
+                return Ok(Some(path));
+            }
+        } else if path.is_dir() {
+            if let Ok(Some(found)) = search_for_binary(&path, binary_name) {
+                return Ok(Some(found));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> Result<(), String> {
+    println!("Starting atomic binary update for {} {}", os, arch);
+
     // 1. Set up PluginConfig for the CLI itself
     let cli_name = "stakpak";
     let base_url = "https://github.com/stakpak/agent/releases/download";
     let version = version.unwrap_or_default();
+
     // 2. Map OS/arch to plugin target
     let target = match (os, arch) {
         ("linux", "x86_64") => "linux-x86_64",
         ("macos", "x86_64") => "darwin-x86_64",
         ("macos", "aarch64") => "darwin-aarch64",
         ("windows", "x86_64") => "windows-x86_64",
-        _ => return Err(format!("Unsupported platform: {} {}", os, arch)),
+        _ => {
+            return Err(format!("Unsupported platform: {} {}", os, arch));
+        }
     };
 
     let config = PluginConfig {
@@ -97,26 +259,150 @@ async fn update_via_plugin_system(
         version: Some(version.clone()),
     };
 
-    // 3. Download and install the latest CLI binary using the plugin system
-    let new_bin_path = get_plugin_path(config).await;
-
-    // 4. Replace the current executable with the new one
+    // 3. Get current executable path
     let current_exe =
         env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
-    fs::copy(&new_bin_path, &current_exe)
-        .map_err(|e| format!("Failed to replace binary: {}", e))?;
 
-    // 5. Set executable permissions (Unix)
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&current_exe)
-            .map_err(|e| format!("Failed to get file metadata: {}", e))?
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&current_exe, perms)
-            .map_err(|e| format!("Failed to set permissions: {}", e))?;
+    // 4. Create file paths for atomic update
+    let temp_exe = current_exe.with_extension("new");
+    let backup_exe = current_exe.with_extension("backup");
+
+    // Clean up any existing temp files
+    if temp_exe.exists() {
+        fs::remove_file(&temp_exe)
+            .map_err(|e| format!("Failed to clean existing temp file: {}", e))?;
+    }
+    if backup_exe.exists() {
+        fs::remove_file(&backup_exe)
+            .map_err(|e| format!("Failed to clean existing backup file: {}", e))?;
     }
 
-    println!("CLI updated successfully! Please restart the CLI to use the new version.");
-    Ok(())
+    // 5. Download and extract new binary
+    println!("Downloading new version {}...", version);
+    let extracted_binary_path = download_and_extract_binary(&config).await?;
+
+    // 6. Copy extracted binary to temp location
+    println!("Preparing new binary...");
+    fs::copy(&extracted_binary_path, &temp_exe)
+        .map_err(|e| format!("Failed to copy extracted binary to temp location: {}", e))?;
+
+    // 7. Set executable permissions on temp file (Unix systems)
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&temp_exe)
+            .map_err(|e| format!("Failed to get temp file metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&temp_exe, perms)
+            .map_err(|e| format!("Failed to set executable permissions on temp file: {}", e))?;
+    }
+
+    // 8. Verify the new binary works - try multiple verification methods
+    println!("Verifying new binary...");
+
+    // First try --help (most binaries support this)
+    let verification_result = Command::new(&temp_exe).arg("--help").output();
+
+    let verification_success = match verification_result {
+        Ok(output) if output.status.success() => {
+            let help_output = String::from_utf8_lossy(&output.stdout);
+            println!("✅ New binary verified successfully with --help!");
+            println!(
+                "   Help output preview: {}",
+                help_output.lines().take(2).collect::<Vec<_>>().join(" ")
+            );
+            true
+        }
+        Ok(_) | Err(_) => {
+            // If --help fails, try running without arguments
+            println!("--help failed, trying without arguments...");
+            match Command::new(&temp_exe).output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("✅ New binary verified successfully (no args)!");
+                    println!(
+                        "   Output preview: {}",
+                        stdout
+                            .lines()
+                            .chain(stderr.lines())
+                            .take(2)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                    true
+                }
+                Err(e) => {
+                    // Clean up and fail
+                    fs::remove_file(&temp_exe).ok();
+                    fs::remove_file(&extracted_binary_path).ok();
+                    return Err(format!(
+                        "Failed to run verification test on new binary: {}",
+                        e
+                    ));
+                }
+            }
+        }
+    };
+
+    if !verification_success {
+        // Clean up and fail
+        fs::remove_file(&temp_exe).ok();
+        fs::remove_file(&extracted_binary_path).ok();
+        return Err("New binary failed all verification tests".to_string());
+    }
+
+    // 9. Create backup of current executable
+    println!("Creating backup of current executable...");
+    fs::copy(&current_exe, &backup_exe).map_err(|e| format!("Failed to create backup: {}", e))?;
+
+    // 10. Atomic replacement using rename
+    println!("Performing atomic replacement...");
+    match fs::rename(&temp_exe, &current_exe) {
+        Ok(()) => {
+            println!("✅ Binary replacement successful!");
+
+            // Clean up backup file
+            fs::remove_file(&backup_exe).ok();
+
+            // Clean up downloaded binary
+            fs::remove_file(&extracted_binary_path).ok();
+
+            println!(
+                "🎉 Update complete! Please restart the CLI to use version {}.",
+                version
+            );
+            std::process::exit(0);
+        }
+        Err(e) => {
+            // Atomic rename failed, try to restore backup
+            println!("❌ Atomic replacement failed: {}", e);
+
+            if backup_exe.exists() {
+                println!("Attempting to restore backup...");
+                match fs::copy(&backup_exe, &current_exe) {
+                    Ok(_) => {
+                        println!("✅ Backup restored successfully");
+                        fs::remove_file(&backup_exe).ok();
+                    }
+                    Err(restore_err) => {
+                        println!("❌ Failed to restore backup: {}", restore_err);
+                        // Clean up temp files
+                        fs::remove_file(&temp_exe).ok();
+                        fs::remove_file(&extracted_binary_path).ok();
+                        return Err(format!(
+                            "Critical error: Failed to replace executable AND failed to restore backup. Original error: {}, Restore error: {}",
+                            e, restore_err
+                        ));
+                    }
+                }
+            }
+
+            // Clean up temp file
+            fs::remove_file(&temp_exe).ok();
+            fs::remove_file(&extracted_binary_path).ok();
+
+            Err(format!("Failed to replace executable: {}", e))
+        }
+    }
 }
