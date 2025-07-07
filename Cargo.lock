@@ -3773,6 +3773,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tracing",
  "uuid",
  "walkdir",
 ]
@@ -3791,6 +3792,7 @@ dependencies = [
  "serde_json",
  "stakpak-shared",
  "tokio",
+ "tracing",
  "tui-markdown",
  "unicode-width 0.2.0",
  "uuid",

@@ -1,10 +1,10 @@
-use crate::secret_manager::SecretManager;
 use rmcp::tool_handler;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
     service::RequestContext, tool_router,
 };
 use stakpak_api::{Client, ClientConfig};
+use stakpak_shared::secret_manager::SecretManager;
 
 #[derive(Clone)]
 pub struct ToolContainer {

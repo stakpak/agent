@@ -1,6 +1,6 @@
+use crate::local_store::LocalStore;
+use crate::secrets::{redact_password, redact_secrets, restore_secrets};
 use serde_json;
-use stakpak_shared::local_store::LocalStore;
-use stakpak_shared::secrets::{redact_password, redact_secrets, restore_secrets};
 use std::collections::HashMap;
 use tracing::{error, warn};
 
