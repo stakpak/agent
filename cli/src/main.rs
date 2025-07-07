@@ -62,6 +62,10 @@ struct Cli {
     #[arg(long = "disable-secret-redaction", default_value_t = false)]
     disable_secret_redaction: bool,
 
+    /// Enable privacy mode to redact private data like IP addresses and AWS account IDs
+    #[arg(long = "privacy-mode", default_value_t = false)]
+    privacy_mode: bool,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
@@ -219,6 +223,7 @@ async fn main() {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
+                                privacy_mode: cli.privacy_mode,
                                 rulebooks,
                                 max_steps,
                                 output_format: cli.output_format,
@@ -240,6 +245,7 @@ async fn main() {
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
                                 redact_secrets: !cli.disable_secret_redaction,
+                                privacy_mode: cli.privacy_mode,
                                 rulebooks,
                             },
                         )
