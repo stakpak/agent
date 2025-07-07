@@ -57,21 +57,7 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
             "\n🚀 Update available!  \x1b[1;37m\x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m ✨\n",
             current_version, latest_version
         );
-        println!("Would you like to update? (y/n)");
-        let mut input = String::new();
-        if let Err(e) = std::io::stdin().read_line(&mut input) {
-            eprintln!("Failed to read input: {}", e);
-            return Ok(());
-        }
-        if input.trim() == "y" {
-            run_auto_update().await?;
-            std::process::exit(0);
-        } else if input.trim() == "n" {
-            println!("Update cancelled!");
-            println!("Proceeding to open Stakpak Agent...")
-        } else {
-            println!("Invalid input! Please enter y or n.");
-        }
+        run_auto_update().await?;
     }
     Ok(())
 }
