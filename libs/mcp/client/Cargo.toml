@@ -11,7 +11,7 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 rmcp = { workspace = true }
 futures = { workspace = true }
-
+reqwest = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"
