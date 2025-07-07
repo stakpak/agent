@@ -21,6 +21,7 @@ pub struct RunAsyncConfig {
     pub local_context: Option<LocalContext>,
     pub verbose: bool,
     pub redact_secrets: bool,
+    pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
@@ -42,7 +43,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
-    let redact_secrets = config.redact_secrets;
     tokio::spawn(async move {
         let _ = start_server_with_listener(
             MCPServerConfigWithoutBindAddress {
@@ -50,7 +50,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
-                redact_secrets,
+                redact_secrets: config.redact_secrets,
+                privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
             },
             listener,
