@@ -132,7 +132,8 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            let redaction_result = redact_secrets(&line, None, &HashMap::new());
+            // TODO: add privacy mode support
+            let redaction_result = redact_secrets(&line, None, &HashMap::new(), false);
             let mut redacted_line = redaction_result.redacted_string;
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
