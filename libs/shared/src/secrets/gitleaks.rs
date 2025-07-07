@@ -900,4 +900,175 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_comprehensive_ip_detection() {
+        println!("=== COMPREHENSIVE IP DETECTION TEST ===");
+
+        let test_cases = vec![
+            // Public IPs that should be detected
+            ("16.170.172.114", true),
+            ("8.8.8.8", true),
+            ("1.1.1.1", true),
+            ("203.0.113.195", true),
+            ("13.107.42.14", true),
+            // Private IPs that should NOT be detected
+            ("192.168.1.1", false),
+            ("10.0.0.1", false),
+            ("172.16.0.1", false),
+            ("127.0.0.1", false),
+            ("169.254.1.1", false),
+            ("0.0.0.0", false),
+            ("255.255.255.255", false),
+        ];
+
+        for (ip, should_detect) in test_cases {
+            let secrets = detect_secrets(ip, None, true);
+            let detected = secrets.iter().any(|s| s.rule_id == "public-ipv4");
+
+            println!(
+                "IP: {} | Should detect: {} | Detected: {}",
+                ip, should_detect, detected
+            );
+
+            if should_detect {
+                assert!(detected, "Should detect public IP: {}", ip);
+            } else {
+                assert!(!detected, "Should NOT detect private IP: {}", ip);
+            }
+        }
+
+        // Test IP in various contexts
+        let context_tests = vec![
+            "IP address: 16.170.172.114",
+            "Connect to 16.170.172.114",
+            "16.170.172.114:8080",
+            "ping 16.170.172.114",
+            "https://16.170.172.114/api",
+        ];
+
+        for context in context_tests {
+            let secrets = detect_secrets(context, None, true);
+            let detected = secrets.iter().any(|s| s.rule_id == "public-ipv4");
+            println!("Context: '{}' | Detected: {}", context, detected);
+            assert!(detected, "Should detect IP in context: {}", context);
+        }
+    }
+
+    #[test]
+    fn test_standalone_ip_detection() {
+        println!("=== TESTING STANDALONE IP DETECTION ===");
+
+        // Test standalone IP that should be detected
+        let standalone_ip = "16.170.172.114";
+        let secrets = detect_secrets(standalone_ip, None, true);
+
+        println!(
+            "Standalone IP '{}' detected {} secrets",
+            standalone_ip,
+            secrets.len()
+        );
+        for secret in &secrets {
+            println!("  Rule: {}, Value: '{}'", secret.rule_id, secret.value);
+        }
+
+        // Test IP with context that should be detected
+        let ip_with_context = "SERVER_IP=16.170.172.114";
+        let secrets_with_context = detect_secrets(ip_with_context, None, true);
+
+        println!(
+            "IP with context '{}' detected {} secrets",
+            ip_with_context,
+            secrets_with_context.len()
+        );
+        for secret in &secrets_with_context {
+            println!("  Rule: {}, Value: '{}'", secret.rule_id, secret.value);
+        }
+
+        // Test keyword filtering
+        let config = &*GITLEAKS_CONFIG_WITH_PRIVACY;
+        let ip_rule = config.rules.iter().find(|r| r.id == "public-ipv4");
+        if let Some(rule) = ip_rule {
+            println!("IP rule keywords: {:?}", rule.keywords);
+            println!(
+                "Standalone IP contains keywords: {}",
+                contains_any_keyword(standalone_ip, &rule.keywords)
+            );
+            println!(
+                "IP with context contains keywords: {}",
+                contains_any_keyword(ip_with_context, &rule.keywords)
+            );
+        }
+    }
+
+    #[test]
+    fn test_user_provided_json_snippet() {
+        println!("=== TESTING USER PROVIDED JSON SNIPPET ===");
+
+        let json_snippet = r#"{
+    "UserId": "AIDAX5UI4H55WM6GS6NIJ",
+    "Account": "544388841223",
+    "Arn": "arn:aws:iam::544388841223:user/terraform-mac"
+}"#;
+
+        let secrets = detect_secrets(json_snippet, None, true);
+        let aws_secrets: Vec<_> = secrets
+            .iter()
+            .filter(|s| s.rule_id == "aws-account-id")
+            .collect();
+
+        println!("Detected {} AWS account ID secrets", aws_secrets.len());
+        for secret in &aws_secrets {
+            println!(
+                "  Value: '{}' at position {}-{}",
+                secret.value, secret.start_pos, secret.end_pos
+            );
+        }
+
+        // Should detect the account ID in the "Account" field
+        assert!(
+            aws_secrets.len() >= 1,
+            "Should detect at least one AWS account ID"
+        );
+        assert!(
+            aws_secrets.iter().any(|s| s.value == "544388841223"),
+            "Should detect account ID 544388841223"
+        );
+
+        // The ARN might also contain a redacted reference but that's already handled
+        println!("✅ JSON snippet test passed - Account field is now detected");
+    }
+
+    #[test]
+    fn test_aws_account_id_json_field() {
+        println!("=== TESTING AWS ACCOUNT ID JSON FIELD DETECTION ===");
+
+        let test_cases = vec![
+            // JSON field patterns that should be detected
+            r#""Account": "544388841223""#,
+            r#""AccountId": "544388841223""#,
+            r#""account": "544388841223""#,
+            r#""accountId": "544388841223""#,
+            // Other patterns that should still work
+            "AWS_ACCOUNT_ID=544388841223",
+            "account.id=544388841223",
+            "account_id: 544388841223",
+            "arn:aws:iam::544388841223:user/test",
+            "544388841223    arn:aws:iam::544388841223:user/terraform-mac    AIDAX5UI4H55WM6GS6NIJ",
+        ];
+
+        for test_case in test_cases {
+            let secrets = detect_secrets(test_case, None, true);
+            let detected = secrets.iter().any(|s| s.rule_id == "aws-account-id");
+
+            println!("Test case: '{}' | Detected: {}", test_case, detected);
+            assert!(detected, "Should detect AWS account ID in: {}", test_case);
+
+            // Check that the detected value is the expected account ID
+            if let Some(secret) = secrets.iter().find(|s| s.rule_id == "aws-account-id") {
+                assert_eq!(secret.value, "544388841223");
+                println!("  -> Detected value: '{}'", secret.value);
+            }
+        }
+    }
 }
