@@ -9,6 +9,8 @@ pub mod local_tools;
 pub mod remote_tools;
 pub mod tool_container;
 
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use std::sync::Arc;
 use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
 use tracing::error;
@@ -47,19 +49,69 @@ impl std::str::FromStr for ToolMode {
     }
 }
 
+#[derive(Clone)]
+pub struct AuthConfig {
+    pub token: Option<String>,
+}
+
+impl AuthConfig {
+    pub async fn new(disabled: bool) -> Self {
+        let token = if disabled {
+            None
+        } else {
+            let config = npwg::PasswordGeneratorConfig {
+                length: 32,
+                ..Default::default()
+            };
+            #[allow(clippy::expect_used)]
+            let token = npwg::generator::generate_password(&config)
+                .await
+                .expect("Failed to generate mcp auth token");
+            Some(token)
+        };
+
+        Self { token }
+    }
+}
+
 pub struct MCPServerConfig {
     pub api: ClientConfig,
     pub bind_address: String,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub tool_mode: ToolMode,
+    pub auth: AuthConfig,
 }
 
-pub struct MCPServerConfigWithoutBindAddress {
-    pub api: ClientConfig,
-    pub redact_secrets: bool,
-    pub privacy_mode: bool,
-    pub tool_mode: ToolMode,
+async fn auth_middleware(
+    request: Request,
+    next: Next,
+    auth_config: Arc<AuthConfig>,
+) -> Result<Response, StatusCode> {
+    if auth_config.token.is_none() {
+        return Ok(next.run(request).await);
+    }
+
+    let auth_header = request
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok());
+
+    if let Some(auth_header) = auth_header {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            if token == auth_config.token.as_ref().unwrap_or(&"".to_string()) {
+                return Ok(next.run(request).await);
+            }
+        }
+    }
+
+    Ok(Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("WWW-Authenticate", "Bearer")
+        .body(axum::body::Body::from(
+            "Unauthorized: Invalid or missing token",
+        ))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -141,32 +193,44 @@ async fn create_shutdown_handler(shutdown_rx: Option<Receiver<()>>) {
 
 /// Internal helper function that contains the common server initialization logic
 async fn start_server_internal(
-    api: ClientConfig,
-    redact_secrets: bool,
-    privacy_mode: bool,
-    tool_mode: ToolMode,
+    config: MCPServerConfig,
     tcp_listener: TcpListener,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(redact_secrets, privacy_mode).await;
+    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
 
-    let tool_container = match tool_mode {
+    if config.auth.token.as_ref().is_some() {
+        tracing::info!("🔒 MCP Authentication enabled");
+        tracing::info!(
+            "🔑 MCP Token: {}",
+            config.auth.token.as_ref().unwrap_or(&"".to_string())
+        );
+        tracing::info!(
+            "💡 MCP clients should use: Authorization: Bearer {}",
+            config.auth.token.as_ref().unwrap_or(&"".to_string())
+        );
+        tracing::info!("🚫 To disable authentication, restart with --disable-mcp-auth");
+    } else {
+        tracing::warn!("⚠️  MCP Authentication disabled - server is open to all connections");
+    }
+
+    let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => ToolContainer::new(
             None,
-            redact_secrets,
-            privacy_mode,
+            config.redact_secrets,
+            config.privacy_mode,
             ToolContainer::tool_router_local(),
         ),
         ToolMode::RemoteOnly => ToolContainer::new(
-            Some(api),
-            redact_secrets,
-            privacy_mode,
+            Some(config.api),
+            config.redact_secrets,
+            config.privacy_mode,
             ToolContainer::tool_router_remote(),
         ),
         ToolMode::Combined => ToolContainer::new(
-            Some(api),
-            redact_secrets,
-            privacy_mode,
+            Some(config.api),
+            config.redact_secrets,
+            config.privacy_mode,
             ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
         ),
     }
@@ -180,7 +244,16 @@ async fn start_server_internal(
         LocalSessionManager::default().into(),
         Default::default(),
     );
-    let router = axum::Router::new().nest_service("/mcp", service);
+
+    let auth_config_arc = Arc::new(config.auth);
+    let router =
+        axum::Router::new()
+            .nest_service("/mcp", service)
+            .layer(axum::middleware::from_fn(move |request, next| {
+                let auth_config = auth_config_arc.clone();
+                async move { auth_middleware(request, next, auth_config).await }
+            }));
+
     axum::serve(tcp_listener, router)
         .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
         .await?;
@@ -191,35 +264,15 @@ async fn start_server_internal(
 /// npx @modelcontextprotocol/inspector cargo run mcp
 pub async fn start_server(
     config: MCPServerConfig,
+    tcp_listener: Option<TcpListener>,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    let tcp_listener = TcpListener::bind(config.bind_address).await?;
-    start_server_internal(
-        config.api,
-        config.redact_secrets,
-        config.privacy_mode,
-        config.tool_mode,
-        tcp_listener,
-        shutdown_rx,
-    )
-    .await
-}
-
-/// Start server with a pre-bound TcpListener to avoid port collision race conditions
-pub async fn start_server_with_listener(
-    config: MCPServerConfigWithoutBindAddress,
-    tcp_listener: TcpListener,
-    shutdown_rx: Option<Receiver<()>>,
-) -> Result<()> {
-    start_server_internal(
-        config.api,
-        config.redact_secrets,
-        config.privacy_mode,
-        config.tool_mode,
-        tcp_listener,
-        shutdown_rx,
-    )
-    .await
+    let tcp_listener = if let Some(tcp_listener) = tcp_listener {
+        tcp_listener
+    } else {
+        TcpListener::bind(config.bind_address.clone()).await?
+    };
+    start_server_internal(config, tcp_listener, shutdown_rx).await
 }
 
 /// Start server with local tools only (no API key required)
@@ -228,6 +281,7 @@ pub async fn start_local_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
+    disable_auth: bool,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -239,7 +293,9 @@ pub async fn start_local_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::LocalOnly,
+            auth: AuthConfig::new(disable_auth).await,
         },
+        None,
         shutdown_rx,
     )
     .await
@@ -252,6 +308,7 @@ pub async fn start_remote_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
+    disable_auth: bool,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -260,7 +317,9 @@ pub async fn start_remote_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::RemoteOnly,
+            auth: AuthConfig::new(disable_auth).await,
         },
+        None,
         shutdown_rx,
     )
     .await
@@ -273,6 +332,7 @@ pub async fn start_combined_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
+    disable_auth: bool,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -281,7 +341,9 @@ pub async fn start_combined_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::Combined,
+            auth: AuthConfig::new(disable_auth).await,
         },
+        None,
         shutdown_rx,
     )
     .await

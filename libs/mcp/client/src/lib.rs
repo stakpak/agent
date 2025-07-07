@@ -20,9 +20,10 @@ pub struct ClientManager {
 impl ClientManager {
     pub async fn new(
         local_server_host: String,
+        auth_token: Option<String>,
         progress_tx: Option<Sender<ToolCallResultProgress>>,
     ) -> Result<Self> {
-        let client1 = local_client(local_server_host, progress_tx).await?;
+        let client1 = local_client(local_server_host, progress_tx, auth_token).await?;
         Ok(Self {
             clients: HashMap::from([("local".to_string(), client1)]),
         })

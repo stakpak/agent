@@ -1,9 +1,15 @@
 use anyhow::Result;
+use reqwest::{
+    Client,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{ClientCapabilities, ClientInfo, Implementation},
     service::RunningService,
-    transport::StreamableHttpClientTransport,
+    transport::{
+        StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
+    },
 };
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
@@ -48,17 +54,26 @@ impl ClientHandler for LocalClientHandler {
 pub async fn local_client(
     host: String,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
+    auth_token: Option<String>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
-    let transport = StreamableHttpClientTransport::from_uri(format!("{}/mcp", host));
+    let http_client = if let Some(token) = auth_token {
+        Client::builder()
+            .default_headers(HeaderMap::from_iter(vec![(
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )]))
+            .build()?
+    } else {
+        Client::builder().build()?
+    };
 
+    let transport = StreamableHttpClientTransport::with_client(
+        http_client,
+        StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", host)),
+    );
     let client_handler = LocalClientHandler { progress_tx };
     let client: RunningService<RoleClient, LocalClientHandler> =
         client_handler.serve(transport).await?;
-
-    // let client: RunningService<RoleClient, rmcp::model::InitializeRequestParam> =
-    //     client_info.serve(transport).await.inspect_err(|e| {
-    //         tracing::error!("client error: {:?}", e);
-    //     })?;
 
     Ok(client)
 }
