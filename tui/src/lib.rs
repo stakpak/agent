@@ -21,6 +21,8 @@ pub async fn run_tui(
     output_tx: Sender<OutputEvent>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     latest_version: Option<String>,
+    redact_secrets: bool,
+    privacy_mode: bool,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -28,7 +30,12 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let all_helpers = vec!["/help", "/status", "/sessions", "/memorize", "/quit"];
-    let mut state = AppState::new(all_helpers.clone(), latest_version);
+    let mut state = AppState::new(
+        all_helpers.clone(),
+        latest_version,
+        redact_secrets,
+        privacy_mode,
+    );
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
