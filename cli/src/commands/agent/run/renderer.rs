@@ -150,7 +150,7 @@ impl OutputRenderer {
 
                 if !tool_params.trim().is_empty() {
                     if let Ok(params_json) = serde_json::from_str::<Value>(tool_params) {
-                        let truncated_params = self.truncate_yaml_value(&params_json, 200);
+                        let truncated_params = truncate_yaml_value(&params_json, 200);
                         if let Ok(pretty_json) = serde_json::to_string_pretty(&truncated_params) {
                             output.push_str("  Arguments:\n");
                             for line in pretty_json.lines() {
@@ -419,45 +419,45 @@ impl OutputRenderer {
 
         wrapped_lines
     }
+}
 
-    fn truncate_yaml_value(&self, value: &Value, max_length: usize) -> Value {
-        match value {
-            Value::String(s) => {
-                if s.chars().count() > max_length {
-                    let truncated: String = s.chars().take(max_length).collect();
-                    Value::String(format!(
-                        "{}... [truncated - {} chars total]",
-                        truncated,
-                        s.chars().count()
-                    ))
-                } else {
-                    value.clone()
-                }
+fn truncate_yaml_value(value: &Value, max_length: usize) -> Value {
+    match value {
+        Value::String(s) => {
+            if s.chars().count() > max_length {
+                let truncated: String = s.chars().take(max_length).collect();
+                Value::String(format!(
+                    "{}... [truncated - {} chars total]",
+                    truncated,
+                    s.chars().count()
+                ))
+            } else {
+                value.clone()
             }
-            Value::Array(arr) => {
-                if arr.len() > 5 {
-                    let mut truncated = arr.iter().take(5).cloned().collect::<Vec<_>>();
-                    truncated.push(Value::String(format!(
-                        "... [truncated - {} items total]",
-                        arr.len()
-                    )));
-                    Value::Array(truncated)
-                } else {
-                    Value::Array(
-                        arr.iter()
-                            .map(|v| self.truncate_yaml_value(v, max_length))
-                            .collect(),
-                    )
-                }
-            }
-            Value::Object(obj) => {
-                let mut truncated_obj = serde_json::Map::new();
-                for (k, v) in obj {
-                    truncated_obj.insert(k.clone(), self.truncate_yaml_value(v, max_length));
-                }
-                Value::Object(truncated_obj)
-            }
-            _ => value.clone(),
         }
+        Value::Array(arr) => {
+            if arr.len() > 5 {
+                let mut truncated = arr.iter().take(5).cloned().collect::<Vec<_>>();
+                truncated.push(Value::String(format!(
+                    "... [truncated - {} items total]",
+                    arr.len()
+                )));
+                Value::Array(truncated)
+            } else {
+                Value::Array(
+                    arr.iter()
+                        .map(|v| truncate_yaml_value(v, max_length))
+                        .collect(),
+                )
+            }
+        }
+        Value::Object(obj) => {
+            let mut truncated_obj = serde_json::Map::new();
+            for (k, v) in obj {
+                truncated_obj.insert(k.clone(), truncate_yaml_value(v, max_length));
+            }
+            Value::Object(truncated_obj)
+        }
+        _ => value.clone(),
     }
 }

@@ -219,7 +219,7 @@ impl AppState {
             ondemand_shell_mode: false,
             shell_tool_calls: None,
             dialog_message_id: None,
-            autocomplete: AutoComplete::new(),
+            autocomplete: AutoComplete::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
         }
     }

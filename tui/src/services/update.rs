@@ -392,7 +392,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
                 .input
                 .chars()
                 .nth(at_pos.saturating_sub(1))
-                .map_or(false, |ch| ch.is_whitespace());
+                .is_some_and(|ch| ch.is_whitespace());
         if is_valid_at {
             handle_at_trigger(state);
         }
@@ -420,7 +420,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     } else {
         // If we're in file autocomplete mode and typing after @, update the filter
         if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
-            let current_word = get_current_word(&state, Some('@'));
+            let current_word = get_current_word(state, Some('@'));
             state.autocomplete.filter_files(&current_word);
 
             if state.autocomplete.filtered_count() == 0 {
@@ -461,7 +461,7 @@ fn handle_input_backspace(state: &mut AppState) {
                 .input
                 .chars()
                 .nth(at_pos.saturating_sub(1))
-                .map_or(false, |ch| ch.is_whitespace());
+                .is_some_and(|ch| ch.is_whitespace());
         if is_valid_at {
             handle_at_trigger(state);
         }
@@ -484,8 +484,8 @@ fn handle_input_backspace(state: &mut AppState) {
         // Check if we're still in @ autocomplete mode
         if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
             // Check if @ still exists
-            if find_at_trigger(&state).is_some() {
-                let current_word = get_current_word(&state, Some('@'));
+            if find_at_trigger(state).is_some() {
+                let current_word = get_current_word(state, Some('@'));
                 state.autocomplete.filter_files(&current_word);
 
                 if state.autocomplete.filtered_count() == 0 {

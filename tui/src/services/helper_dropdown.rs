@@ -113,7 +113,7 @@ fn get_file_icon(filename: &str) -> &'static str {
         return "📁";
     }
 
-    match filename.split('.').last() {
+    match filename.split('.').next_back() {
         Some("rs") => "🦀",
         Some("toml") => "⚙️",
         Some("md") => "📝",
