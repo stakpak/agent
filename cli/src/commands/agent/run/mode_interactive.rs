@@ -15,7 +15,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
+use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
 use uuid::Uuid;
@@ -38,11 +38,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
-
-    // Spawn MCP server task
+    let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(false).await;
+    let mcp_auth_config_clone = mcp_auth_config.clone();
     let mcp_handle = tokio::spawn(async move {
-        let _ = start_server_with_listener(
-            MCPServerConfigWithoutBindAddress {
+        let _ = start_server(
+            MCPServerConfig {
                 api: ClientConfig {
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
@@ -50,8 +50,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
+                auth: mcp_auth_config_clone,
+                bind_address,
             },
-            listener,
+            Some(listener),
             Some(shutdown_rx),
         )
         .await;
@@ -60,6 +62,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     // Initialize clients and tools
     let clients = ClientManager::new(
         ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
+        mcp_auth_config.token,
         Some(mcp_progress_tx),
     )
     .await

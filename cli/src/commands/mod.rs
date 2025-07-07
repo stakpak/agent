@@ -10,7 +10,7 @@ use stakpak_api::{
     Client, ClientConfig,
     models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
 };
-use stakpak_mcp_server::{MCPServerConfigWithoutBindAddress, ToolMode, start_server_with_listener};
+use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -156,6 +156,10 @@ pub enum Commands {
         /// Allow indexing of large projects (more than 500 supported files)
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
+
+        /// Disable MCP authentication (WARNING: this will allow any client to connect)
+        #[arg(long = "disable-mcp-auth", default_value_t = false)]
+        disable_mcp_auth: bool,
     },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
@@ -185,6 +189,7 @@ impl Commands {
                 privacy_mode,
                 tool_mode,
                 index_big_project,
+                disable_mcp_auth,
             } => {
                 let api_config: ClientConfig = config.clone().into();
                 match tool_mode {
@@ -220,15 +225,21 @@ impl Commands {
 
                 let (bind_address, listener) =
                     network::find_available_bind_address_with_listener().await?;
+                let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(disable_mcp_auth).await;
                 println!("MCP server started at http://{}", bind_address);
-                start_server_with_listener(
-                    MCPServerConfigWithoutBindAddress {
+                if let Some(token) = mcp_auth_config.token.as_ref() {
+                    println!("MCP auth token: {}", token);
+                }
+                start_server(
+                    MCPServerConfig {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         tool_mode,
+                        auth: mcp_auth_config,
+                        bind_address,
                     },
-                    listener,
+                    Some(listener),
                     None,
                 )
                 .await
