@@ -105,13 +105,13 @@ async fn auth_middleware(
         }
     }
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .header("WWW-Authenticate", "Bearer")
         .body(axum::body::Body::from(
             "Unauthorized: Invalid or missing token",
         ))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled

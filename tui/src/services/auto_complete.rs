@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::AppState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AutoComplete {
     pub file_suggestions: Vec<String>,
     pub filtered_files: Vec<String>,
@@ -13,15 +13,6 @@ pub struct AutoComplete {
 }
 
 impl AutoComplete {
-    pub fn new() -> Self {
-        Self {
-            file_suggestions: Vec::new(),
-            filtered_files: Vec::new(),
-            is_file_mode: false,
-            trigger_char: None,
-        }
-    }
-
     /// Load all files from current directory recursively
     pub fn load_files_from_directory(&mut self, dir: &Path) {
         self.file_suggestions.clear();
@@ -179,7 +170,7 @@ pub fn find_at_trigger(state: &AppState) -> Option<usize> {
                 || before_cursor
                     .chars()
                     .nth(i.saturating_sub(1))
-                    .map_or(false, |ch| ch.is_whitespace())
+                    .is_some_and(|ch| ch.is_whitespace())
             {
                 return Some(i);
             }

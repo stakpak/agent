@@ -57,15 +57,16 @@ pub async fn local_client(
     auth_token: Option<String>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
     let http_client = if let Some(token) = auth_token {
-        Client::builder()
-            .default_headers(HeaderMap::from_iter(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-            )]))
-            .build()?
+        Client::builder().default_headers(HeaderMap::from_iter(vec![(
+            HeaderName::from_static("authorization"),
+            #[allow(clippy::expect_used)]
+            HeaderValue::from_str(&format!("Bearer {}", token))
+                .expect("Failed to create header value"),
+        )]))
     } else {
-        Client::builder().build()?
-    };
+        Client::builder()
+    }
+    .build()?;
 
     let transport = StreamableHttpClientTransport::with_client(
         http_client,
