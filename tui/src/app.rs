@@ -5,6 +5,7 @@ use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
+use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -68,6 +69,7 @@ pub struct AppState {
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
     pub dialog_message_id: Option<Uuid>,
     pub autocomplete: AutoComplete,
+    pub secret_manager: SecretManager,
 }
 
 #[derive(Debug)]
@@ -134,7 +136,12 @@ pub enum OutputEvent {
 }
 
 impl AppState {
-    pub fn new(helpers: Vec<&'static str>, latest_version: Option<String>) -> Self {
+    pub fn new(
+        helpers: Vec<&'static str>,
+        latest_version: Option<String>,
+        redact_secrets: bool,
+        privacy_mode: bool,
+    ) -> Self {
         let version_message = match latest_version {
             Some(version) => {
                 if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
@@ -213,6 +220,7 @@ impl AppState {
             shell_tool_calls: None,
             dialog_message_id: None,
             autocomplete: AutoComplete::new(),
+            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
         }
     }
 

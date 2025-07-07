@@ -17,8 +17,6 @@ use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
     FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
-use stakpak_shared::secrets::redact_secrets;
-use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -132,9 +130,7 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            // TODO: add privacy mode support
-            let redaction_result = redact_secrets(&line, None, &HashMap::new(), false);
-            let mut redacted_line = redaction_result.redacted_string;
+            let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
                 let text = format!("{}\n", redacted_line);

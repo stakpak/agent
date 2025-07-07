@@ -70,9 +70,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     // Spawn TUI task
     let tui_handle = tokio::spawn(async move {
         let latest_version = get_latest_cli_version().await;
-        let _ = stakpak_tui::run_tui(input_rx, output_tx, shutdown_tx, latest_version.ok())
-            .await
-            .map_err(|e| e.to_string());
+        let _ = stakpak_tui::run_tui(
+            input_rx,
+            output_tx,
+            shutdown_tx,
+            latest_version.ok(),
+            config.redact_secrets,
+            config.privacy_mode,
+        )
+        .await
+        .map_err(|e| e.to_string());
     });
 
     let input_tx_clone = input_tx.clone();
