@@ -7,7 +7,6 @@ use stakpak_api::ClientConfig;
 
 pub mod local_tools;
 pub mod remote_tools;
-pub mod secret_manager;
 pub mod tool_container;
 
 use tokio::{net::TcpListener, sync::broadcast::Receiver};
