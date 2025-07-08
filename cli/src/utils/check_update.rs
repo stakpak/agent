@@ -63,9 +63,8 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
             eprintln!("Failed to read input: {}", e);
             return Ok(());
         }
-        if input.trim() == "y" {
+        if input.trim() == "y" || input.trim().is_empty() {
             run_auto_update().await?;
-            std::process::exit(0);
         } else if input.trim() == "n" {
             println!("Update cancelled!");
             println!("Proceeding to open Stakpak Agent...")
