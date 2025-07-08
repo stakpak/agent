@@ -1,4 +1,5 @@
 use crate::tool_container::ToolContainer;
+use chrono::{DateTime, Utc};
 use rmcp::{
     Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool, tool_router,
 };
@@ -55,6 +56,14 @@ pub struct SearchMemoryRequest {
         description = "List of keywords to search for in your memory. Searches against the title, tags, and content of your memory."
     )]
     pub keywords: Vec<String>,
+    #[schemars(
+        description = "Start time for filtering memories by creation time (inclusive range, ISO 8601 format)"
+    )]
+    pub start_time: Option<DateTime<Utc>>,
+    #[schemars(
+        description = "End time for filtering memories by creation time (inclusive range, ISO 8601 format)"
+    )]
+    pub end_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -419,7 +428,11 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
     )]
     pub async fn search_memory(
         &self,
-        Parameters(SearchMemoryRequest { keywords }): Parameters<SearchMemoryRequest>,
+        Parameters(SearchMemoryRequest {
+            keywords,
+            start_time,
+            end_time,
+        }): Parameters<SearchMemoryRequest>,
     ) -> Result<CallToolResult, McpError> {
         // // Cap the limit to a maximum of 5
         // let limit = limit.map(|l| l.min(5)).or(Some(5));
@@ -436,6 +449,8 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
                 name: "search_memory".to_string(),
                 arguments: json!({
                     "keywords": keywords,
+                    "start_time": start_time,
+                    "end_time": end_time,
                     // "limit": limit,
                 }),
             })
