@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
-use std::fs;
-
+use stakpak_shared::task_manager::TaskInfo;
+use std::fs::{self};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -24,6 +24,24 @@ pub struct RunCommandRequest {
     pub description: Option<String>,
     #[schemars(description = "Optional timeout for the command execution in seconds")]
     pub timeout: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TaskStatusRequest {
+    #[schemars(description = "The task ID to get status for")]
+    pub task_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetTaskDetailsRequest {
+    #[schemars(description = "The task ID to get details for")]
+    pub task_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetAllTasksRequest {
+    #[schemars(description = "View parameter (required for compatibility, any value works)")]
+    pub view: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -93,8 +111,6 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             timeout,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        const MAX_LINES: usize = 300;
-
         let command_clone = command.clone();
 
         // Restore secrets in the command before execution
@@ -220,39 +236,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        let output_lines = result.lines().collect::<Vec<_>>();
-
-        result = if output_lines.len() >= MAX_LINES {
-            // Create a output file to store the full output
-            let output_file = format!(
-                "command.output.{:06x}.txt",
-                rand::rng().random_range(0..=0xFFFFFF)
-            );
-            let output_file_path =
-                LocalStore::write_session_data(&output_file, &result).map_err(|e| {
-                    error!("Failed to write session data to {}: {}", output_file, e);
-                    McpError::internal_error(
-                        "Failed to write session data",
-                        Some(json!({ "error": e.to_string() })),
-                    )
-                })?;
-
-            format!(
-                "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
-                MAX_LINES,
-                output_lines.len(),
-                output_file_path,
-                output_lines
-                    .into_iter()
-                    .rev()
-                    .take(MAX_LINES)
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        } else {
-            result
-        };
+        result = handle_large_output(&result, "command.output")?;
 
         if result.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text("No output")]));
@@ -265,6 +249,281 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
         )]))
+    }
+
+    #[tool(
+        description = "Execute a shell command asynchronously in the background and return immediately with task information without waiting for completion.
+
+Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
+
+PARAMETERS:
+- command: The shell command to execute
+- description: Optional description of the command (not used in execution)  
+- timeout: Optional timeout in seconds after which the task will be terminated
+
+RETURNS:
+- task_id: Unique identifier for the background task
+- status: Current task status (will be 'Running' initially)
+- start_time: When the task was started
+
+SECRET HANDLING:
+- Commands containing secrets will have them restored before execution
+- Task output will be redacted when retrieved
+- Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in commands
+
+Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
+    )]
+    pub async fn run_command_async(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(RunCommandRequest {
+            command,
+            description: _,
+            timeout,
+        }): Parameters<RunCommandRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Restore secrets in the command before execution
+        let actual_command = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&command);
+
+        let timeout_duration = timeout.map(std::time::Duration::from_secs);
+
+        match self
+            .get_task_manager()
+            .start_task(actual_command, timeout_duration)
+            .await
+        {
+            Ok(task_info) => {
+                let output = serde_json::to_string_pretty(&task_info)
+                    .unwrap_or_else(|_| format!("Task started: {}", task_info.id));
+
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Background task started:\n{}",
+                    output
+                ))]))
+            }
+            Err(e) => {
+                error!("Failed to start background task: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("RUN_COMMAND_ASYNC_ERROR"),
+                    Content::text(format!("Failed to start background task: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get the status of all background tasks started with run_command_async.
+
+RETURNS:
+- A markdown-formatted table showing all background tasks with:
+  - Task ID: Full unique identifier (required for cancel_task)
+  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
+  - Start Time: When the task was started
+  - Duration: How long the task has been running or took to complete
+  - Output: Command output preview (truncated to 80 chars, redacted for security)
+
+This tool provides a clean tabular overview of all background tasks and their current state.
+Use the full Task ID from this output with cancel_task to cancel specific tasks."
+    )]
+    pub async fn get_all_tasks(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(GetAllTasksRequest { view: _ }): Parameters<GetAllTasksRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.get_task_manager().get_all_tasks().await {
+            Ok(tasks) => {
+                if tasks.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(
+                        "No background tasks found.",
+                    )]));
+                }
+
+                let redacted_tasks: Vec<TaskInfo> = tasks
+                    .into_iter()
+                    .map(|mut task| {
+                        if let Some(ref output) = task.output {
+                            task.output = Some(
+                                self.get_secret_manager()
+                                    .redact_and_store_secrets(output, None),
+                            );
+                        }
+                        task
+                    })
+                    .collect();
+
+                // Create markdown table format
+                let mut table = String::new();
+                table.push_str("# Background Tasks\n\n");
+
+                // Markdown table header
+                table.push_str("| Task ID | Status | Command | Start Time | Duration | Output |\n");
+                table.push_str("|---------|--------|------------|----------|--------|--------|\n");
+
+                // Markdown table rows
+                for task in &redacted_tasks {
+                    let task_id = task.id.clone();
+                    let status = format!("{:?}", task.status);
+                    let start_time = task.start_time.to_rfc3339();
+                    let duration = if let Some(d) = task.duration {
+                        format!("{}s", d.as_secs())
+                    } else {
+                        "".to_string()
+                    };
+
+                    let redacted_command = self
+                        .get_secret_manager()
+                        .redact_and_store_secrets(&task.command, None);
+                    let redacted_output = if let Some(ref out) = task.output {
+                        self.get_secret_manager()
+                            .redact_and_store_secrets(out, None)
+                    } else {
+                        "No output yet".to_string()
+                    };
+
+                    let escaped_command = redacted_command
+                        .chars()
+                        .take(100)
+                        .collect::<String>()
+                        .replace('|', "\\|")
+                        .replace('\n', " ");
+                    let escaped_output = redacted_output
+                        .chars()
+                        .take(100)
+                        .collect::<String>()
+                        .replace('|', "\\|")
+                        .replace('\n', " ");
+
+                    table.push_str(&format!(
+                        "| {} | {} | {} | {} | {} | {} |\n",
+                        task_id, status, escaped_command, start_time, duration, escaped_output
+                    ));
+                }
+
+                table.push_str(&format!("\n**Total: {} task(s)**", redacted_tasks.len()));
+
+                Ok(CallToolResult::success(vec![Content::text(table)]))
+            }
+            Err(e) => {
+                error!("Failed to get all tasks: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("GET_ALL_TASKS_ERROR"),
+                    Content::text(format!("Failed to get all tasks: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Cancel a running background task started with run_command_async.
+
+PARAMETERS:
+- task_id: The unique identifier of the task to cancel
+
+This will immediately terminate the running command and update the task status to 'Cancelled'.
+The task will be removed from the active tasks list."
+    )]
+    pub async fn cancel_task(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(TaskStatusRequest { task_id }): Parameters<TaskStatusRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.get_task_manager().cancel_task(task_id.clone()).await {
+            Ok(task_info) => {
+                let output = serde_json::to_string_pretty(&task_info)
+                    .unwrap_or_else(|_| format!("Task cancelled: {}", task_info.id));
+
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Task cancelled:\n{}",
+                    output
+                ))]))
+            }
+            Err(e) => {
+                error!("Failed to cancel task: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("CANCEL_TASK_ERROR"),
+                    Content::text(format!("Failed to cancel task: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get detailed information about a specific background task by its ID.
+
+This tool provides comprehensive details about a background task started with run_command_async, including:
+- Current status (Running, Completed, Failed, Cancelled, TimedOut, Pending)
+- Task ID and start time
+- Duration (elapsed time for running tasks, total time for completed tasks)
+- Complete command output with secret redaction
+- Error information if the task failed
+
+If the task output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
+
+Use this tool to check the progress and results of long-running background tasks."
+    )]
+    pub async fn get_task_details(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(GetTaskDetailsRequest { task_id }): Parameters<GetTaskDetailsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .get_task_manager()
+            .get_task_details(task_id.clone())
+            .await
+        {
+            Ok(Some(task_info)) => {
+                let duration_str = if let Some(duration) = task_info.duration {
+                    format!("{:.2}s", duration.as_secs_f64())
+                } else {
+                    "Still running".to_string()
+                };
+
+                let redacted_command = self
+                    .get_secret_manager()
+                    .redact_and_store_secrets(&task_info.command, None);
+
+                let redacted_output = if let Some(ref output) = task_info.output {
+                    handle_large_output(
+                        &self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(output, None),
+                        "task.output",
+                    )?
+                } else {
+                    "No output available".to_string()
+                };
+
+                let output = format!(
+                    "# Task Details: {}\n\nStatus: {:?}\nTask ID: {}\nStarted: {}\nDuration: {}\nCommand: \n```\n{}\n```\n\n## Output:\n```\n{}\n```",
+                    task_info.id,
+                    task_info.status,
+                    task_info.id,
+                    task_info.start_time.format("%Y-%m-%d %H:%M:%S UTC"),
+                    duration_str,
+                    redacted_command,
+                    redacted_output
+                );
+
+                Ok(CallToolResult::success(vec![Content::text(output)]))
+            }
+            Ok(None) => Ok(CallToolResult::error(vec![
+                Content::text("TASK_NOT_FOUND"),
+                Content::text(format!("Task not found: {}", task_id)),
+            ])),
+            Err(e) => {
+                error!("Failed to get task details: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("GET_TASK_DETAILS_ERROR"),
+                    Content::text(format!("Failed to get task details: {}", e)),
+                ]))
+            }
+        }
     }
 
     #[tool(
@@ -637,5 +896,45 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
         )]))
+    }
+}
+
+/// Helper method to handle large output by truncating and saving to file
+fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
+    const MAX_LINES: usize = 300;
+
+    let output_lines = output.lines().collect::<Vec<_>>();
+
+    if output_lines.len() >= MAX_LINES {
+        // Create a output file to store the full output
+        let output_file = format!(
+            "{}.{:06x}.txt",
+            file_prefix,
+            rand::rng().random_range(0..=0xFFFFFF)
+        );
+        let output_file_path =
+            LocalStore::write_session_data(&output_file, output).map_err(|e| {
+                error!("Failed to write session data to {}: {}", output_file, e);
+                McpError::internal_error(
+                    "Failed to write session data",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        Ok(format!(
+            "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
+            MAX_LINES,
+            output_lines.len(),
+            output_file_path,
+            output_lines
+                .into_iter()
+                .rev()
+                .take(MAX_LINES)
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))
+    } else {
+        Ok(output.to_string())
     }
 }

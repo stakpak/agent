@@ -4,4 +4,5 @@ pub mod local_store;
 pub mod models;
 pub mod secret_manager;
 pub mod secrets;
+pub mod task_manager;
 pub mod utils;

@@ -1,11 +1,10 @@
 pub mod gitleaks;
-
+use crate::helper::generate_simple_id;
+/// Re-export the gitleaks initialization function for external access
+pub use gitleaks::initialize_gitleaks_config;
 use gitleaks::{DetectedSecret, detect_secrets};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
 use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A result containing both the redacted string and the mapping of redaction keys to original secrets
 #[derive(Debug, Clone)]
@@ -189,27 +188,9 @@ pub fn redact_password(
 
 /// Generates a random redaction key
 fn generate_redaction_key(rule_id: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-
-    // Use current timestamp and a random component for uniqueness
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    rule_id.hash(&mut hasher);
-    timestamp.hash(&mut hasher);
-
-    // Add some randomness from thread ID if available
-    std::thread::current().id().hash(&mut hasher);
-
-    let hash = hasher.finish();
-    let short_hash = format!("{:x}", hash).chars().take(6).collect::<String>();
-    format!("[REDACTED_SECRET:{rule_id}:{short_hash}]")
+    let id = generate_simple_id(6);
+    format!("[REDACTED_SECRET:{rule_id}:{id}]")
 }
-
-/// Re-export the gitleaks initialization function for external access
-pub use gitleaks::initialize_gitleaks_config;
 
 #[cfg(test)]
 mod tests {
