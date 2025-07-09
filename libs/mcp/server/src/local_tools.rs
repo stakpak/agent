@@ -111,8 +111,6 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             timeout,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        const MAX_LINES: usize = 300;
-
         let command_clone = command.clone();
 
         // Restore secrets in the command before execution
@@ -238,39 +236,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        let output_lines = result.lines().collect::<Vec<_>>();
-
-        result = if output_lines.len() >= MAX_LINES {
-            // Create a output file to store the full output
-            let output_file = format!(
-                "command.output.{:06x}.txt",
-                rand::rng().random_range(0..=0xFFFFFF)
-            );
-            let output_file_path =
-                LocalStore::write_session_data(&output_file, &result).map_err(|e| {
-                    error!("Failed to write session data to {}: {}", output_file, e);
-                    McpError::internal_error(
-                        "Failed to write session data",
-                        Some(json!({ "error": e.to_string() })),
-                    )
-                })?;
-
-            format!(
-                "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
-                MAX_LINES,
-                output_lines.len(),
-                output_file_path,
-                output_lines
-                    .into_iter()
-                    .rev()
-                    .take(MAX_LINES)
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        } else {
-            result
-        };
+        result = handle_large_output(&result, "command.output")?;
 
         if result.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text("No output")]));
@@ -496,6 +462,8 @@ This tool provides comprehensive details about a background task started with ru
 - Complete command output with secret redaction
 - Error information if the task failed
 
+If the task output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory.
+
 Use this tool to check the progress and results of long-running background tasks."
     )]
     pub async fn get_task_details(
@@ -520,8 +488,12 @@ Use this tool to check the progress and results of long-running background tasks
                     .redact_and_store_secrets(&task_info.command, None);
 
                 let redacted_output = if let Some(ref output) = task_info.output {
-                    self.get_secret_manager()
-                        .redact_and_store_secrets(output, None)
+                    handle_large_output(
+                        &self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(output, None),
+                        "task.output",
+                    )?
                 } else {
                     "No output available".to_string()
                 };
@@ -924,5 +896,45 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
         )]))
+    }
+}
+
+/// Helper method to handle large output by truncating and saving to file
+fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
+    const MAX_LINES: usize = 300;
+
+    let output_lines = output.lines().collect::<Vec<_>>();
+
+    if output_lines.len() >= MAX_LINES {
+        // Create a output file to store the full output
+        let output_file = format!(
+            "{}.{:06x}.txt",
+            file_prefix,
+            rand::rng().random_range(0..=0xFFFFFF)
+        );
+        let output_file_path =
+            LocalStore::write_session_data(&output_file, output).map_err(|e| {
+                error!("Failed to write session data to {}: {}", output_file, e);
+                McpError::internal_error(
+                    "Failed to write session data",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        Ok(format!(
+            "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
+            MAX_LINES,
+            output_lines.len(),
+            output_file_path,
+            output_lines
+                .into_iter()
+                .rev()
+                .take(MAX_LINES)
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))
+    } else {
+        Ok(output.to_string())
     }
 }
