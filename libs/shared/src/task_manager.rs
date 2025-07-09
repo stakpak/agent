@@ -1,3 +1,4 @@
+use crate::helper::generate_simple_id;
 use chrono::{DateTime, Utc};
 use std::{collections::HashMap, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
@@ -5,7 +6,6 @@ use tokio::{
     sync::{broadcast, mpsc, oneshot},
     time::timeout,
 };
-use uuid::Uuid;
 
 const START_TASK_WAIT_TIME: Duration = Duration::from_millis(300);
 
@@ -177,7 +177,7 @@ impl TaskManager {
                 timeout,
                 response_tx,
             } => {
-                let task_id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
+                let task_id = id.unwrap_or_else(|| generate_simple_id(6));
                 let result = self.start_task(task_id.clone(), command, timeout).await;
                 let _ = response_tx.send(result.map(|_| task_id.clone()));
                 false

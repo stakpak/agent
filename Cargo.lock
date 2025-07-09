@@ -3770,6 +3770,7 @@ dependencies = [
  "chrono",
  "notify",
  "once_cell",
+ "rand 0.9.1",
  "regex",
  "serde",
  "serde_json",
