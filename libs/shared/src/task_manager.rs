@@ -193,11 +193,12 @@ impl TaskManager {
                 false
             }
             TaskMessage::GetAllTasks { response_tx } => {
-                let tasks: Vec<TaskInfo> = self
+                let mut tasks: Vec<TaskInfo> = self
                     .tasks
                     .values()
                     .map(|entry| TaskInfo::from(&entry.task))
                     .collect();
+                tasks.sort_by(|a, b| b.start_time.cmp(&a.start_time));
                 let _ = response_tx.send(tasks);
                 false
             }
