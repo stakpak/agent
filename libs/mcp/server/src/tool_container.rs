@@ -5,11 +5,14 @@ use rmcp::{
 };
 use stakpak_api::{Client, ClientConfig};
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::task_manager::TaskManagerHandle;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ToolContainer {
     pub client: Option<Client>,
     pub secret_manager: SecretManager,
+    pub task_manager: Arc<TaskManagerHandle>,
     pub tool_router: ToolRouter<Self>,
 }
 
@@ -19,6 +22,7 @@ impl ToolContainer {
         api_config: Option<ClientConfig>,
         redact_secrets: bool,
         privacy_mode: bool,
+        task_manager: Arc<TaskManagerHandle>,
         tool_router: ToolRouter<Self>,
     ) -> Result<Self, String> {
         let client = if let Some(api_config) = api_config {
@@ -30,6 +34,7 @@ impl ToolContainer {
         Ok(Self {
             client,
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            task_manager,
             tool_router,
         })
     }
@@ -40,6 +45,10 @@ impl ToolContainer {
 
     pub fn get_client(&self) -> Option<&Client> {
         self.client.as_ref()
+    }
+
+    pub fn get_task_manager(&self) -> &Arc<TaskManagerHandle> {
+        &self.task_manager
     }
 }
 
