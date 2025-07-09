@@ -4,6 +4,7 @@ use rmcp::transport::streamable_http_server::{
 };
 
 use stakpak_api::ClientConfig;
+use stakpak_shared::task_manager::TaskManager;
 
 pub mod local_tools;
 pub mod remote_tools;
@@ -131,7 +132,10 @@ async fn init_gitleaks_if_needed(redact_secrets: bool, privacy_mode: bool) {
 }
 
 /// Create graceful shutdown handler
-async fn create_shutdown_handler(shutdown_rx: Option<Receiver<()>>) {
+async fn create_shutdown_handler(
+    shutdown_rx: Option<Receiver<()>>,
+    task_manager_handle: Option<std::sync::Arc<stakpak_shared::task_manager::TaskManagerHandle>>,
+) {
     if let Some(mut shutdown_rx) = shutdown_rx {
         let _ = shutdown_rx.recv().await;
     } else {
@@ -185,8 +189,19 @@ async fn create_shutdown_handler(shutdown_rx: Option<Receiver<()>>) {
                     tracing::error!("Failed to listen for Ctrl+C signal: {}", e);
                     // Fall back to waiting indefinitely if signal handling fails
                     tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
+                    return;
                 }
             }
+        }
+    }
+
+    // Shutdown task manager if available
+    if let Some(task_manager_handle) = task_manager_handle {
+        tracing::info!("Shutting down task manager...");
+        if let Err(e) = task_manager_handle.shutdown().await {
+            tracing::error!("Failed to shutdown task manager: {}", e);
+        } else {
+            tracing::info!("Task manager shut down successfully");
         }
     }
 }
@@ -214,23 +229,35 @@ async fn start_server_internal(
         tracing::warn!("⚠️  MCP Authentication disabled - server is open to all connections");
     }
 
+    // Create and start TaskManager
+    let task_manager = TaskManager::new();
+    let task_manager_handle = task_manager.handle();
+
+    // Spawn the task manager to run in background_manager_handle_for_
+    tokio::spawn(async move {
+        task_manager.run().await;
+    });
+
     let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => ToolContainer::new(
             None,
             config.redact_secrets,
             config.privacy_mode,
+            task_manager_handle.clone(),
             ToolContainer::tool_router_local(),
         ),
         ToolMode::RemoteOnly => ToolContainer::new(
             Some(config.api),
             config.redact_secrets,
             config.privacy_mode,
+            task_manager_handle.clone(),
             ToolContainer::tool_router_remote(),
         ),
         ToolMode::Combined => ToolContainer::new(
             Some(config.api),
             config.redact_secrets,
             config.privacy_mode,
+            task_manager_handle.clone(),
             ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
         ),
     }
@@ -255,7 +282,10 @@ async fn start_server_internal(
             }));
 
     axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(create_shutdown_handler(shutdown_rx))
+        .with_graceful_shutdown(create_shutdown_handler(
+            shutdown_rx,
+            Some(task_manager_handle.clone()),
+        ))
         .await?;
 
     Ok(())
