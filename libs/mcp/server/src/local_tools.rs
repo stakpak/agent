@@ -334,13 +334,11 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             }
             Err(e) => {
                 error!("Failed to start background task: {}", e);
-                Err(McpError::internal_error(
-                    "Failed to start background task",
-                    Some(json!({
-                        "command": command,
-                        "error": e.to_string()
-                    })),
-                ))
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("RUN_COMMAND_ASYNC_ERROR"),
+                    Content::text(format!("Failed to start background task: {}", e)),
+                ]))
             }
         }
     }
@@ -438,10 +436,11 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
             }
             Err(e) => {
                 error!("Failed to get all tasks: {}", e);
-                Err(McpError::internal_error(
-                    "Failed to get all tasks",
-                    Some(json!({"error": e.to_string()})),
-                ))
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("GET_ALL_TASKS_ERROR"),
+                    Content::text(format!("Failed to get all tasks: {}", e)),
+                ]))
             }
         }
     }
@@ -472,13 +471,11 @@ The task will be removed from the active tasks list."
             }
             Err(e) => {
                 error!("Failed to cancel task: {}", e);
-                Err(McpError::internal_error(
-                    "Failed to cancel task",
-                    Some(json!({
-                        "task_id": task_id,
-                        "error": e.to_string()
-                    })),
-                ))
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("CANCEL_TASK_ERROR"),
+                    Content::text(format!("Failed to cancel task: {}", e)),
+                ]))
             }
         }
     }
