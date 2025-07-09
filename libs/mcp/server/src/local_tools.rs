@@ -33,6 +33,12 @@ pub struct TaskStatusRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetTaskDetailsRequest {
+    #[schemars(description = "The task ID to get details for")]
+    pub task_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetAllTasksRequest {
     #[schemars(description = "View parameter (required for compatibility, any value works)")]
     pub view: String,
@@ -280,10 +286,9 @@ If the command's output exceeds 300 lines the result will be truncated and the f
     }
 
     #[tool(
-        description = "Execute a shell command asynchronously in the background and return immediately with task information.
+        description = "Execute a shell command asynchronously in the background and return immediately with task information without waiting for completion.
 
-This tool starts a command in the background and returns task details immediately without waiting for completion.
-Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately.
+Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
 
 PARAMETERS:
 - command: The shell command to execute
@@ -388,8 +393,8 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                 table.push_str("# Background Tasks\n\n");
 
                 // Markdown table header
-                table.push_str("| Task ID | Status | Start Time | Duration | Output |\n");
-                table.push_str("|---------|--------|------------|----------|--------|\n");
+                table.push_str("| Task ID | Status | Command | Start Time | Duration | Output |\n");
+                table.push_str("|---------|--------|------------|----------|--------|--------|\n");
 
                 // Markdown table rows
                 for task in &redacted_tasks {
@@ -402,31 +407,32 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         "".to_string()
                     };
 
-                    let output = if let Some(ref out) = task.output {
-                        if out.is_empty() {
-                            "No output".to_string()
-                        } else {
-                            let cleaned = out
-                                .lines()
-                                .map(|line| line.trim())
-                                .filter(|line| !line.is_empty())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            if cleaned.len() > 100 {
-                                format!("{}...", &cleaned[..100])
-                            } else {
-                                cleaned
-                            }
-                        }
+                    let redacted_command = self
+                        .get_secret_manager()
+                        .redact_and_store_secrets(&task.command, None);
+                    let redacted_output = if let Some(ref out) = task.output {
+                        self.get_secret_manager()
+                            .redact_and_store_secrets(out, None)
                     } else {
                         "No output yet".to_string()
                     };
 
-                    let escaped_output = output.replace('|', "\\|").replace('\n', " ");
+                    let escaped_command = redacted_command
+                        .chars()
+                        .take(100)
+                        .collect::<String>()
+                        .replace('|', "\\|")
+                        .replace('\n', " ");
+                    let escaped_output = redacted_output
+                        .chars()
+                        .take(100)
+                        .collect::<String>()
+                        .replace('|', "\\|")
+                        .replace('\n', " ");
 
                     table.push_str(&format!(
-                        "| {} | {} | {} | {} | {} |\n",
-                        task_id, status, start_time, duration, escaped_output
+                        "| {} | {} | {} | {} | {} | {} |\n",
+                        task_id, status, escaped_command, start_time, duration, escaped_output
                     ));
                 }
 
@@ -475,6 +481,74 @@ The task will be removed from the active tasks list."
                 Ok(CallToolResult::error(vec![
                     Content::text("CANCEL_TASK_ERROR"),
                     Content::text(format!("Failed to cancel task: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get detailed information about a specific background task by its ID.
+
+This tool provides comprehensive details about a background task started with run_command_async, including:
+- Current status (Running, Completed, Failed, Cancelled, TimedOut, Pending)
+- Task ID and start time
+- Duration (elapsed time for running tasks, total time for completed tasks)
+- Complete command output with secret redaction
+- Error information if the task failed
+
+Use this tool to check the progress and results of long-running background tasks."
+    )]
+    pub async fn get_task_details(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(GetTaskDetailsRequest { task_id }): Parameters<GetTaskDetailsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .get_task_manager()
+            .get_task_details(task_id.clone())
+            .await
+        {
+            Ok(Some(task_info)) => {
+                let duration_str = if let Some(duration) = task_info.duration {
+                    format!("{:.2}s", duration.as_secs_f64())
+                } else {
+                    "Still running".to_string()
+                };
+
+                let redacted_command = self
+                    .get_secret_manager()
+                    .redact_and_store_secrets(&task_info.command, None);
+
+                let redacted_output = if let Some(ref output) = task_info.output {
+                    self.get_secret_manager()
+                        .redact_and_store_secrets(output, None)
+                } else {
+                    "No output available".to_string()
+                };
+
+                let output = format!(
+                    "# Task Details: {}\n\nStatus: {:?}\nTask ID: {}\nStarted: {}\nDuration: {}\nCommand: \n```\n{}\n```\n\n## Output:\n```\n{}\n```",
+                    task_info.id,
+                    task_info.status,
+                    task_info.id,
+                    task_info.start_time.format("%Y-%m-%d %H:%M:%S UTC"),
+                    duration_str,
+                    redacted_command,
+                    redacted_output
+                );
+
+                Ok(CallToolResult::success(vec![Content::text(output)]))
+            }
+            Ok(None) => Ok(CallToolResult::error(vec![
+                Content::text("TASK_NOT_FOUND"),
+                Content::text(format!("Task not found: {}", task_id)),
+            ])),
+            Err(e) => {
+                error!("Failed to get task details: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("GET_TASK_DETAILS_ERROR"),
+                    Content::text(format!("Failed to get task details: {}", e)),
                 ]))
             }
         }
