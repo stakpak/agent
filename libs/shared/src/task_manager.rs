@@ -2,6 +2,7 @@ use crate::helper::generate_simple_id;
 use chrono::{DateTime, Utc};
 use std::{collections::HashMap, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
+    io::{AsyncBufReadExt, BufReader},
     process::Command,
     sync::{broadcast, mpsc, oneshot},
     time::timeout,
@@ -25,6 +26,7 @@ pub enum TaskStatus {
 pub struct Task {
     pub id: TaskId,
     pub status: TaskStatus,
+    pub command: String,
     pub output: Option<String>,
     pub error: Option<String>,
     pub start_time: DateTime<Utc>,
@@ -43,6 +45,7 @@ pub struct TaskEntry {
 pub struct TaskInfo {
     pub id: TaskId,
     pub status: TaskStatus,
+    pub command: String,
     pub output: Option<String>,
     pub start_time: DateTime<Utc>,
     pub duration: Option<Duration>,
@@ -53,6 +56,7 @@ impl From<&Task> for TaskInfo {
         TaskInfo {
             id: task.id.clone(),
             status: task.status.clone(),
+            command: task.command.clone(),
             output: task.output.clone(),
             start_time: task.start_time,
             duration: task.duration,
@@ -99,6 +103,10 @@ pub enum TaskMessage {
         id: TaskId,
         response_tx: oneshot::Sender<Option<TaskStatus>>,
     },
+    GetTaskDetails {
+        id: TaskId,
+        response_tx: oneshot::Sender<Option<TaskInfo>>,
+    },
     GetAllTasks {
         response_tx: oneshot::Sender<Vec<TaskInfo>>,
     },
@@ -108,6 +116,10 @@ pub enum TaskMessage {
     TaskUpdate {
         id: TaskId,
         completion: TaskCompletion,
+    },
+    PartialUpdate {
+        id: TaskId,
+        output: String,
     },
 }
 
@@ -192,6 +204,11 @@ impl TaskManager {
                 let _ = response_tx.send(status);
                 false
             }
+            TaskMessage::GetTaskDetails { id, response_tx } => {
+                let task_info = self.tasks.get(&id).map(|entry| TaskInfo::from(&entry.task));
+                let _ = response_tx.send(task_info);
+                false
+            }
             TaskMessage::GetAllTasks { response_tx } => {
                 let mut tasks: Vec<TaskInfo> = self
                     .tasks
@@ -222,6 +239,19 @@ impl TaskManager {
                 }
                 false
             }
+            TaskMessage::PartialUpdate { id, output } => {
+                if let Some(entry) = self.tasks.get_mut(&id) {
+                    match &entry.task.output {
+                        Some(existing) => {
+                            entry.task.output = Some(format!("{}{}", existing, output));
+                        }
+                        None => {
+                            entry.task.output = Some(output);
+                        }
+                    }
+                }
+                false
+            }
             TaskMessage::Shutdown { response_tx } => {
                 self.shutdown_all_tasks().await;
                 let _ = response_tx.send(());
@@ -243,6 +273,7 @@ impl TaskManager {
         let task = Task {
             id: id.clone(),
             status: TaskStatus::Running,
+            command: command.clone(),
             output: None,
             error: None,
             start_time: Utc::now(),
@@ -327,7 +358,7 @@ impl TaskManager {
         process_tx: oneshot::Sender<u32>,
         task_tx: mpsc::UnboundedSender<TaskMessage>,
     ) {
-        let child = match Command::new("sh")
+        let mut child = match Command::new("sh")
             .arg("-c")
             .arg(&command)
             .stdout(Stdio::piped())
@@ -351,79 +382,121 @@ impl TaskManager {
             let _ = process_tx.send(process_id);
         }
 
-        // Helper function to execute command and handle cancellation
-        let execute_with_cancellation = async {
-            tokio::select! {
-                result = child.wait_with_output() => {
-                    match result {
-                        Ok(output) => {
-                            let mut combined_output = String::new();
+        // Take stdout and stderr for streaming
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
 
-                            // Add stdout
-                            if !output.stdout.is_empty() {
-                                combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
+        let stdout_reader = BufReader::new(stdout);
+        let stderr_reader = BufReader::new(stderr);
+
+        let mut stdout_lines = stdout_reader.lines();
+        let mut stderr_lines = stderr_reader.lines();
+
+        // Helper function to stream output and handle cancellation
+        let stream_output = async {
+            let mut final_output = String::new();
+            let mut final_error: Option<String> = None;
+
+            loop {
+                tokio::select! {
+                    line = stdout_lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                let output_line = format!("{}\n", line);
+                                final_output.push_str(&output_line);
+                                let _ = task_tx.send(TaskMessage::PartialUpdate {
+                                    id: id.clone(),
+                                    output: output_line,
+                                });
                             }
-
-                            // Add stderr if present
-                            if !output.stderr.is_empty() {
-                                if !combined_output.is_empty() {
-                                    combined_output.push('\n');
+                            Ok(None) => {
+                                // stdout stream ended
+                            }
+                            Err(err) => {
+                                final_error = Some(format!("Error reading stdout: {}", err));
+                                break;
+                            }
+                        }
+                    }
+                    line = stderr_lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                let output_line = format!("{}\n", line);
+                                final_output.push_str(&output_line);
+                                let _ = task_tx.send(TaskMessage::PartialUpdate {
+                                    id: id.clone(),
+                                    output: output_line,
+                                });
+                            }
+                            Ok(None) => {
+                                // stderr stream ended
+                            }
+                            Err(err) => {
+                                final_error = Some(format!("Error reading stderr: {}", err));
+                                break;
+                            }
+                        }
+                    }
+                    status = child.wait() => {
+                        match status {
+                            Ok(exit_status) => {
+                                if final_output.is_empty() {
+                                    final_output = "No output".to_string();
                                 }
-                                combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
-                            }
 
-                            if combined_output.is_empty() {
-                                combined_output = "No output".to_string();
+                                let completion = if exit_status.success() {
+                                    TaskCompletion {
+                                        output: final_output,
+                                        error: final_error,
+                                        final_status: TaskStatus::Completed,
+                                    }
+                                } else {
+                                    TaskCompletion {
+                                        output: final_output,
+                                        error: final_error.or_else(|| Some(format!("Command failed with exit code: {:?}", exit_status.code()))),
+                                        final_status: TaskStatus::Failed,
+                                    }
+                                };
+                                return completion;
                             }
-
-                            if output.status.success() {
-                                TaskCompletion {
-                                    output: combined_output,
-                                    error: None,
-                                    final_status: TaskStatus::Completed,
-                                }
-                            } else {
-                                TaskCompletion {
-                                    output: combined_output,
-                                    error: Some(format!("Command failed with exit code: {:?}", output.status.code())),
+                            Err(err) => {
+                                return TaskCompletion {
+                                    output: final_output,
+                                    error: Some(err.to_string()),
                                     final_status: TaskStatus::Failed,
-                                }
+                                };
                             }
                         }
-                        Err(err) => TaskCompletion {
-                            output: String::new(),
-                            error: Some(err.to_string()),
-                            final_status: TaskStatus::Failed,
-                        }
+                    }
+                    _ = &mut cancel_rx => {
+                        return TaskCompletion {
+                            output: final_output,
+                            error: Some("Task was cancelled".to_string()),
+                            final_status: TaskStatus::Cancelled,
+                        };
                     }
                 }
-                _ = &mut cancel_rx => {
-                    // Kill the process when cancelled - process was already consumed above
-                    // The external kill by PID will handle the process termination
-                    TaskCompletion {
-                        output: String::new(),
-                        error: Some("Task was cancelled".to_string()),
-                        final_status: TaskStatus::Cancelled,
-                    }
-                }
+            }
+
+            TaskCompletion {
+                output: final_output,
+                error: final_error,
+                final_status: TaskStatus::Failed,
             }
         };
 
         // Execute with timeout if provided
         let completion = if let Some(timeout_duration) = task_timeout {
-            match timeout(timeout_duration, execute_with_cancellation).await {
+            match timeout(timeout_duration, stream_output).await {
                 Ok(result) => result,
-                Err(_) => {
-                    // Timeout occurred - the process should already be killed by the cancellation
-                    TaskCompletion {
-                        output: String::new(),
-                        error: Some("Task timed out".to_string()),
-                        final_status: TaskStatus::TimedOut,
-                    }
-                }
+                Err(_) => TaskCompletion {
+                    output: String::new(),
+                    error: Some("Task timed out".to_string()),
+                    final_status: TaskStatus::TimedOut,
+                },
             }
         } else {
-            execute_with_cancellation.await
+            stream_output.await
         };
 
         // Send task completion back to manager
@@ -549,6 +622,16 @@ impl TaskManagerHandle {
 
         self.tx
             .send(TaskMessage::GetStatus { id, response_tx })
+            .map_err(|_| TaskError::ManagerShutdown)?;
+
+        response_rx.await.map_err(|_| TaskError::ManagerShutdown)
+    }
+
+    pub async fn get_task_details(&self, id: TaskId) -> Result<Option<TaskInfo>, TaskError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.tx
+            .send(TaskMessage::GetTaskDetails { id, response_tx })
             .map_err(|_| TaskError::ManagerShutdown)?;
 
         response_rx.await.map_err(|_| TaskError::ManagerShutdown)
