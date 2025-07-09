@@ -7,6 +7,8 @@ use tokio::{
 };
 use uuid::Uuid;
 
+const START_TASK_WAIT_TIME: Duration = Duration::from_millis(300);
+
 pub type TaskId = String;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -78,6 +80,8 @@ pub enum TaskError {
     TaskTimeout,
     #[error("Task cancelled")]
     TaskCancelled,
+    #[error("Task failed on start: {0}")]
+    TaskFailedOnStart(String),
 }
 
 pub enum TaskMessage {
@@ -486,12 +490,25 @@ impl TaskManagerHandle {
             .await
             .map_err(|_| TaskError::ManagerShutdown)??;
 
-        // Get the task info immediately after starting
-        self.get_all_tasks()
+        tokio::time::sleep(START_TASK_WAIT_TIME).await;
+
+        // Get the task info after waiting
+        let task_info = self
+            .get_all_tasks()
             .await?
             .into_iter()
             .find(|task| task.id == task_id)
-            .ok_or(TaskError::TaskNotFound(task_id))
+            .ok_or(TaskError::TaskNotFound(task_id.clone()))?;
+
+        // If the task failed, return an error with the failure details
+        if matches!(task_info.status, TaskStatus::Failed) {
+            let error_msg = task_info
+                .output
+                .unwrap_or_else(|| "Task failed on start".to_string());
+            return Err(TaskError::TaskFailedOnStart(error_msg));
+        }
+
+        Ok(task_info)
     }
 
     pub async fn cancel_task(&self, id: TaskId) -> Result<TaskInfo, TaskError> {
@@ -667,6 +684,54 @@ mod tests {
             .expect("Failed to get all tasks");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].status, TaskStatus::Completed);
+
+        // Shutdown the task manager
+        handle
+            .shutdown()
+            .await
+            .expect("Failed to shutdown task manager");
+    }
+
+    #[tokio::test]
+    async fn test_task_manager_detects_immediate_failure() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        // Spawn the task manager
+        let _manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        // Start a task that will fail immediately
+        let result = handle
+            .start_task("nonexistent_command_12345".to_string(), None)
+            .await;
+
+        // Should get a TaskFailedOnStart error
+        assert!(matches!(result, Err(TaskError::TaskFailedOnStart(_))));
+
+        // Shutdown the task manager
+        handle
+            .shutdown()
+            .await
+            .expect("Failed to shutdown task manager");
+    }
+
+    #[tokio::test]
+    async fn test_task_manager_detects_immediate_exit_code_failure() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        // Spawn the task manager
+        let _manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        // Start a task that will exit with non-zero code immediately
+        let result = handle.start_task("exit 1".to_string(), None).await;
+
+        // Should get a TaskFailedOnStart error
+        assert!(matches!(result, Err(TaskError::TaskFailedOnStart(_))));
 
         // Shutdown the task manager
         handle
