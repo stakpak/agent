@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
-use std::fs;
-
+use stakpak_shared::task_manager::TaskInfo;
+use std::fs::{self};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -24,6 +24,18 @@ pub struct RunCommandRequest {
     pub description: Option<String>,
     #[schemars(description = "Optional timeout for the command execution in seconds")]
     pub timeout: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TaskStatusRequest {
+    #[schemars(description = "The task ID to get status for")]
+    pub task_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetAllTasksRequest {
+    #[schemars(description = "View parameter (required for compatibility, any value works)")]
+    pub view: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -265,6 +277,210 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_output,
         )]))
+    }
+
+    #[tool(
+        description = "Execute a shell command asynchronously in the background and return immediately with task information.
+
+This tool starts a command in the background and returns task details immediately without waiting for completion.
+Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately.
+
+PARAMETERS:
+- command: The shell command to execute
+- description: Optional description of the command (not used in execution)  
+- timeout: Optional timeout in seconds after which the task will be terminated
+
+RETURNS:
+- task_id: Unique identifier for the background task
+- status: Current task status (will be 'Running' initially)
+- start_time: When the task was started
+
+SECRET HANDLING:
+- Commands containing secrets will have them restored before execution
+- Task output will be redacted when retrieved
+- Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in commands
+
+Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
+    )]
+    pub async fn run_command_async(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(RunCommandRequest {
+            command,
+            description: _,
+            timeout,
+        }): Parameters<RunCommandRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Restore secrets in the command before execution
+        let actual_command = self
+            .get_secret_manager()
+            .restore_secrets_in_string(&command);
+
+        let timeout_duration = timeout.map(std::time::Duration::from_secs);
+
+        match self
+            .get_task_manager()
+            .start_task(actual_command, timeout_duration)
+            .await
+        {
+            Ok(task_info) => {
+                let output = serde_json::to_string_pretty(&task_info)
+                    .unwrap_or_else(|_| format!("Task started: {}", task_info.id));
+
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Background task started:\n{}",
+                    output
+                ))]))
+            }
+            Err(e) => {
+                error!("Failed to start background task: {}", e);
+                Err(McpError::internal_error(
+                    "Failed to start background task",
+                    Some(json!({
+                        "command": command,
+                        "error": e.to_string()
+                    })),
+                ))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get the status of all background tasks started with run_command_async.
+
+RETURNS:
+- A markdown-formatted table showing all background tasks with:
+  - Task ID: Full unique identifier (required for cancel_task)
+  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
+  - Start Time: When the task was started
+  - Duration: How long the task has been running or took to complete
+  - Output: Command output preview (truncated to 80 chars, redacted for security)
+
+This tool provides a clean tabular overview of all background tasks and their current state.
+Use the full Task ID from this output with cancel_task to cancel specific tasks."
+    )]
+    pub async fn get_all_tasks(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(GetAllTasksRequest { view: _ }): Parameters<GetAllTasksRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.get_task_manager().get_all_tasks().await {
+            Ok(tasks) => {
+                if tasks.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(
+                        "No background tasks found.",
+                    )]));
+                }
+
+                let redacted_tasks: Vec<TaskInfo> = tasks
+                    .into_iter()
+                    .map(|mut task| {
+                        if let Some(ref output) = task.output {
+                            task.output = Some(
+                                self.get_secret_manager()
+                                    .redact_and_store_secrets(output, None),
+                            );
+                        }
+                        task
+                    })
+                    .collect();
+
+                // Create markdown table format
+                let mut table = String::new();
+                table.push_str("# Background Tasks\n\n");
+
+                // Markdown table header
+                table.push_str("| Task ID | Status | Start Time | Duration | Output |\n");
+                table.push_str("|---------|--------|------------|----------|--------|\n");
+
+                // Markdown table rows
+                for task in &redacted_tasks {
+                    let task_id = task.id.clone();
+                    let status = format!("{:?}", task.status);
+                    let start_time = task.start_time.to_rfc3339();
+                    let duration = if let Some(d) = task.duration {
+                        format!("{}s", d.as_secs())
+                    } else {
+                        "".to_string()
+                    };
+
+                    let output = if let Some(ref out) = task.output {
+                        if out.is_empty() {
+                            "No output".to_string()
+                        } else {
+                            let cleaned = out
+                                .lines()
+                                .map(|line| line.trim())
+                                .filter(|line| !line.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if cleaned.len() > 100 {
+                                format!("{}...", &cleaned[..100])
+                            } else {
+                                cleaned
+                            }
+                        }
+                    } else {
+                        "No output yet".to_string()
+                    };
+
+                    let escaped_output = output.replace('|', "\\|").replace('\n', " ");
+
+                    table.push_str(&format!(
+                        "| {} | {} | {} | {} | {} |\n",
+                        task_id, status, start_time, duration, escaped_output
+                    ));
+                }
+
+                table.push_str(&format!("\n**Total: {} task(s)**", redacted_tasks.len()));
+
+                Ok(CallToolResult::success(vec![Content::text(table)]))
+            }
+            Err(e) => {
+                error!("Failed to get all tasks: {}", e);
+                Err(McpError::internal_error(
+                    "Failed to get all tasks",
+                    Some(json!({"error": e.to_string()})),
+                ))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Cancel a running background task started with run_command_async.
+
+PARAMETERS:
+- task_id: The unique identifier of the task to cancel
+
+This will immediately terminate the running command and update the task status to 'Cancelled'.
+The task will be removed from the active tasks list."
+    )]
+    pub async fn cancel_task(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(TaskStatusRequest { task_id }): Parameters<TaskStatusRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.get_task_manager().cancel_task(task_id.clone()).await {
+            Ok(task_info) => {
+                let output = serde_json::to_string_pretty(&task_info)
+                    .unwrap_or_else(|_| format!("Task cancelled: {}", task_info.id));
+
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Task cancelled:\n{}",
+                    output
+                ))]))
+            }
+            Err(e) => {
+                error!("Failed to cancel task: {}", e);
+                Err(McpError::internal_error(
+                    "Failed to cancel task",
+                    Some(json!({
+                        "task_id": task_id,
+                        "error": e.to_string()
+                    })),
+                ))
+            }
+        }
     }
 
     #[tool(
