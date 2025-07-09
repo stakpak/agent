@@ -1,3 +1,5 @@
+use rand::Rng;
+
 pub fn truncate_output(output: &str) -> String {
     const MAX_OUTPUT_LENGTH: usize = 4000;
     // Truncate long output
@@ -19,4 +21,16 @@ pub fn truncate_output(output: &str) -> String {
     }
 
     output.to_string()
+}
+
+pub fn generate_simple_id(length: usize) -> String {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::rng();
+
+    (0..length)
+        .map(|_| {
+            let idx = rng.random_range(0..CHARS.len());
+            CHARS[idx] as char
+        })
+        .collect()
 }
