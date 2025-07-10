@@ -182,6 +182,17 @@ pub enum Commands {
 }
 
 impl Commands {
+    pub fn requires_auth(&self) -> bool {
+        match &self {
+            Commands::Login { .. } => false,
+            Commands::Logout => false,
+            Commands::Set { .. } => false,
+            Commands::Config => false,
+            Commands::Version => false,
+            Commands::Update => false,
+            _ => true,
+        }
+    }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
             Commands::Mcp {
