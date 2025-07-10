@@ -84,6 +84,10 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    if let Err(e) = auto_update().await {
+        eprintln!("Auto-update failed: {}", e);
+    }
+
     let cli = Cli::parse();
 
     if let Some(workdir) = cli.workdir {
@@ -106,33 +110,6 @@ async fn main() {
 
     match AppConfig::load() {
         Ok(mut config) => {
-            let mut config_updated = false;
-
-            if config.api_key.is_none() {
-                println!();
-                println!("Stakpak API Key not found!");
-                println!(
-                    "- Go to https://stakpak.dev/generate-api-key. Get your api key and paste it below"
-                );
-                print!("Enter your API Key: ");
-                if let Err(e) = std::io::stdout().flush() {
-                    eprintln!("Failed to flush stdout: {}", e);
-                    std::process::exit(1);
-                }
-
-                let api_key = match rpassword::read_password() {
-                    Ok(key) => key,
-                    Err(e) => {
-                        eprintln!("\nFailed to read API key: {}", e);
-                        std::process::exit(1);
-                    }
-                };
-
-                config.api_key = Some(api_key.trim().to_string());
-                config_updated = true;
-                println!("API Key saved successfully!");
-            }
-
             if config.machine_name.is_none() {
                 // Generate a random machine name
                 let random_name = names::Generator::with_naming(Name::Numbered)
@@ -140,22 +117,18 @@ async fn main() {
                     .unwrap_or_else(|| "unknown-machine".to_string());
 
                 config.machine_name = Some(random_name);
-                config_updated = true;
-            }
 
-            if config_updated {
                 if let Err(e) = config.save() {
                     eprintln!("Failed to save config: {}", e);
                 }
             }
 
-            if let Err(e) = auto_update().await {
-                eprintln!("Auto-update failed: {}", e);
-            }
-
             match cli.command {
                 Some(command) => {
                     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    if config.api_key.is_none() && command.requires_auth() {
+                        prompt_for_api_key(&mut config);
+                    }
                     match command.run(config).await {
                         Ok(_) => {}
                         Err(e) => {
@@ -165,6 +138,9 @@ async fn main() {
                     }
                 }
                 None => {
+                    if config.api_key.is_none() {
+                        prompt_for_api_key(&mut config);
+                    }
                     let local_context = analyze_local_context(&config).await.ok();
                     let api_config: ClientConfig = config.clone().into();
                     let client = if let Ok(client) = Client::new(&api_config) {
@@ -267,4 +243,31 @@ async fn main() {
         }
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
+}
+
+fn prompt_for_api_key(config: &mut AppConfig) {
+    println!();
+    println!("Stakpak API Key not found!");
+    println!("- Go to http://stakpak.dev/generate-api-key. Get your api key and paste it below");
+    print!("Enter your API Key: ");
+    if let Err(e) = std::io::stdout().flush() {
+        eprintln!("Failed to flush stdout: {}", e);
+        std::process::exit(1);
+    }
+
+    let api_key = match rpassword::read_password() {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("\nFailed to read API key: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    config.api_key = Some(api_key.trim().to_string());
+
+    if let Err(e) = config.save() {
+        eprintln!("Failed to save config: {}", e);
+    }
+
+    println!("API Key saved successfully!");
 }
