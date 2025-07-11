@@ -53,13 +53,26 @@ pub struct TaskInfo {
 
 impl From<&Task> for TaskInfo {
     fn from(task: &Task) -> Self {
+        let duration = if matches!(task.status, TaskStatus::Running) {
+            // For running tasks, calculate duration from start time to now
+            Some(
+                Utc::now()
+                    .signed_duration_since(task.start_time)
+                    .to_std()
+                    .unwrap_or_default(),
+            )
+        } else {
+            // For completed/failed/cancelled tasks, use the stored duration
+            task.duration
+        };
+
         TaskInfo {
             id: task.id.clone(),
             status: task.status.clone(),
             command: task.command.clone(),
             output: task.output.clone(),
             start_time: task.start_time,
-            duration: task.duration,
+            duration,
         }
     }
 }
