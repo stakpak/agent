@@ -367,10 +367,10 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                     let task_id = task.id.clone();
                     let status = format!("{:?}", task.status);
                     let start_time = task.start_time.to_rfc3339();
-                    let duration = if let Some(d) = task.duration {
-                        format!("{}s", d.as_secs())
+                    let duration = if let Some(duration) = task.duration {
+                        format!("{:.2}s", duration.as_secs_f64())
                     } else {
-                        "".to_string()
+                        "N/A".to_string()
                     };
 
                     let redacted_command = self
@@ -480,7 +480,7 @@ Use this tool to check the progress and results of long-running background tasks
                 let duration_str = if let Some(duration) = task_info.duration {
                     format!("{:.2}s", duration.as_secs_f64())
                 } else {
-                    "Still running".to_string()
+                    "N/A".to_string()
                 };
 
                 let redacted_command = self
