@@ -7,7 +7,8 @@ pub use ratatui::style::Color;
 
 mod services;
 
-use crossterm::{execute, terminal::EnterAlternateScreen};
+use crossterm::{execute, terminal::{EnterAlternateScreen}};
+use crossterm::{event::{EnableBracketedPaste, DisableBracketedPaste}};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -26,7 +27,7 @@ pub async fn run_tui(
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
-    execute!(std::io::stdout(), EnterAlternateScreen)?;
+    execute!(std::io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let all_helpers = vec!["/help", "/status", "/sessions", "/memorize", "/quit"];
@@ -162,6 +163,6 @@ pub async fn run_tui(
     println!("Quitting...");
     let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
-    execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen, DisableBracketedPaste)?;
     Ok(())
 }
