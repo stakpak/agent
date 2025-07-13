@@ -21,6 +21,7 @@ use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
+use console::strip_ansi_codes;
 
 pub fn update(
     state: &mut AppState,
@@ -227,7 +228,10 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
+            // strip text from ansi escape codes
+            let text = strip_ansi_codes(&text);
             state.is_pasting = true;
+            let text = text.replace("\r\n", "\n").replace('\r', "\n");
             state.input.insert_str(state.cursor_position, &text);
             state.cursor_position += text.len();
             state.is_pasting = false;
