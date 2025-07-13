@@ -169,7 +169,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                        let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
+                        // TODO: Add cancel_rx to handle tool call cancellation
+                        let result = run_tool_call(&clients, &tools_map, &tool_call, None).await?;
                         if let Some(result) = result {
                             let result_content = result
                                 .content
