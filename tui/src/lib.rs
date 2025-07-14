@@ -34,7 +34,14 @@ pub async fn run_tui(
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let all_helpers = vec!["/help", "/status", "/sessions", "/memorize", "/quit"];
+    let all_helpers = vec![
+        "/help",
+        "/clear",
+        "/status",
+        "/sessions",
+        "/memorize",
+        "/quit",
+    ];
     let mut state = AppState::new(
         all_helpers.clone(),
         latest_version,
@@ -146,7 +153,7 @@ pub async fn run_tui(
                        if let InputEvent::InputSubmitted = event {
                         if (state.show_helper_dropdown && state.autocomplete.is_active()) || (state.show_shell_mode && !state.waiting_for_shell_input) {
                             // Do nothing for these cases
-                        } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
+                        } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') && state.input.trim() != "clear" {
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                         }
                        }

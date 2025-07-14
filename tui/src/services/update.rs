@@ -6,8 +6,8 @@ use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_memorize_message, push_status_message,
-    push_styled_message, render_system_message,
+    push_clear_message, push_error_message, push_help_message, push_memorize_message,
+    push_status_message, push_styled_message, render_system_message,
 };
 use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
@@ -581,6 +581,11 @@ fn handle_input_submitted(
         return;
     }
 
+    if state.input.trim() == "clear" {
+        push_clear_message(state);
+        return;
+    }
+
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
@@ -627,6 +632,10 @@ fn handle_input_submitted(
                     state.input.clear();
                     state.cursor_position = 0;
                     state.show_helper_dropdown = false;
+                    return;
+                }
+                "/clear" => {
+                    push_clear_message(state);
                     return;
                 }
                 "/memorize" => {
