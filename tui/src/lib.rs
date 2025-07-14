@@ -73,6 +73,15 @@ pub async fn run_tui(
     terminal.draw(|f| view::view(f, &state))?;
     let mut should_quit = false;
     loop {
+        // Check if double Ctrl+C timer expired
+        if state.ctrl_c_pressed_once {
+            if let Some(timer) = state.ctrl_c_timer {
+                if std::time::Instant::now() > timer {
+                    state.ctrl_c_pressed_once = false;
+                    state.ctrl_c_timer = None;
+                }
+            }
+        }
         tokio::select! {
 
                Some(event) = input_rx.recv() => {
@@ -83,7 +92,7 @@ pub async fn run_tui(
             continue;
         }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx,&output_tx, terminal_size, &shell_event_tx);
                        terminal.draw(|f| view::view(f, &state))?;
                        continue;
                    }
@@ -120,11 +129,11 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, terminal_size, &shell_event_tx);
                    }
                }
                Some(event) = internal_rx.recv() => {
-                   if let InputEvent::Quit = event { should_quit = true; }
+                if let InputEvent::Quit = event { should_quit = true; }
                    else {
                        let term_size = terminal.size()?;
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
@@ -157,10 +166,19 @@ pub async fn run_tui(
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                         }
                        }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, terminal_size, &shell_event_tx);
                    }
                }
-               _ = spinner_interval.tick(), if state.loading => {
+               _ = spinner_interval.tick() => {
+                   // Also check double Ctrl+C timer expiry on every tick
+                   if state.ctrl_c_pressed_once {
+                       if let Some(timer) = state.ctrl_c_timer {
+                           if std::time::Instant::now() > timer {
+                               state.ctrl_c_pressed_once = false;
+                               state.ctrl_c_timer = None;
+                           }
+                       }
+                   }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
                    terminal.draw(|f| view::view(f, &state))?;
                }

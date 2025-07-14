@@ -1,7 +1,9 @@
 use crate::services::auto_complete::AutoComplete;
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
+use crate::services::render_input::get_multiline_input_lines;
 use ratatui::style::Color;
+use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -71,6 +73,8 @@ pub struct AppState {
     pub autocomplete: AutoComplete,
     pub secret_manager: SecretManager,
     pub latest_version: Option<String>,
+    pub ctrl_c_pressed_once: bool, // Track if Ctrl+C was pressed once
+    pub ctrl_c_timer: Option<std::time::Instant>, // Timer for double Ctrl+C
 }
 
 #[derive(Debug)]
@@ -123,6 +127,7 @@ pub enum InputEvent {
     InputCursorEnd,
     InputCursorPrevWord,
     InputCursorNextWord,
+    AttemptQuit, // First Ctrl+C press for quit sequence
 }
 
 #[derive(Debug)]
@@ -166,7 +171,7 @@ impl AppState {
             show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
-            pending_bash_message_id: None, // Initialize new field
+            pending_bash_message_id: None,
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
             show_shell_mode: false,
@@ -182,9 +187,14 @@ impl AppState {
             autocomplete: AutoComplete::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
+            ctrl_c_pressed_once: false,
+            ctrl_c_timer: None,
         }
     }
-
+    pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
+        let (lines, cursor_rendered) = get_multiline_input_lines(self, area_width);
+        (lines, cursor_rendered)
+    }
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
 

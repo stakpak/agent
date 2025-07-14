@@ -9,6 +9,22 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
+    if state.is_pasting {
+        let hint = Paragraph::new(Span::styled(
+            "Pasting text...",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(hint, area);
+        return;
+    }
+    if state.ctrl_c_pressed_once && state.ctrl_c_timer.is_some() {
+        let hint = Paragraph::new(Span::styled(
+            "Press Ctrl+C again to exit Stakpak",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(hint, area);
+        return;
+    }
     if state.show_shell_mode {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",

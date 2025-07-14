@@ -28,6 +28,7 @@ pub fn update(
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
+    input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
     terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
@@ -62,7 +63,7 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx, shell_tx);
+                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
@@ -84,7 +85,6 @@ pub fn update(
         }
         InputEvent::PageUp => handle_page_up(state, message_area_height),
         InputEvent::PageDown => handle_page_down(state, message_area_height, message_area_width),
-        InputEvent::Quit => {}
         InputEvent::CursorLeft => {
             if state.cursor_position > 0 {
                 let prev = state.input[..state.cursor_position]
@@ -228,9 +228,8 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
-            // strip text from ansi escape codes
-            let text = strip_ansi_codes(&text);
             state.is_pasting = true;
+            let text = strip_ansi_codes(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
             state.input.insert_str(state.cursor_position, &text);
             state.cursor_position += text.len();
@@ -297,6 +296,25 @@ pub fn update(
                 pos += 1;
             }
             state.cursor_position = pos;
+        }
+        InputEvent::AttemptQuit => {
+            use std::time::Instant;
+            let now = Instant::now();
+            if !state.ctrl_c_pressed_once
+                || state.ctrl_c_timer.is_none()
+                || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
+            {
+                // First press or timer expired: clear input, move cursor, set timer
+                state.input.clear();
+                state.cursor_position = 0;
+                state.ctrl_c_pressed_once = true;
+                state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
+            } else {
+                // Second press within 2s: trigger quit
+                state.ctrl_c_pressed_once = false;
+                state.ctrl_c_timer = None;
+                let _ = input_tx.try_send(InputEvent::Quit);
+            }
         }
         _ => {}
     }
@@ -547,6 +565,7 @@ fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
     output_tx: &Sender<OutputEvent>,
+    input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
     let input_height = 3;
@@ -664,7 +683,7 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                     state.input.clear();
                     state.cursor_position = 0;
-                    std::process::exit(1);
+                    let _ = input_tx.try_send(InputEvent::Quit);
                 }
                 _ => {}
             }
