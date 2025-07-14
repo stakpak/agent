@@ -37,6 +37,9 @@ rand = { workspace = true }
 thiserror.workspace = true
 
 
+[features]
+vendored-openssl = ["reqwest/native-tls-vendored"]
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
