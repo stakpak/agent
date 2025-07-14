@@ -325,6 +325,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     f.render_widget(message_widget, area);
 }
 
+
 fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     // Mask input if in shell mode and waiting for shell input (password)
     let input = if state.show_shell_mode && state.waiting_for_shell_input {
@@ -347,152 +348,302 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     let mut current_pos = 0;
 
     for (segment_idx, segment) in line_segments.iter().enumerate() {
-        let mut current_line = Vec::new();
-        // Add prompt to first line only
-        if state.show_shell_mode {
-            current_line.push(Span::styled(
-                " ".to_string() + SHELL_PROMPT_PREFIX,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else if segment_idx == 0 {
-            current_line.push(Span::raw("> "));
-        }
-
-        let mut current_width = 0;
-
-        // Process this line segment
-        let mut word_segments = Vec::new();
-        let mut current_word = String::new();
-        let mut in_word = false;
-
-        // Split segment into words and spaces, preserving exact positions
-        for (i, c) in segment.char_indices() {
-            let byte_pos = current_pos + i;
-
-            // Render cursor if it's at this exact position
-            if byte_pos == cursor_pos && !cursor_rendered {
-                if in_word {
-                    // End current word before cursor
-                    if !current_word.is_empty() {
-                        word_segments.push((current_word.clone(), false));
-                        current_word.clear();
-                    }
+        // Handle empty segments (blank lines)
+        if segment.is_empty() {
+            let mut empty_line = Vec::new();
+            
+            // Add prompt only for first line
+            if segment_idx == 0 {
+                if state.show_shell_mode {
+                    empty_line.push(Span::styled(
+                        " ".to_string() + SHELL_PROMPT_PREFIX,
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    empty_line.push(Span::raw("> "));
                 }
-
-                // Add the cursor
-                word_segments.push((c.to_string(), true));
-                cursor_rendered = true;
-                in_word = !c.is_whitespace();
-            } else if c.is_whitespace() {
-                // End current word if any
-                if in_word && !current_word.is_empty() {
-                    word_segments.push((current_word.clone(), false));
-                    current_word.clear();
-                    in_word = false;
-                }
-
-                // Add the whitespace
-                word_segments.push((c.to_string(), false));
-            } else {
-                // Part of a word
-                current_word.push(c);
-                in_word = true;
             }
-        }
-
-        // Add any remaining word
-        if in_word && !current_word.is_empty() {
-            word_segments.push((current_word, false));
-        }
-
-        // If cursor is at the end of this segment
-        if current_pos + segment.len() == cursor_pos && !cursor_rendered {
-            word_segments.push((" ".to_string(), true));
-            cursor_rendered = true;
-        }
-
-        // Render the word segments with proper wrapping
-        for (text, is_cursor) in word_segments {
-            let text_width = text
-                .chars()
-                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
-                .sum::<usize>();
-
-            // Check if this segment would exceed line width
-            let needs_wrap = !text.trim().is_empty()
-                && current_width > 0
-                && current_width + text_width > available_width;
-
-            if needs_wrap {
-                // Add current line and start a new one
-                lines.push(Line::from(std::mem::take(&mut current_line)));
-                current_line = Vec::new();
-                current_width = 0;
-            }
-
-            // Add the segment (with or without cursor highlighting)
-            if is_cursor {
-                current_line.push(Span::styled(
-                    text,
+            
+            // Check if cursor is at the end of this empty segment
+            if current_pos == cursor_pos && !cursor_rendered {
+                empty_line.push(Span::styled(
+                    "█",
                     Style::default()
-                        .bg(Color::Cyan)
-                        .fg(Color::Black)
+                        .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ));
-            } else {
-                current_line.push(Span::raw(text));
+                cursor_rendered = true;
             }
-
-            current_width += text_width;
+            
+            lines.push(Line::from(empty_line));
+            current_pos += 1; // +1 for the newline
+            continue;
         }
 
-        // Add this line
-        lines.push(Line::from(std::mem::take(&mut current_line)));
+        // For non-empty segments, wrap text properly but preserve spaces
+        let prompt_text = if state.show_shell_mode {
+            format!(" {}", SHELL_PROMPT_PREFIX)
+        } else if segment_idx == 0 {
+            "> ".to_string()
+        } else {
+            String::new()
+        };
+        
+        let prompt_width = prompt_text.chars().count();
+        let content_width = available_width.saturating_sub(prompt_width);
+        
+        // Process the segment preserving all whitespace
+        let mut current_line_content = String::new();
+        let mut current_line_width = 0;
+        let mut line_start_pos = current_pos;
+        
+        // Split by words but preserve spaces
+        let mut word_positions = Vec::new();
+        let mut word_start = 0;
+        let mut in_word = false;
+        
+        for (i, ch) in segment.char_indices() {
+            if ch.is_whitespace() {
+                if in_word {
+                    // End of word
+                    word_positions.push((word_start, i, false)); // false = word
+                    in_word = false;
+                }
+                if !in_word {
+                    word_start = i;
+                }
+            } else {
+                if !in_word {
+                    if word_start < i {
+                        // There were spaces before this word
+                        word_positions.push((word_start, i, true)); // true = whitespace
+                    }
+                    word_start = i;
+                    in_word = true;
+                }
+            }
+        }
+        
+        // Handle final word or whitespace
+        if in_word && word_start < segment.len() {
+            word_positions.push((word_start, segment.len(), false));
+        } else if !in_word && word_start < segment.len() {
+            word_positions.push((word_start, segment.len(), true));
+        }
+        
+        // If no word positions found, treat entire segment as one unit
+        if word_positions.is_empty() {
+            word_positions.push((0, segment.len(), false));
+        }
+        
+        for (start, end, _is_whitespace) in word_positions {
+            let text = &segment[start..end];
+            let text_width = text.chars().count();
+            
+            // Check if this text fits on current line
+            if current_line_width + text_width > content_width && !current_line_content.is_empty() {
+                // Current line is full, render it
+                let mut line_spans = Vec::new();
+                
+                // Add prompt for first line of this segment
+                if segment_idx == 0 && lines.is_empty() {
+                    if state.show_shell_mode {
+                        line_spans.push(Span::styled(
+                            prompt_text.clone(),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    } else {
+                        line_spans.push(Span::raw(prompt_text.clone()));
+                    }
+                }
+                
+                // Handle cursor in current line content
+                let line_end_pos = line_start_pos + current_line_content.len();
+                if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
+                    let cursor_offset = cursor_pos - line_start_pos;
+                    
+                    if cursor_offset < current_line_content.len() {
+                        let before_cursor = &current_line_content[..cursor_offset];
+                        let at_cursor_char = current_line_content.chars().nth(cursor_offset).unwrap_or(' ');
+                        let at_cursor = if at_cursor_char == ' ' { "█" } else { &at_cursor_char.to_string() };
+                        let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
+                        let after_cursor = if after_cursor_start < current_line_content.len() {
+                            &current_line_content[after_cursor_start..]
+                        } else {
+                            ""
+                        };
+                        
+                        if !before_cursor.is_empty() {
+                            line_spans.push(Span::raw(before_cursor.to_string()));
+                        }
+                        line_spans.push(Span::styled(
+                            at_cursor.to_string(),
+                            Style::default()
+                                .bg(Color::Cyan)
+                                .fg(Color::Black)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        if !after_cursor.is_empty() {
+                            line_spans.push(Span::raw(after_cursor.to_string()));
+                        }
+                        cursor_rendered = true;
+                    } else {
+                        // Cursor at end of line
+                        line_spans.push(Span::raw(current_line_content.clone()));
+                        line_spans.push(Span::styled(
+                            "█",
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        cursor_rendered = true;
+                    }
+                } else {
+                    line_spans.push(Span::raw(current_line_content.clone()));
+                }
+                
+                lines.push(Line::from(line_spans));
+                
+                // Start new line
+                current_line_content.clear();
+                current_line_width = 0;
+                line_start_pos = current_pos + start;
+            }
+            
+            // Add text to current line
+            current_line_content.push_str(text);
+            current_line_width += text_width;
+        }
+        
+        // Render remaining content
+        if !current_line_content.is_empty() {
+            let mut line_spans = Vec::new();
+            
+            // Add prompt for first line of this segment
+            if segment_idx == 0 && lines.is_empty() {
+                if state.show_shell_mode {
+                    line_spans.push(Span::styled(
+                        prompt_text.clone(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    line_spans.push(Span::raw(prompt_text.clone()));
+                }
+            }
+            
+            // Handle cursor in the remaining content
+            let line_end_pos = line_start_pos + current_line_content.len();
+            
+            if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
+                let cursor_offset = cursor_pos - line_start_pos;
+                
+                if cursor_offset < current_line_content.len() {
+                    let before_cursor = &current_line_content[..cursor_offset];
+                    let at_cursor_char = current_line_content.chars().nth(cursor_offset).unwrap_or(' ');
+                    let at_cursor = if at_cursor_char == ' ' { "█" } else { &at_cursor_char.to_string() };
+                    let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
+                    let after_cursor = if after_cursor_start < current_line_content.len() {
+                        &current_line_content[after_cursor_start..]
+                    } else {
+                        ""
+                    };
+                    
+                    if !before_cursor.is_empty() {
+                        line_spans.push(Span::raw(before_cursor.to_string()));
+                    }
+                    line_spans.push(Span::styled(
+                        at_cursor.to_string(),
+                        Style::default()
+                            .bg(Color::Cyan)
+                            .fg(Color::Black)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    if !after_cursor.is_empty() {
+                        line_spans.push(Span::raw(after_cursor.to_string()));
+                    }
+                    cursor_rendered = true;
+                } else {
+                    // Cursor at end of content
+                    line_spans.push(Span::raw(current_line_content.clone()));
+                    line_spans.push(Span::styled(
+                        "█",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    cursor_rendered = true;
+                }
+            } else {
+                line_spans.push(Span::raw(current_line_content.clone()));
+            }
+            
+            lines.push(Line::from(line_spans));
+        }
 
         // Move to next segment
         current_pos += segment.len() + 1; // +1 for newline
     }
 
+    // Handle cursor at the very end of input
     if cursor_pos == input.len() && !cursor_rendered {
-        // If the last line is empty, add cursor there
         if let Some(last_line) = lines.last_mut() {
             last_line.spans.push(Span::styled(
-                " ",
+                "█",
                 Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
             // Create a new line with prompt and cursor
-            lines.push(Line::from(vec![
-                Span::raw("> "),
-                Span::styled(
-                    " ",
+            let mut cursor_line = Vec::new();
+            if state.show_shell_mode {
+                cursor_line.push(Span::styled(
+                    " ".to_string() + SHELL_PROMPT_PREFIX,
                     Style::default()
-                        .bg(Color::Cyan)
-                        .fg(Color::Black)
+                        .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
-                ),
-            ]));
+                ));
+            } else {
+                cursor_line.push(Span::raw("> "));
+            }
+            cursor_line.push(Span::styled(
+                "█",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            lines.push(Line::from(cursor_line));
         }
     }
 
     // Ensure we have at least one line
     if lines.is_empty() {
-        lines.push(Line::from(vec![
-            Span::raw("> "),
-            Span::styled(
-                " ",
+        let mut default_line = Vec::new();
+        if state.show_shell_mode {
+            default_line.push(Span::styled(
+                " ".to_string() + SHELL_PROMPT_PREFIX,
                 Style::default()
-                    .bg(Color::Cyan)
-                    .fg(Color::Black)
+                    .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            ));
+        } else {
+            default_line.push(Span::raw("> "));
+        }
+        default_line.push(Span::styled(
+            "█",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::from(default_line));
     }
+    
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
