@@ -442,22 +442,39 @@ fn handle_input_changed(state: &mut AppState, c: char) {
 
     // Handle existing / helper logic
     if state.input.starts_with('/') {
-        // Reset file autocomplete if we switch to command mode
-        if state.autocomplete.is_active() {
-            state.autocomplete.reset();
-        }
-
-        state.show_helper_dropdown = true;
-        state.filtered_helpers = state
+        let after_slash = &state.input[1..];
+        // If matches a helper, show helpers
+        let matching_helpers: Vec<_> = state
             .helpers
             .iter()
             .filter(|h| h.starts_with(&state.input))
             .cloned()
             .collect();
-        if state.filtered_helpers.is_empty()
-            || state.helper_selected >= state.filtered_helpers.len()
-        {
-            state.helper_selected = 0;
+        if !matching_helpers.is_empty() {
+            state.show_helper_dropdown = true;
+            state.filtered_helpers = matching_helpers;
+            if state.filtered_helpers.is_empty()
+                || state.helper_selected >= state.filtered_helpers.len()
+            {
+                state.helper_selected = 0;
+            }
+        } else {
+            // Otherwise, show file suggestions matching after /
+            if state.autocomplete.file_suggestions.is_empty() {
+                if let Ok(current_dir) = std::env::current_dir() {
+                    state.autocomplete.load_files_from_directory(&current_dir);
+                }
+            }
+            state.autocomplete.filter_files(after_slash);
+            if !state.autocomplete.filtered_files.is_empty() {
+                state.autocomplete.is_file_mode = true;
+                state.autocomplete.trigger_char = None;
+                state.show_helper_dropdown = true;
+                state.helper_selected = 0;
+            } else {
+                state.show_helper_dropdown = false;
+                state.autocomplete.reset();
+            }
         }
     } else {
         // If we're in file autocomplete mode and typing after @, update the filter
