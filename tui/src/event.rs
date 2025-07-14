@@ -9,7 +9,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             }
             match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::Quit)
+                    Some(InputEvent::AttemptQuit)
                 }
                 KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputChangedNewline)
