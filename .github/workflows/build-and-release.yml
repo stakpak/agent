@@ -54,16 +54,7 @@ jobs:
         with:
           shared-key: ${{ matrix.target }}
 
-      - name: Install cross for ARM64 Linux
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build (ARM64 Linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cross build --release --target ${{ matrix.target }}
-
-      - name: Build (Other targets)
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Run tests
