@@ -1,25 +1,59 @@
 use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use crate::AppState;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AutoComplete {
     pub file_suggestions: Vec<String>,
     pub filtered_files: Vec<String>,
     pub is_file_mode: bool,
     pub trigger_char: Option<char>, // '@' or None for Tab
+    // Cache for filtered results to avoid recomputation
+    filter_cache: HashMap<String, Vec<String>>,
+    // Pre-computed lowercase versions for faster matching
+    lowercase_files: Vec<String>,
+    pub debounced_filter: DebouncedFilter,
+}
+
+impl Default for AutoComplete {
+    fn default() -> Self {
+        Self {
+            file_suggestions: Vec::new(),
+            filtered_files: Vec::new(),
+            is_file_mode: false,
+            trigger_char: None,
+            filter_cache: HashMap::new(),
+            lowercase_files: Vec::new(),
+            debounced_filter: DebouncedFilter::new(120), // 120ms debounce
+        }
+    }
 }
 
 impl AutoComplete {
     /// Load all files from current directory recursively
     pub fn load_files_from_directory(&mut self, dir: &Path) {
+        // Only scan if not already cached for this session
+        if !self.file_suggestions.is_empty() {
+            return;
+        }
         self.file_suggestions.clear();
+        self.lowercase_files.clear();
+        self.filter_cache.clear();
+
         // Read gitignore patterns from the directory
         let base_dir = dir.to_string_lossy();
         let ignore_patterns = read_gitignore_patterns(&base_dir);
         self.collect_files_recursive(dir, dir, &ignore_patterns);
+
+        // Pre-compute lowercase versions for faster filtering
+        self.lowercase_files = self
+            .file_suggestions
+            .iter()
+            .map(|f| f.to_lowercase())
+            .collect();
     }
 
     fn collect_files_recursive(
@@ -61,29 +95,44 @@ impl AutoComplete {
         }
     }
 
-    /// Filter files based on current input
+    /// Filter files based on current input - optimized version, debounced
     pub fn filter_files(&mut self, current_word: &str) {
+        if !self.debounced_filter.should_filter(current_word) {
+            return;
+        }
+        // Fast path: if input is empty, just show the first 50 files
         if current_word.is_empty() {
-            self.filtered_files = self.file_suggestions.clone();
-        } else {
-            self.filtered_files = self
-                .file_suggestions
-                .iter()
-                .filter(|file| {
-                    file.to_lowercase().contains(&current_word.to_lowercase())
-                        || fuzzy_match(file, current_word)
-                })
-                .cloned()
-                .collect();
+            self.filtered_files = self.file_suggestions.iter().take(50).cloned().collect();
+            return;
+        }
+
+        // Check cache first
+        if let Some(cached_result) = self.filter_cache.get(current_word) {
+            self.filtered_files = cached_result.clone();
+            return;
+        }
+
+        let word_lower = current_word.to_lowercase();
+        let mut results = Vec::new();
+
+        // Use pre-computed lowercase versions for faster matching
+        for (i, file_lower) in self.lowercase_files.iter().enumerate() {
+            if file_lower.contains(&word_lower) || fuzzy_match_optimized(file_lower, &word_lower) {
+                results.push(self.file_suggestions[i].clone());
+
+                // Early exit if we have enough results
+                if results.len() >= 100 {
+                    break;
+                }
+            }
         }
 
         // Sort by relevance (exact matches first, then prefix matches, then contains)
-        self.filtered_files.sort_by(|a, b| {
+        results.sort_by(|a, b| {
             let a_lower = a.to_lowercase();
             let b_lower = b.to_lowercase();
-            let word_lower = current_word.to_lowercase();
 
-            // Exact match
+            // Exact match check
             if a_lower == word_lower {
                 return std::cmp::Ordering::Less;
             }
@@ -91,19 +140,29 @@ impl AutoComplete {
                 return std::cmp::Ordering::Greater;
             }
 
-            // Starts with
+            // Prefix match check
             let a_starts = a_lower.starts_with(&word_lower);
             let b_starts = b_lower.starts_with(&word_lower);
-
             match (a_starts, b_starts) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => a.cmp(b), // Alphabetical for equal relevance
+                _ => a.len().cmp(&b.len()), // Shorter files first for same category
             }
         });
 
         // Limit results to prevent overwhelming UI
-        self.filtered_files.truncate(20);
+        results.truncate(50);
+
+        // Cache the result for future use
+        self.filter_cache
+            .insert(current_word.to_string(), results.clone());
+
+        // Limit cache size to prevent memory issues
+        if self.filter_cache.len() > 100 {
+            self.filter_cache.clear();
+        }
+
+        self.filtered_files = results;
     }
 
     /// Get the current filtered files for display
@@ -126,22 +185,34 @@ impl AutoComplete {
         self.filtered_files.clear();
         self.is_file_mode = false;
         self.trigger_char = None;
+        // Don't clear cache and lowercase_files - keep them for performance
     }
 
     /// Check if currently in file autocomplete mode
     pub fn is_active(&self) -> bool {
         self.is_file_mode
     }
+
+    /// Clear all caches (call this when directory changes)
+    pub fn clear_caches(&mut self) {
+        self.file_suggestions.clear();
+        self.lowercase_files.clear();
+        self.filter_cache.clear();
+    }
 }
 
-/// Simple fuzzy matching for better file filtering
-fn fuzzy_match(text: &str, pattern: &str) -> bool {
+/// Optimized fuzzy matching with early exit
+fn fuzzy_match_optimized(text: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return true;
     }
 
-    let text_chars: Vec<char> = text.to_lowercase().chars().collect();
-    let pattern_chars: Vec<char> = pattern.to_lowercase().chars().collect();
+    if text.len() < pattern.len() {
+        return false;
+    }
+
+    let text_chars: Vec<char> = text.chars().collect();
+    let pattern_chars: Vec<char> = pattern.chars().collect();
 
     let mut text_idx = 0;
     let mut pattern_idx = 0;
@@ -156,22 +227,20 @@ fn fuzzy_match(text: &str, pattern: &str) -> bool {
     pattern_idx == pattern_chars.len()
 }
 
-/// Find @ trigger before cursor position
+/// Find @ trigger before cursor position - optimized
 pub fn find_at_trigger(state: &AppState) -> Option<usize> {
     let input = &state.input;
     let cursor_pos = state.cursor_position;
     let safe_pos = cursor_pos.min(input.len());
     let before_cursor = &input[..safe_pos];
+
     // Find the last @ that's either at start or preceded by whitespace
-    for (i, c) in before_cursor.char_indices().rev() {
-        if c == '@' {
+    // Use bytes for faster iteration when possible
+    let bytes = before_cursor.as_bytes();
+    for i in (0..bytes.len()).rev() {
+        if bytes[i] == b'@' {
             // Check if it's at start or preceded by whitespace
-            if i == 0
-                || before_cursor
-                    .chars()
-                    .nth(i.saturating_sub(1))
-                    .is_some_and(|ch| ch.is_whitespace())
-            {
+            if i == 0 || bytes[i - 1].is_ascii_whitespace() {
                 return Some(i);
             }
         }
@@ -179,11 +248,12 @@ pub fn find_at_trigger(state: &AppState) -> Option<usize> {
     None
 }
 
-/// Get the current word being typed for filtering
+/// Get the current word being typed for filtering - optimized
 pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String {
     let input = &state.input;
     let cursor_pos = state.cursor_position;
     let safe_pos = cursor_pos.min(input.len());
+
     match trigger_char {
         Some('@') => {
             // Find @ and get text after it
@@ -207,19 +277,22 @@ pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String 
     }
 }
 
-/// Handle Tab trigger for file autocomplete
+/// Handle Tab trigger for file autocomplete - with debouncing
 pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     if state.input.trim().is_empty() {
         return false;
     }
+
     // Load files if not already loaded
     if state.autocomplete.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
             state.autocomplete.load_files_from_directory(&current_dir);
         }
     }
+
     let current_word = get_current_word(state, None);
     state.autocomplete.filter_files(&current_word);
+
     if !state.autocomplete.filtered_files.is_empty() {
         state.autocomplete.is_file_mode = true;
         state.autocomplete.trigger_char = None;
@@ -230,15 +303,17 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     false
 }
 
-/// Handle @ trigger for file autocomplete
+/// Handle @ trigger for file autocomplete - with debouncing
 pub fn handle_at_trigger(state: &mut AppState) -> bool {
     if state.autocomplete.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
             state.autocomplete.load_files_from_directory(&current_dir);
         }
     }
+
     let current_word = get_current_word(state, Some('@'));
     state.autocomplete.filter_files(&current_word);
+
     if !state.autocomplete.filtered_files.is_empty() {
         state.autocomplete.is_file_mode = true;
         state.autocomplete.trigger_char = Some('@');
@@ -279,9 +354,40 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
         }
         _ => {}
     }
+
     // Reset autocomplete state
     state.autocomplete.reset();
     state.show_helper_dropdown = false;
     state.filtered_helpers.clear();
     state.helper_selected = 0;
+}
+
+#[derive(Debug, Clone)]
+pub struct DebouncedFilter {
+    last_query: String,
+    last_update: std::time::Instant,
+    debounce_ms: u64,
+}
+
+impl DebouncedFilter {
+    pub fn new(debounce_ms: u64) -> Self {
+        Self {
+            last_query: String::new(),
+            last_update: std::time::Instant::now(),
+            debounce_ms,
+        }
+    }
+
+    pub fn should_filter(&mut self, query: &str) -> bool {
+        let now = std::time::Instant::now();
+        let should_update = query != self.last_query
+            || now.duration_since(self.last_update).as_millis() > self.debounce_ms as u128;
+
+        if should_update {
+            self.last_query = query.to_string();
+            self.last_update = now;
+        }
+
+        should_update
+    }
 }
