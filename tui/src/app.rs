@@ -1,7 +1,7 @@
 use crate::services::auto_complete::AutoComplete;
-use crate::services::helper_block::push_styled_message;
+use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
-use ratatui::style::{Color, Style};
+use ratatui::style::Color;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -70,6 +70,7 @@ pub struct AppState {
     pub dialog_message_id: Option<Uuid>,
     pub autocomplete: AutoComplete,
     pub secret_manager: SecretManager,
+    pub latest_version: Option<String>,
 }
 
 #[derive(Debug)]
@@ -142,52 +143,11 @@ impl AppState {
         redact_secrets: bool,
         privacy_mode: bool,
     ) -> Self {
-        let version_message = match latest_version {
-            Some(version) => {
-                if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
-                    Message::info(
-                        format!(
-                            "🚀 Update available!  v{}  →  {} ✨   ",
-                            env!("CARGO_PKG_VERSION"),
-                            version
-                        ),
-                        Some(Style::default().fg(ratatui::style::Color::Yellow)),
-                    )
-                } else {
-                    Message::info(
-                        format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
-                        None,
-                    )
-                }
-            }
-            None => Message::info(
-                format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
-                None,
-            ),
-        };
         AppState {
             input: String::new(),
             cursor_position: 0,
             cursor_visible: true,
-            messages: vec![
-                Message::info(
-                    r"
- ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
-▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  
- ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  
-▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
-                    Some(Style::default().fg(ratatui::style::Color::Cyan)),
-                ),
-                version_message,
-                Message::info("/help for help, /status for your current setup", None),
-                Message::info(
-                    format!(
-                        "cwd: {}",
-                        std::env::current_dir().unwrap_or_default().display()
-                    ),
-                    None,
-                ),
-            ],
+            messages: welcome_messages(latest_version.clone()),
             scroll: 0,
             scroll_to_bottom: false,
             stay_at_bottom: true,
@@ -221,6 +181,7 @@ impl AppState {
             dialog_message_id: None,
             autocomplete: AutoComplete::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            latest_version: latest_version.clone(),
         }
     }
 

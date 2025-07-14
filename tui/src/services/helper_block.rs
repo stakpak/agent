@@ -155,6 +155,7 @@ pub fn push_help_message(state: &mut AppState) {
     // Slash-commands list
     let commands = vec![
         ("/help", "show this help overlay"),
+        ("/clear", "clear the screen"),
         ("/status", "show account status"),
         ("/sessions", "show list of sessions"),
         ("/memorize", "memorize the conversation history"),
@@ -280,4 +281,101 @@ pub fn push_styled_message(
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
     state.messages.push(Message::styled(line));
+}
+
+pub fn version_message(latest_version: Option<String>) -> Message {
+    let version_message = match latest_version {
+        Some(version) => {
+            if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
+                Message::info(
+                    format!(
+                        "🚀 Update available!  v{}  →  {} ✨   ",
+                        env!("CARGO_PKG_VERSION"),
+                        version
+                    ),
+                    Some(Style::default().fg(ratatui::style::Color::Yellow)),
+                )
+            } else {
+                Message::info(
+                    format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
+                    None,
+                )
+            }
+        }
+        None => Message::info(
+            format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
+            None,
+        ),
+    };
+    version_message
+}
+
+pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
+    vec![
+        Message::info(
+            r"
+ ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
+▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  
+ ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  
+▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
+            Some(Style::default().fg(ratatui::style::Color::Cyan)),
+        ),
+        version_message(latest_version),
+        Message::info("/help for help, /status for your current setup", None),
+        Message::info(
+            format!(
+                "cwd: {}",
+                std::env::current_dir().unwrap_or_default().display()
+            ),
+            None,
+        ),
+    ]
+}
+
+pub fn push_clear_message(state: &mut AppState) {
+    state.messages.clear();
+    state.input.clear();
+    state.cursor_position = 0;
+    state.show_helper_dropdown = false;
+
+    let welcome_msg = welcome_messages(state.latest_version.clone());
+    state.messages.extend(welcome_msg);
+
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "● ",
+            Style::default()
+                .fg(Color::Rgb(128, 128, 128))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("/clear", Style::default().fg(Color::Rgb(180, 180, 180))),
+    ]));
+
+    lines.push(Line::from(vec![Span::styled(
+        "  L (no content)",
+        Style::default()
+            .fg(Color::Rgb(128, 128, 128))
+            .add_modifier(Modifier::BOLD),
+    )]));
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    let owned_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(owned_lines),
+    });
 }
