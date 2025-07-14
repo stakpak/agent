@@ -228,12 +228,24 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
-            state.is_pasting = true;
             let text = strip_ansi_codes(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
-            state.input.insert_str(state.cursor_position, &text);
-            state.cursor_position += text.len();
-            state.is_pasting = false;
+            let line_count = text.lines().count();
+            if line_count > 10 {
+                state.pasted_long_text = Some(text.clone());
+                let placeholder = format!("[Pasted text of {} lines]", line_count);
+                state.pasted_placeholder = Some(placeholder.clone());
+                // Insert the placeholder at the current cursor position
+                let pos = state.cursor_position.min(state.input.len());
+                state.input.insert_str(pos, &placeholder);
+                state.cursor_position = pos + placeholder.len();
+            } else {
+                // Normal paste
+                state.input.insert_str(state.cursor_position, &text);
+                state.cursor_position += text.len();
+                state.pasted_long_text = None;
+                state.pasted_placeholder = None;
+            }
         }
         InputEvent::InputCursorStart => {
             state.cursor_position = 0;
@@ -407,6 +419,14 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
 
+    // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
+    if let Some(placeholder) = &state.pasted_placeholder {
+        if !state.input.contains(placeholder) {
+            state.pasted_long_text = None;
+            state.pasted_placeholder = None;
+        }
+    }
+
     // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
     if let Some(at_pos) = find_at_trigger(state) {
         let is_valid_at = at_pos == 0
@@ -474,6 +494,14 @@ fn handle_input_backspace(state: &mut AppState) {
         let remove_at = pos - prev;
         state.input.drain(remove_at..pos);
         state.cursor_position = remove_at;
+    }
+
+    // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
+    if let Some(placeholder) = &state.pasted_placeholder {
+        if !state.input.contains(placeholder) {
+            state.pasted_long_text = None;
+            state.pasted_placeholder = None;
+        }
     }
 
     // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
@@ -568,7 +596,6 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    let input_height = 3;
     if state.show_shell_mode {
         // Check if we're waiting for shell input (like password)
         if state.waiting_for_shell_input {
@@ -689,10 +716,26 @@ fn handle_input_submitted(
             }
         }
     } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
+        let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         let was_at_bottom = state.scroll == max_scroll;
+
+        if let (Some(placeholder), Some(long_text)) =
+            (&state.pasted_placeholder, &state.pasted_long_text)
+        {
+            if state.input.contains(placeholder) {
+                let replaced = state.input.replace(placeholder, long_text);
+                state.input = replaced;
+            }
+        }
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
+        let _ = output_tx.try_send(OutputEvent::UserMessage(
+            state.input.clone(),
+            state.shell_tool_calls.clone(),
+        ));
         state
             .messages
             .push(Message::user(format!("> {}", state.input), None));

@@ -75,6 +75,8 @@ pub struct AppState {
     pub latest_version: Option<String>,
     pub ctrl_c_pressed_once: bool, // Track if Ctrl+C was pressed once
     pub ctrl_c_timer: Option<std::time::Instant>, // Timer for double Ctrl+C
+    pub pasted_long_text: Option<String>, // Stores the actual pasted text if large
+    pub pasted_placeholder: Option<String>, // Stores the placeholder if large paste is present
 }
 
 #[derive(Debug)]
@@ -189,6 +191,8 @@ impl AppState {
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
+            pasted_long_text: None,
+            pasted_placeholder: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {

@@ -38,7 +38,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts = vec![
             Line::from("/ for commands       shift + enter or ctrl + j to insert newline"),
             Line::from(format!(
-                "{}for shell mode     ↵ to send message    ctrl + c to quit",
+                "{} for shell mode     ↵ to send message    ctrl + c to quit",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
