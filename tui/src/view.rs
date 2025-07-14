@@ -325,7 +325,6 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     f.render_widget(message_widget, area);
 }
 
-
 fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     // Mask input if in shell mode and waiting for shell input (password)
     let input = if state.show_shell_mode && state.waiting_for_shell_input {
@@ -351,7 +350,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         // Handle empty segments (blank lines)
         if segment.is_empty() {
             let mut empty_line = Vec::new();
-            
+
             // Add prompt only for first line
             if segment_idx == 0 {
                 if state.show_shell_mode {
@@ -365,7 +364,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                     empty_line.push(Span::raw("> "));
                 }
             }
-            
+
             // Check if cursor is at the end of this empty segment
             if current_pos == cursor_pos && !cursor_rendered {
                 empty_line.push(Span::styled(
@@ -376,7 +375,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 ));
                 cursor_rendered = true;
             }
-            
+
             lines.push(Line::from(empty_line));
             current_pos += 1; // +1 for the newline
             continue;
@@ -390,20 +389,20 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             String::new()
         };
-        
+
         let prompt_width = prompt_text.chars().count();
         let content_width = available_width.saturating_sub(prompt_width);
-        
+
         // Process the segment preserving all whitespace
         let mut current_line_content = String::new();
         let mut current_line_width = 0;
         let mut line_start_pos = current_pos;
-        
+
         // Split by words but preserve spaces
         let mut word_positions = Vec::new();
         let mut word_start = 0;
         let mut in_word = false;
-        
+
         for (i, ch) in segment.char_indices() {
             if ch.is_whitespace() {
                 if in_word {
@@ -425,28 +424,28 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-        
+
         // Handle final word or whitespace
         if in_word && word_start < segment.len() {
             word_positions.push((word_start, segment.len(), false));
         } else if !in_word && word_start < segment.len() {
             word_positions.push((word_start, segment.len(), true));
         }
-        
+
         // If no word positions found, treat entire segment as one unit
         if word_positions.is_empty() {
             word_positions.push((0, segment.len(), false));
         }
-        
+
         for (start, end, _is_whitespace) in word_positions {
             let text = &segment[start..end];
             let text_width = text.chars().count();
-            
+
             // Check if this text fits on current line
             if current_line_width + text_width > content_width && !current_line_content.is_empty() {
                 // Current line is full, render it
                 let mut line_spans = Vec::new();
-                
+
                 // Add prompt for first line of this segment
                 if segment_idx == 0 && lines.is_empty() {
                     if state.show_shell_mode {
@@ -460,23 +459,30 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                         line_spans.push(Span::raw(prompt_text.clone()));
                     }
                 }
-                
+
                 // Handle cursor in current line content
                 let line_end_pos = line_start_pos + current_line_content.len();
                 if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
                     let cursor_offset = cursor_pos - line_start_pos;
-                    
+
                     if cursor_offset < current_line_content.len() {
                         let before_cursor = &current_line_content[..cursor_offset];
-                        let at_cursor_char = current_line_content.chars().nth(cursor_offset).unwrap_or(' ');
-                        let at_cursor = if at_cursor_char == ' ' { "█" } else { &at_cursor_char.to_string() };
+                        let at_cursor_char = current_line_content
+                            .chars()
+                            .nth(cursor_offset)
+                            .unwrap_or(' ');
+                        let at_cursor = if at_cursor_char == ' ' {
+                            "█"
+                        } else {
+                            &at_cursor_char.to_string()
+                        };
                         let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
                         let after_cursor = if after_cursor_start < current_line_content.len() {
                             &current_line_content[after_cursor_start..]
                         } else {
                             ""
                         };
-                        
+
                         if !before_cursor.is_empty() {
                             line_spans.push(Span::raw(before_cursor.to_string()));
                         }
@@ -505,24 +511,24 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 } else {
                     line_spans.push(Span::raw(current_line_content.clone()));
                 }
-                
+
                 lines.push(Line::from(line_spans));
-                
+
                 // Start new line
                 current_line_content.clear();
                 current_line_width = 0;
                 line_start_pos = current_pos + start;
             }
-            
+
             // Add text to current line
             current_line_content.push_str(text);
             current_line_width += text_width;
         }
-        
+
         // Render remaining content
         if !current_line_content.is_empty() {
             let mut line_spans = Vec::new();
-            
+
             // Add prompt for first line of this segment
             if segment_idx == 0 && lines.is_empty() {
                 if state.show_shell_mode {
@@ -536,24 +542,31 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                     line_spans.push(Span::raw(prompt_text.clone()));
                 }
             }
-            
+
             // Handle cursor in the remaining content
             let line_end_pos = line_start_pos + current_line_content.len();
-            
+
             if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
                 let cursor_offset = cursor_pos - line_start_pos;
-                
+
                 if cursor_offset < current_line_content.len() {
                     let before_cursor = &current_line_content[..cursor_offset];
-                    let at_cursor_char = current_line_content.chars().nth(cursor_offset).unwrap_or(' ');
-                    let at_cursor = if at_cursor_char == ' ' { "█" } else { &at_cursor_char.to_string() };
+                    let at_cursor_char = current_line_content
+                        .chars()
+                        .nth(cursor_offset)
+                        .unwrap_or(' ');
+                    let at_cursor = if at_cursor_char == ' ' {
+                        "█"
+                    } else {
+                        &at_cursor_char.to_string()
+                    };
                     let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
                     let after_cursor = if after_cursor_start < current_line_content.len() {
                         &current_line_content[after_cursor_start..]
                     } else {
                         ""
                     };
-                    
+
                     if !before_cursor.is_empty() {
                         line_spans.push(Span::raw(before_cursor.to_string()));
                     }
@@ -582,7 +595,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 line_spans.push(Span::raw(current_line_content.clone()));
             }
-            
+
             lines.push(Line::from(line_spans));
         }
 
@@ -643,7 +656,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         ));
         lines.push(Line::from(default_line));
     }
-    
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
