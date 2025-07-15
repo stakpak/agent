@@ -60,14 +60,7 @@ impl AuthConfig {
         let token = if disabled {
             None
         } else {
-            let config = npwg::PasswordGeneratorConfig {
-                length: 32,
-                ..Default::default()
-            };
-            #[allow(clippy::expect_used)]
-            let token = npwg::generator::generate_password(&config)
-                .await
-                .expect("Failed to generate mcp auth token");
+            let token = stakpak_shared::utils::generate_password(64, true);
             Some(token)
         };
 
