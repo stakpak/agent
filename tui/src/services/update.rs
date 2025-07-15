@@ -1,7 +1,5 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
-use crate::services::auto_complete::{
-    find_at_trigger, get_current_word, handle_at_trigger, handle_file_selection, handle_tab_trigger,
-};
+use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
@@ -23,6 +21,7 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
     event: InputEvent,
@@ -331,6 +330,7 @@ pub fn update(
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
+    state.poll_autocomplete_results();
 }
 
 fn handle_shell_mode(state: &mut AppState) {
@@ -427,76 +427,35 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         }
     }
 
-    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
-    if let Some(at_pos) = find_at_trigger(state) {
-        let is_valid_at = at_pos == 0
-            || state
-                .input
-                .chars()
-                .nth(at_pos.saturating_sub(1))
-                .is_some_and(|ch| ch.is_whitespace());
-        if is_valid_at {
-            handle_at_trigger(state);
-        }
-    }
-
-    // Handle existing / helper logic
     if state.input.starts_with('/') {
-        let after_slash = &state.input[1..];
-        // If matches a helper, show helpers
-        let matching_helpers: Vec<_> = state
+        if state.autocomplete.is_active() {
+            state.autocomplete.reset();
+        }
+
+        state.show_helper_dropdown = true;
+        state.filtered_helpers = state
             .helpers
             .iter()
             .filter(|h| h.starts_with(&state.input))
             .cloned()
             .collect();
-        if !matching_helpers.is_empty() {
-            state.show_helper_dropdown = true;
-            state.filtered_helpers = matching_helpers;
-            if state.filtered_helpers.is_empty()
-                || state.helper_selected >= state.filtered_helpers.len()
-            {
-                state.helper_selected = 0;
-            }
-        } else {
-            // Otherwise, show file suggestions matching after /
-            if state.autocomplete.file_suggestions.is_empty() {
-                if let Ok(current_dir) = std::env::current_dir() {
-                    state.autocomplete.load_files_from_directory(&current_dir);
-                }
-            }
-            state.autocomplete.filter_files(after_slash);
-            if !state.autocomplete.filtered_files.is_empty() {
-                state.autocomplete.is_file_mode = true;
-                state.autocomplete.trigger_char = None;
-                state.show_helper_dropdown = true;
-                state.helper_selected = 0;
-            } else {
-                state.show_helper_dropdown = false;
-                state.autocomplete.reset();
-            }
-        }
-    } else {
-        // If we're in file autocomplete mode and typing after @, update the filter
-        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
-            let current_word = get_current_word(state, Some('@'));
-            state.autocomplete.filter_files(&current_word);
-
-            if state.autocomplete.filtered_count() == 0 {
-                state.show_helper_dropdown = false;
-                state.autocomplete.reset();
-            } else {
-                state.helper_selected = state
-                    .helper_selected
-                    .min(state.autocomplete.filtered_count().saturating_sub(1));
-            }
-        } else {
-            // Regular behavior - hide helper dropdown
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
+        if state.filtered_helpers.is_empty()
+            || state.helper_selected >= state.filtered_helpers.len()
+        {
             state.helper_selected = 0;
-            state.autocomplete.reset();
         }
+    }
+    // Send input to autocomplete worker (async, non-blocking)
+    if let Some(tx) = &state.autocomplete_tx {
+        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+    }
+
+    if state.input.is_empty() {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.filtered_files.clear();
+        state.helper_selected = 0;
+        state.autocomplete.reset();
     }
 }
 
@@ -521,59 +480,17 @@ fn handle_input_backspace(state: &mut AppState) {
         }
     }
 
-    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
-    if let Some(at_pos) = find_at_trigger(state) {
-        let is_valid_at = at_pos == 0
-            || state
-                .input
-                .chars()
-                .nth(at_pos.saturating_sub(1))
-                .is_some_and(|ch| ch.is_whitespace());
-        if is_valid_at {
-            handle_at_trigger(state);
-        }
+    // Send input to autocomplete worker (async, non-blocking)
+    if let Some(tx) = &state.autocomplete_tx {
+        let _ = tx.try_send((state.input.clone(), state.cursor_position));
     }
-
-    if state.input.starts_with('/') {
-        state.show_helper_dropdown = true;
-        state.filtered_helpers = state
-            .helpers
-            .iter()
-            .filter(|h| h.starts_with(&state.input))
-            .cloned()
-            .collect();
-        if state.filtered_helpers.is_empty()
-            || state.helper_selected >= state.filtered_helpers.len()
-        {
-            state.helper_selected = 0;
-        }
-    } else {
-        // Check if we're still in @ autocomplete mode
-        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
-            // Check if @ still exists
-            if find_at_trigger(state).is_some() {
-                let current_word = get_current_word(state, Some('@'));
-                state.autocomplete.filter_files(&current_word);
-
-                if state.autocomplete.filtered_count() == 0 {
-                    state.show_helper_dropdown = false;
-                    state.autocomplete.reset();
-                } else {
-                    state.helper_selected = state
-                        .helper_selected
-                        .min(state.autocomplete.filtered_count().saturating_sub(1));
-                }
-            } else {
-                // @ was deleted, exit autocomplete mode
-                state.show_helper_dropdown = false;
-                state.autocomplete.reset();
-            }
-        } else {
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
-            state.helper_selected = 0;
-            state.autocomplete.reset();
-        }
+    // Hide dropdown if input is empty
+    if state.input.is_empty() {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.filtered_files.clear();
+        state.helper_selected = 0;
+        state.autocomplete.reset();
     }
 }
 
@@ -732,7 +649,9 @@ fn handle_input_submitted(
                 _ => {}
             }
         }
-    } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
+    } else if !state.input.trim().is_empty() {
+        // PERFORMANCE FIX: Simplified condition for submission
+        // Allow submission of any non-empty input that's not a recognized helper command
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));

@@ -1,4 +1,4 @@
-use crate::services::auto_complete::AutoComplete;
+use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
 use crate::services::render_input::get_multiline_input_lines;
@@ -19,6 +19,12 @@ use crate::services::shell_mode::{
 use crate::services::helper_block::push_error_message;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
+
+// --- NEW: Async autocomplete result struct ---
+pub struct AutoCompleteResult {
+    pub filtered_helpers: Vec<&'static str>,
+    pub filtered_files: Vec<String>,
+}
 
 #[derive(Debug)]
 pub struct SessionInfo {
@@ -46,6 +52,7 @@ pub struct AppState {
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
     pub filtered_helpers: Vec<&'static str>,
+    pub filtered_files: Vec<String>, // NEW: for file autocomplete
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
     pub dialog_command: Option<ToolCall>,
@@ -57,7 +64,7 @@ pub struct AppState {
     pub show_sessions_dialog: bool,
     pub session_selected: usize,
     pub account_info: String,
-    pub pending_bash_message_id: Option<Uuid>, // New field to track pending bash message
+    pub pending_bash_message_id: Option<Uuid>,
     pub streaming_tool_results: HashMap<Uuid, String>,
     pub streaming_tool_result_id: Option<Uuid>,
     pub show_shell_mode: bool,
@@ -73,10 +80,13 @@ pub struct AppState {
     pub autocomplete: AutoComplete,
     pub secret_manager: SecretManager,
     pub latest_version: Option<String>,
-    pub ctrl_c_pressed_once: bool, // Track if Ctrl+C was pressed once
-    pub ctrl_c_timer: Option<std::time::Instant>, // Timer for double Ctrl+C
-    pub pasted_long_text: Option<String>, // Stores the actual pasted text if large
-    pub pasted_placeholder: Option<String>, // Stores the placeholder if large paste is present
+    pub ctrl_c_pressed_once: bool,
+    pub ctrl_c_timer: Option<std::time::Instant>,
+    pub pasted_long_text: Option<String>,
+    pub pasted_placeholder: Option<String>,
+    // --- NEW: autocomplete channels ---
+    pub autocomplete_tx: Option<mpsc::Sender<(String, usize)>>,
+    pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
 }
 
 #[derive(Debug)]
@@ -150,6 +160,18 @@ impl AppState {
         redact_secrets: bool,
         privacy_mode: bool,
     ) -> Self {
+        let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
+        let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
+        let helpers_clone = helpers.clone();
+        let autocomplete_instance = AutoComplete::default();
+        // Spawn autocomplete worker from auto_complete.rs
+        tokio::spawn(autocomplete_worker(
+            autocomplete_rx,
+            result_tx,
+            helpers_clone,
+            autocomplete_instance,
+        ));
+
         AppState {
             input: String::new(),
             cursor_position: 0,
@@ -162,6 +184,7 @@ impl AppState {
             show_helper_dropdown: false,
             helper_selected: 0,
             filtered_helpers: helpers,
+            filtered_files: Vec::new(),
             show_shortcuts: false,
             is_dialog_open: false,
             dialog_command: None,
@@ -193,6 +216,8 @@ impl AppState {
             ctrl_c_timer: None,
             pasted_long_text: None,
             pasted_placeholder: None,
+            autocomplete_tx: Some(autocomplete_tx),
+            autocomplete_rx: Some(result_rx),
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
@@ -201,7 +226,6 @@ impl AppState {
     }
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
-
         push_styled_message(
             self,
             &command,
@@ -209,8 +233,6 @@ impl AppState {
             SHELL_PROMPT_PREFIX,
             Color::Rgb(160, 92, 158),
         );
-
-        // Use PTY for sudo commands
         let shell_cmd = if command.contains("sudo") || command.contains("ssh") {
             #[cfg(unix)]
             {
@@ -229,12 +251,8 @@ impl AppState {
         } else {
             run_background_shell_command(command.clone(), shell_tx)
         };
-
-        // Store the command handle
         self.active_shell_command = Some(shell_cmd.clone());
         self.active_shell_command_output = Some(String::new());
-
-        // Spawn task to handle shell events and convert to InputEvents
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {
@@ -258,5 +276,26 @@ impl AppState {
                 }
             }
         });
+    }
+
+    // --- NEW: Poll autocomplete results and update state ---
+    pub fn poll_autocomplete_results(&mut self) {
+        if let Some(rx) = &mut self.autocomplete_rx {
+            while let Ok(result) = rx.try_recv() {
+                self.filtered_files = result.filtered_files;
+                self.autocomplete.filtered_files = self.filtered_files.clone();
+                self.autocomplete.is_file_mode = !self.filtered_files.is_empty();
+                self.autocomplete.trigger_char = if !self.filtered_files.is_empty() {
+                    Some('@')
+                } else {
+                    None
+                };
+                // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
+                let has_at_trigger = find_at_trigger(&self.input, self.cursor_position).is_some();
+                self.show_helper_dropdown = (self.input.trim() == "/")
+                    || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
+                    || (has_at_trigger && !self.filtered_files.is_empty());
+            }
+        }
     }
 }

@@ -26,12 +26,10 @@ pub fn view(f: &mut Frame, state: &AppState) {
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
-        && ((state.autocomplete.is_active() && !state.autocomplete.filtered_files.is_empty())
-            || (!state.autocomplete.is_active()
-                && !state.filtered_helpers.is_empty()
-                && state.input.starts_with('/')));
+        && ((!state.filtered_helpers.is_empty() && state.input.starts_with('/'))
+            || !state.filtered_files.is_empty());
     let dropdown_height = if dropdown_showing {
-        if state.autocomplete.is_active() {
+        if !state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
             state.filtered_helpers.len() as u16
