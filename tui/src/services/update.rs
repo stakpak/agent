@@ -82,8 +82,16 @@ pub fn update(
         InputEvent::ScrollDown => {
             handle_scroll_down(state, message_area_height, message_area_width)
         }
-        InputEvent::PageUp => handle_page_up(state, message_area_height),
-        InputEvent::PageDown => handle_page_down(state, message_area_height, message_area_width),
+        InputEvent::PageUp => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_up(state, message_area_height);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::PageDown => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_down(state, message_area_height, message_area_width);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
         InputEvent::Quit => {}
         InputEvent::CursorLeft => {
             if state.cursor_position > 0 {
