@@ -604,7 +604,7 @@ fn handle_input_submitted(
             .and_then(|s| s.split('\"').next())
             .unwrap_or("");
         if !command.is_empty() {
-            let active_commands = vec!["ssh", "sudo"];
+            let active_commands = ["ssh", "sudo"];
             if active_commands.iter().any(|cmd| command.contains(cmd)) {
                 state.show_shell_mode = true;
                 state.is_dialog_open = false;
