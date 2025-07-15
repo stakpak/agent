@@ -284,7 +284,7 @@ pub fn push_styled_message(
 }
 
 pub fn version_message(latest_version: Option<String>) -> Message {
-    let version_message = match latest_version {
+    match latest_version {
         Some(version) => {
             if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
                 Message::info(
@@ -306,8 +306,7 @@ pub fn version_message(latest_version: Option<String>) -> Message {
             format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
             None,
         ),
-    };
-    version_message
+    }
 }
 
 pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
@@ -341,41 +340,27 @@ pub fn push_clear_message(state: &mut AppState) {
     let welcome_msg = welcome_messages(state.latest_version.clone());
     state.messages.extend(welcome_msg);
 
-    let mut lines = Vec::new();
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            "● ",
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default()
+                    .fg(Color::Rgb(128, 128, 128))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("/clear", Style::default().fg(Color::Rgb(180, 180, 180))),
+        ]),
+        Line::from(vec![Span::styled(
+            "  L (no content)",
             Style::default()
                 .fg(Color::Rgb(128, 128, 128))
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("/clear", Style::default().fg(Color::Rgb(180, 180, 180))),
-    ]));
-
-    lines.push(Line::from(vec![Span::styled(
-        "  L (no content)",
-        Style::default()
-            .fg(Color::Rgb(128, 128, 128))
-            .add_modifier(Modifier::BOLD),
-    )]));
-
-    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-
-    let owned_lines: Vec<Line<'static>> = lines
-        .into_iter()
-        .map(|line| {
-            let owned_spans: Vec<Span<'static>> = line
-                .spans
-                .into_iter()
-                .map(|span| Span::styled(span.content.into_owned(), span.style))
-                .collect();
-            Line::from(owned_spans)
-        })
-        .collect();
+        )]),
+        Line::from(vec![Span::from("SPACING_MARKER")]),
+    ];
 
     state.messages.push(Message {
         id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(owned_lines),
+        content: MessageContent::StyledBlock(lines),
     });
 }

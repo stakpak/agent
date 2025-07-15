@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use tokio::sync::mpsc;
+
 use crate::AppState;
+use crate::app::AutoCompleteResult;
 
 #[derive(Debug, Clone)]
 pub struct AutoComplete {
@@ -227,37 +230,41 @@ fn fuzzy_match_optimized(text: &str, pattern: &str) -> bool {
     pattern_idx == pattern_chars.len()
 }
 
-/// Find @ trigger before cursor position - optimized
-pub fn find_at_trigger(state: &AppState) -> Option<usize> {
-    let input = &state.input;
-    let cursor_pos = state.cursor_position;
+// Refactored: Find @ trigger before cursor position - optimized
+pub fn find_at_trigger(input: &str, cursor_pos: usize) -> Option<usize> {
     let safe_pos = cursor_pos.min(input.len());
     let before_cursor = &input[..safe_pos];
-
-    // Find the last @ that's either at start or preceded by whitespace
-    // Use bytes for faster iteration when possible
     let bytes = before_cursor.as_bytes();
     for i in (0..bytes.len()).rev() {
         if bytes[i] == b'@' {
             // Check if it's at start or preceded by whitespace
             if i == 0 || bytes[i - 1].is_ascii_whitespace() {
-                return Some(i);
+                // Case 1: Cursor is immediately after @ (e.g. @|)
+                if i + 1 == cursor_pos {
+                    return Some(i);
+                }
+                // Case 2: Next character is non-space (e.g. @a)
+                if i + 1 < input.len() {
+                    let next_char = input[i + 1..].chars().next();
+                    if let Some(c) = next_char {
+                        if !c.is_whitespace() {
+                            return Some(i);
+                        }
+                    }
+                }
+                // If @ is at the end but cursor is not right after, or next char is space, do not trigger
             }
         }
     }
     None
 }
 
-/// Get the current word being typed for filtering - optimized
-pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String {
-    let input = &state.input;
-    let cursor_pos = state.cursor_position;
+// Refactored: Get the current word being typed for filtering - optimized
+pub fn get_current_word(input: &str, cursor_pos: usize, trigger_char: Option<char>) -> String {
     let safe_pos = cursor_pos.min(input.len());
-
     match trigger_char {
         Some('@') => {
-            // Find @ and get text after it
-            if let Some(at_pos) = find_at_trigger(state) {
+            if let Some(at_pos) = find_at_trigger(input, cursor_pos) {
                 let after_at = &input[at_pos + 1..safe_pos];
                 after_at.to_string()
             } else {
@@ -265,7 +272,6 @@ pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String 
             }
         }
         None => {
-            // Tab mode - get current word
             let before_cursor = &input[..safe_pos];
             if let Some(word_start) = before_cursor.rfind(char::is_whitespace) {
                 input[word_start + 1..safe_pos].to_string()
@@ -290,7 +296,7 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
         }
     }
 
-    let current_word = get_current_word(state, None);
+    let current_word = get_current_word(state.input.as_str(), state.cursor_position, None);
     state.autocomplete.filter_files(&current_word);
 
     if !state.autocomplete.filtered_files.is_empty() {
@@ -303,25 +309,16 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     false
 }
 
-/// Handle @ trigger for file autocomplete - with debouncing
-pub fn handle_at_trigger(state: &mut AppState) -> bool {
-    if state.autocomplete.file_suggestions.is_empty() {
+// Refactored: Handle @ trigger for file autocomplete - with debouncing
+pub fn handle_at_trigger(input: &str, cursor_pos: usize, autocomplete: &mut AutoComplete) -> bool {
+    if autocomplete.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
-            state.autocomplete.load_files_from_directory(&current_dir);
+            autocomplete.load_files_from_directory(&current_dir);
         }
     }
-
-    let current_word = get_current_word(state, Some('@'));
-    state.autocomplete.filter_files(&current_word);
-
-    if !state.autocomplete.filtered_files.is_empty() {
-        state.autocomplete.is_file_mode = true;
-        state.autocomplete.trigger_char = Some('@');
-        state.show_helper_dropdown = true;
-        state.helper_selected = 0;
-        return true;
-    }
-    false
+    let current_word = get_current_word(input, cursor_pos, Some('@'));
+    autocomplete.filter_files(&current_word);
+    !autocomplete.filtered_files.is_empty()
 }
 
 /// Handle file selection and update input string
@@ -329,7 +326,7 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
     match state.autocomplete.trigger_char {
         Some('@') => {
             // Replace from @ to cursor with selected file
-            if let Some(at_pos) = find_at_trigger(state) {
+            if let Some(at_pos) = find_at_trigger(state.input.as_str(), state.cursor_position) {
                 let before_at = state.input[..at_pos].to_string();
                 let after_cursor = state.input[state.cursor_position..].to_string();
                 state.input = format!("{}{}{}", before_at, selected_file, after_cursor);
@@ -389,5 +386,43 @@ impl DebouncedFilter {
         }
 
         should_update
+    }
+}
+
+/// Async autocomplete worker for background filtering
+pub async fn autocomplete_worker(
+    mut rx: mpsc::Receiver<(String, usize)>, // (input, cursor_position)
+    tx: mpsc::Sender<AutoCompleteResult>,
+    helpers: Vec<&'static str>,
+    mut autocomplete: AutoComplete,
+) {
+    if let Ok(current_dir) = std::env::current_dir() {
+        autocomplete.load_files_from_directory(&current_dir);
+    }
+    while let Some((input, cursor_position)) = rx.recv().await {
+        // Filter helpers
+        let filtered_helpers: Vec<&'static str> = helpers
+            .iter()
+            .filter(|h| h.starts_with(&input) && !input.is_empty())
+            .copied()
+            .collect();
+
+        let mut filtered_files = Vec::new();
+        // Detect @ trigger using new signature
+        if let Some(_at_pos) = find_at_trigger(&input, cursor_position) {
+            if handle_at_trigger(&input, cursor_position, &mut autocomplete) {
+                autocomplete.is_file_mode = true;
+                autocomplete.trigger_char = Some('@');
+                filtered_files = autocomplete.filtered_files.clone();
+            }
+        }
+        // TODO: Add / and other triggers as needed
+
+        let _ = tx
+            .send(AutoCompleteResult {
+                filtered_helpers,
+                filtered_files,
+            })
+            .await;
     }
 }

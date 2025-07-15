@@ -67,14 +67,12 @@ pub fn get_multiline_input_lines(state: &AppState, area_width: usize) -> (Vec<Li
                 if !in_word {
                     word_start = i;
                 }
-            } else {
-                if !in_word {
-                    if word_start < i {
-                        word_positions.push((word_start, i, true));
-                    }
-                    word_start = i;
-                    in_word = true;
+            } else if !in_word {
+                if word_start < i {
+                    word_positions.push((word_start, i, true));
                 }
+                word_start = i;
+                in_word = true;
             }
         }
         if in_word && word_start < segment.len() {
