@@ -20,7 +20,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts {
         let shortcuts = vec![
-            Line::from("/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline"),
+            Line::from(
+                "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
+            ),
             Line::from(format!(
                 "{}for shell mode     ↵ to send message    ctrl + c to quit",
                 SHELL_PROMPT_PREFIX.trim()
