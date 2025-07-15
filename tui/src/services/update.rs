@@ -592,28 +592,27 @@ fn handle_input_submitted(
         state.input.clear();
         state.cursor_position = 0;
 
-        let tool_call_args = state
-            .dialog_command
-            .as_ref()
-            .unwrap()
-            .function
-            .arguments
-            .clone();
+        let tool_call_args = if let Some(cmd) = state.dialog_command.as_ref() {
+            cmd.function.arguments.clone()
+        } else {
+            String::new()
+        };
+
         let command = tool_call_args
             .split("\"command\": \"")
             .nth(1)
-            .unwrap()
-            .split("\"")
-            .nth(0)
-            .unwrap();
-        let active_commands = vec!["ssh", "sudo"];
-        if active_commands.iter().any(|cmd| command.contains(cmd)) {
-            state.show_shell_mode = true;
-            state.is_dialog_open = false;
-            state.input.clear();
-            state.cursor_position = 0;
-            state.run_shell_command(command.to_string(), shell_tx);
-            return;
+            .and_then(|s| s.split('\"').next())
+            .unwrap_or("");
+        if !command.is_empty() {
+            let active_commands = vec!["ssh", "sudo"];
+            if active_commands.iter().any(|cmd| command.contains(cmd)) {
+                state.show_shell_mode = true;
+                state.is_dialog_open = false;
+                state.input.clear();
+                state.cursor_position = 0;
+                state.run_shell_command(command.to_string(), shell_tx);
+                return;
+            }
         }
 
         if state.dialog_selected == 0 {
