@@ -60,6 +60,9 @@ jobs:
 
       - name: Build (cross)
         if: endsWith(matrix.target, 'musl')
+        env:
+          OPENSSL_STATIC: 1
+          OPENSSL_VENDORED: 1
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Build (native)
@@ -68,6 +71,9 @@ jobs:
 
       - name: Run tests (cross)
         if: endsWith(matrix.target, 'musl')
+        env:
+          OPENSSL_STATIC: 1
+          OPENSSL_VENDORED: 1
         run: cross test --target ${{ matrix.target }}
 
       - name: Run tests (native)
