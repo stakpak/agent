@@ -418,12 +418,12 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
     }
 
     #[tool(
-        description = "Cancel a running background task started with run_command_async.
+        description = "Cancel a running asynchronous background task started with run_command_async.
 
 PARAMETERS:
-- task_id: The unique identifier of the task to cancel
+- task_id: The unique identifier of the task to cancel. Use the get_all_tasks tool to get the task ID.
 
-This will immediately terminate the running command and update the task status to 'Cancelled'.
+This will immediately terminate the background task and update the task status to 'Cancelled'.
 The task will be removed from the active tasks list."
     )]
     pub async fn cancel_task(
