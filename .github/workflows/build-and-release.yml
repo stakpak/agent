@@ -49,15 +49,29 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install cross
+        if: contains(matrix.target, 'musl')
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.target }}
 
-      - name: Build
+      - name: Build (cross)
+        if: endsWith(matrix.target, 'musl')
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: ${{ !endsWith(matrix.target, 'musl') }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Run tests
+      - name: Run tests (cross)
+        if: endsWith(matrix.target, 'musl')
+        run: cross test --target ${{ matrix.target }}
+
+      - name: Run tests (native)
+        if: ${{ !endsWith(matrix.target, 'musl') }}
         run: cargo test --target ${{ matrix.target }}
 
       - name: Prepare binary
