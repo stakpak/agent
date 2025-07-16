@@ -52,6 +52,7 @@ rand = "0.9.1"
 walkdir = "2.0.0"
 notify = "8.0.0"
 thiserror = "2.0.12"
+rustls = "0.23.29"
 
 # Required nightly
 [workspace.lints.clippy]
