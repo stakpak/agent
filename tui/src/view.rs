@@ -37,10 +37,18 @@ pub fn view(f: &mut Frame, state: &AppState) {
     } else {
         0
     };
-    let hint_height = if dropdown_showing { 0 } else { margin_height };
+    let hint_height = if state.show_helper_dropdown && !state.is_dialog_open {
+        0
+    } else {
+        margin_height
+    };
 
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
-    let dialog_margin = if state.show_sessions_dialog { 1 } else { 0 };
+    let dialog_margin = if state.show_sessions_dialog || state.is_dialog_open {
+        2
+    } else {
+        0
+    };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
@@ -51,8 +59,8 @@ pub fn view(f: &mut Frame, state: &AppState) {
     if !state.show_sessions_dialog {
         constraints.push(Constraint::Length(input_height));
         constraints.push(Constraint::Length(dropdown_height));
-        constraints.push(Constraint::Length(hint_height));
     }
+    constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
     let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -71,17 +79,11 @@ pub fn view(f: &mut Frame, state: &AppState) {
         width: 0,
         height: 0,
     };
-    let mut hint_area = Rect {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    };
+    let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
         input_area = chunks[3];
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
-        hint_area = chunks.get(5).copied().unwrap_or(input_area);
     }
 
     let message_area_width = message_area.width as usize;
@@ -97,20 +99,16 @@ pub fn view(f: &mut Frame, state: &AppState) {
 
     if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
-        return;
-    }
-    if state.is_dialog_open {
+    } else if state.is_dialog_open {
         render_confirmation_dialog(f, state);
-        return;
-    }
-
-    if !state.is_dialog_open {
+    } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         render_autocomplete_dropdown(f, state, dropdown_area);
-        if !dropdown_showing {
-            render_hint_or_shortcuts(f, state, hint_area);
-        }
+    }
+    // Render hint/shortcuts if not hiding for dropdown (unless dialog is open)
+    if !state.show_helper_dropdown {
+        render_hint_or_shortcuts(f, state, hint_area);
     }
 }
 

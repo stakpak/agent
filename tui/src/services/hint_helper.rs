@@ -25,6 +25,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
         return;
     }
+
     if state.show_shell_mode {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",
@@ -44,7 +45,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
-    } else {
+    } else if !state.show_sessions_dialog && !state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "? for shortcuts",
             Style::default().fg(Color::Cyan),
