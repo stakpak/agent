@@ -34,7 +34,7 @@ flate2 = "1.1"
 zip = "4.2"
 rand = { workspace = true }
 thiserror.workspace = true
-rustls = "0.23.29"
+rustls = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"
