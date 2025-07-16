@@ -415,11 +415,11 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-    if c == '?' && state.input.is_empty() {
+    if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
-    if c == '$' && (state.input.is_empty() || state.is_dialog_open) {
+    if c == '$' && (state.input.is_empty() || state.is_dialog_open) && !state.show_sessions_dialog {
         state.input.clear();
         handle_shell_mode(state);
         return;

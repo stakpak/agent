@@ -18,7 +18,7 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
 
     // Clamp so dialog fits on screen
     if last_message_y + dialog_height > screen.height {
-        last_message_y = screen.height.saturating_sub(dialog_height + 1);
+        last_message_y = screen.height.saturating_sub(dialog_height + 3);
     }
 
     let area = ratatui::layout::Rect {
