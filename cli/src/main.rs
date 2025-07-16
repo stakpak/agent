@@ -263,6 +263,12 @@ fn prompt_for_api_key(config: &mut AppConfig) {
         }
     };
 
+    let api_key = api_key.trim();
+    if api_key.is_empty() || !api_key.starts_with("stkpk_api") {
+        eprintln!("\nInvalid API key format.");
+        std::process::exit(1);
+    }
+
     config.api_key = Some(api_key.trim().to_string());
 
     if let Err(e) = config.save() {
