@@ -4,8 +4,8 @@ use anyhow::Result;
 use local::LocalClientHandler;
 use rmcp::{
     RoleClient,
-    model::{CallToolRequestParam, Tool},
-    service::RunningService,
+    model::{CallToolRequestParam, ClientRequest, Request, Tool},
+    service::{PeerRequestOptions, RequestHandle, RunningService},
 };
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
@@ -60,14 +60,19 @@ impl ClientManager {
     }
 
     pub async fn call_tool(
-        &mut self,
+        &self,
         client_name: &str,
         params: CallToolRequestParam,
-    ) -> Result<()> {
+    ) -> Result<RequestHandle<RoleClient>, String> {
         #[allow(clippy::unwrap_used)]
-        let client = self.clients.get_mut(client_name).unwrap();
-        client.call_tool(params).await?;
-        Ok(())
+        let client = self.clients.get(client_name).unwrap();
+        client
+            .send_cancellable_request(
+                ClientRequest::CallToolRequest(Request::new(params)),
+                PeerRequestOptions::no_options(),
+            )
+            .await
+            .map_err(|e| e.to_string())
     }
 
     pub async fn close_clients(&mut self) -> Result<()> {

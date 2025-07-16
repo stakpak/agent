@@ -23,12 +23,14 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
     output_tx: &Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
 ) {
@@ -117,7 +119,7 @@ pub fn update(
         InputEvent::Loading(is_loading) => {
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -514,7 +516,14 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+fn handle_esc(
+    state: &mut AppState,
+    output_tx: &Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+) {
+    if let Some(cancel_tx) = cancel_tx {
+        let _ = cancel_tx.send(());
+    }
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
