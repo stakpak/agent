@@ -12,7 +12,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
     let show = input == "/" || state.helpers.iter().any(|h| *h == input);
     if state.show_helper_dropdown && show {
         use ratatui::widgets::{List, ListItem, ListState};
-        let item_style = Style::default().bg(Color::Black);
+        let item_style = Style::default();
         let items: Vec<ListItem> = if state.input == "/" {
             state
                 .helpers
@@ -32,8 +32,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 })
                 .collect()
         };
-        let bg_block = Block::default().style(Style::default().bg(Color::Black));
-        f.render_widget(bg_block, dropdown_area);
+        // No background block
         let mut list_state = ListState::default();
         list_state.select(Some(
             state.helper_selected.min(items.len().saturating_sub(1)),
