@@ -781,22 +781,26 @@ fn handle_stream_tool_result(
 }
 
 fn handle_scroll_up(state: &mut AppState) {
-    if state.scroll > 0 {
-        state.scroll -= 1;
+    let lines = 15;
+    if state.scroll >= lines {
+        state.scroll -= lines;
+        state.stay_at_bottom = false;
+    } else {
+        state.scroll = 0;
         state.stay_at_bottom = false;
     }
 }
 
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
+    let lines = 15;
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.scroll < max_scroll {
-        state.scroll += 1;
-        if state.scroll == max_scroll {
-            state.stay_at_bottom = true;
-        }
+    if state.scroll + lines < max_scroll {
+        state.scroll += lines;
+        state.stay_at_bottom = false;
     } else {
+        state.scroll = max_scroll;
         state.stay_at_bottom = true;
     }
 }
