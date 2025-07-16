@@ -158,15 +158,15 @@ pub enum Commands {
 
 impl Commands {
     pub fn requires_auth(&self) -> bool {
-        match &self {
-            Commands::Login { .. } => false,
-            Commands::Logout => false,
-            Commands::Set { .. } => false,
-            Commands::Config => false,
-            Commands::Version => false,
-            Commands::Update => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Commands::Login { .. }
+                | Commands::Logout
+                | Commands::Set { .. }
+                | Commands::Config
+                | Commands::Version
+                | Commands::Update
+        )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
@@ -212,7 +212,7 @@ impl Commands {
                 let (bind_address, listener) =
                     network::find_available_bind_address_with_listener().await?;
                 let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(disable_mcp_auth).await;
-                println!("MCP server started at http://{}", bind_address);
+                println!("MCP server started at http://{}/mcp", bind_address);
                 if let Some(token) = mcp_auth_config.token.as_ref() {
                     println!("MCP auth token: {}", token);
                 }

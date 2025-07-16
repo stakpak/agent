@@ -35,6 +35,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+    let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
     let local_mcp_server_host = format!("http://{}", bind_address);
@@ -76,6 +77,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         let _ = stakpak_tui::run_tui(
             input_rx,
             output_tx,
+            Some(cancel_tx.clone()),
             shutdown_tx,
             latest_version.ok(),
             config.redact_secrets,
@@ -169,7 +171,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                        let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
+                        let result = run_tool_call(
+                            &clients,
+                            &tools_map,
+                            &tool_call,
+                            Some(cancel_rx.resubscribe()),
+                        )
+                        .await?;
+
+                        let mut should_continue = false;
+
                         if let Some(result) = result {
                             let result_content = result
                                 .content
@@ -195,11 +206,20 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             )
                             .await?;
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+
+                            // Continue to next tool or main loop if error
+                            should_continue = result.is_error.unwrap_or(false);
                         }
 
+                        // Process next tool in queue if available
                         if !tools_queue.is_empty() {
-                            let tool_call = tools_queue.remove(0);
-                            send_tool_call(&input_tx, &tool_call).await?;
+                            let next_tool_call = tools_queue.remove(0);
+                            send_tool_call(&input_tx, &next_tool_call).await?;
+                            continue;
+                        }
+
+                        // If there was an error, continue to main loop
+                        if should_continue {
                             continue;
                         }
                     }

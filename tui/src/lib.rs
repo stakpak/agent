@@ -20,6 +20,7 @@ pub use view::view;
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     latest_version: Option<String>,
     redact_secrets: bool,
@@ -76,7 +77,7 @@ pub async fn run_tui(
             continue;
         }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        terminal.draw(|f| view::view(f, &state))?;
                        continue;
                    }
@@ -113,7 +114,7 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                    }
                }
                Some(event) = internal_rx.recv() => {
@@ -150,7 +151,7 @@ pub async fn run_tui(
                             let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                         }
                        }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                    }
                }
                _ = spinner_interval.tick(), if state.loading => {
