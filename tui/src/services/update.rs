@@ -21,6 +21,8 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
+const SCROLL_LINES: usize = 10;
+
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
@@ -82,8 +84,16 @@ pub fn update(
         InputEvent::ScrollDown => {
             handle_scroll_down(state, message_area_height, message_area_width)
         }
-        InputEvent::PageUp => handle_page_up(state, message_area_height),
-        InputEvent::PageDown => handle_page_down(state, message_area_height, message_area_width),
+        InputEvent::PageUp => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_up(state, message_area_height);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::PageDown => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_down(state, message_area_height, message_area_width);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
         InputEvent::CursorLeft => {
             if state.cursor_position > 0 {
                 let prev = state.input[..state.cursor_position]
@@ -781,9 +791,8 @@ fn handle_stream_tool_result(
 }
 
 fn handle_scroll_up(state: &mut AppState) {
-    let lines = 15;
-    if state.scroll >= lines {
-        state.scroll -= lines;
+    if state.scroll >= SCROLL_LINES {
+        state.scroll -= SCROLL_LINES;
         state.stay_at_bottom = false;
     } else {
         state.scroll = 0;
@@ -792,12 +801,11 @@ fn handle_scroll_up(state: &mut AppState) {
 }
 
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    let lines = 15;
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.scroll + lines < max_scroll {
-        state.scroll += lines;
+    if state.scroll + SCROLL_LINES < max_scroll {
+        state.scroll += SCROLL_LINES;
         state.stay_at_bottom = false;
     } else {
         state.scroll = max_scroll;
