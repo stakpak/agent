@@ -8,7 +8,9 @@ use console::strip_ansi_codes;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::models::integrations::openai::{
+    ToolCall, ToolCallResult, ToolCallResultStatus,
+};
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
@@ -463,11 +465,25 @@ pub fn render_bash_block(
 }
 
 pub fn render_result_block(
-    tool_call: &ToolCall,
-    result: &str,
+    tool_call_result: &ToolCallResult,
     state: &mut AppState,
     terminal_size: Size,
 ) {
+    let tool_call = tool_call_result.call.clone();
+    let result = tool_call_result.result.clone();
+    let tool_call_status = tool_call_result.status.clone();
+    if tool_call_status == ToolCallResultStatus::Error {
+        render_bash_block_rejected(&tool_call.function.name, state, Some(result.to_string()));
+        return;
+    }
+    if tool_call_status == ToolCallResultStatus::Cancelled {
+        render_bash_block_rejected(
+            &tool_call.function.name,
+            state,
+            Some("Interrupted by user".to_string()),
+        );
+        return;
+    }
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
         terminal_width - 4
@@ -507,7 +523,7 @@ pub fn render_result_block(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" ({})", extract_truncated_command_arguments(tool_call)),
+            format!(" ({})", extract_truncated_command_arguments(&tool_call)),
             Style::default().fg(Color::Gray),
         ),
     ];
@@ -515,7 +531,7 @@ pub fn render_result_block(
     // Calculate padding for header
     let header_content_width = 2
         + tool_call.function.name.len()
-        + extract_truncated_command_arguments(tool_call).len()
+        + extract_truncated_command_arguments(&tool_call).len()
         + 3; // "● " + " (" + ")"
     let header_padding = inner_width.saturating_sub(header_content_width);
     header_spans.push(Span::from(" ".repeat(header_padding)));
@@ -524,7 +540,7 @@ pub fn render_result_block(
     lines.push(Line::from(header_spans));
 
     // Preprocess result to handle terminal control sequences
-    let preprocessed_result = preprocess_terminal_output(result);
+    let preprocessed_result = preprocess_terminal_output(&result);
 
     // Convert result to ratatui Text with ANSI support
     let result_text = match preprocessed_result.into_text() {
@@ -635,14 +651,18 @@ pub fn render_result_block(
 }
 
 // Function to render a rejected bash command (when user selects "No")
-pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
+pub fn render_bash_block_rejected(
+    command_name: &str,
+    state: &mut AppState,
+    message: Option<String>,
+) {
     let mut lines = Vec::new();
 
     lines.push(Line::from(vec![
         Span::styled(
             "● ",
             Style::default()
-                .fg(Color::LightGreen)
+                .fg(Color::LightRed)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -657,9 +677,9 @@ pub fn render_bash_block_rejected(command_name: &str, state: &mut AppState) {
         ),
         Span::styled("...", Style::default().fg(Color::Gray)),
     ]));
-
+    let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
     lines.push(Line::from(vec![Span::styled(
-        "  L No (tell Stakpak what to do differently)",
+        format!("  L {}", message),
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     )]));
 

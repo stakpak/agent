@@ -82,10 +82,8 @@ pub async fn run_tui(
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
-                       let tool_call = tool_call_result.call.clone();
-                       let result = tool_call_result.result.clone();
                        services::update::clear_streaming_tool_results(&mut state);
-                       services::bash_block::render_result_block(&tool_call, &result, &mut state, terminal_size);
+                       services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
                    }
 
                    if let InputEvent::Quit = event { should_quit = true; }
