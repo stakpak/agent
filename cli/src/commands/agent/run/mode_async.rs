@@ -203,7 +203,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                     async { run_tool_call(&clients, &tools_map, tool_call, None).await };
 
                 let result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(60), // 60 second timeout
+                    std::time::Duration::from_secs(60 * 60), // 60 minute timeout
                     tool_execution,
                 )
                 .await
@@ -213,7 +213,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                         print!(
                             "{}",
                             renderer.render_error(&format!(
-                                "Tool '{}' timed out after 60 seconds",
+                                "Tool '{}' timed out after 60 minutes",
                                 tool_call.function.name
                             ))
                         );
