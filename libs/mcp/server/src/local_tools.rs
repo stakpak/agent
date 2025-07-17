@@ -418,12 +418,12 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
     }
 
     #[tool(
-        description = "Cancel a running background task started with run_command_async.
+        description = "Cancel a running asynchronous background task started with run_command_async.
 
 PARAMETERS:
-- task_id: The unique identifier of the task to cancel
+- task_id: The unique identifier of the task to cancel. Use the get_all_tasks tool to get the task ID.
 
-This will immediately terminate the running command and update the task status to 'Cancelled'.
+This will immediately terminate the background task and update the task status to 'Cancelled'.
 The task will be removed from the active tasks list."
     )]
     pub async fn cancel_task(
@@ -867,27 +867,7 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         let length = length.unwrap_or(15);
         let no_symbols = no_symbols.unwrap_or(false);
 
-        let mut config = npwg::PasswordGeneratorConfig {
-            length,
-            ..Default::default()
-        };
-
-        if no_symbols {
-            config.excluded_chars = npwg::config::DEFINE
-                .iter()
-                .find(|(name, _)| *name == "symbol3")
-                .map(|(_, chars)| chars.chars().collect())
-                .unwrap_or_default();
-        }
-
-        let password = if let Ok(password) = npwg::generator::generate_password(&config).await {
-            password
-        } else {
-            return Ok(CallToolResult::error(vec![
-                Content::text("FAILED_TO_GENERATE_PASSWORD"),
-                Content::text("Failed to generate password"),
-            ]));
-        };
+        let password = stakpak_shared::utils::generate_password(length, no_symbols);
 
         let redacted_password = self
             .get_secret_manager()

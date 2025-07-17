@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
 
@@ -277,5 +278,142 @@ temp*
         );
 
         Ok(())
+    }
+}
+
+/// Generate a secure password with alphanumeric characters and optional symbols
+pub fn generate_password(length: usize, no_symbols: bool) -> String {
+    let mut rng = rand::rng();
+
+    // Define character sets
+    let lowercase = "abcdefghijklmnopqrstuvwxyz";
+    let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let digits = "0123456789";
+    let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+
+    // Build the character set based on options
+    let mut charset = String::new();
+    charset.push_str(lowercase);
+    charset.push_str(uppercase);
+    charset.push_str(digits);
+
+    if !no_symbols {
+        charset.push_str(symbols);
+    }
+
+    let charset_chars: Vec<char> = charset.chars().collect();
+
+    // Generate password ensuring at least one character from each required category
+    let mut password = String::new();
+
+    // Ensure at least one character from each category
+    password.push(
+        lowercase
+            .chars()
+            .nth(rng.random_range(0..lowercase.len()))
+            .unwrap(),
+    );
+    password.push(
+        uppercase
+            .chars()
+            .nth(rng.random_range(0..uppercase.len()))
+            .unwrap(),
+    );
+    password.push(
+        digits
+            .chars()
+            .nth(rng.random_range(0..digits.len()))
+            .unwrap(),
+    );
+
+    if !no_symbols {
+        password.push(
+            symbols
+                .chars()
+                .nth(rng.random_range(0..symbols.len()))
+                .unwrap(),
+        );
+    }
+
+    // Fill the rest with random characters from the full charset
+    let remaining_length = if length > password.len() {
+        length - password.len()
+    } else {
+        0
+    };
+
+    for _ in 0..remaining_length {
+        let random_char = charset_chars[rng.random_range(0..charset_chars.len())];
+        password.push(random_char);
+    }
+
+    // Shuffle the password to randomize the order
+    let mut password_chars: Vec<char> = password.chars().collect();
+    for i in 0..password_chars.len() {
+        let j = rng.random_range(0..password_chars.len());
+        password_chars.swap(i, j);
+    }
+
+    // Take only the requested length
+    password_chars.into_iter().take(length).collect()
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_password_length() {
+        let password = generate_password(10, false);
+        assert_eq!(password.len(), 10);
+
+        let password = generate_password(20, true);
+        assert_eq!(password.len(), 20);
+    }
+
+    #[test]
+    fn test_generate_password_no_symbols() {
+        let password = generate_password(50, true);
+        let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+
+        for symbol in symbols.chars() {
+            assert!(
+                !password.contains(symbol),
+                "Password should not contain symbol: {}",
+                symbol
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_password_with_symbols() {
+        let password = generate_password(50, false);
+        let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+
+        // At least one symbol should be present (due to our algorithm)
+        let has_symbol = password.chars().any(|c| symbols.contains(c));
+        assert!(has_symbol, "Password should contain at least one symbol");
+    }
+
+    #[test]
+    fn test_generate_password_contains_required_chars() {
+        let password = generate_password(50, false);
+
+        let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
+        let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
+        let has_digit = password.chars().any(|c| c.is_ascii_digit());
+
+        assert!(has_lowercase, "Password should contain lowercase letters");
+        assert!(has_uppercase, "Password should contain uppercase letters");
+        assert!(has_digit, "Password should contain digits");
+    }
+
+    #[test]
+    fn test_generate_password_uniqueness() {
+        let password1 = generate_password(20, false);
+        let password2 = generate_password(20, false);
+
+        // Very unlikely to generate the same password twice
+        assert_ne!(password1, password2);
     }
 }
