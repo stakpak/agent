@@ -3,12 +3,12 @@ use crate::{
     config::AppConfig,
     utils::network,
 };
-use agent::{AgentCommands, get_or_create_session, run_agent};
+use agent::AgentCommands;
 use clap::Subcommand;
-use flow::{clone, get_flow_ref, push, sync};
+use flow::{clone, get_flow_ref, push};
 use stakpak_api::{
     Client, ClientConfig,
-    models::{AgentID, Document, ProvisionerType, TranspileTargetProvisionerType},
+    models::{Document, ProvisionerType, TranspileTargetProvisionerType},
 };
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use termimad::MadSkin;
@@ -65,16 +65,6 @@ pub enum Commands {
         dir: Option<String>,
     },
 
-    /// Sync configurations from and to a flow
-    Sync {
-        /// Flow reference in format: <owner_name>/<flow_name>(/<version_id_or_tag>)?
-        #[arg(name = "flow-ref")]
-        flow_ref: String,
-        /// Source/Destination directory
-        #[arg(long, short)]
-        dir: Option<String>,
-    },
-
     /// Query your configurations
     Query {
         /// Query string to search/prompt for over your flows
@@ -107,21 +97,6 @@ pub enum Commands {
         /// Auto approve all changes
         #[arg(long, short = 'y', default_value_t = false)]
         auto_approve: bool,
-    },
-
-    /// Apply configurations
-    Apply {
-        /// Flow reference in format: <owner_name>/<flow_name>(/<version_id_or_tag>)?
-        #[arg(name = "flow-ref")]
-        flow_ref: String,
-
-        /// Target directory
-        #[arg(long, short)]
-        dir: Option<String>,
-
-        /// Provisioner type to apply (terraform, kubernetes, dockerfile, github-actions)
-        #[arg(long, short = 'p')]
-        provisioner: Option<ProvisionerType>,
     },
 
     /// Transpile configurations
@@ -347,11 +322,6 @@ impl Commands {
                 let skin = MadSkin::default();
                 println!("{}", skin.inline(&data.to_text(synthesize_output)));
             }
-            Commands::Sync { flow_ref, dir } => {
-                let client = Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
-                let flow_ref = get_flow_ref(&client, flow_ref).await?;
-                sync(&config, &client, &flow_ref, dir.as_deref()).await?;
-            }
             Commands::Push {
                 flow_ref,
                 create,
@@ -488,95 +458,13 @@ impl Commands {
                     println!();
                 };
 
-                AgentCommands::run(agent_commands, config, false).await?;
+                AgentCommands::run(agent_commands, config).await?;
             }
             Commands::Version => {
                 println!(
                     "stakpak v{} (https://github.com/stakpak/agent)",
                     env!("CARGO_PKG_VERSION")
                 );
-            }
-            Commands::Apply {
-                flow_ref,
-                dir,
-                provisioner,
-                // no_clone,
-            } => {
-                let client = Client::new(&config.clone().into()).map_err(|e| e.to_string())?;
-
-                let flow_ref = get_flow_ref(&client, flow_ref).await?;
-                let path_map = clone(&client, &flow_ref, dir.as_deref()).await?;
-
-                if path_map.is_empty() {
-                    return Err("No configurations found to apply".into());
-                }
-
-                let config_clone = config.clone();
-                let client_clone =
-                    Client::new(&config_clone.clone().into()).map_err(|e| e.to_string())?;
-                let flow_ref_clone = flow_ref.clone();
-                let dir_clone = dir.clone();
-                tokio::spawn(async move {
-                    flow::sync(
-                        &config_clone,
-                        &client_clone,
-                        &flow_ref_clone,
-                        dir_clone.as_deref(),
-                    )
-                    .await
-                });
-
-                let agent_id = AgentID::KevinV1;
-
-                let agent_input = match provisioner {
-                    None => {
-                        println!(
-                            "Please specify a provisioner to apply with -p. Available provisioners:"
-                        );
-                        for provisioner in path_map.keys() {
-                            println!("  {}", provisioner);
-                        }
-                        return Err("Must specify provisioner type to apply".to_string());
-                    }
-                    Some(provisioner) => {
-                        let tasks = client
-                            .get_agent_tasks(&provisioner, dir)
-                            .await
-                            .map_err(|e| e.to_string())?;
-
-                        let task = tasks
-                            .iter()
-                            .find(|t| {
-                                t.input.get_agent_id() == agent_id
-                                    && t.provisioner == Some(provisioner.clone())
-                            })
-                            .ok_or("No matching task found")?;
-
-                        task.input.clone()
-                    }
-                };
-
-                let (agent_id, session, checkpoint) =
-                    get_or_create_session(&client, agent_id, None, Some(agent_input.clone()))
-                        .await?;
-
-                let checkpoint_id = run_agent(
-                    &config,
-                    &client,
-                    agent_id,
-                    session,
-                    checkpoint,
-                    Some(agent_input),
-                    true,
-                    true,
-                )
-                .await?;
-
-                // Write checkpoint ID to local file for resuming later
-                std::fs::write(".stakpak_apply_checkpoint", checkpoint_id.to_string())
-                    .map_err(|e| format!("Failed to write checkpoint file: {}", e))?;
-
-                println!("[Saved checkpoint ID to .stakpak_apply_checkpoint]");
             }
             Commands::Warden {
                 env,

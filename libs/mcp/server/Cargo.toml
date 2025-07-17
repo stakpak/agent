@@ -15,7 +15,6 @@ rmcp = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 axum = "0.8.4"
-npwg = "0.4.5"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]

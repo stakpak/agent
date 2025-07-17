@@ -27,7 +27,6 @@ termimad = "0.31.1"
 walkdir = { workspace = true }
 tokio-process-stream = "0.4.0"
 tokio-stream = "0.1.17"
-rust_socketio = { version = "0.6.0", features = ["async"] }
 rpassword = "7.3"
 names = "0.14.0"
 tar = "0.4"
@@ -35,7 +34,7 @@ flate2 = "1.1"
 zip = "4.2"
 rand = { workspace = true }
 thiserror.workspace = true
-
+rustls = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"
