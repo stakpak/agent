@@ -585,6 +585,28 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
+        let tool_call_args = if let Some(cmd) = state.dialog_command.as_ref() {
+            cmd.function.arguments.clone()
+        } else {
+            String::new()
+        };
+
+        let command = tool_call_args
+            .split("\"command\": \"")
+            .nth(1)
+            .and_then(|s| s.split('\"').next())
+            .unwrap_or("");
+        if !command.is_empty() {
+            let active_commands = ["ssh", "sudo"];
+            if active_commands.iter().any(|cmd| command.contains(cmd)) {
+                state.show_shell_mode = true;
+                state.is_dialog_open = false;
+                state.input.clear();
+                state.cursor_position = 0;
+                state.run_shell_command(command.to_string(), shell_tx);
+                return;
+            }
+        }
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
