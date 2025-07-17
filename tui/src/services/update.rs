@@ -15,7 +15,7 @@ use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
-    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -23,12 +23,14 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
     output_tx: &Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
 ) {
@@ -115,9 +117,10 @@ pub fn update(
             state.is_dialog_open = true;
         }
         InputEvent::Loading(is_loading) => {
+            state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -375,6 +378,11 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
+    if (state.is_streaming || state.loading) && !state.is_dialog_open {
+        state.input.clear();
+        state.cursor_position = 0;
+        return;
+    }
     if c == '?' && state.input.is_empty() {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -514,7 +522,15 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 }
 
-fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+fn handle_esc(
+    state: &mut AppState,
+    output_tx: &Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+) {
+    if let Some(cancel_tx) = cancel_tx {
+        let _ = cancel_tx.send(());
+    }
+    state.is_streaming = false;
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
     } else if state.show_helper_dropdown {
@@ -524,7 +540,7 @@ fn handle_esc(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_truncated_command_arguments(tool_call);
-            render_bash_block_rejected(&truncated_command, state);
+            render_bash_block_rejected(&truncated_command, state, None);
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -549,6 +565,11 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
+    if (state.is_streaming || state.loading) && !state.is_dialog_open {
+        state.input.clear();
+        state.cursor_position = 0;
+        return;
+    }
     let input_height = 3;
     if state.show_shell_mode {
         // Check if we're waiting for shell input (like password)
@@ -600,7 +621,7 @@ fn handle_input_submitted(
             let tool_call_opt = state.dialog_command.clone();
             if let Some(tool_call) = &tool_call_opt {
                 let truncated_command = extract_truncated_command_arguments(tool_call);
-                render_bash_block_rejected(&truncated_command, state);
+                render_bash_block_rejected(&truncated_command, state, None);
             }
         }
 
@@ -712,6 +733,7 @@ fn handle_input_submitted_with(
 
 fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area_height: usize) {
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
+        state.is_streaming = true;
         if let MessageContent::Plain(text, _) = &mut message.content {
             text.push_str(&s);
         }
@@ -733,6 +755,7 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
+        state.is_streaming = false;
     }
 }
 
@@ -741,6 +764,7 @@ fn handle_stream_tool_result(
     progress: ToolCallResultProgress,
     terminal_size: Size,
 ) {
+    state.is_streaming = true;
     let tool_call_id = progress.id;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
@@ -834,6 +858,7 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 }
 
 pub fn clear_streaming_tool_results(state: &mut AppState) {
+    state.is_streaming = false;
     state.streaming_tool_results.clear();
     state
         .messages
@@ -871,5 +896,6 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
             .as_ref()
             .cloned()
             .unwrap_or_default(),
+        status: ToolCallResultStatus::Success,
     }
 }
