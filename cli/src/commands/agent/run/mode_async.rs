@@ -199,7 +199,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 );
 
                 // Add timeout for tool execution
-                let tool_execution = async { run_tool_call(&clients, &tools_map, tool_call).await };
+                let tool_execution =
+                    async { run_tool_call(&clients, &tools_map, tool_call, None).await };
 
                 let result = match tokio::time::timeout(
                     std::time::Duration::from_secs(60 * 60), // 60 minute timeout

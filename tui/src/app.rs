@@ -70,6 +70,7 @@ pub struct AppState {
     pub dialog_message_id: Option<Uuid>,
     pub autocomplete: AutoComplete,
     pub secret_manager: SecretManager,
+    pub is_streaming: bool,
 }
 
 #[derive(Debug)]
@@ -221,6 +222,7 @@ impl AppState {
             dialog_message_id: None,
             autocomplete: AutoComplete::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            is_streaming: false,
         }
     }
 
