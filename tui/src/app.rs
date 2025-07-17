@@ -295,7 +295,8 @@ impl AppState {
                     None
                 };
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
-                let has_at_trigger = find_at_trigger(&result.input, result.cursor_position).is_some();
+                let has_at_trigger =
+                    find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (self.input.trim() == "/")
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
                     || (has_at_trigger && !is_files_empty);

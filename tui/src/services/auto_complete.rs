@@ -408,15 +408,13 @@ pub async fn autocomplete_worker(
                     .chars()
                     .nth(at_pos.saturating_sub(1))
                     .is_some_and(|ch| ch.is_whitespace());
-            if is_valid_at {
-                if handle_at_trigger(&input, cursor_position, &mut autocomplete) {
-                    autocomplete.is_file_mode = true;
-                    autocomplete.trigger_char = Some('@');
-                    filtered_files = autocomplete.filtered_files.clone();
-                }
+            if is_valid_at && handle_at_trigger(&input, cursor_position, &mut autocomplete) {
+                autocomplete.is_file_mode = true;
+                autocomplete.trigger_char = Some('@');
+                filtered_files = autocomplete.filtered_files.clone();
             }
         }
-       
+
         // TODO: Add / and other triggers as needed
 
         let _ = tx
