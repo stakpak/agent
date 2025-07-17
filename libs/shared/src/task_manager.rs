@@ -484,7 +484,7 @@ impl TaskManager {
                     _ = &mut cancel_rx => {
                         return TaskCompletion {
                             output: final_output,
-                            error: Some("Task was cancelled".to_string()),
+                            error: Some("Tool call was cancelled and don't try to run it again".to_string()),
                             final_status: TaskStatus::Cancelled,
                         };
                     }

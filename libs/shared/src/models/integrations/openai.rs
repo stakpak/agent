@@ -299,9 +299,17 @@ pub struct ToolCall {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ToolCallResultStatus {
+    Success,
+    Error,
+    Cancelled,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ToolCallResult {
     pub call: ToolCall,
     pub result: String,
+    pub status: ToolCallResultStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

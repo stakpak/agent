@@ -2,7 +2,7 @@ use crate::commands::agent::run::tui::send_input_event;
 use stakpak_api::Client;
 use stakpak_api::models::AgentOutput;
 use stakpak_shared::models::integrations::openai::{
-    ChatMessage, MessageContent, Role, ToolCall, ToolCallResult,
+    ChatMessage, MessageContent, Role, ToolCall, ToolCallResult, ToolCallResultStatus,
 };
 use stakpak_tui::InputEvent;
 use uuid::Uuid;
@@ -102,6 +102,16 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
                                 .as_ref()
                                 .unwrap_or(&MessageContent::String(String::new()))
                                 .to_string(),
+                            status: match message
+                                .content
+                                .as_ref()
+                                .unwrap_or(&MessageContent::String(String::new()))
+                                .to_string()
+                                .contains("cancelled")
+                            {
+                                true => ToolCallResultStatus::Cancelled,
+                                false => ToolCallResultStatus::Success,
+                            },
                         }),
                     )
                     .await;
