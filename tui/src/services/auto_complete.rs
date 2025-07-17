@@ -234,25 +234,17 @@ fn fuzzy_match_optimized(text: &str, pattern: &str) -> bool {
 pub fn find_at_trigger(input: &str, cursor_pos: usize) -> Option<usize> {
     let safe_pos = cursor_pos.min(input.len());
     let before_cursor = &input[..safe_pos];
-    let bytes = before_cursor.as_bytes();
-    for i in (0..bytes.len()).rev() {
-        if bytes[i] == b'@' {
+    // Find the last @ that's either at start or preceded by whitespace
+    for (i, c) in before_cursor.char_indices().rev() {
+        if c == '@' {
             // Check if it's at start or preceded by whitespace
-            if i == 0 || bytes[i - 1].is_ascii_whitespace() {
-                // Case 1: Cursor is immediately after @ (e.g. @|)
-                if i + 1 == cursor_pos {
-                    return Some(i);
-                }
-                // Case 2: Next character is non-space (e.g. @a)
-                if i + 1 < input.len() {
-                    let next_char = input[i + 1..].chars().next();
-                    if let Some(c) = next_char {
-                        if !c.is_whitespace() {
-                            return Some(i);
-                        }
-                    }
-                }
-                // If @ is at the end but cursor is not right after, or next char is space, do not trigger
+            if i == 0
+                || before_cursor
+                    .chars()
+                    .nth(i.saturating_sub(1))
+                    .is_some_and(|ch| ch.is_whitespace())
+            {
+                return Some(i);
             }
         }
     }
@@ -409,19 +401,30 @@ pub async fn autocomplete_worker(
 
         let mut filtered_files = Vec::new();
         // Detect @ trigger using new signature
-        if let Some(_at_pos) = find_at_trigger(&input, cursor_position) {
-            if handle_at_trigger(&input, cursor_position, &mut autocomplete) {
-                autocomplete.is_file_mode = true;
-                autocomplete.trigger_char = Some('@');
-                filtered_files = autocomplete.filtered_files.clone();
+
+        if let Some(at_pos) = find_at_trigger(&input, cursor_position) {
+            let is_valid_at = at_pos == 0
+                || input
+                    .chars()
+                    .nth(at_pos.saturating_sub(1))
+                    .is_some_and(|ch| ch.is_whitespace());
+            if is_valid_at {
+                if handle_at_trigger(&input, cursor_position, &mut autocomplete) {
+                    autocomplete.is_file_mode = true;
+                    autocomplete.trigger_char = Some('@');
+                    filtered_files = autocomplete.filtered_files.clone();
+                }
             }
         }
+       
         // TODO: Add / and other triggers as needed
 
         let _ = tx
             .send(AutoCompleteResult {
                 filtered_helpers,
                 filtered_files,
+                cursor_position,
+                input,
             })
             .await;
     }

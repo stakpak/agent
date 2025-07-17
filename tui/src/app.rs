@@ -24,6 +24,8 @@ use crate::services::shell_mode::run_pty_command;
 pub struct AutoCompleteResult {
     pub filtered_helpers: Vec<&'static str>,
     pub filtered_files: Vec<String>,
+    pub cursor_position: usize,
+    pub input: String,
 }
 
 #[derive(Debug)]
@@ -282,7 +284,9 @@ impl AppState {
     pub fn poll_autocomplete_results(&mut self) {
         if let Some(rx) = &mut self.autocomplete_rx {
             while let Ok(result) = rx.try_recv() {
-                self.filtered_files = result.filtered_files;
+                let filtered_files = result.filtered_files.clone();
+                let is_files_empty = filtered_files.is_empty();
+                self.filtered_files = filtered_files;
                 self.autocomplete.filtered_files = self.filtered_files.clone();
                 self.autocomplete.is_file_mode = !self.filtered_files.is_empty();
                 self.autocomplete.trigger_char = if !self.filtered_files.is_empty() {
@@ -291,10 +295,10 @@ impl AppState {
                     None
                 };
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
-                let has_at_trigger = find_at_trigger(&self.input, self.cursor_position).is_some();
+                let has_at_trigger = find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (self.input.trim() == "/")
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
-                    || (has_at_trigger && !self.filtered_files.is_empty());
+                    || (has_at_trigger && !is_files_empty);
             }
         }
     }

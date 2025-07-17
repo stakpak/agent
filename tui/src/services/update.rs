@@ -340,7 +340,6 @@ pub fn update(
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
-    state.poll_autocomplete_results();
 }
 
 fn handle_shell_mode(state: &mut AppState) {
@@ -428,7 +427,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     let pos = state.cursor_position.min(state.input.len());
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
-
+    
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
     if let Some(placeholder) = &state.pasted_placeholder {
         if !state.input.contains(placeholder) {
@@ -459,7 +458,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     if let Some(tx) = &state.autocomplete_tx {
         let _ = tx.try_send((state.input.clone(), state.cursor_position));
     }
-
+    
     if state.input.is_empty() {
         state.show_helper_dropdown = false;
         state.filtered_helpers.clear();
