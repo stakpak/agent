@@ -28,8 +28,15 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         height: dialog_height,
     };
 
+    let mut message = "Press Enter to continue or Esc to cancel and reprompt";
+    if let Some(dialog_command) = state.dialog_command.as_ref() {
+        let command = dialog_command.function.arguments.clone();
+        if command.contains("sudo") {
+            message = "This is a sudo command '$' to run the command yourself or Esc to cancel and reprompt";
+        }
+    }
     let line = Line::from(vec![Span::styled(
-        "Press Enter to continue, '$' to run the command yourself or Esc to cancel and reprompt",
+        message,
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
