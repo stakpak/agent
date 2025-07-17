@@ -15,7 +15,7 @@ use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
-    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -880,5 +880,6 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
             .as_ref()
             .cloned()
             .unwrap_or_default(),
+        status: ToolCallResultStatus::Success,
     }
 }

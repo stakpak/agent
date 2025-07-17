@@ -16,7 +16,7 @@ use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
+use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
 use uuid::Uuid;
 
@@ -201,6 +201,19 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     stakpak_shared::models::integrations::openai::ToolCallResult {
                                         call: tool_call.clone(),
                                         result: result_content,
+                                        status: match result.is_error.unwrap_or(false) {
+                                            true => match result.content[0].raw.as_text() {
+                                                Some(text) => {
+                                                    if text.text.contains("cancelled") {
+                                                        ToolCallResultStatus::Cancelled
+                                                    } else {
+                                                        ToolCallResultStatus::Error
+                                                    }
+                                                }
+                                                None => ToolCallResultStatus::Error,
+                                            },
+                                            false => ToolCallResultStatus::Success,
+                                        },
                                     },
                                 ),
                             )
