@@ -413,8 +413,8 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
                 if !in_word {
                     word_start = i;
                 }
-            } else {
-                if !in_word && word_start < i {
+            } else if !in_word {
+                if word_start < i {
                     // There were spaces before this word
                     word_positions.push((word_start, i, true)); // true = whitespace
                 }
