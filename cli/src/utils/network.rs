@@ -39,7 +39,7 @@ async fn find_available_port_with_listener(host: &str) -> Result<(TcpListener, u
 pub async fn find_available_bind_address_with_listener() -> Result<(String, TcpListener), String> {
     let host = match detect_container_environment() {
         true => "0.0.0.0",
-        false => "localhost",
+        false => "127.0.0.1", // Force IPv4 to avoid IPv6 TLS issues
     };
 
     let (listener, port) = find_available_port_with_listener(host).await?;

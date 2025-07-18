@@ -4,13 +4,13 @@ use rmcp::transport::streamable_http_server::{
 };
 
 use stakpak_api::ClientConfig;
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::task_manager::TaskManager;
 
 pub mod local_tools;
 pub mod remote_tools;
 pub mod tool_container;
 
-use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
@@ -74,38 +74,7 @@ pub struct MCPServerConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub tool_mode: ToolMode,
-    pub auth: AuthConfig,
-}
-
-async fn auth_middleware(
-    request: Request,
-    next: Next,
-    auth_config: Arc<AuthConfig>,
-) -> Result<Response, StatusCode> {
-    if auth_config.token.is_none() {
-        return Ok(next.run(request).await);
-    }
-
-    let auth_header = request
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    if let Some(auth_header) = auth_header {
-        if let Some(token) = auth_header.strip_prefix("Bearer ") {
-            if token == auth_config.token.as_ref().unwrap_or(&"".to_string()) {
-                return Ok(next.run(request).await);
-            }
-        }
-    }
-
-    Response::builder()
-        .status(StatusCode::UNAUTHORIZED)
-        .header("WWW-Authenticate", "Bearer")
-        .body(axum::body::Body::from(
-            "Unauthorized: Invalid or missing token",
-        ))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    pub certificate_chain: Arc<Option<CertificateChain>>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -207,21 +176,6 @@ async fn start_server_internal(
 ) -> Result<()> {
     init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
 
-    if config.auth.token.as_ref().is_some() {
-        tracing::info!("🔒 MCP Authentication enabled");
-        tracing::info!(
-            "🔑 MCP Token: {}",
-            config.auth.token.as_ref().unwrap_or(&"".to_string())
-        );
-        tracing::info!(
-            "💡 MCP clients should use: Authorization: Bearer {}",
-            config.auth.token.as_ref().unwrap_or(&"".to_string())
-        );
-        tracing::info!("🚫 To disable authentication, restart with --disable-mcp-auth");
-    } else {
-        tracing::warn!("⚠️  MCP Authentication disabled - server is open to all connections");
-    }
-
     // Create and start TaskManager
     let task_manager = TaskManager::new();
     let task_manager_handle = task_manager.handle();
@@ -265,21 +219,23 @@ async fn start_server_internal(
         Default::default(),
     );
 
-    let auth_config_arc = Arc::new(config.auth);
-    let router =
-        axum::Router::new()
-            .nest_service("/mcp", service)
-            .layer(axum::middleware::from_fn(move |request, next| {
-                let auth_config = auth_config_arc.clone();
-                async move { auth_middleware(request, next, auth_config).await }
-            }));
+    let router = axum::Router::new().nest_service("/mcp", service);
 
-    axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(create_shutdown_handler(
-            shutdown_rx,
-            Some(task_manager_handle.clone()),
-        ))
-        .await?;
+    if let Some(cert_chain) = config.certificate_chain.as_ref() {
+        let tls_config = cert_chain.create_server_config()?;
+        let rustls_config =
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+        axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+            .serve(router.into_make_service())
+            .await?;
+    } else {
+        axum::serve(tcp_listener, router)
+            .with_graceful_shutdown(create_shutdown_handler(
+                shutdown_rx,
+                Some(task_manager_handle.clone()),
+            ))
+            .await?;
+    }
 
     Ok(())
 }
@@ -304,7 +260,7 @@ pub async fn start_local_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
-    disable_auth: bool,
+    certificate_chain: Option<CertificateChain>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -316,7 +272,7 @@ pub async fn start_local_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::LocalOnly,
-            auth: AuthConfig::new(disable_auth).await,
+            certificate_chain: Arc::new(certificate_chain),
         },
         None,
         shutdown_rx,
@@ -331,7 +287,7 @@ pub async fn start_remote_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
-    disable_auth: bool,
+    certificate_chain: Option<CertificateChain>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -340,7 +296,7 @@ pub async fn start_remote_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::RemoteOnly,
-            auth: AuthConfig::new(disable_auth).await,
+            certificate_chain: Arc::new(certificate_chain),
         },
         None,
         shutdown_rx,
@@ -355,7 +311,7 @@ pub async fn start_combined_server(
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
-    disable_auth: bool,
+    certificate_chain: Option<CertificateChain>,
 ) -> Result<()> {
     start_server(
         MCPServerConfig {
@@ -364,7 +320,7 @@ pub async fn start_combined_server(
             redact_secrets,
             privacy_mode,
             tool_mode: ToolMode::Combined,
-            auth: AuthConfig::new(disable_auth).await,
+            certificate_chain: Arc::new(certificate_chain),
         },
         None,
         shutdown_rx,

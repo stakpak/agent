@@ -1,17 +1,17 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use local::LocalClientHandler;
+use local::{LocalClientHandler, local_client};
 use rmcp::{
     RoleClient,
     model::{CallToolRequestParam, ClientRequest, Request, Tool},
     service::{PeerRequestOptions, RequestHandle, RunningService},
 };
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
 
-mod local;
-use crate::local::local_client;
+pub mod local;
 
 pub struct ClientManager {
     clients: HashMap<String, RunningService<RoleClient, LocalClientHandler>>,
@@ -20,10 +20,10 @@ pub struct ClientManager {
 impl ClientManager {
     pub async fn new(
         local_server_host: String,
-        auth_token: Option<String>,
         progress_tx: Option<Sender<ToolCallResultProgress>>,
+        certificate_chain: Arc<Option<CertificateChain>>,
     ) -> Result<Self> {
-        let client1 = local_client(local_server_host, progress_tx, auth_token).await?;
+        let client1 = local_client(local_server_host, progress_tx, certificate_chain).await?;
         Ok(Self {
             clients: HashMap::from([("local".to_string(), client1)]),
         })
