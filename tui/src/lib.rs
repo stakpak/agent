@@ -17,6 +17,15 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
 
+// Thread-local storage for editor state
+use std::cell::RefCell;
+use std::thread_local;
+
+thread_local! {
+    static EDITOR_STATE: RefCell<Option<edtui::EditorState>> = RefCell::new(None);
+    static EDITOR_EVENT_HANDLER: RefCell<Option<edtui::EditorEventHandler>> = RefCell::new(None);
+}
+
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
@@ -64,7 +73,7 @@ pub async fn run_tui(
     // get terminal width
     let terminal_size = terminal.size()?;
     // Main async update/view loop
-    terminal.draw(|f| view::view(f, &state))?;
+    terminal.draw(|f| view::view(f, &mut state))?;
     let mut should_quit = false;
     loop {
         tokio::select! {
@@ -78,7 +87,7 @@ pub async fn run_tui(
         }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
-                       terminal.draw(|f| view::view(f, &state))?;
+                       terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
@@ -117,7 +126,38 @@ pub async fn run_tui(
                }
                Some(event) = internal_rx.recv() => {
                    if let InputEvent::Quit = event { should_quit = true; }
-                   else {
+                   else if state.show_editor {
+                       // Handle editor events
+                       if let InputEvent::ToggleEditor = event {
+                           state.show_editor = false;
+                           
+                           // Only save editor content back to input if we're not editing a file
+                           if state.editor_file_path.is_none() {
+                               EDITOR_STATE.with(|editor_state| {
+                                   if let Some(state_ref) = editor_state.borrow().as_ref() {
+                                       state.input = state_ref.lines.iter_row()
+                                           .map(|row| row.iter().collect::<String>())
+                                           .collect::<Vec<String>>()
+                                           .join("\n");
+                                   }
+                               });
+                           }
+                           
+                           // Clear file path when exiting editor
+                           state.editor_file_path = None;
+                           
+                           // Clear thread-local storage
+                           EDITOR_STATE.with(|editor_state| {
+                               *editor_state.borrow_mut() = None;
+                           });
+                           EDITOR_EVENT_HANDLER.with(|editor_event_handler| {
+                               *editor_event_handler.borrow_mut() = None;
+                           });
+                       } else {
+                            // Handle editor events using edtui
+                            handle_editor_event(&mut state, event);
+                        }
+                   } else {
                        let term_size = terminal.size()?;
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                        let input_height = 3;
@@ -154,13 +194,13 @@ pub async fn run_tui(
                }
                _ = spinner_interval.tick(), if state.loading => {
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
-                   terminal.draw(|f| view::view(f, &state))?;
+                   terminal.draw(|f| view::view(f, &mut state))?;
                }
            }
         if should_quit {
             break;
         }
-        terminal.draw(|f| view::view(f, &state))?;
+        terminal.draw(|f| view::view(f, &mut state))?;
     }
 
     println!("Quitting...");
@@ -172,4 +212,170 @@ pub async fn run_tui(
         DisableBracketedPaste
     )?;
     Ok(())
+}
+
+fn handle_editor_event(state: &mut AppState, event: InputEvent) {
+    use edtui::events::KeyEvent;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    
+    // Initialize editor state if not already done
+    EDITOR_STATE.with(|editor_state| {
+        if editor_state.borrow().is_none() {
+            *editor_state.borrow_mut() = Some(edtui::EditorState::new(edtui::Lines::from(&state.editor_content)));
+        }
+    });
+    
+    EDITOR_EVENT_HANDLER.with(|editor_event_handler| {
+        if editor_event_handler.borrow().is_none() {
+            *editor_event_handler.borrow_mut() = Some(edtui::EditorEventHandler::default());
+        }
+    });
+    
+    match event {
+        InputEvent::Up => {
+            // Create a key event for up arrow
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::Down => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::CursorLeft => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::CursorRight => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::InputChanged(c) => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::InputBackspace => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::InputSubmitted => {
+            let key_event = ratatui::crossterm::event::KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::empty(),
+                kind: ratatui::crossterm::event::KeyEventKind::Press,
+                state: ratatui::crossterm::event::KeyEventState::empty(),
+            };
+            let edtui_key_event = KeyEvent::from(key_event);
+            EDITOR_EVENT_HANDLER.with(|handler| {
+                EDITOR_STATE.with(|state| {
+                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                        handler.on_key_event(edtui_key_event, state);
+                    }
+                });
+            });
+        }
+        InputEvent::SaveFile => {
+            // Handle save file event in editor mode
+            if let Some(file_path) = &state.editor_file_path {
+                // Get the current content from the editor state
+                let content = EDITOR_STATE.with(|editor_state| {
+                    if let Some(state_ref) = editor_state.borrow().as_ref() {
+                        state_ref.lines.iter_row()
+                            .map(|row| row.iter().collect::<String>())
+                            .collect::<Vec<String>>()
+                            .join("\n")
+                    } else {
+                        state.editor_content.clone()
+                    }
+                });
+                
+                if let Err(e) = std::fs::write(file_path, content) {
+                    // Add error message to the UI
+                    state.messages.push(crate::services::message::Message::info(
+                        format!("Failed to save file: {}", e),
+                        Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red))
+                    ));
+                } else {
+                    state.messages.push(crate::services::message::Message::info(
+                        format!("File saved: {}", file_path), 
+                        None
+                    ));
+                }
+            }
+        }
+        _ => {
+            // Ignore other events in editor mode
+        }
+    }
 }

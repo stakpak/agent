@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+
 use crate::services::shell_mode::{
     SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent, run_background_shell_command,
 };
@@ -71,6 +72,13 @@ pub struct AppState {
     pub autocomplete: AutoComplete,
     pub secret_manager: SecretManager,
     pub is_streaming: bool,
+    // Editor state
+    pub show_editor: bool,
+    pub editor_content: String, // Store editor content as plain text
+    pub editor_file_path: Option<String>, // Current file being edited
+    pub show_file_picker: bool, // Show file picker dialog
+    pub file_picker_files: Vec<String>, // List of files in current directory
+    pub file_picker_selected: usize, // Selected file index
 }
 
 #[derive(Debug)]
@@ -123,6 +131,10 @@ pub enum InputEvent {
     InputCursorEnd,
     InputCursorPrevWord,
     InputCursorNextWord,
+    ToggleEditor,
+    OpenFile(String), // Open a file in the editor
+    SaveFile, // Save the current file
+    ShowFilePicker, // Show file picker dialog
 }
 
 #[derive(Debug)]
@@ -223,6 +235,13 @@ impl AppState {
             autocomplete: AutoComplete::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             is_streaming: false,
+            // Editor state
+            show_editor: false,
+            editor_content: String::new(),
+            editor_file_path: None,
+            show_file_picker: false,
+            file_picker_files: Vec::new(),
+            file_picker_selected: 0,
         }
     }
 

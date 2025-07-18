@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
+use crate::EDITOR_STATE;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -37,7 +38,11 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
-            if state.show_sessions_dialog {
+            if state.show_file_picker {
+                if state.file_picker_selected > 0 {
+                    state.file_picker_selected -= 1;
+                }
+            } else if state.show_sessions_dialog {
                 if state.session_selected > 0 {
                     state.session_selected -= 1;
                 }
@@ -48,7 +53,11 @@ pub fn update(
             }
         }
         InputEvent::Down => {
-            if state.show_sessions_dialog {
+            if state.show_file_picker {
+                if state.file_picker_selected + 1 < state.file_picker_files.len() {
+                    state.file_picker_selected += 1;
+                }
+            } else if state.show_sessions_dialog {
                 if state.session_selected + 1 < state.sessions.len() {
                     state.session_selected += 1;
                 }
@@ -63,7 +72,25 @@ pub fn update(
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
-            if !state.is_pasting {
+            if state.show_file_picker {
+                // Open selected file
+                if let Some(selected_file) = state.file_picker_files.get(state.file_picker_selected) {
+                    match std::fs::read_to_string(selected_file) {
+                        Ok(content) => {
+                            state.editor_content = content;
+                            state.editor_file_path = Some(selected_file.clone());
+                            state.show_editor = true;
+                        }
+                        Err(_) => {
+                            // File doesn't exist, create it
+                            state.editor_content = String::new();
+                            state.editor_file_path = Some(selected_file.clone());
+                            state.show_editor = true;
+                        }
+                    }
+                }
+                state.show_file_picker = false;
+            } else if !state.is_pasting {
                 handle_input_submitted(state, message_area_height, output_tx, shell_tx);
             }
         }
@@ -120,8 +147,87 @@ pub fn update(
             state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx),
-
+        InputEvent::HandleEsc => {
+            if state.show_file_picker {
+                state.show_file_picker = false;
+            } else {
+                handle_esc(state, output_tx, cancel_tx);
+            }
+        }
+        InputEvent::ToggleEditor => {
+            state.show_editor = !state.show_editor;
+            if state.show_editor {
+                // Initialize editor with current input content
+                state.editor_content = state.input.clone();
+            }
+        }
+        InputEvent::OpenFile(_) => {
+            // For now, we'll use a simple approach - open a default file
+            // In a real implementation, you'd want a file picker dialog
+            let file_path = "tui/src/view.rs";
+            match std::fs::read_to_string(file_path) {
+                Ok(content) => {
+                    state.editor_content = content;
+                    state.editor_file_path = Some(file_path.to_string());
+                    state.show_editor = true;
+                }
+                Err(_) => {
+                    // File doesn't exist, create it
+                    state.editor_content = String::new();
+                    state.editor_file_path = Some(file_path.to_string());
+                    state.show_editor = true;
+                }
+            }
+        }
+        InputEvent::SaveFile => {
+            if let Some(file_path) = &state.editor_file_path {
+                // Get the current content from the editor state
+                let content = EDITOR_STATE.with(|editor_state| {
+                    if let Some(state_ref) = editor_state.borrow().as_ref() {
+                        state_ref.lines.iter_row()
+                            .map(|row| row.iter().collect::<String>())
+                            .collect::<Vec<String>>()
+                            .join("\n")
+                    } else {
+                        state.editor_content.clone()
+                    }
+                });
+                
+                if let Err(e) = std::fs::write(file_path, content) {
+                    // Add error message to the UI
+                    state.messages.push(Message::info(
+                        format!("Failed to save file: {}", e),
+                        Some(Style::default().fg(ratatui::style::Color::Red))
+                    ));
+                } else {
+                    state.messages.push(Message::info(format!("File saved: {}", file_path), None));
+                }
+            }
+        }
+        InputEvent::ShowFilePicker => {
+            state.show_file_picker = true;
+            state.file_picker_selected = 0;
+            
+            // Get list of files in current directory
+            let mut files = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(".") {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if let Some(name) = path.file_name() {
+                            if let Some(name_str) = name.to_str() {
+                                // Only show files, not directories for now
+                                if path.is_file() {
+                                    files.push(name_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            files.sort();
+            state.file_picker_files = files;
+        }
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
         }

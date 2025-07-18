@@ -24,7 +24,16 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::InputCursorStart)
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::InputCursorEnd)
+                    Some(InputEvent::ToggleEditor)
+                }
+                KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::OpenFile(String::new())) // Will be handled to prompt for filename
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::SaveFile)
+                }
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ShowFilePicker)
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorNextWord)

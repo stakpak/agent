@@ -17,6 +17,7 @@ chrono = "0.4"
 console = "0.15"
 ansi-to-tui = "7.0.0"
 tracing = { workspace = true }
+edtui = { git = "https://github.com/preiter93/edtui", branch = "main" }
 
 [lints.clippy]
 unwrap_used = "deny"
