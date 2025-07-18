@@ -11,8 +11,10 @@ use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub struct RunAsyncConfig {
@@ -25,6 +27,7 @@ pub struct RunAsyncConfig {
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
+    pub enable_mtls: bool,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -42,9 +45,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     );
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
-    let local_mcp_server_host = format!("http://{}", bind_address);
-    let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(false).await;
-    let mcp_auth_config_clone = mcp_auth_config.clone();
+
+    // Generate certificates if mTLS is enabled
+    let certificate_chain = Arc::new(if config.enable_mtls {
+        CertificateChain::generate().ok()
+    } else {
+        None
+    });
+
+    let protocol = if config.enable_mtls { "https" } else { "http" };
+    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+
+    let certificate_chain_for_server = certificate_chain.clone();
     tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -55,8 +67,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                auth: mcp_auth_config_clone,
                 bind_address,
+                certificate_chain: certificate_chain_for_server,
             },
             Some(listener),
             None,
@@ -64,10 +76,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         .await;
     });
 
+    // Initialize clients and tools
     let clients = ClientManager::new(
         ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        mcp_auth_config.token,
         None,
+        certificate_chain,
     )
     .await
     .map_err(|e| e.to_string())?;

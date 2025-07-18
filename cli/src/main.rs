@@ -1,5 +1,6 @@
 use clap::Parser;
 use names::{self, Name};
+use rustls::crypto::CryptoProvider;
 use stakpak_api::{Client, ClientConfig};
 use std::{env, io::Write, path::Path};
 
@@ -74,6 +75,10 @@ struct Cli {
     #[arg(long = "disable-official-rulebooks", default_value_t = false)]
     disable_official_rulebooks: bool,
 
+    /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
+    #[arg(long = "disable-mcp-mtls", default_value_t = false)]
+    disable_mcp_mtls: bool,
+
     /// Prompt to run the agent with (required when using --print or --async)
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -84,6 +89,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    // Initialize rustls crypto provider
+    let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
     if let Err(e) = auto_update().await {
         eprintln!("Auto-update failed: {}", e);
     }
@@ -207,6 +215,7 @@ async fn main() {
                                 rulebooks,
                                 max_steps,
                                 output_format: cli.output_format,
+                                enable_mtls: !cli.disable_mcp_mtls,
                             },
                         )
                         .await
@@ -227,6 +236,7 @@ async fn main() {
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
+                                enable_mtls: !cli.disable_mcp_mtls,
                             },
                         )
                         .await
