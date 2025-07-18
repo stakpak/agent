@@ -1,3 +1,4 @@
+pub mod cert_utils;
 pub mod file_watcher;
 pub mod helper;
 pub mod local_store;
