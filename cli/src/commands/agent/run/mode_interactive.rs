@@ -16,8 +16,10 @@ use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct RunInteractiveConfig {
@@ -26,6 +28,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
+    pub enable_mtls: bool,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -38,9 +41,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
-    let local_mcp_server_host = format!("http://{}", bind_address);
-    let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(false).await;
-    let mcp_auth_config_clone = mcp_auth_config.clone();
+
+    // Generate certificates if mTLS is enabled
+    let certificate_chain = Arc::new(if config.enable_mtls {
+        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
+    } else {
+        None
+    });
+
+    let protocol = if config.enable_mtls { "https" } else { "http" };
+    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+
+    let certificate_chain_for_server = certificate_chain.clone();
     let mcp_handle = tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -51,8 +63,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                auth: mcp_auth_config_clone,
                 bind_address,
+                certificate_chain: certificate_chain_for_server,
             },
             Some(listener),
             Some(shutdown_rx),
@@ -63,8 +75,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     // Initialize clients and tools
     let clients = ClientManager::new(
         ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        mcp_auth_config.token,
         Some(mcp_progress_tx),
+        certificate_chain,
     )
     .await
     .map_err(|e| e.to_string())?;
