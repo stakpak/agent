@@ -44,7 +44,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
     // Generate certificates if mTLS is enabled
     let certificate_chain = Arc::new(if config.enable_mtls {
-        CertificateChain::generate().ok()
+        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
     } else {
         None
     });

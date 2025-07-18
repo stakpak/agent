@@ -134,10 +134,6 @@ pub enum Commands {
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
 
-        /// Disable MCP authentication (WARNING: this will allow any client to connect)
-        #[arg(long = "disable-mcp-auth", default_value_t = false)]
-        disable_mcp_auth: bool,
-
         /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
         #[arg(long = "disable-mcp-mtls", default_value_t = false)]
         disable_mcp_mtls: bool,
@@ -181,7 +177,6 @@ impl Commands {
                 privacy_mode,
                 tool_mode,
                 index_big_project,
-                disable_mcp_auth,
                 disable_mcp_mtls,
             } => {
                 let api_config: ClientConfig = config.clone().into();
@@ -218,7 +213,6 @@ impl Commands {
 
                 let (bind_address, listener) =
                     network::find_available_bind_address_with_listener().await?;
-                let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(disable_mcp_auth).await;
 
                 // Generate certificates if mTLS is enabled
                 let certificate_chain = if !disable_mcp_mtls {
@@ -242,9 +236,7 @@ impl Commands {
 
                 let protocol = if !disable_mcp_mtls { "https" } else { "http" };
                 println!("MCP server started at {}://{}/mcp", protocol, bind_address);
-                if let Some(token) = mcp_auth_config.token.as_ref() {
-                    println!("MCP auth token: {}", token);
-                }
+
                 start_server(
                     MCPServerConfig {
                         api: config.into(),
