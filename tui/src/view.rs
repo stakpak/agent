@@ -112,7 +112,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_file_picker(f, state, f.area());
         return;
     }
-    
+
     if state.show_editor {
         render_editor(f, state, f.area());
         return;
@@ -129,37 +129,50 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 }
 
 fn render_file_picker(f: &mut Frame, state: &mut AppState, area: Rect) {
-    use ratatui::widgets::{Block, Borders, List, ListItem};
     use ratatui::style::Modifier;
-    
+    use ratatui::widgets::{Block, Borders, List, ListItem};
+
     // Clear the entire area first
     f.render_widget(ratatui::widgets::Clear, area);
-    
+
     // Create a block with background
     let block = Block::default()
         .title(" File Picker - Press Enter to open, Esc to cancel ")
-        .title_style(Style::default().fg(ratatui::style::Color::Green).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(ratatui::style::Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ratatui::style::Color::Green))
-        .style(Style::default().bg(ratatui::style::Color::Rgb(30,30,46)));
-    
+        .style(Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46)));
+
     let inner_area = block.inner(area);
-    
+
     // Render the background block first
     f.render_widget(block, area);
-    
+
     // Create list items
-    let items: Vec<ListItem> = state.file_picker_files
+    let items: Vec<ListItem> = state
+        .file_picker_files
         .iter()
         .map(|file| ListItem::new(file.clone()))
         .collect();
-    
+
     let list = List::new(items)
         .block(Block::default())
-        .highlight_style(Style::default().bg(ratatui::style::Color::Blue).fg(ratatui::style::Color::White))
+        .highlight_style(
+            Style::default()
+                .bg(ratatui::style::Color::Blue)
+                .fg(ratatui::style::Color::White),
+        )
         .highlight_symbol("> ");
-    
-    f.render_stateful_widget(list, inner_area, &mut ratatui::widgets::ListState::default().with_selected(Some(state.file_picker_selected)));
+
+    f.render_stateful_widget(
+        list,
+        inner_area,
+        &mut ratatui::widgets::ListState::default().with_selected(Some(state.file_picker_selected)),
+    );
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -719,18 +732,20 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
 
 fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     use edtui::{EditorView, SyntaxHighlighter};
-    use ratatui::widgets::{Block, Borders};
     use ratatui::style::Modifier;
-    
+    use ratatui::widgets::{Block, Borders};
+
     // Initialize editor state if not already done
     let mut editor_state_initialized = false;
     crate::EDITOR_STATE.with(|editor_state| {
         if editor_state.borrow().is_none() {
-            *editor_state.borrow_mut() = Some(edtui::EditorState::new(edtui::Lines::from(&state.editor_content)));
+            *editor_state.borrow_mut() = Some(edtui::EditorState::new(edtui::Lines::from(
+                &state.editor_content,
+            )));
             editor_state_initialized = true;
         }
     });
-    
+
     if editor_state_initialized {
         crate::EDITOR_EVENT_HANDLER.with(|editor_event_handler| {
             if editor_event_handler.borrow().is_none() {
@@ -738,10 +753,10 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
             }
         });
     }
-    
+
     // Clear the entire area first to ensure no content shows through
     f.render_widget(ratatui::widgets::Clear, area);
-    
+
     // Fill the entire area with the desired background color
     let background_rect = Rect {
         x: area.x,
@@ -750,43 +765,58 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         height: area.height,
     };
     let background_widget = ratatui::widgets::Block::default()
-        .style(Style::default().bg(ratatui::style::Color::Rgb(30,30,46)));
+        .style(Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46)));
     f.render_widget(background_widget, background_rect);
-    
+
     // Create a block with background to cover the content behind
     let title = if let Some(file_path) = &state.editor_file_path {
         format!(" Editor - {}", file_path)
     } else {
         " Editor ".to_string()
     };
+
+    // Get the current editor mode from the editor state
+    let editor_mode = crate::EDITOR_STATE.with(|editor_state| {
+        if let Some(state_ref) = editor_state.borrow().as_ref() {
+            format!("{:?}", state_ref.mode)
+        } else {
+            "Normal".to_string()
+        }
+    });
     
-    // Add status line with commands
-    let status_line = " Ctrl+S: Save | Ctrl+E: Exit | Ctrl+P: File Picker ";
-    
+    // Create status line with mode on left and commands on right
+    let status_line = format!(" {}", editor_mode);
+    let commands = "Ctrl+S: Save | Ctrl+E: Exit | Ctrl+P: File Picker ";
+    let status_line_len = status_line.len();
+
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(ratatui::style::Color::Blue).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(ratatui::style::Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ratatui::style::Color::Blue))
-        .style(Style::default().bg(ratatui::style::Color::Rgb(30,30,46)));
-    
+        .style(Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46)));
+
     // Calculate the inner area first (reserve space for status line)
     let mut inner_area = block.inner(area);
     inner_area.height = inner_area.height.saturating_sub(1); // Reserve 1 line for status
-    
+
     // Render the background block first
     f.render_widget(block, area);
-    
+
     // Create the editor view widget with syntax highlighting
     crate::EDITOR_STATE.with(|editor_state| {
         if let Some(state_ref) = editor_state.borrow_mut().as_mut() {
             // Determine file extension for syntax highlighting
             let file_extension = if let Some(file_path) = &state.editor_file_path {
-                file_path.split('.').last().unwrap_or("txt")
+                file_path.split('.').next_back().unwrap_or("txt")
             } else {
                 "txt"
             };
-            
+
             // Create syntax highlighter based on file extension
             let syntax_highlighter = match file_extension {
                 "rs" => Some(SyntaxHighlighter::new("dracula", "rs")),
@@ -801,34 +831,34 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
                 "sh" | "bash" => Some(SyntaxHighlighter::new("dracula", "bash")),
                 _ => None,
             };
-            
+
             // Render a background paragraph to fill the area with the desired color
             let background_paragraph = Paragraph::new("")
-                .style(Style::default().bg(ratatui::style::Color::Rgb(30,30,46)));
+                .style(Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46)));
             f.render_widget(background_paragraph, inner_area);
-            
+
             // Create a custom theme with the desired background color
             let custom_theme = EditorTheme {
-                base: Style::default().bg(ratatui::style::Color::Rgb(30,30,46)),
-                cursor_style: Style::default(),
-                selection_style: Style::default().bg(ratatui::style::Color::Blue).fg(ratatui::style::Color::White),
+                base: Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46)),
+                cursor_style: Style::default().bg(ratatui::style::Color::White),
+                selection_style: Style::default()
+                    .bg(ratatui::style::Color::Blue)
+                    .fg(ratatui::style::Color::White),
                 block: None,
                 status_line: None,
             };
-            
-            let mut editor_view = EditorView::new(state_ref)
-                .theme(custom_theme)
-                .wrap(true);
-            
+
+            let mut editor_view = EditorView::new(state_ref).theme(custom_theme).wrap(true);
+
             // Add syntax highlighting if available
             if let Some(highlighter) = syntax_highlighter {
                 editor_view = editor_view.syntax_highlighter(Some(highlighter));
             }
-            
+
             f.render_widget(editor_view, inner_area);
         }
     });
-    
+
     // Render status line at the bottom
     let status_area = Rect {
         x: area.x + 1,
@@ -836,17 +866,26 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         width: area.width - 2,
         height: 1,
     };
-    
+
     let status_text = ratatui::text::Line::from(vec![
         ratatui::text::Span::styled(
             status_line,
-            Style::default().fg(ratatui::style::Color::Cyan).bg(ratatui::style::Color::Rgb(30,30,46))
-        )
+            Style::default()
+                .fg(ratatui::style::Color::Cyan)
+                .bg(ratatui::style::Color::Rgb(30, 30, 46)),
+        ),
+        ratatui::text::Span::styled(
+            format!("{:>width$}", commands, width = (area.width - status_line_len as u16 - 2) as usize),
+            Style::default()
+                .fg(ratatui::style::Color::Rgb(160, 92, 158))
+                .bg(ratatui::style::Color::Rgb(30, 30, 46))
+               
+        ),
     ]);
-    
+
     f.render_widget(
         ratatui::widgets::Paragraph::new(status_text)
-            .style(Style::default().bg(ratatui::style::Color::Rgb(30,30,46))),
-        status_area
+            .style(Style::default().bg(ratatui::style::Color::Rgb(30, 30, 46))),
+        status_area,
     );
 }

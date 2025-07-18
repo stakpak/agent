@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-
 use crate::services::shell_mode::{
     SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent, run_background_shell_command,
 };
@@ -133,8 +132,8 @@ pub enum InputEvent {
     InputCursorNextWord,
     ToggleEditor,
     OpenFile(String), // Open a file in the editor
-    SaveFile, // Save the current file
-    ShowFilePicker, // Show file picker dialog
+    SaveFile,         // Save the current file
+    ShowFilePicker,   // Show file picker dialog
 }
 
 #[derive(Debug)]

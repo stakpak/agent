@@ -21,8 +21,8 @@ use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use console::strip_ansi_codes;
 use crate::EDITOR_STATE;
+use console::strip_ansi_codes;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -74,7 +74,8 @@ pub fn update(
         InputEvent::InputSubmitted => {
             if state.show_file_picker {
                 // Open selected file
-                if let Some(selected_file) = state.file_picker_files.get(state.file_picker_selected) {
+                if let Some(selected_file) = state.file_picker_files.get(state.file_picker_selected)
+                {
                     match std::fs::read_to_string(selected_file) {
                         Ok(content) => {
                             state.editor_content = content;
@@ -184,7 +185,9 @@ pub fn update(
                 // Get the current content from the editor state
                 let content = EDITOR_STATE.with(|editor_state| {
                     if let Some(state_ref) = editor_state.borrow().as_ref() {
-                        state_ref.lines.iter_row()
+                        state_ref
+                            .lines
+                            .iter_row()
                             .map(|row| row.iter().collect::<String>())
                             .collect::<Vec<String>>()
                             .join("\n")
@@ -192,34 +195,34 @@ pub fn update(
                         state.editor_content.clone()
                     }
                 });
-                
+
                 if let Err(e) = std::fs::write(file_path, content) {
                     // Add error message to the UI
                     state.messages.push(Message::info(
                         format!("Failed to save file: {}", e),
-                        Some(Style::default().fg(ratatui::style::Color::Red))
+                        Some(Style::default().fg(ratatui::style::Color::Red)),
                     ));
                 } else {
-                    state.messages.push(Message::info(format!("File saved: {}", file_path), None));
+                    state
+                        .messages
+                        .push(Message::info(format!("File saved: {}", file_path), None));
                 }
             }
         }
         InputEvent::ShowFilePicker => {
             state.show_file_picker = true;
             state.file_picker_selected = 0;
-            
+
             // Get list of files in current directory
             let mut files = Vec::new();
             if let Ok(entries) = std::fs::read_dir(".") {
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        let path = entry.path();
-                        if let Some(name) = path.file_name() {
-                            if let Some(name_str) = name.to_str() {
-                                // Only show files, not directories for now
-                                if path.is_file() {
-                                    files.push(name_str.to_string());
-                                }
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(name) = path.file_name() {
+                        if let Some(name_str) = name.to_str() {
+                            // Only show files, not directories for now
+                            if path.is_file() {
+                                files.push(name_str.to_string());
                             }
                         }
                     }

@@ -22,8 +22,8 @@ use std::cell::RefCell;
 use std::thread_local;
 
 thread_local! {
-    static EDITOR_STATE: RefCell<Option<edtui::EditorState>> = RefCell::new(None);
-    static EDITOR_EVENT_HANDLER: RefCell<Option<edtui::EditorEventHandler>> = RefCell::new(None);
+    static EDITOR_STATE: RefCell<Option<edtui::EditorState>> = const { RefCell::new(None) };
+    static EDITOR_EVENT_HANDLER: RefCell<Option<edtui::EditorEventHandler>> = const { RefCell::new(None) };
 }
 
 pub async fn run_tui(
@@ -130,7 +130,7 @@ pub async fn run_tui(
                        // Handle editor events
                        if let InputEvent::ToggleEditor = event {
                            state.show_editor = false;
-                           
+
                            // Only save editor content back to input if we're not editing a file
                            if state.editor_file_path.is_none() {
                                EDITOR_STATE.with(|editor_state| {
@@ -142,10 +142,10 @@ pub async fn run_tui(
                                    }
                                });
                            }
-                           
+
                            // Clear file path when exiting editor
                            state.editor_file_path = None;
-                           
+
                            // Clear thread-local storage
                            EDITOR_STATE.with(|editor_state| {
                                *editor_state.borrow_mut() = None;
@@ -217,20 +217,22 @@ pub async fn run_tui(
 fn handle_editor_event(state: &mut AppState, event: InputEvent) {
     use edtui::events::KeyEvent;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-    
+
     // Initialize editor state if not already done
     EDITOR_STATE.with(|editor_state| {
         if editor_state.borrow().is_none() {
-            *editor_state.borrow_mut() = Some(edtui::EditorState::new(edtui::Lines::from(&state.editor_content)));
+            *editor_state.borrow_mut() = Some(edtui::EditorState::new(edtui::Lines::from(
+                &state.editor_content,
+            )));
         }
     });
-    
+
     EDITOR_EVENT_HANDLER.with(|editor_event_handler| {
         if editor_event_handler.borrow().is_none() {
             *editor_event_handler.borrow_mut() = Some(edtui::EditorEventHandler::default());
         }
     });
-    
+
     match event {
         InputEvent::Up => {
             // Create a key event for up arrow
@@ -243,7 +245,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -259,7 +263,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -275,7 +281,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -291,7 +299,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -307,7 +317,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -323,7 +335,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -339,7 +353,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
             let edtui_key_event = KeyEvent::from(key_event);
             EDITOR_EVENT_HANDLER.with(|handler| {
                 EDITOR_STATE.with(|state| {
-                    if let (Some(handler), Some(state)) = (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut()) {
+                    if let (Some(handler), Some(state)) =
+                        (handler.borrow_mut().as_mut(), state.borrow_mut().as_mut())
+                    {
                         handler.on_key_event(edtui_key_event, state);
                     }
                 });
@@ -351,7 +367,9 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
                 // Get the current content from the editor state
                 let content = EDITOR_STATE.with(|editor_state| {
                     if let Some(state_ref) = editor_state.borrow().as_ref() {
-                        state_ref.lines.iter_row()
+                        state_ref
+                            .lines
+                            .iter_row()
                             .map(|row| row.iter().collect::<String>())
                             .collect::<Vec<String>>()
                             .join("\n")
@@ -359,17 +377,17 @@ fn handle_editor_event(state: &mut AppState, event: InputEvent) {
                         state.editor_content.clone()
                     }
                 });
-                
+
                 if let Err(e) = std::fs::write(file_path, content) {
                     // Add error message to the UI
                     state.messages.push(crate::services::message::Message::info(
                         format!("Failed to save file: {}", e),
-                        Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red))
+                        Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
                     ));
                 } else {
                     state.messages.push(crate::services::message::Message::info(
-                        format!("File saved: {}", file_path), 
-                        None
+                        format!("File saved: {}", file_path),
+                        None,
                     ));
                 }
             }
