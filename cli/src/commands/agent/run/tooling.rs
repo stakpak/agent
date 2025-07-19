@@ -1,10 +1,11 @@
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, CancelledNotification, CancelledNotificationParam,
-    Content, ServerResult,
+    ServerResult,
 };
 use stakpak_api::Client;
 use stakpak_api::models::AgentSession;
 use stakpak_mcp_client::ClientManager;
+use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_tui::SessionInfo;
 
@@ -74,9 +75,7 @@ pub async fn run_tool_call(
                         extensions: Default::default(),
                     };
                     let _ = peer_for_cancel.send_notification(notification.into()).await;
-                    return Ok(Some(CallToolResult::error(vec![Content::text(
-                        "Tool call was cancelled",
-                    )])))
+                    return Ok(Some(CallToolResult::cancel(None)));
                 }
             }
         } else {
