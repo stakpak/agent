@@ -3644,6 +3644,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "tempfile",
