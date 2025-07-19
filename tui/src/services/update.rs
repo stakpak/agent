@@ -142,6 +142,10 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
+            // remove ansi codes
+            let line = strip_ansi_codes(&line);
+            // normalize line endings
+            let line = line.replace("\r\n", "\n").replace('\r', "\n");
             let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
