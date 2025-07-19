@@ -17,6 +17,7 @@ use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
 use std::sync::Arc;
@@ -191,7 +192,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         )
                         .await?;
 
-                        let mut should_continue = false;
+                        let mut should_stop = false;
 
                         if let Some(result) = result {
                             let result_content = result
@@ -213,19 +214,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     stakpak_shared::models::integrations::openai::ToolCallResult {
                                         call: tool_call.clone(),
                                         result: result_content,
-                                        status: match result.is_error.unwrap_or(false) {
-                                            true => match result.content[0].raw.as_text() {
-                                                Some(text) => {
-                                                    if text.text.contains("cancelled") {
-                                                        ToolCallResultStatus::Cancelled
-                                                    } else {
-                                                        ToolCallResultStatus::Error
-                                                    }
-                                                }
-                                                None => ToolCallResultStatus::Error,
-                                            },
-                                            false => ToolCallResultStatus::Success,
-                                        },
+                                        status: result.get_status(),
                                     },
                                 ),
                             )
@@ -233,7 +222,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
                             // Continue to next tool or main loop if error
-                            should_continue = result.is_error.unwrap_or(false);
+                            should_stop = match result.get_status() {
+                                ToolCallResultStatus::Cancelled => true,
+                                ToolCallResultStatus::Error => false,
+                                ToolCallResultStatus::Success => false,
+                            };
                         }
 
                         // Process next tool in queue if available
@@ -243,8 +236,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             continue;
                         }
 
-                        // If there was an error, continue to main loop
-                        if should_continue {
+                        // If there was an cancellation, stop the loop
+                        if should_stop {
                             continue;
                         }
                     }
