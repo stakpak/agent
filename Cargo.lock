@@ -3642,6 +3642,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
+ "rmcp",
  "rustls",
  "serde",
  "serde_json",

@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
+use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
 use std::fs::{self};
@@ -204,15 +205,16 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         // Execute with timeout and cancellation support
         let execution_result = if let Some(timeout_secs) = timeout {
             let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
             tokio::select! {
                 result = tokio::time::timeout(timeout_duration, stream_and_wait) => result,
                 _ = ctx.ct.cancelled() => {
                     // Cancellation occurred, kill the process
                     let _ = child.kill().await;
-                    return Ok(CallToolResult::error(vec![
+                    return Ok(CallToolResult::cancel(Some(&vec![
                         Content::text("COMMAND_CANCELLED"),
                         Content::text("Command execution was cancelled"),
-                    ]));
+                    ])));
                 }
             }
         } else {
@@ -220,10 +222,10 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                 result = stream_and_wait => Ok(result),
                 _ = ctx.ct.cancelled() => {
                     let _ = child.kill().await;
-                    return Ok(CallToolResult::error(vec![
+                    return Ok(CallToolResult::cancel(Some(&vec![
                         Content::text("COMMAND_CANCELLED"),
                         Content::text("Command execution was cancelled"),
-                    ]));
+                    ])));
                 }
             }
         };
