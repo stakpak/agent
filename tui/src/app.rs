@@ -20,6 +20,8 @@ use crate::services::helper_block::push_error_message;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 
+const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
+
 // --- NEW: Async autocomplete result struct ---
 pub struct AutoCompleteResult {
     pub filtered_helpers: Vec<&'static str>,
@@ -90,6 +92,7 @@ pub struct AppState {
     pub autocomplete_tx: Option<mpsc::Sender<(String, usize)>>,
     pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
     pub is_streaming: bool,
+    pub interactive_commands: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -222,6 +225,7 @@ impl AppState {
             autocomplete_tx: Some(autocomplete_tx),
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
+            interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {

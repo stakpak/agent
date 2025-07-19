@@ -620,16 +620,18 @@ fn handle_input_submitted(
             .nth(1)
             .and_then(|s| s.split('\"').next())
             .unwrap_or("");
-        if !command.is_empty() {
-            let active_commands = ["ssh", "sudo"];
-            if active_commands.iter().any(|cmd| command.contains(cmd)) {
-                state.show_shell_mode = true;
-                state.is_dialog_open = false;
-                state.input.clear();
-                state.cursor_position = 0;
-                state.run_shell_command(command.to_string(), shell_tx);
-                return;
-            }
+        if !command.is_empty()
+            && state
+                .interactive_commands
+                .iter()
+                .any(|cmd| command.contains(cmd))
+        {
+            state.show_shell_mode = true;
+            state.is_dialog_open = false;
+            state.input.clear();
+            state.cursor_position = 0;
+            state.run_shell_command(command.to_string(), shell_tx);
+            return;
         }
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
