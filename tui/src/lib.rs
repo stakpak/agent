@@ -20,6 +20,7 @@ pub use view::view;
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     latest_version: Option<String>,
     redact_secrets: bool,
@@ -92,16 +93,14 @@ pub async fn run_tui(
             continue;
         }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx,&output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
                        terminal.draw(|f| view::view(f, &state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
-                       let tool_call = tool_call_result.call.clone();
-                       let result = tool_call_result.result.clone();
                        services::update::clear_streaming_tool_results(&mut state);
-                       services::bash_block::render_result_block(&tool_call, &result, &mut state, terminal_size);
+                       services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
                    }
 
                    if let InputEvent::Quit = event { should_quit = true; }
@@ -130,7 +129,7 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
                    }
                }
@@ -168,7 +167,7 @@ pub async fn run_tui(
                     //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                     //     }
                     //    }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
                    }
                }

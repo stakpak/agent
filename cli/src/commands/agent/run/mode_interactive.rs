@@ -16,8 +16,11 @@ use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall};
+use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::models::integrations::mcp::CallToolResultExt;
+use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
 use stakpak_tui::{Color, InputEvent, OutputEvent};
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct RunInteractiveConfig {
@@ -26,6 +29,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
+    pub enable_mtls: bool,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -35,11 +39,21 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+    let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
     let ctx_clone = ctx.clone();
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
-    let local_mcp_server_host = format!("http://{}", bind_address);
-    let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(false).await;
-    let mcp_auth_config_clone = mcp_auth_config.clone();
+
+    // Generate certificates if mTLS is enabled
+    let certificate_chain = Arc::new(if config.enable_mtls {
+        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
+    } else {
+        None
+    });
+
+    let protocol = if config.enable_mtls { "https" } else { "http" };
+    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+
+    let certificate_chain_for_server = certificate_chain.clone();
     let mcp_handle = tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -50,8 +64,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                auth: mcp_auth_config_clone,
                 bind_address,
+                certificate_chain: certificate_chain_for_server,
             },
             Some(listener),
             Some(shutdown_rx),
@@ -62,8 +76,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     // Initialize clients and tools
     let clients = ClientManager::new(
         ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        mcp_auth_config.token,
         Some(mcp_progress_tx),
+        certificate_chain,
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -76,6 +90,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         let _ = stakpak_tui::run_tui(
             input_rx,
             output_tx,
+            Some(cancel_tx.clone()),
             shutdown_tx,
             latest_version.ok(),
             config.redact_secrets,
@@ -169,7 +184,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                        let result = run_tool_call(&clients, &tools_map, &tool_call).await?;
+                        let result = run_tool_call(
+                            &clients,
+                            &tools_map,
+                            &tool_call,
+                            Some(cancel_rx.resubscribe()),
+                        )
+                        .await?;
+
+                        let mut should_stop = false;
+
                         if let Some(result) = result {
                             let result_content = result
                                 .content
@@ -190,16 +214,30 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     stakpak_shared::models::integrations::openai::ToolCallResult {
                                         call: tool_call.clone(),
                                         result: result_content,
+                                        status: result.get_status(),
                                     },
                                 ),
                             )
                             .await?;
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+
+                            // Continue to next tool or main loop if error
+                            should_stop = match result.get_status() {
+                                ToolCallResultStatus::Cancelled => true,
+                                ToolCallResultStatus::Error => false,
+                                ToolCallResultStatus::Success => false,
+                            };
                         }
 
+                        // Process next tool in queue if available
                         if !tools_queue.is_empty() {
-                            let tool_call = tools_queue.remove(0);
-                            send_tool_call(&input_tx, &tool_call).await?;
+                            let next_tool_call = tools_queue.remove(0);
+                            send_tool_call(&input_tx, &next_tool_call).await?;
+                            continue;
+                        }
+
+                        // If there was an cancellation, stop the loop
+                        if should_stop {
                             continue;
                         }
                     }
