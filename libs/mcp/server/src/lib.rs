@@ -225,7 +225,16 @@ async fn start_server_internal(
         let tls_config = cert_chain.create_server_config()?;
         let rustls_config =
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+
+        let handle = axum_server::Handle::new();
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            create_shutdown_handler(shutdown_rx, Some(task_manager_handle.clone())).await;
+            shutdown_handle.graceful_shutdown(None);
+        });
+
         axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+            .handle(handle)
             .serve(router.into_make_service())
             .await?;
     } else {
