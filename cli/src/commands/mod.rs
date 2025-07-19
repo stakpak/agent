@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     code_index::{get_or_build_local_code_index, start_code_index_watcher},
     config::AppConfig,
@@ -132,9 +134,9 @@ pub enum Commands {
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
 
-        /// Disable MCP authentication (WARNING: this will allow any client to connect)
-        #[arg(long = "disable-mcp-auth", default_value_t = false)]
-        disable_mcp_auth: bool,
+        /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
+        #[arg(long = "disable-mcp-mtls", default_value_t = false)]
+        disable_mcp_mtls: bool,
     },
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
@@ -158,15 +160,15 @@ pub enum Commands {
 
 impl Commands {
     pub fn requires_auth(&self) -> bool {
-        match &self {
-            Commands::Login { .. } => false,
-            Commands::Logout => false,
-            Commands::Set { .. } => false,
-            Commands::Config => false,
-            Commands::Version => false,
-            Commands::Update => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Commands::Login { .. }
+                | Commands::Logout
+                | Commands::Set { .. }
+                | Commands::Config
+                | Commands::Version
+                | Commands::Update
+        )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
@@ -175,7 +177,7 @@ impl Commands {
                 privacy_mode,
                 tool_mode,
                 index_big_project,
-                disable_mcp_auth,
+                disable_mcp_mtls,
             } => {
                 let api_config: ClientConfig = config.clone().into();
                 match tool_mode {
@@ -211,19 +213,38 @@ impl Commands {
 
                 let (bind_address, listener) =
                     network::find_available_bind_address_with_listener().await?;
-                let mcp_auth_config = stakpak_mcp_server::AuthConfig::new(disable_mcp_auth).await;
-                println!("MCP server started at http://{}", bind_address);
-                if let Some(token) = mcp_auth_config.token.as_ref() {
-                    println!("MCP auth token: {}", token);
-                }
+
+                // Generate certificates if mTLS is enabled
+                let certificate_chain = if !disable_mcp_mtls {
+                    match stakpak_shared::cert_utils::CertificateChain::generate() {
+                        Ok(chain) => {
+                            println!("🔐 mTLS enabled - generated certificate chain");
+                            if let Ok(ca_pem) = chain.get_ca_cert_pem() {
+                                println!("📜 CA Certificate (copy this to your client):");
+                                println!("{}", ca_pem);
+                            }
+                            Some(chain)
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to generate certificate chain: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let protocol = if !disable_mcp_mtls { "https" } else { "http" };
+                println!("MCP server started at {}://{}/mcp", protocol, bind_address);
+
                 start_server(
                     MCPServerConfig {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         tool_mode,
-                        auth: mcp_auth_config,
                         bind_address,
+                        certificate_chain: Arc::new(certificate_chain),
                     },
                     Some(listener),
                     None,

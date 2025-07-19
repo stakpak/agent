@@ -1,8 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::Result;
-use reqwest::{
-    Client,
-    header::{HeaderMap, HeaderName, HeaderValue},
-};
+use reqwest::Client;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{ClientCapabilities, ClientInfo, Implementation},
@@ -11,6 +10,7 @@ use rmcp::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
 
@@ -54,20 +54,18 @@ impl ClientHandler for LocalClientHandler {
 pub async fn local_client(
     host: String,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
-    auth_token: Option<String>,
+    certificate_chain: Arc<Option<CertificateChain>>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
-    let http_client = if let Some(token) = auth_token {
-        Client::builder().default_headers(HeaderMap::from_iter(vec![(
-            HeaderName::from_static("authorization"),
-            #[allow(clippy::expect_used)]
-            HeaderValue::from_str(&format!("Bearer {}", token))
-                .expect("Failed to create header value"),
-        )]))
-    } else {
-        Client::builder()
-    }
-    .build()?;
+    let mut client_builder = Client::builder();
 
+    // Configure mTLS if certificate chain is provided
+    if let Some(cert_chain) = certificate_chain.as_ref() {
+        tracing::info!("🔐 Configuring mTLS client with certificate chain");
+        let tls_config = cert_chain.create_client_config()?;
+        client_builder = client_builder.use_preconfigured_tls(tls_config);
+    }
+
+    let http_client = client_builder.build()?;
     let transport = StreamableHttpClientTransport::with_client(
         http_client,
         StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", host)),

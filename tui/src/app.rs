@@ -89,6 +89,7 @@ pub struct AppState {
     // --- NEW: autocomplete channels ---
     pub autocomplete_tx: Option<mpsc::Sender<(String, usize)>>,
     pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
+    pub is_streaming: bool,
 }
 
 #[derive(Debug)]
@@ -220,6 +221,7 @@ impl AppState {
             pasted_placeholder: None,
             autocomplete_tx: Some(autocomplete_tx),
             autocomplete_rx: Some(result_rx),
+            is_streaming: false,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
