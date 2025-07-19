@@ -8,12 +8,11 @@ use ratatui::{
 };
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
-    if state.show_helper_dropdown
-        && !state.filtered_helpers.is_empty()
-        && state.input.starts_with('/')
-    {
+    let input = state.input.trim();
+    let show = input == "/" || state.helpers.iter().any(|h| *h == input);
+    if state.show_helper_dropdown && show {
         use ratatui::widgets::{List, ListItem, ListState};
-        let item_style = Style::default().bg(Color::Black);
+        let item_style = Style::default();
         let items: Vec<ListItem> = if state.input == "/" {
             state
                 .helpers
@@ -33,8 +32,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 })
                 .collect()
         };
-        let bg_block = Block::default().style(Style::default().bg(Color::Black));
-        f.render_widget(bg_block, dropdown_area);
+        // No background block
         let mut list_state = ListState::default();
         list_state.select(Some(
             state.helper_selected.min(items.len().saturating_sub(1)),
@@ -54,10 +52,7 @@ pub fn render_autocomplete_dropdown(f: &mut Frame, state: &AppState, area: Rect)
     if !state.show_helper_dropdown {
         return;
     }
-    // Determine if we're in file autocomplete mode
-    let is_file_mode = state.autocomplete.is_active();
-
-    if is_file_mode {
+    if !state.filtered_files.is_empty() {
         render_file_dropdown(f, state, area);
     } else if !state.filtered_helpers.is_empty() {
         render_helper_dropdown(f, state, area);
