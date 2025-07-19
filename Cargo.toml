@@ -58,6 +58,7 @@ rustls-pemfile = "2.1.2"
 tokio-rustls = "0.26.0"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 time = { version = "0.3", features = ["macros"] }
+rustls-platform-verifier = "0.5"
 
 # Required nightly
 [workspace.lints.clippy]
