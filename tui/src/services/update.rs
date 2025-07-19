@@ -416,7 +416,6 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-    
     if (state.is_streaming || state.loading) && !state.is_dialog_open {
         state.input.clear();
         state.cursor_position = 0;
