@@ -292,7 +292,7 @@ SECRET HANDLING:
 - Task output will be redacted when retrieved
 - Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in commands
 
-Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
+Use the get_all_tasks tool to monitor task progress, or the cancel_async_task tool to cancel a task."
     )]
     pub async fn run_command_async(
         &self,
@@ -340,14 +340,14 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
 
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
-  - Task ID: Full unique identifier (required for cancel_task)
+  - Task ID: Full unique identifier (required for cancel_async_task)
   - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
   - Start Time: When the task was started
   - Duration: How long the task has been running or took to complete
   - Output: Command output preview (truncated to 80 chars, redacted for security)
 
 This tool provides a clean tabular overview of all background tasks and their current state.
-Use the full Task ID from this output with cancel_task to cancel specific tasks."
+Use the full Task ID from this output with cancel_async_task to cancel specific tasks."
     )]
     pub async fn get_all_tasks(
         &self,
@@ -447,7 +447,7 @@ PARAMETERS:
 This will immediately terminate the background task and update the task status to 'Cancelled'.
 The task will be removed from the active tasks list."
     )]
-    pub async fn cancel_task(
+    pub async fn cancel_async_task(
         &self,
         _ctx: RequestContext<RoleServer>,
         Parameters(TaskStatusRequest { task_id }): Parameters<TaskStatusRequest>,
