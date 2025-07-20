@@ -380,7 +380,13 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
     }
 
     #[tool(
-        description = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources."
+        description = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources.
+
+QUERY STRATEGY GUIDANCE:
+- For SPECIFIC queries: Use many related keywords in a single call to get highly targeted results (e.g., ['kubernetes', 'ingress', 'nginx', 'ssl', 'tls'] for a specific SSL setup question)
+- For BROAD knowledge gathering: Break down into multiple calls with fewer keywords each to cover more ground (e.g., separate calls for ['kubernetes', 'networking'], ['kubernetes', 'storage'], ['kubernetes', 'security'] instead of cramming all topics into one call)
+
+If your goal requires understanding multiple distinct topics or technologies, make separate search calls rather than combining all keywords into one overly-specific search that may miss relevant documentation."
     )]
     pub async fn search_docs(
         &self,
