@@ -7,7 +7,9 @@ use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_memorize_message,
     push_status_message, push_styled_message, render_system_message,
 };
-use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
+use crate::services::message::{
+    Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
+};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
@@ -532,7 +534,8 @@ fn handle_esc(
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_truncated_command_arguments(tool_call);
-            render_bash_block_rejected(&truncated_command, state, None);
+            let title = get_command_type_name(tool_call);
+            render_bash_block_rejected(&truncated_command, &title, state, None);
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -642,7 +645,8 @@ fn handle_input_submitted(
             let tool_call_opt = state.dialog_command.clone();
             if let Some(tool_call) = &tool_call_opt {
                 let truncated_command = extract_truncated_command_arguments(tool_call);
-                render_bash_block_rejected(&truncated_command, state, None);
+                let title = get_command_type_name(tool_call);
+                render_bash_block_rejected(&truncated_command, &title, state, None);
             }
         }
 

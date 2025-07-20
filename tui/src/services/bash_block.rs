@@ -345,7 +345,7 @@ pub fn render_styled_block_ansi_to_tui(
     let message_id = message_id.unwrap_or_else(Uuid::new_v4);
 
     // Convert to owned lines for storage
-    let owned_lines: Vec<Line<'static>> = formatted_lines
+    let mut owned_lines: Vec<Line<'static>> = formatted_lines
         .into_iter()
         .map(|line| {
             let owned_spans: Vec<Span<'static>> = line
@@ -356,6 +356,9 @@ pub fn render_styled_block_ansi_to_tui(
             Line::from(owned_spans)
         })
         .collect();
+
+    // add spaceing marker
+    owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
     // Store as StyledBlock (same as result block) instead of BashBubble
     state.messages.push(Message {
@@ -382,31 +385,31 @@ pub fn extract_bash_block_info(
             border_color: Color::Green,
             title_color: Color::White,
             content_color: Color::LightGreen,
-            tool_type: "create_file".to_string(),
+            tool_type: "Create File".to_string(),
         },
         "edit_file" => BubbleColors {
             border_color: Color::Yellow,
             title_color: Color::White,
             content_color: Color::LightYellow,
-            tool_type: "edit_file".to_string(),
+            tool_type: "Edit File".to_string(),
         },
         "run_command" => BubbleColors {
             border_color: Color::Cyan,
             title_color: Color::Yellow,
             content_color: Color::Gray,
-            tool_type: "run_command".to_string(),
+            tool_type: "Run Command".to_string(),
         },
         "read_file" => BubbleColors {
             border_color: Color::Magenta,
             title_color: Color::White,
             content_color: Color::LightMagenta,
-            tool_type: "read_file".to_string(),
+            tool_type: "Read File".to_string(),
         },
         "delete_file" => BubbleColors {
             border_color: Color::Red,
             title_color: Color::White,
             content_color: Color::LightRed,
-            tool_type: "delete_file".to_string(),
+            tool_type: "Delete File".to_string(),
         },
         _ => BubbleColors {
             border_color: Color::Cyan,
@@ -472,13 +475,20 @@ pub fn render_result_block(
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
+    let title = get_command_type_name(&tool_call);
     if tool_call_status == ToolCallResultStatus::Error {
-        render_bash_block_rejected(&tool_call.function.name, state, Some(result.to_string()));
+        render_bash_block_rejected(
+            &tool_call.function.name,
+            &title,
+            state,
+            Some(result.to_string()),
+        );
         return;
     }
     if tool_call_status == ToolCallResultStatus::Cancelled {
         render_bash_block_rejected(
             &tool_call.function.name,
+            &title,
             state,
             Some("Interrupted by user".to_string()),
         );
@@ -517,7 +527,7 @@ pub fn render_result_block(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            tool_call.function.name.to_string(),
+            title,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -653,11 +663,11 @@ pub fn render_result_block(
 // Function to render a rejected bash command (when user selects "No")
 pub fn render_bash_block_rejected(
     command_name: &str,
+    title: &str,
     state: &mut AppState,
     message: Option<String>,
 ) {
     let mut lines = Vec::new();
-
     lines.push(Line::from(vec![
         Span::styled(
             "● ",
@@ -666,7 +676,7 @@ pub fn render_bash_block_rejected(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "Bash",
+            title,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
