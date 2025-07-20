@@ -519,10 +519,10 @@ pub fn render_result_block(
     // Header line with border - handle multi-line command arguments
     let command_args = extract_truncated_command_arguments(&tool_call);
     let title_with_args = format!("{} ({})", title, command_args);
-    
+
     // Calculate available width for the title and arguments
     let available_width = inner_width - 2; // Account for borders and spacing
-    
+
     // Check if the title with arguments fits on one line
     if title_with_args.len() <= available_width {
         // Single line header
@@ -581,15 +581,15 @@ pub fn render_result_block(
 
         let title_indent = 4; // "│ ● " + 1 more space to align under the "S"
         let args_available_width = inner_width - title_indent - 2; // Account for borders
-        
+
         let wrapped_args = wrap_text_simple_unicode(&command_args, args_available_width);
-        
+
         for (i, arg_line) in wrapped_args.iter().enumerate() {
             let mut arg_spans = vec![
                 Span::styled("│", Style::default().fg(Color::Gray)),
                 Span::from(" "),
             ];
-            
+
             if i == 0 {
                 // First line of arguments - start with opening parenthesis
                 arg_spans.push(Span::styled(
@@ -607,7 +607,7 @@ pub fn render_result_block(
                     Style::default().fg(Color::Gray),
                 ));
             }
-            
+
             if i == 0 {
                 // First line - calculate padding normally
                 let arg_content_width = 1 + arg_line.len() + 1; // "(" + content
@@ -621,13 +621,16 @@ pub fn render_result_block(
 
             lines.push(Line::from(arg_spans));
         }
-        
+
         // Close the parentheses on the last line
         if let Some(last_line) = lines.last_mut() {
             // Find the last span that contains the argument content
-            if let Some(last_content_span) = last_line.spans.iter_mut().rev().find(|span| {
-                span.style.fg == Some(Color::Gray) && !span.content.contains("│")
-            }) {
+            if let Some(last_content_span) = last_line
+                .spans
+                .iter_mut()
+                .rev()
+                .find(|span| span.style.fg == Some(Color::Gray) && !span.content.contains("│"))
+            {
                 last_content_span.content = format!("{})", last_content_span.content).into();
             }
         }
@@ -757,7 +760,7 @@ pub fn render_bash_block_rejected(
     // Handle multi-line command name if needed
     let title_with_args = format!("{} ({})", title, command_name);
     let max_width = 80; // Reasonable max width for rejected commands
-    
+
     if title_with_args.len() <= max_width {
         // Single line
         lines.push(Line::from(vec![
@@ -796,49 +799,44 @@ pub fn render_bash_block_rejected(
             ),
             Span::styled("...", Style::default().fg(Color::Gray)),
         ]));
-        
+
         // Split command arguments into multiple lines
         // Calculate proper indentation to align under the command name
         let title_indent = 2 + title.len(); // "● " + title length
         let args_prefix = " ".repeat(title_indent); // Align directly under the command name
         let args_available_width = max_width - title_indent;
-        
+
         let wrapped_args = wrap_text_simple_unicode(command_name, args_available_width);
-        
+
         for (i, arg_line) in wrapped_args.iter().enumerate() {
             if i == 0 {
                 // First line of arguments
                 lines.push(Line::from(vec![
                     Span::from(args_prefix.clone()),
-                    Span::styled(
-                        format!("({}", arg_line),
-                        Style::default().fg(Color::Gray),
-                    ),
+                    Span::styled(format!("({}", arg_line), Style::default().fg(Color::Gray)),
                 ]));
             } else {
                 // Continuation lines
                 lines.push(Line::from(vec![
                     Span::from(args_prefix.clone()),
-                    Span::styled(
-                        arg_line.clone(),
-                        Style::default().fg(Color::Gray),
-                    ),
+                    Span::styled(arg_line.clone(), Style::default().fg(Color::Gray)),
                 ]));
             }
         }
-        
+
         // Close the parentheses on the last line if we had multiple lines
         if wrapped_args.len() > 1 {
             if let Some(last_line) = lines.last_mut() {
                 if let Some(last_content_span) = last_line.spans.last_mut() {
                     if last_content_span.style.fg == Some(Color::Gray) {
-                        last_content_span.content = format!("{})", last_content_span.content).into();
+                        last_content_span.content =
+                            format!("{})", last_content_span.content).into();
                     }
                 }
             }
         }
     }
-    
+
     let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
     lines.push(Line::from(vec![Span::styled(
         format!("  L {}", message),
