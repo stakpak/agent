@@ -807,8 +807,14 @@ fn handle_stream_tool_result(
     progress: ToolCallResultProgress,
     terminal_size: Size,
 ) {
-    state.is_streaming = true;
     let tool_call_id = progress.id;
+
+    // Check if this tool call is already completed - if so, ignore streaming updates
+    if state.completed_tool_calls.contains(&tool_call_id) {
+        return;
+    }
+
+    state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
     state
@@ -904,6 +910,13 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 
 pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.is_streaming = false;
+
+    // Mark the current streaming tool call as completed
+    if let Some(tool_call_id) = state.streaming_tool_result_id {
+        state.completed_tool_calls.insert(tool_call_id);
+    }
+
+    // Clear the streaming data and remove the streaming message
     state.streaming_tool_results.clear();
     state
         .messages
