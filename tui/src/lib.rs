@@ -99,7 +99,6 @@ pub async fn run_tui(
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
-                    eprintln!("tool result: {:?}", tool_call_result);
                        services::update::clear_streaming_tool_results(&mut state);
                        services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
                    }
