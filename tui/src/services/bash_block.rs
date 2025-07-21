@@ -47,7 +47,7 @@ pub fn strip_all_ansi(text: &str) -> String {
 pub fn preprocess_terminal_output(text: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut current_line = String::new();
-    let text = strip_all_ansi(&text);
+    let text = strip_all_ansi(text);
     for ch in text.chars() {
         match ch {
             '\r' => {
@@ -497,7 +497,6 @@ pub fn render_result_block(
     state: &mut AppState,
     terminal_size: Size,
 ) {
-
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
@@ -662,9 +661,9 @@ pub fn render_result_block(
         }
     }
 
-        // Preprocess result to handle terminal control sequences
+    // Preprocess result to handle terminal control sequences
     let preprocessed_result = preprocess_terminal_output(&result);
-    
+
     // Since the content is plain text without ANSI codes, just create a simple Text
     let result_text = ratatui::text::Text::from(preprocessed_result);
 
