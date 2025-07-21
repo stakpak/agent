@@ -86,7 +86,7 @@ pub struct LocalCodeSearchRequest {
 #[tool_router(router = tool_router_remote, vis = "pub")]
 impl ToolContainer {
     #[tool(
-        description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. This code generation/editing only works for Terraform, Kubernetes, Dockerfile, and Github Actions. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
+        description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
 IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files."
     )]
     pub async fn generate_code(
