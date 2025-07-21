@@ -1,15 +1,15 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
-use crate::services::auto_complete::{
-    find_at_trigger, get_current_word, handle_at_trigger, handle_file_selection, handle_tab_trigger,
-};
+use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{
     render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_error_message, push_help_message, push_memorize_message, push_status_message,
-    push_styled_message, render_system_message,
+    push_clear_message, push_error_message, push_help_message, push_memorize_message,
+    push_status_message, push_styled_message, render_system_message,
 };
-use crate::services::message::{Message, MessageContent, get_wrapped_message_lines};
+use crate::services::message::{
+    Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
+};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
@@ -23,12 +23,15 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
+const SCROLL_LINES: usize = 10;
+
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
     event: InputEvent,
     message_area_height: usize,
     message_area_width: usize,
+    input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     terminal_size: Size,
@@ -64,7 +67,7 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx, shell_tx);
+                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
@@ -84,9 +87,16 @@ pub fn update(
         InputEvent::ScrollDown => {
             handle_scroll_down(state, message_area_height, message_area_width)
         }
-        InputEvent::PageUp => handle_page_up(state, message_area_height),
-        InputEvent::PageDown => handle_page_down(state, message_area_height, message_area_width),
-        InputEvent::Quit => {}
+        InputEvent::PageUp => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_up(state, message_area_height);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::PageDown => {
+            state.stay_at_bottom = false; // unlock from bottom
+            handle_page_down(state, message_area_height, message_area_width);
+            adjust_scroll(state, message_area_height, message_area_width);
+        }
         InputEvent::CursorLeft => {
             if state.cursor_position > 0 {
                 let prev = state.input[..state.cursor_position]
@@ -134,6 +144,10 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
+            // remove ansi codes
+            let line = strip_ansi_codes(&line);
+            // normalize line endings
+            let line = line.replace("\r\n", "\n").replace('\r', "\n");
             let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
@@ -231,13 +245,24 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
-            // strip text from ansi escape codes
             let text = strip_ansi_codes(&text);
-            state.is_pasting = true;
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
-            state.input.insert_str(state.cursor_position, &text);
-            state.cursor_position += text.len();
-            state.is_pasting = false;
+            let line_count = text.lines().count();
+            if line_count > 10 {
+                state.pasted_long_text = Some(text.clone());
+                let placeholder = format!("[Pasted text of {} lines]", line_count);
+                state.pasted_placeholder = Some(placeholder.clone());
+                // Insert the placeholder at the current cursor position
+                let pos = state.cursor_position.min(state.input.len());
+                state.input.insert_str(pos, &placeholder);
+                state.cursor_position = pos + placeholder.len();
+            } else {
+                // Normal paste
+                state.input.insert_str(state.cursor_position, &text);
+                state.cursor_position += text.len();
+                state.pasted_long_text = None;
+                state.pasted_placeholder = None;
+            }
         }
         InputEvent::InputCursorStart => {
             state.cursor_position = 0;
@@ -300,6 +325,25 @@ pub fn update(
                 pos += 1;
             }
             state.cursor_position = pos;
+        }
+        InputEvent::AttemptQuit => {
+            use std::time::Instant;
+            let now = Instant::now();
+            if !state.ctrl_c_pressed_once
+                || state.ctrl_c_timer.is_none()
+                || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
+            {
+                // First press or timer expired: clear input, move cursor, set timer
+                state.input.clear();
+                state.cursor_position = 0;
+                state.ctrl_c_pressed_once = true;
+                state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
+            } else {
+                // Second press within 2s: trigger quit
+                state.ctrl_c_pressed_once = false;
+                state.ctrl_c_timer = None;
+                let _ = input_tx.try_send(InputEvent::Quit);
+            }
         }
         _ => {}
     }
@@ -383,11 +427,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.cursor_position = 0;
         return;
     }
-    if c == '?' && state.input.is_empty() {
+    if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
-    if c == '$' && (state.input.is_empty() || state.is_dialog_open) {
+    if c == '$' && (state.input.is_empty() || state.is_dialog_open) && !state.show_sessions_dialog {
         state.input.clear();
         handle_shell_mode(state);
         return;
@@ -397,22 +441,15 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     state.input.insert(pos, c);
     state.cursor_position = pos + c.len_utf8();
 
-    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
-    if let Some(at_pos) = find_at_trigger(state) {
-        let is_valid_at = at_pos == 0
-            || state
-                .input
-                .chars()
-                .nth(at_pos.saturating_sub(1))
-                .is_some_and(|ch| ch.is_whitespace());
-        if is_valid_at {
-            handle_at_trigger(state);
+    // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
+    if let Some(placeholder) = &state.pasted_placeholder {
+        if !state.input.contains(placeholder) {
+            state.pasted_long_text = None;
+            state.pasted_placeholder = None;
         }
     }
 
-    // Handle existing / helper logic
     if state.input.starts_with('/') {
-        // Reset file autocomplete if we switch to command mode
         if state.autocomplete.is_active() {
             state.autocomplete.reset();
         }
@@ -429,27 +466,18 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         {
             state.helper_selected = 0;
         }
-    } else {
-        // If we're in file autocomplete mode and typing after @, update the filter
-        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
-            let current_word = get_current_word(state, Some('@'));
-            state.autocomplete.filter_files(&current_word);
+    }
+    // Send input to autocomplete worker (async, non-blocking)
+    if let Some(tx) = &state.autocomplete_tx {
+        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+    }
 
-            if state.autocomplete.filtered_count() == 0 {
-                state.show_helper_dropdown = false;
-                state.autocomplete.reset();
-            } else {
-                state.helper_selected = state
-                    .helper_selected
-                    .min(state.autocomplete.filtered_count().saturating_sub(1));
-            }
-        } else {
-            // Regular behavior - hide helper dropdown
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
-            state.helper_selected = 0;
-            state.autocomplete.reset();
-        }
+    if state.input.is_empty() {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.filtered_files.clear();
+        state.helper_selected = 0;
+        state.autocomplete.reset();
     }
 }
 
@@ -466,59 +494,25 @@ fn handle_input_backspace(state: &mut AppState) {
         state.cursor_position = remove_at;
     }
 
-    // --- Re-trigger @-autocomplete if cursor is after @ and word is non-empty, and @ is at start or after whitespace ---
-    if let Some(at_pos) = find_at_trigger(state) {
-        let is_valid_at = at_pos == 0
-            || state
-                .input
-                .chars()
-                .nth(at_pos.saturating_sub(1))
-                .is_some_and(|ch| ch.is_whitespace());
-        if is_valid_at {
-            handle_at_trigger(state);
+    // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
+    if let Some(placeholder) = &state.pasted_placeholder {
+        if !state.input.contains(placeholder) {
+            state.pasted_long_text = None;
+            state.pasted_placeholder = None;
         }
     }
 
-    if state.input.starts_with('/') {
-        state.show_helper_dropdown = true;
-        state.filtered_helpers = state
-            .helpers
-            .iter()
-            .filter(|h| h.starts_with(&state.input))
-            .cloned()
-            .collect();
-        if state.filtered_helpers.is_empty()
-            || state.helper_selected >= state.filtered_helpers.len()
-        {
-            state.helper_selected = 0;
-        }
-    } else {
-        // Check if we're still in @ autocomplete mode
-        if state.autocomplete.is_active() && state.autocomplete.trigger_char == Some('@') {
-            // Check if @ still exists
-            if find_at_trigger(state).is_some() {
-                let current_word = get_current_word(state, Some('@'));
-                state.autocomplete.filter_files(&current_word);
-
-                if state.autocomplete.filtered_count() == 0 {
-                    state.show_helper_dropdown = false;
-                    state.autocomplete.reset();
-                } else {
-                    state.helper_selected = state
-                        .helper_selected
-                        .min(state.autocomplete.filtered_count().saturating_sub(1));
-                }
-            } else {
-                // @ was deleted, exit autocomplete mode
-                state.show_helper_dropdown = false;
-                state.autocomplete.reset();
-            }
-        } else {
-            state.show_helper_dropdown = false;
-            state.filtered_helpers.clear();
-            state.helper_selected = 0;
-            state.autocomplete.reset();
-        }
+    // Send input to autocomplete worker (async, non-blocking)
+    if let Some(tx) = &state.autocomplete_tx {
+        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+    }
+    // Hide dropdown if input is empty
+    if state.input.is_empty() {
+        state.show_helper_dropdown = false;
+        state.filtered_helpers.clear();
+        state.filtered_files.clear();
+        state.helper_selected = 0;
+        state.autocomplete.reset();
     }
 }
 
@@ -540,7 +534,8 @@ fn handle_esc(
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_truncated_command_arguments(tool_call);
-            render_bash_block_rejected(&truncated_command, state, None);
+            let title = get_command_type_name(tool_call);
+            render_bash_block_rejected(&truncated_command, &title, state, None);
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -563,6 +558,7 @@ fn handle_input_submitted(
     state: &mut AppState,
     message_area_height: usize,
     output_tx: &Sender<OutputEvent>,
+    input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
     if (state.is_streaming || state.loading) && !state.is_dialog_open {
@@ -570,7 +566,6 @@ fn handle_input_submitted(
         state.cursor_position = 0;
         return;
     }
-    let input_height = 3;
     if state.show_shell_mode {
         // Check if we're waiting for shell input (like password)
         if state.waiting_for_shell_input {
@@ -602,6 +597,11 @@ fn handle_input_submitted(
         return;
     }
 
+    if state.input.trim() == "clear" {
+        push_clear_message(state);
+        return;
+    }
+
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
@@ -612,6 +612,30 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
+        let tool_call_args = if let Some(cmd) = state.dialog_command.as_ref() {
+            cmd.function.arguments.clone()
+        } else {
+            String::new()
+        };
+
+        let command = tool_call_args
+            .split("\"command\": \"")
+            .nth(1)
+            .and_then(|s| s.split('\"').next())
+            .unwrap_or("");
+        if !command.is_empty()
+            && state
+                .interactive_commands
+                .iter()
+                .any(|cmd| command.contains(cmd))
+        {
+            state.show_shell_mode = true;
+            state.is_dialog_open = false;
+            state.input.clear();
+            state.cursor_position = 0;
+            state.run_shell_command(command.to_string(), shell_tx);
+            return;
+        }
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
@@ -621,7 +645,8 @@ fn handle_input_submitted(
             let tool_call_opt = state.dialog_command.clone();
             if let Some(tool_call) = &tool_call_opt {
                 let truncated_command = extract_truncated_command_arguments(tool_call);
-                render_bash_block_rejected(&truncated_command, state, None);
+                let title = get_command_type_name(tool_call);
+                render_bash_block_rejected(&truncated_command, &title, state, None);
             }
         }
 
@@ -650,6 +675,10 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                     return;
                 }
+                "/clear" => {
+                    push_clear_message(state);
+                    return;
+                }
                 "/memorize" => {
                     push_memorize_message(state);
                     let _ = output_tx.try_send(OutputEvent::Memorize);
@@ -676,16 +705,34 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                     state.input.clear();
                     state.cursor_position = 0;
-                    std::process::exit(1);
+                    let _ = input_tx.try_send(InputEvent::Quit);
                 }
                 _ => {}
             }
         }
-    } else if !state.input.trim().is_empty() && !state.input.trim().starts_with('/') {
+    } else if !state.input.trim().is_empty() {
+        // PERFORMANCE FIX: Simplified condition for submission
+        // Allow submission of any non-empty input that's not a recognized helper command
+        let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         let was_at_bottom = state.scroll == max_scroll;
+
+        if let (Some(placeholder), Some(long_text)) =
+            (&state.pasted_placeholder, &state.pasted_long_text)
+        {
+            if state.input.contains(placeholder) {
+                let replaced = state.input.replace(placeholder, long_text);
+                state.input = replaced;
+            }
+        }
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
+        let _ = output_tx.try_send(OutputEvent::UserMessage(
+            state.input.clone(),
+            state.shell_tool_calls.clone(),
+        ));
         state
             .messages
             .push(Message::user(format!("> {}", state.input), None));
@@ -764,8 +811,14 @@ fn handle_stream_tool_result(
     progress: ToolCallResultProgress,
     terminal_size: Size,
 ) {
-    state.is_streaming = true;
     let tool_call_id = progress.id;
+
+    // Check if this tool call is already completed - if so, ignore streaming updates
+    if state.completed_tool_calls.contains(&tool_call_id) {
+        return;
+    }
+
+    state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
     state
@@ -798,8 +851,11 @@ fn handle_stream_tool_result(
 }
 
 fn handle_scroll_up(state: &mut AppState) {
-    if state.scroll > 0 {
-        state.scroll -= 1;
+    if state.scroll >= SCROLL_LINES {
+        state.scroll -= SCROLL_LINES;
+        state.stay_at_bottom = false;
+    } else {
+        state.scroll = 0;
         state.stay_at_bottom = false;
     }
 }
@@ -808,12 +864,11 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.scroll < max_scroll {
-        state.scroll += 1;
-        if state.scroll == max_scroll {
-            state.stay_at_bottom = true;
-        }
+    if state.scroll + SCROLL_LINES < max_scroll {
+        state.scroll += SCROLL_LINES;
+        state.stay_at_bottom = false;
     } else {
+        state.scroll = max_scroll;
         state.stay_at_bottom = true;
     }
 }
@@ -859,6 +914,13 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
 
 pub fn clear_streaming_tool_results(state: &mut AppState) {
     state.is_streaming = false;
+
+    // Mark the current streaming tool call as completed
+    if let Some(tool_call_id) = state.streaming_tool_result_id {
+        state.completed_tool_calls.insert(tool_call_id);
+    }
+
+    // Clear the streaming data and remove the streaming message
     state.streaming_tool_results.clear();
     state
         .messages

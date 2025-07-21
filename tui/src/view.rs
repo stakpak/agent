@@ -9,12 +9,11 @@ use crate::services::message_pattern::{
     spans_to_string,
 };
 use crate::services::sessions_dialog::render_sessions_dialog;
-use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Color, Style},
+    text::Line,
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -27,12 +26,10 @@ pub fn view(f: &mut Frame, state: &AppState) {
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
-        && ((state.autocomplete.is_active() && !state.autocomplete.filtered_files.is_empty())
-            || (!state.autocomplete.is_active()
-                && !state.filtered_helpers.is_empty()
-                && state.input.starts_with('/')));
+        && ((!state.filtered_helpers.is_empty() && state.input.starts_with('/'))
+            || !state.filtered_files.is_empty());
     let dropdown_height = if dropdown_showing {
-        if state.autocomplete.is_active() {
+        if !state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
             state.filtered_helpers.len() as u16
@@ -40,10 +37,18 @@ pub fn view(f: &mut Frame, state: &AppState) {
     } else {
         0
     };
-    let hint_height = if dropdown_showing { 0 } else { margin_height };
+    let hint_height = if state.show_helper_dropdown && !state.is_dialog_open {
+        0
+    } else {
+        margin_height
+    };
 
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
-    let dialog_margin = if state.show_sessions_dialog { 1 } else { 0 };
+    let dialog_margin = if state.show_sessions_dialog || state.is_dialog_open {
+        2
+    } else {
+        0
+    };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
@@ -54,8 +59,8 @@ pub fn view(f: &mut Frame, state: &AppState) {
     if !state.show_sessions_dialog {
         constraints.push(Constraint::Length(input_height));
         constraints.push(Constraint::Length(dropdown_height));
-        constraints.push(Constraint::Length(hint_height));
     }
+    constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
     let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -74,17 +79,11 @@ pub fn view(f: &mut Frame, state: &AppState) {
         width: 0,
         height: 0,
     };
-    let mut hint_area = Rect {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    };
+    let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
         input_area = chunks[3];
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
-        hint_area = chunks.get(5).copied().unwrap_or(input_area);
     }
 
     let message_area_width = message_area.width as usize;
@@ -100,20 +99,16 @@ pub fn view(f: &mut Frame, state: &AppState) {
 
     if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
-        return;
-    }
-    if state.is_dialog_open {
+    } else if state.is_dialog_open {
         render_confirmation_dialog(f, state);
-        return;
-    }
-
-    if !state.is_dialog_open {
+    } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         render_autocomplete_dropdown(f, state, dropdown_area);
-        if !dropdown_showing {
-            render_hint_or_shortcuts(f, state, hint_area);
-        }
+    }
+    // Render hint/shortcuts if not hiding for dropdown (unless dialog is open)
+    if !state.show_helper_dropdown {
+        render_hint_or_shortcuts(f, state, hint_area);
     }
 }
 
@@ -326,335 +321,8 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 }
 
 fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
-    // Mask input if in shell mode and waiting for shell input (password)
-    let input = if state.show_shell_mode && state.waiting_for_shell_input {
-        "*".repeat(state.input.chars().count())
-    } else {
-        state.input.clone()
-    };
-    let available_width = area.width.saturating_sub(4) as usize; // -4 for borders and padding
-
-    // Ensure the cursor position is valid
-    let cursor_pos = state.cursor_position.min(input.len());
-
-    // Split the input by newlines first
-    let line_segments: Vec<&str> = input.split('\n').collect();
-
-    let mut lines = Vec::new();
-    let mut cursor_rendered = false;
-
-    // Track position in the input string (in bytes)
-    let mut current_pos = 0;
-
-    for (segment_idx, segment) in line_segments.iter().enumerate() {
-        // Handle empty segments (blank lines)
-        if segment.is_empty() {
-            let mut empty_line = Vec::new();
-
-            // Add prompt only for first line
-            if segment_idx == 0 {
-                if state.show_shell_mode {
-                    empty_line.push(Span::styled(
-                        " ".to_string() + SHELL_PROMPT_PREFIX,
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                } else {
-                    empty_line.push(Span::raw("> "));
-                }
-            }
-
-            // Check if cursor is at the end of this empty segment
-            if current_pos == cursor_pos && !cursor_rendered {
-                empty_line.push(Span::styled(
-                    "█",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                cursor_rendered = true;
-            }
-
-            lines.push(Line::from(empty_line));
-            current_pos += 1; // +1 for the newline
-            continue;
-        }
-
-        // For non-empty segments, wrap text properly but preserve spaces
-        let prompt_text = if state.show_shell_mode {
-            format!(" {}", SHELL_PROMPT_PREFIX)
-        } else if segment_idx == 0 {
-            "> ".to_string()
-        } else {
-            String::new()
-        };
-
-        let prompt_width = prompt_text.chars().count();
-        let content_width = available_width.saturating_sub(prompt_width);
-
-        // Process the segment preserving all whitespace
-        let mut current_line_content = String::new();
-        let mut current_line_width = 0;
-        let mut line_start_pos = current_pos;
-
-        // Split by words but preserve spaces
-        let mut word_positions = Vec::new();
-        let mut word_start = 0;
-        let mut in_word = false;
-
-        for (i, ch) in segment.char_indices() {
-            if ch.is_whitespace() {
-                if in_word {
-                    // End of word
-                    word_positions.push((word_start, i, false)); // false = word
-                    in_word = false;
-                }
-                if !in_word {
-                    word_start = i;
-                }
-            } else if !in_word {
-                if word_start < i {
-                    // There were spaces before this word
-                    word_positions.push((word_start, i, true)); // true = whitespace
-                }
-                word_start = i;
-                in_word = true;
-            }
-        }
-
-        // Handle final word or whitespace
-        if in_word && word_start < segment.len() {
-            word_positions.push((word_start, segment.len(), false));
-        } else if !in_word && word_start < segment.len() {
-            word_positions.push((word_start, segment.len(), true));
-        }
-
-        // If no word positions found, treat entire segment as one unit
-        if word_positions.is_empty() {
-            word_positions.push((0, segment.len(), false));
-        }
-
-        for (start, end, _is_whitespace) in word_positions {
-            let text = &segment[start..end];
-            let text_width = text.chars().count();
-
-            // Check if this text fits on current line
-            if current_line_width + text_width > content_width && !current_line_content.is_empty() {
-                // Current line is full, render it
-                let mut line_spans = Vec::new();
-
-                // Add prompt for first line of this segment
-                if segment_idx == 0 && lines.is_empty() {
-                    if state.show_shell_mode {
-                        line_spans.push(Span::styled(
-                            prompt_text.clone(),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                    } else {
-                        line_spans.push(Span::raw(prompt_text.clone()));
-                    }
-                }
-
-                // Handle cursor in current line content
-                let line_end_pos = line_start_pos + current_line_content.len();
-                if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
-                    let cursor_offset = cursor_pos - line_start_pos;
-
-                    if cursor_offset < current_line_content.len() {
-                        let before_cursor = &current_line_content[..cursor_offset];
-                        let at_cursor_char = current_line_content
-                            .chars()
-                            .nth(cursor_offset)
-                            .unwrap_or(' ');
-                        let at_cursor = if at_cursor_char == ' ' {
-                            "█"
-                        } else {
-                            &at_cursor_char.to_string()
-                        };
-                        let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
-                        let after_cursor = if after_cursor_start < current_line_content.len() {
-                            &current_line_content[after_cursor_start..]
-                        } else {
-                            ""
-                        };
-
-                        if !before_cursor.is_empty() {
-                            line_spans.push(Span::raw(before_cursor.to_string()));
-                        }
-                        line_spans.push(Span::styled(
-                            at_cursor.to_string(),
-                            Style::default()
-                                .bg(Color::Cyan)
-                                .fg(Color::Black)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                        if !after_cursor.is_empty() {
-                            line_spans.push(Span::raw(after_cursor.to_string()));
-                        }
-                        cursor_rendered = true;
-                    } else {
-                        // Cursor at end of line
-                        line_spans.push(Span::raw(current_line_content.clone()));
-                        line_spans.push(Span::styled(
-                            "█",
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                        cursor_rendered = true;
-                    }
-                } else {
-                    line_spans.push(Span::raw(current_line_content.clone()));
-                }
-
-                lines.push(Line::from(line_spans));
-
-                // Start new line
-                current_line_content.clear();
-                current_line_width = 0;
-                line_start_pos = current_pos + start;
-            }
-
-            // Add text to current line
-            current_line_content.push_str(text);
-            current_line_width += text_width;
-        }
-
-        // Render remaining content
-        if !current_line_content.is_empty() {
-            let mut line_spans = Vec::new();
-
-            // Add prompt for first line of this segment
-            if segment_idx == 0 && lines.is_empty() {
-                if state.show_shell_mode {
-                    line_spans.push(Span::styled(
-                        prompt_text.clone(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                } else {
-                    line_spans.push(Span::raw(prompt_text.clone()));
-                }
-            }
-
-            // Handle cursor in the remaining content
-            let line_end_pos = line_start_pos + current_line_content.len();
-
-            if cursor_pos >= line_start_pos && cursor_pos <= line_end_pos && !cursor_rendered {
-                let cursor_offset = cursor_pos - line_start_pos;
-
-                if cursor_offset < current_line_content.len() {
-                    let before_cursor = &current_line_content[..cursor_offset];
-                    let at_cursor_char = current_line_content
-                        .chars()
-                        .nth(cursor_offset)
-                        .unwrap_or(' ');
-                    let at_cursor = if at_cursor_char == ' ' {
-                        "█"
-                    } else {
-                        &at_cursor_char.to_string()
-                    };
-                    let after_cursor_start = cursor_offset + at_cursor_char.len_utf8();
-                    let after_cursor = if after_cursor_start < current_line_content.len() {
-                        &current_line_content[after_cursor_start..]
-                    } else {
-                        ""
-                    };
-
-                    if !before_cursor.is_empty() {
-                        line_spans.push(Span::raw(before_cursor.to_string()));
-                    }
-                    line_spans.push(Span::styled(
-                        at_cursor.to_string(),
-                        Style::default()
-                            .bg(Color::Cyan)
-                            .fg(Color::Black)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    if !after_cursor.is_empty() {
-                        line_spans.push(Span::raw(after_cursor.to_string()));
-                    }
-                    cursor_rendered = true;
-                } else {
-                    // Cursor at end of content
-                    line_spans.push(Span::raw(current_line_content.clone()));
-                    line_spans.push(Span::styled(
-                        "█",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    cursor_rendered = true;
-                }
-            } else {
-                line_spans.push(Span::raw(current_line_content.clone()));
-            }
-
-            lines.push(Line::from(line_spans));
-        }
-
-        // Move to next segment
-        current_pos += segment.len() + 1; // +1 for newline
-    }
-
-    // Handle cursor at the very end of input
-    if cursor_pos == input.len() && !cursor_rendered {
-        if let Some(last_line) = lines.last_mut() {
-            last_line.spans.push(Span::styled(
-                "█",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            // Create a new line with prompt and cursor
-            let mut cursor_line = Vec::new();
-            if state.show_shell_mode {
-                cursor_line.push(Span::styled(
-                    " ".to_string() + SHELL_PROMPT_PREFIX,
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                cursor_line.push(Span::raw("> "));
-            }
-            cursor_line.push(Span::styled(
-                "█",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            lines.push(Line::from(cursor_line));
-        }
-    }
-
-    // Ensure we have at least one line
-    if lines.is_empty() {
-        let mut default_line = Vec::new();
-        if state.show_shell_mode {
-            default_line.push(Span::styled(
-                " ".to_string() + SHELL_PROMPT_PREFIX,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            default_line.push(Span::raw("> "));
-        }
-        default_line.push(Span::styled(
-            "█",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ));
-        lines.push(Line::from(default_line));
-    }
-
+    let area_width = area.width as usize;
+    let (lines, _cursor_rendered) = state.render_input(area_width);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
@@ -662,12 +330,9 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             Style::default().fg(Color::DarkGray)
         });
-
-    // Render the input widget
     let input_widget = Paragraph::new(lines)
         .style(Style::default())
         .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
-
     f.render_widget(input_widget, area);
 }

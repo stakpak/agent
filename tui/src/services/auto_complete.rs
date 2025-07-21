@@ -1,25 +1,62 @@
 use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::AppState;
+use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, Default)]
+use crate::AppState;
+use crate::app::AutoCompleteResult;
+
+#[derive(Debug, Clone)]
 pub struct AutoComplete {
     pub file_suggestions: Vec<String>,
     pub filtered_files: Vec<String>,
     pub is_file_mode: bool,
     pub trigger_char: Option<char>, // '@' or None for Tab
+    // Cache for filtered results to avoid recomputation
+    filter_cache: HashMap<String, Vec<String>>,
+    // Pre-computed lowercase versions for faster matching
+    lowercase_files: Vec<String>,
+    pub debounced_filter: DebouncedFilter,
+}
+
+impl Default for AutoComplete {
+    fn default() -> Self {
+        Self {
+            file_suggestions: Vec::new(),
+            filtered_files: Vec::new(),
+            is_file_mode: false,
+            trigger_char: None,
+            filter_cache: HashMap::new(),
+            lowercase_files: Vec::new(),
+            debounced_filter: DebouncedFilter::new(120), // 120ms debounce
+        }
+    }
 }
 
 impl AutoComplete {
     /// Load all files from current directory recursively
     pub fn load_files_from_directory(&mut self, dir: &Path) {
+        // Only scan if not already cached for this session
+        if !self.file_suggestions.is_empty() {
+            return;
+        }
         self.file_suggestions.clear();
+        self.lowercase_files.clear();
+        self.filter_cache.clear();
+
         // Read gitignore patterns from the directory
         let base_dir = dir.to_string_lossy();
         let ignore_patterns = read_gitignore_patterns(&base_dir);
         self.collect_files_recursive(dir, dir, &ignore_patterns);
+
+        // Pre-compute lowercase versions for faster filtering
+        self.lowercase_files = self
+            .file_suggestions
+            .iter()
+            .map(|f| f.to_lowercase())
+            .collect();
     }
 
     fn collect_files_recursive(
@@ -61,29 +98,44 @@ impl AutoComplete {
         }
     }
 
-    /// Filter files based on current input
+    /// Filter files based on current input - optimized version, debounced
     pub fn filter_files(&mut self, current_word: &str) {
+        if !self.debounced_filter.should_filter(current_word) {
+            return;
+        }
+        // Fast path: if input is empty, just show the first 50 files
         if current_word.is_empty() {
-            self.filtered_files = self.file_suggestions.clone();
-        } else {
-            self.filtered_files = self
-                .file_suggestions
-                .iter()
-                .filter(|file| {
-                    file.to_lowercase().contains(&current_word.to_lowercase())
-                        || fuzzy_match(file, current_word)
-                })
-                .cloned()
-                .collect();
+            self.filtered_files = self.file_suggestions.iter().take(50).cloned().collect();
+            return;
+        }
+
+        // Check cache first
+        if let Some(cached_result) = self.filter_cache.get(current_word) {
+            self.filtered_files = cached_result.clone();
+            return;
+        }
+
+        let word_lower = current_word.to_lowercase();
+        let mut results = Vec::new();
+
+        // Use pre-computed lowercase versions for faster matching
+        for (i, file_lower) in self.lowercase_files.iter().enumerate() {
+            if file_lower.contains(&word_lower) || fuzzy_match_optimized(file_lower, &word_lower) {
+                results.push(self.file_suggestions[i].clone());
+
+                // Early exit if we have enough results
+                if results.len() >= 100 {
+                    break;
+                }
+            }
         }
 
         // Sort by relevance (exact matches first, then prefix matches, then contains)
-        self.filtered_files.sort_by(|a, b| {
+        results.sort_by(|a, b| {
             let a_lower = a.to_lowercase();
             let b_lower = b.to_lowercase();
-            let word_lower = current_word.to_lowercase();
 
-            // Exact match
+            // Exact match check
             if a_lower == word_lower {
                 return std::cmp::Ordering::Less;
             }
@@ -91,19 +143,29 @@ impl AutoComplete {
                 return std::cmp::Ordering::Greater;
             }
 
-            // Starts with
+            // Prefix match check
             let a_starts = a_lower.starts_with(&word_lower);
             let b_starts = b_lower.starts_with(&word_lower);
-
             match (a_starts, b_starts) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => a.cmp(b), // Alphabetical for equal relevance
+                _ => a.len().cmp(&b.len()), // Shorter files first for same category
             }
         });
 
         // Limit results to prevent overwhelming UI
-        self.filtered_files.truncate(20);
+        results.truncate(50);
+
+        // Cache the result for future use
+        self.filter_cache
+            .insert(current_word.to_string(), results.clone());
+
+        // Limit cache size to prevent memory issues
+        if self.filter_cache.len() > 100 {
+            self.filter_cache.clear();
+        }
+
+        self.filtered_files = results;
     }
 
     /// Get the current filtered files for display
@@ -126,22 +188,34 @@ impl AutoComplete {
         self.filtered_files.clear();
         self.is_file_mode = false;
         self.trigger_char = None;
+        // Don't clear cache and lowercase_files - keep them for performance
     }
 
     /// Check if currently in file autocomplete mode
     pub fn is_active(&self) -> bool {
         self.is_file_mode
     }
+
+    /// Clear all caches (call this when directory changes)
+    pub fn clear_caches(&mut self) {
+        self.file_suggestions.clear();
+        self.lowercase_files.clear();
+        self.filter_cache.clear();
+    }
 }
 
-/// Simple fuzzy matching for better file filtering
-fn fuzzy_match(text: &str, pattern: &str) -> bool {
+/// Optimized fuzzy matching with early exit
+fn fuzzy_match_optimized(text: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return true;
     }
 
-    let text_chars: Vec<char> = text.to_lowercase().chars().collect();
-    let pattern_chars: Vec<char> = pattern.to_lowercase().chars().collect();
+    if text.len() < pattern.len() {
+        return false;
+    }
+
+    let text_chars: Vec<char> = text.chars().collect();
+    let pattern_chars: Vec<char> = pattern.chars().collect();
 
     let mut text_idx = 0;
     let mut pattern_idx = 0;
@@ -156,10 +230,8 @@ fn fuzzy_match(text: &str, pattern: &str) -> bool {
     pattern_idx == pattern_chars.len()
 }
 
-/// Find @ trigger before cursor position
-pub fn find_at_trigger(state: &AppState) -> Option<usize> {
-    let input = &state.input;
-    let cursor_pos = state.cursor_position;
+// Refactored: Find @ trigger before cursor position - optimized
+pub fn find_at_trigger(input: &str, cursor_pos: usize) -> Option<usize> {
     let safe_pos = cursor_pos.min(input.len());
     let before_cursor = &input[..safe_pos];
     // Find the last @ that's either at start or preceded by whitespace
@@ -179,15 +251,12 @@ pub fn find_at_trigger(state: &AppState) -> Option<usize> {
     None
 }
 
-/// Get the current word being typed for filtering
-pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String {
-    let input = &state.input;
-    let cursor_pos = state.cursor_position;
+// Refactored: Get the current word being typed for filtering - optimized
+pub fn get_current_word(input: &str, cursor_pos: usize, trigger_char: Option<char>) -> String {
     let safe_pos = cursor_pos.min(input.len());
     match trigger_char {
         Some('@') => {
-            // Find @ and get text after it
-            if let Some(at_pos) = find_at_trigger(state) {
+            if let Some(at_pos) = find_at_trigger(input, cursor_pos) {
                 let after_at = &input[at_pos + 1..safe_pos];
                 after_at.to_string()
             } else {
@@ -195,7 +264,6 @@ pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String 
             }
         }
         None => {
-            // Tab mode - get current word
             let before_cursor = &input[..safe_pos];
             if let Some(word_start) = before_cursor.rfind(char::is_whitespace) {
                 input[word_start + 1..safe_pos].to_string()
@@ -207,19 +275,22 @@ pub fn get_current_word(state: &AppState, trigger_char: Option<char>) -> String 
     }
 }
 
-/// Handle Tab trigger for file autocomplete
+/// Handle Tab trigger for file autocomplete - with debouncing
 pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     if state.input.trim().is_empty() {
         return false;
     }
+
     // Load files if not already loaded
     if state.autocomplete.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
             state.autocomplete.load_files_from_directory(&current_dir);
         }
     }
-    let current_word = get_current_word(state, None);
+
+    let current_word = get_current_word(state.input.as_str(), state.cursor_position, None);
     state.autocomplete.filter_files(&current_word);
+
     if !state.autocomplete.filtered_files.is_empty() {
         state.autocomplete.is_file_mode = true;
         state.autocomplete.trigger_char = None;
@@ -230,23 +301,16 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     false
 }
 
-/// Handle @ trigger for file autocomplete
-pub fn handle_at_trigger(state: &mut AppState) -> bool {
-    if state.autocomplete.file_suggestions.is_empty() {
+// Refactored: Handle @ trigger for file autocomplete - with debouncing
+pub fn handle_at_trigger(input: &str, cursor_pos: usize, autocomplete: &mut AutoComplete) -> bool {
+    if autocomplete.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
-            state.autocomplete.load_files_from_directory(&current_dir);
+            autocomplete.load_files_from_directory(&current_dir);
         }
     }
-    let current_word = get_current_word(state, Some('@'));
-    state.autocomplete.filter_files(&current_word);
-    if !state.autocomplete.filtered_files.is_empty() {
-        state.autocomplete.is_file_mode = true;
-        state.autocomplete.trigger_char = Some('@');
-        state.show_helper_dropdown = true;
-        state.helper_selected = 0;
-        return true;
-    }
-    false
+    let current_word = get_current_word(input, cursor_pos, Some('@'));
+    autocomplete.filter_files(&current_word);
+    !autocomplete.filtered_files.is_empty()
 }
 
 /// Handle file selection and update input string
@@ -254,7 +318,7 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
     match state.autocomplete.trigger_char {
         Some('@') => {
             // Replace from @ to cursor with selected file
-            if let Some(at_pos) = find_at_trigger(state) {
+            if let Some(at_pos) = find_at_trigger(state.input.as_str(), state.cursor_position) {
                 let before_at = state.input[..at_pos].to_string();
                 let after_cursor = state.input[state.cursor_position..].to_string();
                 state.input = format!("{}{}{}", before_at, selected_file, after_cursor);
@@ -279,9 +343,87 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
         }
         _ => {}
     }
+
     // Reset autocomplete state
     state.autocomplete.reset();
     state.show_helper_dropdown = false;
     state.filtered_helpers.clear();
     state.helper_selected = 0;
+}
+
+#[derive(Debug, Clone)]
+pub struct DebouncedFilter {
+    last_query: String,
+    last_update: std::time::Instant,
+    debounce_ms: u64,
+}
+
+impl DebouncedFilter {
+    pub fn new(debounce_ms: u64) -> Self {
+        Self {
+            last_query: String::new(),
+            last_update: std::time::Instant::now(),
+            debounce_ms,
+        }
+    }
+
+    pub fn should_filter(&mut self, query: &str) -> bool {
+        let now = std::time::Instant::now();
+        let should_update = query != self.last_query
+            || now.duration_since(self.last_update).as_millis() > self.debounce_ms as u128;
+
+        if should_update {
+            self.last_query = query.to_string();
+            self.last_update = now;
+        }
+
+        should_update
+    }
+}
+
+/// Async autocomplete worker for background filtering
+pub async fn autocomplete_worker(
+    mut rx: mpsc::Receiver<(String, usize)>, // (input, cursor_position)
+    tx: mpsc::Sender<AutoCompleteResult>,
+    helpers: Vec<&'static str>,
+    mut autocomplete: AutoComplete,
+) {
+    if let Ok(current_dir) = std::env::current_dir() {
+        autocomplete.load_files_from_directory(&current_dir);
+    }
+    while let Some((input, cursor_position)) = rx.recv().await {
+        // Filter helpers
+        let filtered_helpers: Vec<&'static str> = helpers
+            .iter()
+            .filter(|h| h.starts_with(&input) && !input.is_empty())
+            .copied()
+            .collect();
+
+        let mut filtered_files = Vec::new();
+        // Detect @ trigger using new signature
+
+        if let Some(at_pos) = find_at_trigger(&input, cursor_position) {
+            let is_valid_at = at_pos == 0
+                || input
+                    .chars()
+                    .nth(at_pos.saturating_sub(1))
+                    .is_some_and(|ch| ch.is_whitespace());
+            if is_valid_at && handle_at_trigger(&input, cursor_position, &mut autocomplete) {
+                autocomplete.is_file_mode = true;
+                autocomplete.trigger_char = Some('@');
+                filtered_files = autocomplete.filtered_files.clone();
+            }
+        }
+
+        // TODO: Add / and other triggers as needed
+
+        let _ = tx
+            .send(AutoCompleteResult {
+                filtered_helpers,
+                filtered_files,
+                cursor_position,
+                input,
+            })
+            .await;
+    }
 }
