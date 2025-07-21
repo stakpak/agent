@@ -1,5 +1,7 @@
 use flate2::read::GzDecoder;
 use reqwest;
+use reqwest::header::HeaderMap;
+use stakpak_shared::tls_client::create_tls_client;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -153,7 +155,7 @@ async fn get_latest_version(config: &PluginConfig) -> Result<String, String> {
     let version_url = format!("{}/latest_version.txt", config.base_url);
 
     // Download the version file
-    let client = reqwest::Client::new();
+    let client = create_tls_client(HeaderMap::new())?;
     let response = client
         .get(&version_url)
         .send()
@@ -231,7 +233,7 @@ async fn download_and_install_plugin(config: &PluginConfig) -> Result<String, St
     println!("Downloading {} plugin...", config.name);
 
     // Download the archive
-    let client = reqwest::Client::new();
+    let client = create_tls_client(HeaderMap::new())?;
     let response = client
         .get(&download_url)
         .send()
