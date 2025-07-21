@@ -1,7 +1,7 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{
-    render_bash_block, render_bash_block_rejected, render_styled_block,
+    preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_memorize_message,
@@ -146,6 +146,7 @@ pub fn update(
         InputEvent::ShellOutput(line) => {
             // remove ansi codes
             let line = strip_ansi_codes(&line);
+            let line = preprocess_terminal_output(&line);
             // normalize line endings
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
@@ -164,6 +165,9 @@ pub fn update(
         }
 
         InputEvent::ShellError(line) => {
+            let line = strip_ansi_codes(&line);
+            let line = preprocess_terminal_output(&line);
+            let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
             adjust_scroll(state, message_area_height, message_area_width);
         }
