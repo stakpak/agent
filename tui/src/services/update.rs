@@ -21,7 +21,6 @@ use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use console::strip_ansi_codes;
 
 const SCROLL_LINES: usize = 7;
 
@@ -145,7 +144,6 @@ pub fn update(
         }
         InputEvent::ShellOutput(line) => {
             // remove ansi codes
-            let line = strip_ansi_codes(&line);
             let line = preprocess_terminal_output(&line);
             // normalize line endings
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
@@ -165,7 +163,6 @@ pub fn update(
         }
 
         InputEvent::ShellError(line) => {
-            let line = strip_ansi_codes(&line);
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
@@ -249,7 +246,7 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
-            let text = strip_ansi_codes(&text);
+            let text = preprocess_terminal_output(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
             let line_count = text.lines().count();
             if line_count > 10 {
