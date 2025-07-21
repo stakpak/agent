@@ -3,8 +3,7 @@ use chrono::{DateTime, Utc};
 use rmcp::{
     Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool, tool_router,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use stakpak_api::models::{CodeIndex, SimpleDocument};
 use stakpak_api::{GenerationResult, ToolsCallParams};
@@ -22,10 +21,6 @@ pub struct GenerateCodeRequest {
         description = "Prompt to use to generate code, this should be as detailed as possible. Make sure to specify the paths of the files to be created or modified if you want to save changes to the filesystem."
     )]
     pub prompt: String,
-    #[schemars(
-        description = "Type of code to generate one of Dockerfile, Kubernetes, Terraform, GithubActions"
-    )]
-    pub provisioner: Provisioner,
     #[schemars(
         description = "Whether to save the generated files to the filesystem (default: false)"
     )]
@@ -88,32 +83,6 @@ pub struct LocalCodeSearchRequest {
     pub show_dependencies: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, JsonSchema)]
-pub enum Provisioner {
-    #[serde(rename = "Terraform")]
-    Terraform,
-    #[serde(rename = "Kubernetes")]
-    Kubernetes,
-    #[serde(rename = "Dockerfile")]
-    Dockerfile,
-    #[serde(rename = "GithubActions")]
-    GithubActions,
-    #[serde(rename = "None")]
-    None,
-}
-
-impl std::fmt::Display for Provisioner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Provisioner::Terraform => write!(f, "Terraform"),
-            Provisioner::Kubernetes => write!(f, "Kubernetes"),
-            Provisioner::Dockerfile => write!(f, "Dockerfile"),
-            Provisioner::GithubActions => write!(f, "GithubActions"),
-            Provisioner::None => write!(f, "None"),
-        }
-    }
-}
-
 #[tool_router(router = tool_router_remote, vis = "pub")]
 impl ToolContainer {
     #[tool(
@@ -124,7 +93,6 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
         &self,
         Parameters(GenerateCodeRequest {
             prompt,
-            provisioner,
             save_files,
             context,
         }): Parameters<GenerateCodeRequest>,
@@ -179,7 +147,6 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
                 name: "generate_code".to_string(),
                 arguments: json!({
                     "prompt": prompt,
-                    "provisioner": provisioner.to_string(),
                     "context": context_documents,
                     "output_format": output_format,
                 }),
