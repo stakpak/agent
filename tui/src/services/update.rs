@@ -619,11 +619,21 @@ fn handle_input_submitted(
             String::new()
         };
 
-        let command = tool_call_args
-            .split("\"command\": \"")
-            .nth(1)
-            .and_then(|s| s.split('\"').next())
-            .unwrap_or("");
+        let command = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call_args) {
+            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
+                cmd.to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            // Fallback to old parsing method if JSON parsing fails
+            tool_call_args
+                .split("\"command\": \"")
+                .nth(1)
+                .and_then(|s| s.split('\"').next())
+                .unwrap_or("")
+                .to_string()
+        };
         if !command.is_empty()
             && state
                 .interactive_commands
@@ -634,6 +644,7 @@ fn handle_input_submitted(
             state.is_dialog_open = false;
             state.input.clear();
             state.cursor_position = 0;
+            let command = preprocess_terminal_output(&command);
             state.run_shell_command(command.to_string(), shell_tx);
             return;
         }
