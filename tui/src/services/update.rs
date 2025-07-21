@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use console::strip_ansi_codes;
 
-const SCROLL_LINES: usize = 10;
+const SCROLL_LINES: usize = 7;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
