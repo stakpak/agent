@@ -2,6 +2,35 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tokio::sync::mpsc;
 
+/// Check if a line contains sensitive terms that might require user input
+fn contains_sensitive_terms(line: &str) -> bool {
+    let lower_line = line.to_lowercase();
+    let sensitive_terms = [
+        "password",
+        "passphrase",
+        "secret",
+        "api_key",
+        "api key",
+        "token",
+        "key",
+        "credential",
+        "private key",
+        "private_key",
+        "ssh key",
+        "ssh_key",
+        "gpg key",
+        "gpg_key",
+        "certificate",
+        "cert",
+        "pem",
+        "p12",
+        "keystore",
+        "truststore",
+    ];
+
+    sensitive_terms.iter().any(|term| lower_line.contains(term))
+}
+
 /// The shell prompt prefix used in the TUI
 pub const SHELL_PROMPT_PREFIX: &str = "$ ";
 
@@ -9,7 +38,7 @@ pub const SHELL_PROMPT_PREFIX: &str = "$ ";
 pub enum ShellEvent {
     Output(String),
     Error(String),
-    InputRequest(String), // For password prompts
+    InputRequest(String), // For sensitive input prompts (passwords, secrets, keys, etc.)
     Completed(i32),       // Exit code
     Clear,                // Clear the output display
 }
@@ -103,8 +132,8 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            // Check for password prompts
-                            if line.contains("password") || line.contains("Password") {
+                            // Check for sensitive input prompts
+                            if contains_sensitive_terms(&line) {
                                 let _ =
                                     tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
                             }
@@ -127,8 +156,8 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            // Check for password prompts in stderr too
-                            if line.contains("password") || line.contains("Password") {
+                            // Check for sensitive input prompts in stderr too
+                            if contains_sensitive_terms(&line) {
                                 let _ =
                                     tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
                             }
@@ -269,15 +298,15 @@ pub fn run_pty_command(
 
                     // Process accumulated data
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
-                        // Look for password prompt patterns
-                        if text.to_lowercase().contains("password") && !text.ends_with('\n') {
-                            // This is likely a password prompt without newline
+                        // Look for sensitive input prompt patterns
+                        if contains_sensitive_terms(&text) && !text.ends_with('\n') {
+                            // This is likely a sensitive input prompt without newline
                             let _ = output_tx.blocking_send(ShellEvent::InputRequest(text.clone()));
                             accumulated.clear();
                         } else if text.contains('\n') {
                             // Process complete lines
                             for line in text.lines() {
-                                if line.to_lowercase().contains("password") {
+                                if contains_sensitive_terms(line) {
                                     let _ = output_tx
                                         .blocking_send(ShellEvent::InputRequest(line.to_string()));
                                 } else {

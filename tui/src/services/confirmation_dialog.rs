@@ -35,10 +35,7 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
             .iter()
             .any(|cmd| command.contains(cmd))
         {
-            format!(
-                "This is a {} command '$' to run the command yourself or Esc to cancel and reprompt",
-                command
-            )
+            "This is an interactive command. '$' to run the command yourself or Esc to cancel and reprompt".to_string()
         } else {
             "Press Enter to continue or Esc to cancel and reprompt".to_string()
         }
