@@ -248,10 +248,6 @@ pub async fn run_default_warden(
     // Enable TTY by default for convenience command
     cmd.arg("--tty");
 
-    // TODO: enable mTLS to work with Warden
-    // Disable mTLS for the MCP server/client when running with warden
-    cmd.arg("--disable-mcp-mtls");
-
     // Mount ~/.stakpak/config.toml if it exists as read-only volume
     if let Ok(home_dir) = std::env::var("HOME") {
         let config_path = Path::new(&home_dir).join(".stakpak").join("config.toml");
@@ -271,6 +267,10 @@ pub async fn run_default_warden(
     for volume in extra_volumes {
         cmd.args(["--volume", &volume]);
     }
+
+    // TODO: enable mTLS to work with Warden
+    // Disable mTLS for the MCP server/client when running with warden
+    cmd.args(["--", "stakpak --disable-mcp-mtls"]);
 
     // Execute the warden command with TTY support
     execute_warden_command(cmd, true)
