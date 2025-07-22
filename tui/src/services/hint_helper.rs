@@ -9,7 +9,11 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if !state.input.is_empty() {
+    if !state.input.is_empty()
+        && !state.show_shell_mode
+        && !state.show_sessions_dialog
+        && !state.is_dialog_open
+    {
         let hint = Paragraph::new(Span::styled(
             "Press Enter to send",
             Style::default().fg(Color::DarkGray),

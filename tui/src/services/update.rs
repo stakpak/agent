@@ -130,7 +130,7 @@ pub fn update(
             state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -246,6 +246,18 @@ pub fn update(
 
             // Scroll to the bottom to show the cleared state
             adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::ShellKill => {
+            // Kill the running command if there is one
+            if let Some(cmd) = &state.active_shell_command {
+                if let Err(_e) = cmd.kill() {
+                    // eprintln!("Failed to kill command: {}", e);
+                }
+            }
+            // Reset shell state
+            state.active_shell_command = None;
+            state.active_shell_command_output = None;
+            state.waiting_for_shell_input = false;
         }
         InputEvent::HandlePaste(text) => {
             let text = preprocess_terminal_output(&text);
@@ -473,8 +485,10 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         }
     }
     // Send input to autocomplete worker (async, non-blocking)
-    if let Some(tx) = &state.autocomplete_tx {
-        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+    if !state.waiting_for_shell_input {
+        if let Some(tx) = &state.autocomplete_tx {
+            let _ = tx.try_send((state.input.clone(), state.cursor_position));
+        }
     }
 
     if state.input.is_empty() {
@@ -525,6 +539,7 @@ fn handle_esc(
     state: &mut AppState,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    shell_tx: &Sender<InputEvent>,
 ) {
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
@@ -547,7 +562,8 @@ fn handle_esc(
         state.input.clear();
         state.cursor_position = 0;
     } else if state.show_shell_mode {
-        state.show_shell_mode = false;
+        let _ = shell_tx.try_send(InputEvent::ShellKill);
+        // state.show_shell_mode = false;
         state.input.clear();
         state.cursor_position = 0;
         if state.dialog_command.is_some() {
@@ -617,41 +633,7 @@ fn handle_input_submitted(
         state.is_dialog_open = false;
         state.input.clear();
         state.cursor_position = 0;
-        let tool_call_args = if let Some(cmd) = state.dialog_command.as_ref() {
-            cmd.function.arguments.clone()
-        } else {
-            String::new()
-        };
 
-        let command = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call_args) {
-            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
-                cmd.to_string()
-            } else {
-                String::new()
-            }
-        } else {
-            // Fallback to old parsing method if JSON parsing fails
-            tool_call_args
-                .split("\"command\": \"")
-                .nth(1)
-                .and_then(|s| s.split('\"').next())
-                .unwrap_or("")
-                .to_string()
-        };
-        if !command.is_empty()
-            && state
-                .interactive_commands
-                .iter()
-                .any(|cmd| command.contains(cmd))
-        {
-            state.show_shell_mode = true;
-            state.is_dialog_open = false;
-            state.input.clear();
-            state.cursor_position = 0;
-            let command = preprocess_terminal_output(&command);
-            state.run_shell_command(command.to_string(), shell_tx);
-            return;
-        }
         if state.dialog_selected == 0 {
             if let Some(tool_call) = &state.dialog_command {
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));

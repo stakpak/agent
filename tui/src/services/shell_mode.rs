@@ -1,8 +1,21 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 
 use crate::services::bash_block::preprocess_terminal_output;
+
+// Global process registry to track running commands
+static PROCESS_REGISTRY: std::sync::OnceLock<Arc<Mutex<HashMap<String, u32>>>> =
+    std::sync::OnceLock::new();
+
+fn get_process_registry() -> Arc<Mutex<HashMap<String, u32>>> {
+    PROCESS_REGISTRY
+        .get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+        .clone()
+}
 
 // Master function combining all detection methods
 fn is_interactive_prompt(line: &str) -> bool {
@@ -35,6 +48,45 @@ pub struct ShellCommand {
 fn is_clear_command(command: &str) -> bool {
     let trimmed = command.trim();
     trimmed == "clear" || trimmed.starts_with("clear ") || trimmed.starts_with("clear\t")
+}
+
+impl ShellCommand {
+    /// Kill the running command by sending Ctrl+C and then using system kill
+    pub fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Try Ctrl+C through stdin multiple times
+        for _i in 0..3 {
+            let _ = self.stdin_tx.try_send("\x03".to_string());
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Also try sending Ctrl+C with newline
+        let _ = self.stdin_tx.try_send("\x03\n".to_string());
+
+        // Try to kill the process directly using the registry
+        let registry = get_process_registry();
+        if let Ok(registry) = registry.lock() {
+            if let Some(&pid) = registry.get(&self.id) {
+                #[cfg(unix)]
+                {
+                    use std::process::Command;
+                    // First try SIGTERM (graceful)
+                    let _ = Command::new("kill").args([&pid.to_string()]).output();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    // Then try SIGKILL (forceful)
+                    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+                }
+                #[cfg(windows)]
+                {
+                    use std::process::Command;
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/F"])
+                        .output();
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Run a shell command in the background while keeping the TUI active
@@ -88,6 +140,13 @@ pub fn run_background_shell_command(
                 return;
             }
         };
+
+        // Register the PID in the global registry
+        let child_pid = child.id();
+        let registry = get_process_registry();
+        if let Ok(mut registry) = registry.lock() {
+            registry.insert(command_id.clone(), child_pid);
+        }
 
         // Handle stdin in a separate thread
         if let Some(mut stdin) = child.stdin.take() {
@@ -178,10 +237,20 @@ pub fn run_background_shell_command(
                 let code = status.code().unwrap_or(-1);
                 // Give stdout/stderr threads a moment to finish sending their events
                 std::thread::sleep(std::time::Duration::from_millis(10));
+                // Clean up the registry
+                let registry = get_process_registry();
+                if let Ok(mut registry) = registry.lock() {
+                    registry.remove(&command_id);
+                }
                 let _ = output_tx.blocking_send(ShellEvent::Completed(code));
             }
             Err(e) => {
                 let _ = output_tx.blocking_send(ShellEvent::Error(format!("Wait error: {}", e)));
+                // Clean up the registry
+                let registry = get_process_registry();
+                if let Ok(mut registry) = registry.lock() {
+                    registry.remove(&command_id);
+                }
                 let _ = output_tx.blocking_send(ShellEvent::Completed(-1));
             }
         }
@@ -246,6 +315,14 @@ pub fn run_pty_command(
                 return;
             }
         };
+
+        // Register the PID in the global registry
+        if let Some(child_pid) = child.process_id() {
+            let registry = get_process_registry();
+            if let Ok(mut registry) = registry.lock() {
+                registry.insert(command_id.clone(), child_pid);
+            }
+        }
 
         // Take the writer for stdin
         let mut writer = match pair.master.take_writer() {

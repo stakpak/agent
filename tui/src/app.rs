@@ -139,6 +139,7 @@ pub enum InputEvent {
     ShellWaitingForInput,
     ShellCompleted(i32),
     ShellClear,
+    ShellKill,
     HandlePaste(String),
     InputDelete,
     InputDeleteWord,
@@ -307,7 +308,7 @@ impl AppState {
                     find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (self.input.trim() == "/")
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
-                    || (has_at_trigger && !is_files_empty);
+                    || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
         }
     }
