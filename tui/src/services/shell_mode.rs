@@ -1,6 +1,335 @@
+use regex::Regex;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use tokio::sync::mpsc;
+
+use crate::services::bash_block::preprocess_terminal_output;
+
+fn is_input_prompt(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    // Empty or very short lines are not prompts
+    if trimmed.len() < 2 {
+        return false;
+    }
+
+    // Shell prompts - check for user@host patterns too
+    if trimmed.ends_with("$ ")
+        || trimmed.ends_with("# ")
+        || trimmed.ends_with("> ")
+        || trimmed.ends_with("% ")
+    {
+        return true;
+    }
+
+    // Interactive shell patterns
+    static SHELL_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    let shell_regex = SHELL_REGEX
+        .get_or_init(|| Regex::new(r"^[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9_\-\.]+[:#\$%>]\s*$").ok());
+
+    if let Some(regex) = shell_regex {
+        if regex.is_match(trimmed) {
+            return true;
+        }
+    }
+
+    // Command continuation prompts
+    if trimmed == ">" || trimmed == ">>" || trimmed.starts_with("... ") {
+        return true;
+    }
+
+    // Interactive application prompts
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("(") && lower.ends_with(")") && lower.len() > 4 {
+        return true; // (Pdb), (gdb), etc.
+    }
+
+    // Generic input patterns - be more specific
+    if trimmed.ends_with(": ")
+        && !lower.contains("error")
+        && !lower.contains("warning")
+        && !lower.contains("info")
+        && !lower.starts_with("http")
+        && trimmed.len() < 100
+    {
+        // Additional check: likely interactive if it's asking for something
+        if lower.contains("enter") || lower.contains("input") || lower.contains("type") {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Detects sensitive credential-related prompts
+fn contains_sensitive_terms(line: &str) -> bool {
+    let lower_line = line.to_lowercase();
+
+    // Must look like a prompt, not just contain sensitive words
+    let looks_like_prompt = lower_line.ends_with(": ")
+        || lower_line.ends_with("? ")
+        || lower_line.contains("enter ")
+        || lower_line.contains("provide ")
+        || lower_line.contains("input ")
+        || lower_line.contains("please ");
+
+    if !looks_like_prompt {
+        return false;
+    }
+
+    let sensitive_terms = [
+        "password",
+        "passphrase",
+        "secret",
+        "pin",
+        "code",
+        "api_key",
+        "api key",
+        "access_key",
+        "access key",
+        "token",
+        "auth",
+        "authentication",
+        "credential",
+        "cred",
+        "private key",
+        "private_key",
+        "ssh key",
+        "ssh_key",
+        "gpg key",
+        "gpg_key",
+        "pgp key",
+        "pgp_key",
+        "certificate",
+        "cert",
+        "pem",
+        "p12",
+        "pfx",
+        "keystore",
+        "truststore",
+        "wallet",
+        "seed phrase",
+        "mnemonic",
+        "recovery",
+        "backup phrase",
+        "master password",
+        "unlock",
+        "decrypt",
+        "2fa",
+        "mfa",
+        "totp",
+        "otp",
+        "verification",
+    ];
+
+    sensitive_terms.iter().any(|term| lower_line.contains(term))
+}
+
+/// Detects confirmation prompts (y/n, yes/no, etc.)
+fn is_confirmation_prompt(line: &str) -> bool {
+    let lower_line = line.to_lowercase();
+    let trimmed = line.trim();
+
+    // Direct y/n patterns
+    static CONFIRM_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    let confirm_regex = CONFIRM_REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?i)\[?\s*([yn])\s*/\s*([yn])\s*\]?:?\s*$|\[?\s*(yes|no)\s*/\s*(yes|no)\s*\]?:?\s*$",
+        )
+        .ok()
+    });
+
+    if let Some(regex) = confirm_regex {
+        if regex.is_match(trimmed) {
+            return true;
+        }
+    }
+
+    // Question patterns with confirmation words
+    if lower_line.ends_with("?") || lower_line.ends_with("? ") {
+        let confirmation_words = [
+            "continue",
+            "proceed",
+            "confirm",
+            "sure",
+            "agree",
+            "delete",
+            "remove",
+            "overwrite",
+            "replace",
+            "install",
+            "upgrade",
+            "downgrade",
+            "restart",
+            "reboot",
+            "shutdown",
+            "abort",
+            "cancel",
+            "skip",
+            "retry",
+            "force",
+            "accept",
+            "approve",
+            "allow",
+            "permit",
+            "enable",
+            "disable",
+            "destroy",
+            "purge",
+            "reset",
+            "clear",
+        ];
+
+        if confirmation_words
+            .iter()
+            .any(|word| lower_line.contains(word))
+        {
+            return true;
+        }
+    }
+
+    // Common prompt patterns
+    let prompt_patterns = [
+        "do you want to",
+        "would you like to",
+        "are you sure",
+        "should i",
+        "shall i",
+        "may i",
+        "can i",
+        "press any key",
+        "press enter",
+        "hit enter",
+        "type y",
+        "type yes",
+        "enter y",
+        "enter yes",
+        "confirm by typing",
+        "to confirm",
+    ];
+
+    prompt_patterns
+        .iter()
+        .any(|pattern| lower_line.contains(pattern))
+}
+
+/// Detects various waiting/loading states that might need interaction
+fn is_waiting_prompt(line: &str) -> bool {
+    let lower_line = line.to_lowercase();
+    let trimmed = line.trim();
+
+    // Loading patterns that might pause for input
+    let waiting_patterns = [
+        "loading...",
+        "please wait",
+        "processing...",
+        "connecting...",
+        "downloading...",
+        "installing...",
+        "updating...",
+        "press any key",
+        "press enter",
+        "hit enter",
+        "press return",
+        "press space",
+        "press esc",
+        "press ctrl+c",
+        "waiting for",
+        "paused",
+        "suspended",
+        "more --",
+        "-- more --",
+        "continue?",
+        "next?",
+        "more?",
+        "help?",
+        "(press h for help)",
+        "(? for help)",
+        "enter to continue",
+        "space to continue",
+        "q to quit",
+        "pager:",
+        "less:",
+        "more:",
+        "debugger",
+        "breakpoint",
+        "debugging",
+    ];
+
+    if waiting_patterns
+        .iter()
+        .any(|pattern| lower_line.contains(pattern))
+    {
+        return true;
+    }
+
+    // Interactive program indicators
+    if trimmed.starts_with("(") && trimmed.ends_with(")") {
+        let interactive_apps = ["pdb", "gdb", "lldb", "node", "python", "irb", "repl"];
+        if interactive_apps.iter().any(|app| lower_line.contains(app)) {
+            return true;
+        }
+    }
+
+    // Progress indicators that might stop
+    static PROGRESS_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    let progress_regex = PROGRESS_REGEX
+        .get_or_init(|| Regex::new(r"^\s*\[[\s=>#\-\.]*\]\s*\d+%?\s*$|^\s*\d+%\s*$").ok());
+
+    // Don't flag normal progress bars, only ones that might pause
+    if let Some(regex) = progress_regex {
+        if regex.is_match(trimmed) && lower_line.contains("pause") {
+            return true;
+        }
+    }
+
+    // Menu selections
+    if (trimmed.starts_with("1)")
+        || trimmed.starts_with("a)")
+        || trimmed.starts_with("[1]")
+        || trimmed.starts_with("(1)"))
+        && (lower_line.contains("select")
+            || lower_line.contains("choose")
+            || lower_line.contains("option")
+            || lower_line.contains("menu"))
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Master function combining all detection methods
+fn is_interactive_prompt(line: &str) -> bool {
+    // Skip obviously non-interactive lines
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.len() > 500 {
+        return false;
+    }
+
+    // Skip common log patterns
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("info:")
+        || lower.starts_with("debug:")
+        || lower.starts_with("warn:")
+        || lower.starts_with("error:")
+        || lower.starts_with("[info]")
+        || lower.starts_with("[debug]")
+        || lower.starts_with("[warn]")
+        || lower.starts_with("[error]")
+        || lower.contains("timestamp")
+        || lower.contains("iso8601")
+    {
+        return false;
+    }
+
+    // Check all prompt types
+    is_input_prompt(line)
+        || contains_sensitive_terms(line)
+        || is_confirmation_prompt(line)
+        || is_waiting_prompt(line)
+}
 
 /// The shell prompt prefix used in the TUI
 pub const SHELL_PROMPT_PREFIX: &str = "$ ";
@@ -9,7 +338,7 @@ pub const SHELL_PROMPT_PREFIX: &str = "$ ";
 pub enum ShellEvent {
     Output(String),
     Error(String),
-    InputRequest(String), // For password prompts
+    InputRequest(String), // For sensitive input prompts (passwords, secrets, keys, etc.)
     Completed(i32),       // Exit code
     Clear,                // Clear the output display
 }
@@ -103,8 +432,9 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            // Check for password prompts
-                            if line.contains("password") || line.contains("Password") {
+                            let line = preprocess_terminal_output(&line);
+                            // Check for sensitive input prompts
+                            if is_interactive_prompt(&line) {
                                 let _ =
                                     tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
                             }
@@ -127,8 +457,9 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            // Check for password prompts in stderr too
-                            if line.contains("password") || line.contains("Password") {
+                            // Check for sensitive input prompts in stderr too
+                            let line = preprocess_terminal_output(&line);
+                            if is_interactive_prompt(&line) {
                                 let _ =
                                     tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
                             }
@@ -269,15 +600,16 @@ pub fn run_pty_command(
 
                     // Process accumulated data
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
-                        // Look for password prompt patterns
-                        if text.to_lowercase().contains("password") && !text.ends_with('\n') {
-                            // This is likely a password prompt without newline
+                        let text = preprocess_terminal_output(&text);
+                        // Look for sensitive input prompt patterns
+                        if is_interactive_prompt(&text) && !text.ends_with('\n') {
+                            // This is likely a sensitive input prompt without newline
                             let _ = output_tx.blocking_send(ShellEvent::InputRequest(text.clone()));
                             accumulated.clear();
                         } else if text.contains('\n') {
                             // Process complete lines
                             for line in text.lines() {
-                                if line.to_lowercase().contains("password") {
+                                if is_interactive_prompt(line) {
                                     let _ = output_tx
                                         .blocking_send(ShellEvent::InputRequest(line.to_string()));
                                 } else {
