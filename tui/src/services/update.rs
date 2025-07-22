@@ -147,18 +147,16 @@ pub fn update(
             // remove ansi codes
             let line = preprocess_terminal_output(&line);
             // normalize line endings
-            let line = line.replace("\r\n", "\n").replace('\r', "\n");
-            let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
+            let mut line = line.replace("\r\n", "\n").replace('\r', "\n");
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
-                let text = format!("{}\n", redacted_line);
+                let text = format!("{}\n", line);
                 output.push_str(&text);
                 *output = truncate_output(output);
             }
 
-            redacted_line = truncate_output(&redacted_line);
-
-            state.messages.push(Message::plain_text(redacted_line));
+            line = truncate_output(&line);
+            state.messages.push(Message::plain_text(line));
 
             // Only adjust scroll if not streaming or if we're staying at bottom
             if !state.is_streaming || state.stay_at_bottom {
