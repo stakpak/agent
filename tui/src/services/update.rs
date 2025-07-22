@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
-const SCROLL_LINES: usize = 7;
+// Reduced from 7 to 3 for smoother, less disorienting scrolling
+const SCROLL_LINES: usize = 3;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -159,14 +160,20 @@ pub fn update(
 
             state.messages.push(Message::plain_text(redacted_line));
 
-            adjust_scroll(state, message_area_height, message_area_width);
+            // Only adjust scroll if not streaming or if we're staying at bottom
+            if !state.is_streaming || state.stay_at_bottom {
+                adjust_scroll(state, message_area_height, message_area_width);
+            }
         }
 
         InputEvent::ShellError(line) => {
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
-            adjust_scroll(state, message_area_height, message_area_width);
+            // Only adjust scroll if not streaming or if we're staying at bottom
+            if !state.is_streaming || state.stay_at_bottom {
+                adjust_scroll(state, message_area_height, message_area_width);
+            }
         }
 
         InputEvent::ShellInputRequest(prompt) => {
@@ -178,6 +185,7 @@ pub fn update(
                 Color::Yellow,
             );
             state.waiting_for_shell_input = true;
+            // Always adjust scroll for input requests as they're important
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
@@ -798,6 +806,15 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
         if let MessageContent::Plain(text, _) = &mut message.content {
             text.push_str(&s);
         }
+        // During streaming, only adjust scroll if we're staying at bottom
+        if state.stay_at_bottom {
+            let input_height = 3;
+            let total_lines = state.messages.len() * 2;
+            let max_visible_lines =
+                std::cmp::max(1, message_area_height.saturating_sub(input_height));
+            let max_scroll = total_lines.saturating_sub(max_visible_lines);
+            state.scroll = max_scroll;
+        }
     } else {
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
@@ -878,12 +895,14 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.scroll + SCROLL_LINES < max_scroll {
-        state.scroll += SCROLL_LINES;
-        state.stay_at_bottom = false;
-    } else {
+
+    // If we're close to the bottom, just go to the bottom
+    if state.scroll + SCROLL_LINES >= max_scroll.saturating_sub(SCROLL_LINES) {
         state.scroll = max_scroll;
         state.stay_at_bottom = true;
+    } else {
+        state.scroll += SCROLL_LINES;
+        state.stay_at_bottom = false;
     }
 }
 
@@ -913,6 +932,17 @@ fn handle_page_down(state: &mut AppState, message_area_height: usize, message_ar
 }
 
 fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
+    // Skip expensive scroll calculations during streaming unless necessary
+    if state.is_streaming && state.stay_at_bottom {
+        // Use a simpler calculation for streaming when staying at bottom
+        let input_height = 3;
+        let total_lines = state.messages.len() * 2;
+        let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
+        let max_scroll = total_lines.saturating_sub(max_visible_lines);
+        state.scroll = max_scroll;
+        return;
+    }
+
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
