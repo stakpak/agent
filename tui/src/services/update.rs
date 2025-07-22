@@ -197,10 +197,8 @@ pub fn update(
                 }
             }
 
-            if !state.ondemand_shell_mode {
-                state.active_shell_command = None;
-                state.active_shell_command_output = None;
-            }
+            state.active_shell_command = None;
+            state.active_shell_command_output = None;
 
             state.input.clear();
             state.cursor_position = 0;
@@ -442,6 +440,12 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.cursor_position = 0;
         return;
     }
+    if state.show_shell_mode
+        && state.active_shell_command.is_some()
+        && !state.waiting_for_shell_input
+    {
+        return; // Block all input
+    }
     if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -562,7 +566,9 @@ fn handle_esc(
         state.input.clear();
         state.cursor_position = 0;
     } else if state.show_shell_mode {
-        let _ = shell_tx.try_send(InputEvent::ShellKill);
+        if state.active_shell_command.is_some() {
+            let _ = shell_tx.try_send(InputEvent::ShellKill);
+        }
         // state.show_shell_mode = false;
         state.input.clear();
         state.cursor_position = 0;

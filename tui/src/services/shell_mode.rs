@@ -152,8 +152,8 @@ pub fn run_background_shell_command(
         if let Some(mut stdin) = child.stdin.take() {
             std::thread::spawn(move || {
                 while let Some(input) = stdin_rx.blocking_recv() {
-                    if let Err(e) = writeln!(stdin, "{}", input) {
-                        eprintln!("Failed to write to stdin: {}", e);
+                    if let Err(_e) = writeln!(stdin, "{}", input) {
+                        // eprintln!("Failed to write to stdin: {}", e);
                         break;
                     }
                     if let Err(e) = stdin.flush() {
