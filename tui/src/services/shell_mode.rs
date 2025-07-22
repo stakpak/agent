@@ -68,6 +68,7 @@ fn contains_sensitive_terms(line: &str) -> bool {
 
     // Must look like a prompt, not just contain sensitive words
     let looks_like_prompt = lower_line.ends_with(": ")
+        || lower_line.ends_with(":")
         || lower_line.ends_with("? ")
         || lower_line.contains("enter ")
         || lower_line.contains("provide ")
@@ -463,7 +464,24 @@ pub fn run_background_shell_command(
                                 let _ =
                                     tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
                             }
-                            let _ = tx_clone.blocking_send(ShellEvent::Error(line));
+
+                            // Check if this stderr line is actually an error or just progress info
+                            let lower_line = line.to_lowercase();
+                            let is_actual_error = lower_line.contains("error")
+                                || lower_line.contains("failed")
+                                || lower_line.contains("fatal")
+                                || lower_line.contains("exception")
+                                || lower_line.contains("panic")
+                                || lower_line.starts_with("error:")
+                                || lower_line.starts_with("fatal:")
+                                || lower_line.starts_with("exception:");
+
+                            if is_actual_error {
+                                let _ = tx_clone.blocking_send(ShellEvent::Error(line));
+                            } else {
+                                // Treat as normal output if it's not an actual error
+                                let _ = tx_clone.blocking_send(ShellEvent::Output(line));
+                            }
                         }
                         Err(e) => {
                             let _ = tx_clone
@@ -478,6 +496,8 @@ pub fn run_background_shell_command(
         match child.wait() {
             Ok(status) => {
                 let code = status.code().unwrap_or(-1);
+                // Give stdout/stderr threads a moment to finish sending their events
+                std::thread::sleep(std::time::Duration::from_millis(10));
                 let _ = output_tx.blocking_send(ShellEvent::Completed(code));
             }
             Err(e) => {
