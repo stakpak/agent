@@ -5,7 +5,7 @@ use crate::services::bash_block::{
 };
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_memorize_message,
-    push_status_message, push_styled_message, render_system_message,
+    push_status_message, render_system_message,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
@@ -174,20 +174,16 @@ pub fn update(
             }
         }
 
-        InputEvent::ShellInputRequest(prompt) => {
-            push_styled_message(
-                state,
-                &prompt,
-                Color::Rgb(180, 180, 180),
-                "?! ",
-                Color::Yellow,
-            );
+        InputEvent::ShellWaitingForInput => {
             state.waiting_for_shell_input = true;
-            // Always adjust scroll for input requests as they're important
+            // Allow user input when command is waiting
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
         InputEvent::ShellCompleted(_code) => {
+            // Command completed, reset waiting state
+            state.waiting_for_shell_input = false;
+
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
@@ -583,7 +579,7 @@ fn handle_input_submitted(
             state.cursor_position = 0;
             state.waiting_for_shell_input = false;
 
-            // Send the password to the shell command
+            // Send the input to the shell command
             if let Some(cmd) = &state.active_shell_command {
                 let stdin_tx = cmd.stdin_tx.clone();
                 tokio::spawn(async move {

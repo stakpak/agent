@@ -136,7 +136,7 @@ pub enum InputEvent {
     Tab,
     ShellOutput(String),
     ShellError(String),
-    ShellInputRequest(String),
+    ShellWaitingForInput,
     ShellCompleted(i32),
     ShellClear,
     HandlePaste(String),
@@ -273,8 +273,8 @@ impl AppState {
                     ShellEvent::Error(line) => {
                         let _ = input_tx.send(InputEvent::ShellError(line)).await;
                     }
-                    ShellEvent::InputRequest(prompt) => {
-                        let _ = input_tx.send(InputEvent::ShellInputRequest(prompt)).await;
+                    ShellEvent::WaitingForInput => {
+                        let _ = input_tx.send(InputEvent::ShellWaitingForInput).await;
                     }
                     ShellEvent::Completed(code) => {
                         let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
