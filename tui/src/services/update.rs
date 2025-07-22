@@ -951,7 +951,6 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state
         .messages
         .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
-    state.streaming_tool_result_id = None;
 }
 
 pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
