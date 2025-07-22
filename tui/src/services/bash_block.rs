@@ -8,9 +8,11 @@ use console::strip_ansi_codes;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use regex::Regex;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultStatus,
 };
+use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
@@ -20,11 +22,32 @@ pub enum ContentAlignment {
     Center,
 }
 
+pub fn strip_all_ansi(text: &str) -> String {
+    // First pass: console crate (handles 95% of cases efficiently)
+    let cleaned = console::strip_ansi_codes(text);
+
+    // Second pass: catch the specific sequences console misses
+    static REMAINING: OnceLock<Option<Regex>> = OnceLock::new();
+    let maybe_regex = REMAINING.get_or_init(|| {
+        Regex::new(concat!(
+            r"\x1b\]0;[^\x07\x1b]*(\x07|\x1b\\)|", // Window titles
+            r"\\u\{[0-9a-fA-F]+\}|",               // Unicode escapes
+            r"\x07"                                // Bell
+        ))
+        .ok()
+    });
+
+    if let Some(regex) = maybe_regex {
+        regex.replace_all(&cleaned, "").to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
 // Add this function to preprocess text and handle carriage returns
-fn preprocess_terminal_output(text: &str) -> String {
+pub fn preprocess_terminal_output(text: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut current_line = String::new();
-
+    let text = strip_all_ansi(text);
     for ch in text.chars() {
         match ch {
             '\r' => {
@@ -35,6 +58,9 @@ fn preprocess_terminal_output(text: &str) -> String {
                 // Newline - finish the current line and start a new one
                 lines.push(current_line.clone());
                 current_line.clear();
+            }
+            '\t' => {
+                current_line.push_str("    ");
             }
             _ => {
                 current_line.push(ch);
@@ -57,7 +83,6 @@ fn preprocess_terminal_output(text: &str) -> String {
     if filtered_lines.is_empty() && !text.trim().is_empty() {
         return text.to_string();
     }
-
     filtered_lines.join("\n")
 }
 
@@ -639,11 +664,8 @@ pub fn render_result_block(
     // Preprocess result to handle terminal control sequences
     let preprocessed_result = preprocess_terminal_output(&result);
 
-    // Convert result to ratatui Text with ANSI support
-    let result_text = match preprocessed_result.into_text() {
-        Ok(text) => text,
-        Err(_) => ratatui::text::Text::from(preprocessed_result.clone()),
-    };
+    // Since the content is plain text without ANSI codes, just create a simple Text
+    let result_text = ratatui::text::Text::from(preprocessed_result);
 
     // Use compact indentation like bash blocks
     let line_indent = "  "; // 2 spaces for compact style

@@ -1,7 +1,7 @@
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{
-    render_bash_block, render_bash_block_rejected, render_styled_block,
+    preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_memorize_message,
@@ -21,9 +21,8 @@ use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use console::strip_ansi_codes;
 
-const SCROLL_LINES: usize = 10;
+const SCROLL_LINES: usize = 7;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -145,7 +144,7 @@ pub fn update(
         }
         InputEvent::ShellOutput(line) => {
             // remove ansi codes
-            let line = strip_ansi_codes(&line);
+            let line = preprocess_terminal_output(&line);
             // normalize line endings
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
@@ -164,6 +163,8 @@ pub fn update(
         }
 
         InputEvent::ShellError(line) => {
+            let line = preprocess_terminal_output(&line);
+            let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
             adjust_scroll(state, message_area_height, message_area_width);
         }
@@ -245,7 +246,7 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::HandlePaste(text) => {
-            let text = strip_ansi_codes(&text);
+            let text = preprocess_terminal_output(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
             let line_count = text.lines().count();
             if line_count > 10 {
@@ -431,6 +432,8 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
+    state.show_shortcuts = false;
+
     if c == '$' && (state.input.is_empty() || state.is_dialog_open) && !state.show_sessions_dialog {
         state.input.clear();
         handle_shell_mode(state);
@@ -618,11 +621,21 @@ fn handle_input_submitted(
             String::new()
         };
 
-        let command = tool_call_args
-            .split("\"command\": \"")
-            .nth(1)
-            .and_then(|s| s.split('\"').next())
-            .unwrap_or("");
+        let command = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call_args) {
+            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
+                cmd.to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            // Fallback to old parsing method if JSON parsing fails
+            tool_call_args
+                .split("\"command\": \"")
+                .nth(1)
+                .and_then(|s| s.split('\"').next())
+                .unwrap_or("")
+                .to_string()
+        };
         if !command.is_empty()
             && state
                 .interactive_commands
@@ -633,6 +646,7 @@ fn handle_input_submitted(
             state.is_dialog_open = false;
             state.input.clear();
             state.cursor_position = 0;
+            let command = preprocess_terminal_output(&command);
             state.run_shell_command(command.to_string(), shell_tx);
             return;
         }
