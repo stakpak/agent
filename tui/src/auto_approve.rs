@@ -59,6 +59,11 @@ impl Default for CommandPatterns {
                 "mkfs".to_string(),
                 "fdisk".to_string(),
                 "format".to_string(),
+                "ssh-keygen".to_string(),
+                "gpg".to_string(),
+                "openssl".to_string(),
+                "certutil".to_string(),
+                "keytool".to_string(),
             ],
             interactive_required: vec![
                 "ssh".to_string(),

@@ -20,13 +20,13 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputDeleteWord)
                 }
-                KeyCode::Char('a')
+                KeyCode::Char('o')
                     if key.modifiers.contains(KeyModifiers::CONTROL)
                         && key.modifiers.contains(KeyModifiers::SHIFT) =>
                 {
                     Some(InputEvent::AutoApproveCurrentTool)
                 }
-                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ToggleAutoApprove)
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {

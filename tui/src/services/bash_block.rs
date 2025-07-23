@@ -781,7 +781,7 @@ pub fn render_bash_block_rejected(
 
     // Handle multi-line command name if needed
     let title_with_args = format!("{} ({})", title, command_name);
-    let max_width = 80; // Reasonable max width for rejected commands
+    let max_width = 120; // Reasonable max width for rejected commands
 
     if title_with_args.len() <= max_width {
         // Single line

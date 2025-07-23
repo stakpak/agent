@@ -196,7 +196,7 @@ fn render_enhanced_confirmation_dialog(
         let hint = Line::from(vec![
             Span::styled("💡 Tip: ", Style::default().fg(Color::Yellow)),
             Span::styled(
-                "Ctrl+A: toggle auto-approve | Ctrl+Shift+A: auto-approve this tool",
+                "Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool",
                 Style::default().fg(Color::Gray),
             ),
         ]);
@@ -231,7 +231,7 @@ fn create_options_list(
     };
     options.push(ListItem::new(option2));
 
-    // Option 3: No, and tell Claude what to do differently
+    // Option 3: No, and tell Stakpak what to do differently
     let option3 = if state.dialog_selected == 2 {
         "> No, and tell Stakpak what to do differently (esc)"
     } else {

@@ -74,9 +74,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     } else if state.is_dialog_open {
         // Show focus information when dialog is open
         let focus_text = if state.dialog_focused {
-            "Press Tab to focus Chat view. Dialog focused"
+            "Press Tab to focus Chat view. Dialog focused | Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool"
         } else {
-            "Press Tab to focus Dialog. Chat view focused"
+            "Press Tab to focus Dialog. Chat view focused | Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool"
         };
 
         let hint = Paragraph::new(Span::styled(
