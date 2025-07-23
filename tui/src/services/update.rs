@@ -102,7 +102,14 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
+                handle_input_submitted(
+                    state,
+                    message_area_height,
+                    output_tx,
+                    input_tx,
+                    shell_tx,
+                    cancel_tx,
+                );
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
@@ -236,17 +243,29 @@ pub fn update(
                     crate::auto_approve::RiskLevel::High => "high-risk",
                     crate::auto_approve::RiskLevel::Critical => "critical-risk",
                 };
-
-                let auto_approve_message = format!(
-                    "🔓 Auto-approved {} tool ({})",
-                    tool_call.function.name, risk_text
-                );
+                // make tool name split by _ and make first letter capital
+                let tool_name = tool_call
+                    .function
+                    .name
+                    .clone()
+                    .split('_')
+                    .map(|s| {
+                        let mut chars = s.chars();
+                        match chars.next() {
+                            None => String::new(),
+                            Some(first) => first.to_uppercase().chain(chars).collect(),
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join(" ");
+                let auto_approve_message =
+                    format!("🔓 Auto-approved {} tool ({})", tool_name, risk_text);
                 push_styled_message(state, &auto_approve_message, Color::Green, "", Color::Green);
             } else {
                 // Show confirmation dialog as usual
                 state.dialog_command = Some(tool_call.clone());
                 state.is_dialog_open = true;
-                state.dialog_focused = false; // Default to messages view focused when dialog opens
+                state.dialog_focused = true; // Default to dialog focused when dialog opens
             }
         }
         InputEvent::Loading(is_loading) => {
@@ -688,6 +707,7 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     if (state.is_streaming || state.loading) && !state.is_dialog_open {
         state.input.clear();
@@ -737,44 +757,7 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        state.is_dialog_open = false;
-        state.input.clear();
-        state.cursor_position = 0;
-        let tool_call_args = if let Some(cmd) = state.dialog_command.as_ref() {
-            cmd.function.arguments.clone()
-        } else {
-            String::new()
-        };
-
-        let command = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call_args) {
-            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
-                cmd.to_string()
-            } else {
-                String::new()
-            }
-        } else {
-            // Fallback to old parsing method if JSON parsing fails
-            tool_call_args
-                .split("\"command\": \"")
-                .nth(1)
-                .and_then(|s| s.split('\"').next())
-                .unwrap_or("")
-                .to_string()
-        };
-        if !command.is_empty()
-            && state
-                .interactive_commands
-                .iter()
-                .any(|cmd| command.contains(cmd))
-        {
-            state.show_shell_mode = true;
-            state.is_dialog_open = false;
-            state.input.clear();
-            state.cursor_position = 0;
-            let command = preprocess_terminal_output(&command);
-            state.run_shell_command(command.to_string(), shell_tx);
-            return;
-        }
+        eprintln!("state.dialog_selected: {}", state.dialog_selected);
         match state.dialog_selected {
             0 => {
                 // Option 1: Yes - Accept the tool call
@@ -812,17 +795,14 @@ fn handle_input_submitted(
                 }
             }
             2 => {
-                // Option 3: No, and tell Claude what to do differently
-                let tool_call_opt = state.dialog_command.clone();
-                if let Some(tool_call) = &tool_call_opt {
-                    // Reject the tool call
-                    let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-
-                    // Show the styled rejection message
-                    let truncated_command = extract_truncated_command_arguments(tool_call);
-                    let title = get_command_type_name(tool_call);
-                    render_bash_block_rejected(&truncated_command, &title, state, None);
-                }
+                // Option 3: No, and tell Stakpak what to do differently
+                eprintln!(
+                    "Dialog selected: {}, is_dialog_open: {}, dialog_command: {:?}",
+                    state.dialog_selected,
+                    state.is_dialog_open,
+                    state.dialog_command.is_some()
+                );
+                handle_esc(state, output_tx, cancel_tx);
             }
             _ => {
                 // Fallback to option 0 (Yes)
@@ -831,9 +811,11 @@ fn handle_input_submitted(
                 }
             }
         }
-
+        state.is_dialog_open = false;
         state.dialog_command = None;
-        state.dialog_focused = false; // Reset focus when dialog closes
+        state.dialog_focused = false;
+        state.input.clear();
+        state.cursor_position = 0; // Reset focus when dialog closes
     } else if state.show_helper_dropdown {
         if state.autocomplete.is_active() {
             let selected_file = state
