@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
 // Reduced from 7 to 3 for smoother, less disorienting scrolling
-const SCROLL_LINES: usize = 3;
+const SCROLL_LINES: usize = 5;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -946,14 +946,12 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
-
-    // If we're close to the bottom, just go to the bottom
-    if state.scroll + SCROLL_LINES >= max_scroll.saturating_sub(SCROLL_LINES) {
-        state.scroll = max_scroll;
-        state.stay_at_bottom = true;
-    } else {
+    if state.scroll + SCROLL_LINES < max_scroll {
         state.scroll += SCROLL_LINES;
         state.stay_at_bottom = false;
+    } else {
+        state.scroll = max_scroll;
+        state.stay_at_bottom = true;
     }
 }
 
@@ -983,17 +981,6 @@ fn handle_page_down(state: &mut AppState, message_area_height: usize, message_ar
 }
 
 fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    // Skip expensive scroll calculations during streaming unless necessary
-    if state.is_streaming && state.stay_at_bottom {
-        // Use a simpler calculation for streaming when staying at bottom
-        let input_height = 3;
-        let total_lines = state.messages.len() * 2;
-        let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
-        let max_scroll = total_lines.saturating_sub(max_visible_lines);
-        state.scroll = max_scroll;
-        return;
-    }
-
     let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
