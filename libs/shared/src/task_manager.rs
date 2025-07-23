@@ -1,4 +1,5 @@
 use crate::helper::generate_simple_id;
+use crate::remote_connection::{RemoteConnectionInfo, RemoteConnectionManager};
 use chrono::{DateTime, Utc};
 use std::{collections::HashMap, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
@@ -27,6 +28,7 @@ pub struct Task {
     pub id: TaskId,
     pub status: TaskStatus,
     pub command: String,
+    pub remote_connection: Option<RemoteConnectionInfo>,
     pub output: Option<String>,
     pub error: Option<String>,
     pub start_time: DateTime<Utc>,
@@ -105,6 +107,7 @@ pub enum TaskMessage {
     Start {
         id: Option<TaskId>,
         command: String,
+        remote_connection: Option<RemoteConnectionInfo>,
         timeout: Option<Duration>,
         response_tx: oneshot::Sender<Result<TaskId, TaskError>>,
     },
@@ -199,11 +202,14 @@ impl TaskManager {
             TaskMessage::Start {
                 id,
                 command,
+                remote_connection,
                 timeout,
                 response_tx,
             } => {
                 let task_id = id.unwrap_or_else(|| generate_simple_id(6));
-                let result = self.start_task(task_id.clone(), command, timeout).await;
+                let result = self
+                    .start_task(task_id.clone(), command, timeout, remote_connection)
+                    .await;
                 let _ = response_tx.send(result.map(|_| task_id.clone()));
                 false
             }
@@ -278,6 +284,7 @@ impl TaskManager {
         id: TaskId,
         command: String,
         timeout: Option<Duration>,
+        remote_connection: Option<RemoteConnectionInfo>,
     ) -> Result<(), TaskError> {
         if self.tasks.contains_key(&id) {
             return Err(TaskError::TaskAlreadyRunning(id));
@@ -287,6 +294,7 @@ impl TaskManager {
             id: id.clone(),
             status: TaskStatus::Running,
             command: command.clone(),
+            remote_connection: remote_connection.clone(),
             output: None,
             error: None,
             start_time: Utc::now(),
@@ -296,11 +304,15 @@ impl TaskManager {
 
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let (process_tx, process_rx) = oneshot::channel();
-        let task_tx = self.tx.clone();
+        let task_tx: mpsc::UnboundedSender<TaskMessage> = self.tx.clone();
 
+        let is_remote_task = remote_connection.is_some();
+
+        // Spawn task immediately - SSH connection happens inside the task
         let handle = tokio::spawn(Self::execute_task(
             id.clone(),
             command,
+            remote_connection,
             timeout,
             cancel_rx,
             process_tx,
@@ -316,12 +328,16 @@ impl TaskManager {
 
         self.tasks.insert(id.clone(), entry);
 
-        // Wait for the process ID to be sent back
-        if let Ok(process_id) = process_rx.await {
-            if let Some(entry) = self.tasks.get_mut(&id) {
-                entry.process_id = Some(process_id);
+        // Wait for the process ID for local tasks only
+        if !is_remote_task {
+            // Local task - wait for process ID for proper cleanup
+            if let Ok(process_id) = process_rx.await {
+                if let Some(entry) = self.tasks.get_mut(&id) {
+                    entry.process_id = Some(process_id);
+                }
             }
         }
+        // Remote tasks don't have local process IDs, so we skip waiting
 
         Ok(())
     }
@@ -366,11 +382,51 @@ impl TaskManager {
     async fn execute_task(
         id: TaskId,
         command: String,
+        remote_connection: Option<RemoteConnectionInfo>,
         task_timeout: Option<Duration>,
         mut cancel_rx: oneshot::Receiver<()>,
         process_tx: oneshot::Sender<u32>,
         task_tx: mpsc::UnboundedSender<TaskMessage>,
     ) {
+        let completion = if let Some(remote_info) = remote_connection {
+            // Remote execution
+            Self::execute_remote_task(
+                id.clone(),
+                command,
+                remote_info,
+                task_timeout,
+                &mut cancel_rx,
+                &task_tx,
+            )
+            .await
+        } else {
+            // Local execution (existing logic)
+            Self::execute_local_task(
+                id.clone(),
+                command,
+                task_timeout,
+                &mut cancel_rx,
+                process_tx,
+                &task_tx,
+            )
+            .await
+        };
+
+        // Send task completion back to manager
+        let _ = task_tx.send(TaskMessage::TaskUpdate {
+            id: id.clone(),
+            completion,
+        });
+    }
+
+    async fn execute_local_task(
+        id: TaskId,
+        command: String,
+        task_timeout: Option<Duration>,
+        cancel_rx: &mut oneshot::Receiver<()>,
+        process_tx: oneshot::Sender<u32>,
+        task_tx: &mpsc::UnboundedSender<TaskMessage>,
+    ) -> TaskCompletion {
         let mut child = match Command::new("sh")
             .arg("-c")
             .arg(&command)
@@ -380,13 +436,11 @@ impl TaskManager {
         {
             Ok(child) => child,
             Err(err) => {
-                let completion = TaskCompletion {
+                return TaskCompletion {
                     output: String::new(),
                     error: Some(format!("Failed to spawn command: {}", err)),
                     final_status: TaskStatus::Failed,
                 };
-                let _ = task_tx.send(TaskMessage::TaskUpdate { id, completion });
-                return;
             }
         };
 
@@ -481,7 +535,7 @@ impl TaskManager {
                             }
                         }
                     }
-                    _ = &mut cancel_rx => {
+                    _ = &mut *cancel_rx => {
                         return TaskCompletion {
                             output: final_output,
                             error: Some("Tool call was cancelled and don't try to run it again".to_string()),
@@ -499,7 +553,7 @@ impl TaskManager {
         };
 
         // Execute with timeout if provided
-        let completion = if let Some(timeout_duration) = task_timeout {
+        if let Some(timeout_duration) = task_timeout {
             match timeout(timeout_duration, stream_output).await {
                 Ok(result) => result,
                 Err(_) => TaskCompletion {
@@ -510,13 +564,77 @@ impl TaskManager {
             }
         } else {
             stream_output.await
+        }
+    }
+
+    async fn execute_remote_task(
+        id: TaskId,
+        command: String,
+        remote_info: RemoteConnectionInfo,
+        task_timeout: Option<Duration>,
+        cancel_rx: &mut oneshot::Receiver<()>,
+        task_tx: &mpsc::UnboundedSender<TaskMessage>,
+    ) -> TaskCompletion {
+        // Use RemoteConnectionManager to get a connection
+        let connection_manager = RemoteConnectionManager::new();
+        let connection = match connection_manager.get_connection(&remote_info).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                return TaskCompletion {
+                    output: String::new(),
+                    error: Some(format!("Failed to establish remote connection: {}", e)),
+                    final_status: TaskStatus::Failed,
+                };
+            }
         };
 
-        // Send task completion back to manager
-        let _ = task_tx.send(TaskMessage::TaskUpdate {
-            id: id.clone(),
-            completion,
-        });
+        // Create progress callback for streaming updates
+        let task_tx_clone = task_tx.clone();
+        let id_clone = id.clone();
+        let progress_callback = move |output: String| {
+            if !output.trim().is_empty() {
+                let _ = task_tx_clone.send(TaskMessage::PartialUpdate {
+                    id: id_clone.clone(),
+                    output,
+                });
+            }
+        };
+
+        // Use streaming execution with proper cancellation and timeout
+        match connection
+            .execute_command_with_streaming(&command, task_timeout, cancel_rx, progress_callback)
+            .await
+        {
+            Ok((output, exit_code)) => TaskCompletion {
+                output,
+                error: if exit_code != 0 {
+                    Some(format!("Command exited with code {}", exit_code))
+                } else {
+                    None
+                },
+                final_status: TaskStatus::Completed,
+            },
+            Err(e) => {
+                let error_msg = e.to_string();
+                let status = if error_msg.contains("timed out") {
+                    TaskStatus::TimedOut
+                } else if error_msg.contains("cancelled") {
+                    TaskStatus::Cancelled
+                } else {
+                    TaskStatus::Failed
+                };
+
+                TaskCompletion {
+                    output: String::new(),
+                    error: Some(if error_msg.contains("cancelled") {
+                        "Tool call was cancelled and don't try to run it again".to_string()
+                    } else {
+                        format!("Remote command failed: {}", error_msg)
+                    }),
+                    final_status: status,
+                }
+            }
+        }
     }
 
     async fn shutdown_all_tasks(&mut self) {
@@ -561,13 +679,15 @@ impl TaskManagerHandle {
         &self,
         command: String,
         timeout: Option<Duration>,
+        remote_connection: Option<RemoteConnectionInfo>,
     ) -> Result<TaskInfo, TaskError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.tx
             .send(TaskMessage::Start {
                 id: None,
-                command,
+                command: command.clone(),
+                remote_connection: remote_connection.clone(),
                 timeout,
                 response_tx,
             })
@@ -577,24 +697,25 @@ impl TaskManagerHandle {
             .await
             .map_err(|_| TaskError::ManagerShutdown)??;
 
+        // Wait for the task to start and get its status
         tokio::time::sleep(START_TASK_WAIT_TIME).await;
 
-        // Get the task info after waiting
         let task_info = self
-            .get_all_tasks()
-            .await?
-            .into_iter()
-            .find(|task| task.id == task_id)
-            .ok_or(TaskError::TaskNotFound(task_id.clone()))?;
+            .get_task_details(task_id.clone())
+            .await
+            .map_err(|_| TaskError::ManagerShutdown)?
+            .ok_or_else(|| TaskError::TaskNotFound(task_id.clone()))?;
 
-        // If the task failed, return an error with the failure details
-        if matches!(task_info.status, TaskStatus::Failed) {
-            let error_msg = task_info
-                .output
-                .unwrap_or_else(|| "Task failed on start".to_string());
-            return Err(TaskError::TaskFailedOnStart(error_msg));
+        // If the task is not running, it means it failed to start or was cancelled
+        if task_info.status != TaskStatus::Running {
+            return Err(TaskError::TaskFailedOnStart(
+                task_info
+                    .output
+                    .unwrap_or_else(|| "Unknown reason".to_string()),
+            ));
         }
 
+        // Return the task info with updated status
         Ok(task_info)
     }
 
@@ -688,7 +809,7 @@ mod tests {
 
         // Start a background task
         let task_info = handle
-            .start_task("sleep 5".to_string(), None)
+            .start_task("sleep 5".to_string(), None, None)
             .await
             .expect("Failed to start task");
 
@@ -724,7 +845,7 @@ mod tests {
 
         // Start a long-running background task
         let task_info = handle
-            .start_task("sleep 10".to_string(), None)
+            .start_task("sleep 10".to_string(), None, None)
             .await
             .expect("Failed to start task");
 
@@ -760,7 +881,7 @@ mod tests {
 
         // Start a simple task
         let task_info = handle
-            .start_task("echo 'Hello, World!'".to_string(), None)
+            .start_task("echo 'Hello, World!'".to_string(), None, None)
             .await
             .expect("Failed to start task");
 
@@ -801,7 +922,7 @@ mod tests {
 
         // Start a task that will fail immediately
         let result = handle
-            .start_task("nonexistent_command_12345".to_string(), None)
+            .start_task("nonexistent_command_12345".to_string(), None, None)
             .await;
 
         // Should get a TaskFailedOnStart error
@@ -825,7 +946,7 @@ mod tests {
         });
 
         // Start a task that will exit with non-zero code immediately
-        let result = handle.start_task("exit 1".to_string(), None).await;
+        let result = handle.start_task("exit 1".to_string(), None, None).await;
 
         // Should get a TaskFailedOnStart error
         assert!(matches!(result, Err(TaskError::TaskFailedOnStart(_))));

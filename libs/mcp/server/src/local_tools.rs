@@ -4,6 +4,7 @@ use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
+use stakpak_shared::remote_connection::{PathLocation, RemoteConnection, RemoteConnectionInfo};
 
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
@@ -12,6 +13,7 @@ use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
 use std::fs::{self};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::error;
@@ -25,6 +27,14 @@ pub struct RunCommandRequest {
     pub description: Option<String>,
     #[schemars(description = "Optional timeout for the command execution in seconds")]
     pub timeout: Option<u64>,
+    #[schemars(
+        description = "Optional remote connection string (format: user@host or user@host:port)"
+    )]
+    pub remote: Option<String>,
+    #[schemars(description = "Optional password for remote connection")]
+    pub password: Option<String>,
+    #[schemars(description = "Optional path to private key for remote connection")]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -47,17 +57,27 @@ pub struct GetAllTasksRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ViewRequest {
-    #[schemars(description = "The path to the file or directory to view")]
+    #[schemars(
+        description = "The path to the file or directory to view. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+    )]
     pub path: String,
     #[schemars(
         description = "Optional line range to view [start_line, end_line]. Line numbers are 1-indexed. Use -1 for end_line to read to end of file."
     )]
     pub view_range: Option<[i32; 2]>,
+    #[schemars(description = "Optional password for remote connection (if path is remote)")]
+    pub password: Option<String>,
+    #[schemars(
+        description = "Optional path to private key for remote connection (if path is remote)"
+    )]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct StrReplaceRequest {
-    #[schemars(description = "The path to the file to modify")]
+    #[schemars(
+        description = "The path to the file to modify. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+    )]
     pub path: String,
     #[schemars(
         description = "The exact text to replace (must match exactly, including whitespace and indentation)"
@@ -71,16 +91,30 @@ pub struct StrReplaceRequest {
         description = "Whether to replace all occurrences of the old text in the file (default: false)"
     )]
     pub replace_all: Option<bool>,
+    #[schemars(description = "Optional password for remote connection (if path is remote)")]
+    pub password: Option<String>,
+    #[schemars(
+        description = "Optional path to private key for remote connection (if path is remote)"
+    )]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateRequest {
-    #[schemars(description = "The path where the new file should be created")]
+    #[schemars(
+        description = "The path where the new file should be created. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+    )]
     pub path: String,
     #[schemars(
         description = "The content to write to the new file, when creating code, ensure the new text has proper syntax, indentation, and follows the codebase style."
     )]
     pub file_text: String,
+    #[schemars(description = "Optional password for remote connection (if path is remote)")]
+    pub password: Option<String>,
+    #[schemars(
+        description = "Optional path to private key for remote connection (if path is remote)"
+    )]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -94,7 +128,16 @@ pub struct GeneratePasswordRequest {
 #[tool_router(router = tool_router_local, vis = "pub")]
 impl ToolContainer {
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access. 
+        description = "A system command execution tool that allows running shell commands with full system access on local or remote systems via SSH.
+
+REMOTE EXECUTION:
+- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
+- Examples: 
+  * 'user@server.com' (uses default port 22 and auto-discovered keys)
+  * 'user@server.com:2222' with password authentication
+  * Remote paths: 'ssh://user@host/path' or 'user@host:/path'
 
 SECRET HANDLING: 
 - Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
@@ -110,177 +153,55 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             command,
             description: _,
             timeout,
+            remote,
+            password,
+            private_key_path,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let command_clone = command.clone();
+        // Use unified command execution helper
+        match self
+            .execute_command_unified(&command, timeout, remote, password, private_key_path, &ctx)
+            .await
+        {
+            Ok(mut result) => {
+                result = handle_large_output(&result, "command.output")?;
 
-        // Restore secrets in the command before execution
-        let actual_command = self
-            .get_secret_manager()
-            .restore_secrets_in_string(&command);
-
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(actual_command)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                error!("Failed to run command: {}", e);
-                McpError::internal_error(
-                    "Failed to run command",
-                    Some(json!({
-                        "command": command_clone,
-                        "error": e.to_string()
-                    })),
-                )
-            })?;
-
-        #[allow(clippy::unwrap_used)]
-        let stdout = child.stdout.take().unwrap();
-        #[allow(clippy::unwrap_used)]
-        let stderr = child.stderr.take().unwrap();
-
-        let mut stdout_reader = BufReader::new(stdout);
-        let mut stderr_reader = BufReader::new(stderr);
-
-        let mut stdout_buf = String::new();
-        let mut stderr_buf = String::new();
-        let mut result = String::new();
-        let progress_id = Uuid::new_v4();
-
-        // Helper function to stream output and wait for process completion
-        let stream_and_wait = async {
-            // Read from both streams concurrently
-            loop {
-                tokio::select! {
-                    Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
-                        if n == 0 {
-                            break;
-                        }
-                        let line = stderr_buf.trim_end_matches('\n').to_string();
-                        stderr_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50,
-                            total: Some(100),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: line,
-                            }).unwrap_or_default()),
-                        }).await;
-                    }
-                    Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
-                        if n == 0 {
-                            break;
-                        }
-                        let line = stdout_buf.trim_end_matches('\n').to_string();
-                        stdout_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        // skip if message is empty
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50,
-                            total: Some(100),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: format!("{}\n", line),
-                            }).unwrap_or_default()),
-                        }).await;
-                    }
-                    else => break,
+                if result.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text("No output")]));
                 }
-            }
 
-            // Wait for the process to complete
-            child.wait().await
-        };
+                let redacted_output = self
+                    .get_secret_manager()
+                    .redact_and_store_secrets(&result, None);
 
-        // Execute with timeout and cancellation support
-        let execution_result = if let Some(timeout_secs) = timeout {
-            let timeout_duration = std::time::Duration::from_secs(timeout_secs);
-
-            tokio::select! {
-                result = tokio::time::timeout(timeout_duration, stream_and_wait) => result,
-                _ = ctx.ct.cancelled() => {
-                    // Cancellation occurred, kill the process
-                    let _ = child.kill().await;
-                    return Ok(CallToolResult::cancel(Some(&vec![
-                        Content::text("COMMAND_CANCELLED"),
-                        Content::text("Command execution was cancelled"),
-                    ])));
-                }
+                Ok(CallToolResult::success(vec![Content::text(
+                    &redacted_output,
+                )]))
             }
-        } else {
-            tokio::select! {
-                result = stream_and_wait => Ok(result),
-                _ = ctx.ct.cancelled() => {
-                    let _ = child.kill().await;
-                    return Ok(CallToolResult::cancel(Some(&vec![
-                        Content::text("COMMAND_CANCELLED"),
-                        Content::text("Command execution was cancelled"),
-                    ])));
-                }
-            }
-        };
-
-        let exit_code = match execution_result {
-            Ok(Ok(exit_status)) => exit_status.code().unwrap_or(-1),
-            Ok(Err(e)) => {
-                error!("Failed to wait for command: {}", e);
-                return Err(McpError::internal_error(
-                    "Failed to wait for command",
-                    Some(json!({
-                        "command": command_clone,
-                        "error": e.to_string()
-                    })),
-                ));
-            }
-            Err(_) => {
-                // Timeout occurred, kill the process
-                let _ = child.kill().await;
-                result.push_str(&format!(
-                    "Command timed out after {} seconds\n",
-                    timeout.unwrap_or_default()
-                ));
-                -1
-            }
-        };
-
-        if exit_code != 0 {
-            result.push_str(&format!("Command exited with code {}\n", exit_code));
+            Err(error_result) => Ok(error_result),
         }
-
-        result = handle_large_output(&result, "command.output")?;
-
-        if result.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text("No output")]));
-        }
-
-        let redacted_output = self
-            .get_secret_manager()
-            .redact_and_store_secrets(&result, None);
-
-        Ok(CallToolResult::success(vec![Content::text(
-            &redacted_output,
-        )]))
     }
 
     #[tool(
-        description = "Execute a shell command asynchronously in the background and return immediately with task information without waiting for completion.
+        description = "Execute a shell command asynchronously in the background on LOCAL OR REMOTE systems and return immediately with task information without waiting for completion.
+
+REMOTE EXECUTION SUPPORT:
+- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH background execution
+- Use 'password' for password authentication or 'private_key_path' for key-based auth  
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Examples:
+  * 'user@server.com' - Remote background task with auto-discovered keys
+  * 'user@server.com:2222' - Remote background task with custom port
 
 Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
 
 PARAMETERS:
-- command: The shell command to execute
+- command: The shell command to execute (locally or remotely)
 - description: Optional description of the command (not used in execution)  
 - timeout: Optional timeout in seconds after which the task will be terminated
+- remote: Optional remote connection string for SSH execution
+- password: Optional password for remote authentication
+- private_key_path: Optional path to private key for remote authentication
 
 RETURNS:
 - task_id: Unique identifier for the background task
@@ -301,6 +222,9 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_async_task to
             command,
             description: _,
             timeout,
+            remote,
+            password,
+            private_key_path,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
         // Restore secrets in the command before execution
@@ -310,11 +234,26 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_async_task to
 
         let timeout_duration = timeout.map(std::time::Duration::from_secs);
 
-        match self
-            .get_task_manager()
-            .start_task(actual_command, timeout_duration)
-            .await
-        {
+        // Handle both local and remote async commands using TaskManager
+        let result = if let Some(remote_str) = remote {
+            // Remote async command
+            let remote_connection = RemoteConnectionInfo {
+                connection_string: remote_str,
+                password,
+                private_key_path,
+            };
+
+            self.get_task_manager()
+                .start_task(actual_command, timeout_duration, Some(remote_connection))
+                .await
+        } else {
+            // Local async command (existing logic)
+            self.get_task_manager()
+                .start_task(actual_command, timeout_duration, None)
+                .await
+        };
+
+        match result {
             Ok(task_info) => {
                 let output = serde_json::to_string_pretty(&task_info)
                     .unwrap_or_else(|_| format!("Task started: {}", task_info.id));
@@ -548,7 +487,18 @@ Use this tool to check the progress and results of long-running background tasks
     }
 
     #[tool(
-        description = "View the contents of a file or list the contents of a directory. Can read entire files or specific line ranges.
+        description = "View the contents of a local or remote file/directory. Can read entire files or specific line ranges.
+
+REMOTE FILE ACCESS:
+- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- IMPORTANT: Use ABSOLUTE paths for remote files/directories (e.g., '/etc/config' not 'config')
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Examples:
+  * 'user@server.com:/etc/nginx/nginx.conf' - Remote file with auto-discovered keys
+  * 'ssh://user@server.com/var/log/app.log' - Remote file with SSH URL format
+  * 'user@server.com:/home/user/documents' - Remote directory listing
+  * '/local/path/file.txt' - Local file (default behavior)
 
 SECRET HANDLING:
 - File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
@@ -557,13 +507,438 @@ SECRET HANDLING:
 
 A maximum of 300 lines will be shown at a time, the rest will be truncated."
     )]
-    pub fn view(
+    pub async fn view(
         &self,
-        Parameters(ViewRequest { path, view_range }): Parameters<ViewRequest>,
+        Parameters(ViewRequest {
+            path,
+            view_range,
+            password,
+            private_key_path,
+        }): Parameters<ViewRequest>,
     ) -> Result<CallToolResult, McpError> {
         const MAX_LINES: usize = 300;
 
-        let path_obj = Path::new(&path);
+        // Check if this is a remote path
+        if Self::is_remote_path(&path) {
+            // Handle remote file/directory viewing
+            match self
+                .get_remote_connection(&path, password, private_key_path)
+                .await
+            {
+                Ok((conn, remote_path)) => {
+                    self.view_remote_path(&conn, &remote_path, &path, view_range, MAX_LINES)
+                        .await
+                }
+                Err(error_result) => Ok(error_result),
+            }
+        } else {
+            // Handle local file/directory viewing
+            self.view_local_path(&path, view_range, MAX_LINES).await
+        }
+    }
+
+    #[tool(
+        description = "Replace a specific string in a local or remote file with new text. The old_str must match exactly including whitespace and indentation.
+
+REMOTE FILE EDITING:
+- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/etc/config' not 'config')
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Examples:
+  * 'user@server.com:/etc/nginx/sites-available/default' - Edit remote config
+  * 'ssh://user@server.com/var/www/app/config.php' - Edit remote application config
+  * '/local/path/file.txt' - Edit local file (default behavior)
+
+SECRET HANDLING:
+- You can use secret placeholders like [REDACTED_SECRET:rule-id:hash] in both old_str and new_str parameters
+- These placeholders will be automatically restored to actual secret values before performing the replacement
+- This allows you to safely work with secret values without exposing them
+
+When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+    )]
+    pub async fn str_replace(
+        &self,
+        Parameters(StrReplaceRequest {
+            path,
+            old_str,
+            new_str,
+            replace_all,
+            password,
+            private_key_path,
+        }): Parameters<StrReplaceRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Check if this is a remote path
+        if Self::is_remote_path(&path) {
+            // Handle remote file replacement
+            match self
+                .get_remote_connection(&path, password, private_key_path)
+                .await
+            {
+                Ok((conn, remote_path)) => {
+                    self.str_replace_remote(
+                        &conn,
+                        &remote_path,
+                        &path,
+                        &old_str,
+                        &new_str,
+                        replace_all,
+                    )
+                    .await
+                }
+                Err(error_result) => Ok(error_result),
+            }
+        } else {
+            // Handle local file replacement
+            self.str_replace_local(&path, &old_str, &new_str, replace_all)
+                .await
+        }
+    }
+
+    #[tool(
+        description = "Create a new local or remote file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist.
+
+REMOTE FILE CREATION:
+- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/script.sh' not 'script.sh')
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Parent directories will be created automatically on remote systems
+- Examples:
+  * 'user@server.com:/tmp/script.sh' - Create remote script
+  * 'ssh://user@server.com/var/www/new-config.json' - Create remote config
+  * '/local/path/file.txt' - Create local file (default behavior)
+
+SECRET HANDLING:
+- File content containing secrets will have them restored before writing to ensure functionality
+- Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in file_text parameter"
+    )]
+    pub async fn create(
+        &self,
+        Parameters(CreateRequest {
+            path,
+            file_text,
+            password,
+            private_key_path,
+        }): Parameters<CreateRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Check if this is a remote path
+        if Self::is_remote_path(&path) {
+            // Handle remote file creation
+            match self
+                .get_remote_connection(&path, password, private_key_path)
+                .await
+            {
+                Ok((conn, remote_path)) => {
+                    self.create_remote(&conn, &remote_path, &path, &file_text)
+                        .await
+                }
+                Err(error_result) => Ok(error_result),
+            }
+        } else {
+            // Handle local file creation
+            self.create_local(&path, &file_text)
+        }
+    }
+
+    #[tool(
+        description = "Generate a cryptographically secure password with the specified constraints. The generated password will be automatically redacted in the response for security.
+
+PARAMETERS:
+- length: The length of the password to generate (default: 15 characters)
+- no_symbols: Whether to exclude symbols from the password (default: false, includes symbols)
+
+CHARACTER SETS:
+- Letters: A-Z, a-z (always included)
+- Numbers: 0-9 (always included)  
+- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
+
+SECURITY FEATURES:
+- Uses cryptographically secure random number generation
+- Output is automatically redacted and stored as [REDACTED_SECRET:password:hash]
+- The redacted placeholder can be used in subsequent commands where actual password will be restored
+"
+    )]
+    pub async fn generate_password(
+        &self,
+        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
+            GeneratePasswordRequest,
+        >,
+    ) -> Result<CallToolResult, McpError> {
+        let length = length.unwrap_or(15);
+        let no_symbols = no_symbols.unwrap_or(false);
+
+        let password = stakpak_shared::utils::generate_password(length, no_symbols);
+
+        let redacted_password = self
+            .get_secret_manager()
+            .redact_and_store_password(&password, &password);
+
+        Ok(CallToolResult::success(vec![Content::text(
+            &redacted_password,
+        )]))
+    }
+
+    // Helper functions to avoid code duplication
+
+    /// Get remote connection for a path, handling authentication
+    async fn get_remote_connection(
+        &self,
+        path: &str,
+        password: Option<String>,
+        private_key_path: Option<String>,
+    ) -> Result<(Arc<RemoteConnection>, String), CallToolResult> {
+        let path_location = PathLocation::parse(path).map_err(|e| {
+            CallToolResult::error(vec![
+                Content::text("INVALID_PATH"),
+                Content::text(format!("Failed to parse path: {}", e)),
+            ])
+        })?;
+
+        match path_location {
+            PathLocation::Remote {
+                mut connection,
+                path: remote_path,
+            } => {
+                // Override connection details if provided
+                if let Some(pwd) = password {
+                    connection.password = Some(pwd);
+                }
+                if let Some(key_path) = private_key_path {
+                    connection.private_key_path = Some(key_path);
+                }
+
+                let connection_manager = self.get_remote_connection_manager();
+                let conn = connection_manager
+                    .get_connection(&connection)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to establish remote connection: {}", e);
+                        CallToolResult::error(vec![
+                            Content::text("REMOTE_CONNECTION_ERROR"),
+                            Content::text(format!("Failed to connect to remote host: {}", e)),
+                        ])
+                    })?;
+
+                Ok((conn, remote_path))
+            }
+            PathLocation::Local(_) => Err(CallToolResult::error(vec![
+                Content::text("NOT_REMOTE"),
+                Content::text("This helper is for remote connections only"),
+            ])),
+        }
+    }
+
+    /// Check if a path is remote
+    fn is_remote_path(path: &str) -> bool {
+        PathLocation::parse(path)
+            .map(|loc| loc.is_remote())
+            .unwrap_or(false)
+    }
+
+    /// Execute command either locally or remotely based on parameters
+    async fn execute_command_unified(
+        &self,
+        command: &str,
+        timeout: Option<u64>,
+        remote: Option<String>,
+        password: Option<String>,
+        private_key_path: Option<String>,
+        ctx: &RequestContext<RoleServer>,
+    ) -> Result<String, CallToolResult> {
+        let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
+
+        if let Some(remote_str) = &remote {
+            // Remote execution
+            let connection_info = RemoteConnectionInfo {
+                connection_string: remote_str.clone(),
+                password: password.clone(),
+                private_key_path: private_key_path.clone(),
+            };
+
+            let connection_manager = self.get_remote_connection_manager();
+            let connection = connection_manager
+                .get_connection(&connection_info)
+                .await
+                .map_err(|e| {
+                    error!("Failed to establish remote connection: {}", e);
+                    CallToolResult::error(vec![
+                        Content::text("REMOTE_CONNECTION_ERROR"),
+                        Content::text(format!("Failed to connect to remote host: {}", e)),
+                    ])
+                })?;
+
+            let (output, exit_code) = connection
+                .execute_command(&actual_command, ctx)
+                .await
+                .map_err(|e| {
+                    error!("Failed to execute remote command: {}", e);
+                    CallToolResult::error(vec![
+                        Content::text("REMOTE_COMMAND_ERROR"),
+                        Content::text(format!("Failed to execute remote command: {}", e)),
+                    ])
+                })?;
+
+            let mut result = output;
+            if exit_code != 0 {
+                result.push_str(&format!("\nCommand exited with code {}", exit_code));
+            }
+
+            Ok(result)
+        } else {
+            // Local execution - existing logic
+            self.execute_local_command(&actual_command, timeout, ctx)
+                .await
+        }
+    }
+
+    /// Execute local command with existing logic extracted to avoid duplication
+    async fn execute_local_command(
+        &self,
+        actual_command: &str,
+        timeout: Option<u64>,
+        ctx: &RequestContext<RoleServer>,
+    ) -> Result<String, CallToolResult> {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(actual_command)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                error!("Failed to run command: {}", e);
+                CallToolResult::error(vec![
+                    Content::text("COMMAND_ERROR"),
+                    Content::text(format!("Failed to run command: {}", e)),
+                ])
+            })?;
+
+        #[allow(clippy::unwrap_used)]
+        let stdout = child.stdout.take().unwrap();
+        #[allow(clippy::unwrap_used)]
+        let stderr = child.stderr.take().unwrap();
+        let mut stdout_reader = BufReader::new(stdout);
+        let mut stderr_reader = BufReader::new(stderr);
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+        let mut result = String::new();
+        let progress_id = Uuid::new_v4();
+
+        // Helper function to stream output and wait for process completion
+        let stream_and_wait = async {
+            // Read from both streams concurrently
+            loop {
+                tokio::select! {
+                    Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
+                        if n == 0 {
+                            break;
+                        }
+                        let line = stderr_buf.trim_end_matches('\n').to_string();
+                        stderr_buf.clear();
+                        result.push_str(&format!("{}\n", line));
+                        // Send notification but continue processing
+                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 50,
+                            total: Some(100),
+                            message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                id: progress_id,
+                                message: line,
+                            }).unwrap_or_default()),
+                        }).await;
+                    }
+                    Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
+                        if n == 0 {
+                            break;
+                        }
+                        let line = stdout_buf.trim_end_matches('\n').to_string();
+                        stdout_buf.clear();
+                        result.push_str(&format!("{}\n", line));
+                        // Send notification but continue processing
+                        // skip if message is empty
+                        if line.is_empty() {
+                            continue;
+                        }
+                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                            progress_token: ProgressToken(NumberOrString::Number(0)),
+                            progress: 50,
+                            total: Some(100),
+                            message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                id: progress_id,
+                                message: format!("{}\n", line),
+                            }).unwrap_or_default()),
+                        }).await;
+                    }
+                    else => break,
+                }
+            }
+
+            // Wait for the process to complete
+            child.wait().await
+        };
+
+        // Execute with timeout and cancellation support
+        let execution_result = if let Some(timeout_secs) = timeout {
+            let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+            tokio::select! {
+                result = tokio::time::timeout(timeout_duration, stream_and_wait) => result,
+                _ = ctx.ct.cancelled() => {
+                    // Cancellation occurred, kill the process
+                    let _ = child.kill().await;
+                    return Err(CallToolResult::cancel(Some(&vec![
+                        Content::text("COMMAND_CANCELLED"),
+                        Content::text("Command execution was cancelled"),
+                    ])));
+                }
+            }
+        } else {
+            tokio::select! {
+                result = stream_and_wait => Ok(result),
+                _ = ctx.ct.cancelled() => {
+                    let _ = child.kill().await;
+                    return Err(CallToolResult::cancel(Some(&vec![
+                        Content::text("COMMAND_CANCELLED"),
+                        Content::text("Command execution was cancelled"),
+                    ])));
+                }
+            }
+        };
+
+        let exit_code = match execution_result {
+            Ok(Ok(exit_status)) => exit_status.code().unwrap_or(-1),
+            Ok(Err(e)) => {
+                return Err(CallToolResult::error(vec![
+                    Content::text("COMMAND_ERROR"),
+                    Content::text(format!("Failed to wait for command: {}", e)),
+                ]));
+            }
+            Err(_) => {
+                // Timeout occurred, kill the process
+                let _ = child.kill().await;
+                result.push_str(&format!(
+                    "Command timed out after {} seconds\n",
+                    timeout.unwrap_or_default()
+                ));
+                -1
+            }
+        };
+
+        if exit_code != 0 {
+            result.push_str(&format!("Command exited with code {}\n", exit_code));
+        }
+
+        Ok(result)
+    }
+
+    /// View the contents of a local file or directory
+    async fn view_local_path(
+        &self,
+        path: &str,
+        view_range: Option<[i32; 2]>,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        let path_obj = Path::new(path);
 
         if !path_obj.exists() {
             return Ok(CallToolResult::error(vec![
@@ -574,7 +949,7 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
 
         if path_obj.is_dir() {
             // List directory contents
-            match fs::read_dir(&path) {
+            match fs::read_dir(path) {
                 Ok(entries) => {
                     let mut result = format!("Directory listing for \"{}\":\n", path);
                     let mut items: Vec<_> = entries.collect();
@@ -625,96 +1000,14 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
             }
         } else {
             // Read file contents
-            match fs::read_to_string(&path) {
+            match fs::read_to_string(path) {
                 Ok(content) => {
-                    let result = if let Some([start, end]) = view_range {
-                        let lines: Vec<&str> = content.lines().collect();
-                        let start_idx = if start <= 0 { 0 } else { (start - 1) as usize };
-                        let end_idx = if end == -1 {
-                            lines.len()
-                        } else {
-                            std::cmp::min(end as usize, lines.len())
-                        };
-
-                        if start_idx >= lines.len() {
-                            return Ok(CallToolResult::error(vec![
-                                Content::text("INVALID_RANGE"),
-                                Content::text(format!(
-                                    "Start line {} is beyond file length {}",
-                                    start,
-                                    lines.len()
-                                )),
-                            ]));
-                        }
-
-                        let selected_lines = &lines[start_idx..end_idx];
-                        if selected_lines.len() <= MAX_LINES {
-                            format!(
-                                "File: {} (lines {}-{})\n{}",
-                                path,
-                                start_idx + 1,
-                                end_idx,
-                                selected_lines
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:3}: {}", start_idx + i + 1, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            )
-                        } else {
-                            // truncate the extra lines
-                            let selected_lines =
-                                selected_lines.iter().take(MAX_LINES).collect::<Vec<_>>();
-
-                            format!(
-                                "File: {} (showing lines {}-{}, only the first {} lines of your view range)\n{}\n...",
-                                path,
-                                start_idx + 1,
-                                start_idx + 1 + MAX_LINES,
-                                MAX_LINES,
-                                selected_lines
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:4}: {}", start_idx + i + 1, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            )
-                        }
-                    } else {
-                        let lines: Vec<&str> = content.lines().collect();
-                        if lines.len() <= MAX_LINES {
-                            format!(
-                                "File: {} ({} lines)\n{}",
-                                path,
-                                lines.len(),
-                                lines
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            )
-                        } else {
-                            // truncate the extra lines
-                            let selected_lines = lines.iter().take(MAX_LINES).collect::<Vec<_>>();
-                            format!(
-                                "File: {} (showing {} / {} lines)\n{}\n...",
-                                path,
-                                MAX_LINES,
-                                lines.len(),
-                                selected_lines
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:3}: {}", i + 1, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            )
-                        }
-                    };
+                    let result =
+                        self.format_file_content(&content, path, view_range, max_lines, "File")?;
 
                     let redacted_result = self
                         .get_secret_manager()
-                        .redact_and_store_secrets(&result, Some(&path));
+                        .redact_and_store_secrets(&result, Some(path));
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
@@ -727,109 +1020,367 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
         }
     }
 
-    #[tool(
-        description = "Replace a specific string in a file with new text. The old_str must match exactly including whitespace and indentation.
-
-SECRET HANDLING:
-- You can use secret placeholders like [REDACTED_SECRET:rule-id:hash] in both old_str and new_str parameters
-- These placeholders will be automatically restored to actual secret values before performing the replacement
-- This allows you to safely work with secret values without exposing them
-
-When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
-    )]
-    pub fn str_replace(
+    /// View the contents of a remote file or directory
+    async fn view_remote_path(
         &self,
-        Parameters(StrReplaceRequest {
-            path,
-            old_str,
-            new_str,
-            replace_all,
-        }): Parameters<StrReplaceRequest>,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        view_range: Option<[i32; 2]>,
+        max_lines: usize,
     ) -> Result<CallToolResult, McpError> {
-        let path_obj = Path::new(&path);
-
-        if !path_obj.exists() {
+        if !conn.exists(remote_path).await {
             return Ok(CallToolResult::error(vec![
                 Content::text("FILE_NOT_FOUND"),
-                Content::text(format!("File not found: {}", path)),
+                Content::text(format!(
+                    "Remote file or directory not found: {}",
+                    original_path
+                )),
             ]));
         }
 
-        if path_obj.is_dir() {
-            return Ok(CallToolResult::error(vec![
-                Content::text("IS_DIRECTORY"),
-                Content::text(format!("Cannot edit directory: {}", path)),
-            ]));
-        }
+        if conn.is_directory(remote_path).await {
+            // List remote directory contents
+            match conn.list_directory(remote_path).await {
+                Ok(entries) => {
+                    let mut result =
+                        format!("Remote directory listing for \"{}\":\n", original_path);
 
-        // Restore secrets in the input strings
-        let actual_old_str = self
-            .get_secret_manager()
-            .restore_secrets_in_string(&old_str);
-        let actual_new_str = self
-            .get_secret_manager()
-            .restore_secrets_in_string(&new_str);
+                    let mut sorted_entries = entries;
+                    sorted_entries.sort();
 
-        match fs::read_to_string(&path) {
-            Ok(content) => {
-                let matches: Vec<_> = content.match_indices(&actual_old_str).collect();
+                    for (i, entry) in sorted_entries.iter().enumerate() {
+                        let is_last = i == sorted_entries.len() - 1;
+                        let prefix = if is_last { "└── " } else { "├── " };
 
-                match (matches.len(), replace_all) {
-                    (0, _) => Ok(CallToolResult::error(vec![
-                        Content::text("NO_MATCH"),
-                        Content::text(
-                            "No match found for replacement text. Please check your text and try again.",
-                        ),
-                    ])),
-                    (1, _) => {
-                        let new_content = content.replace(&actual_old_str, &actual_new_str);
-                        match fs::write(&path, new_content) {
-                            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
-                                "Successfully replaced text in {}",
-                                path
-                            ))])),
-                            Err(e) => Ok(CallToolResult::error(vec![
-                                Content::text("WRITE_ERROR"),
-                                Content::text(format!("Cannot write to file: {}", e)),
-                            ])),
-                        }
+                        let entry_name = entry.split('/').next_back().unwrap_or(entry);
+                        let suffix = if conn.is_directory(entry).await {
+                            "/"
+                        } else {
+                            ""
+                        };
+
+                        result.push_str(&format!("{}{}{}\n", prefix, entry_name, suffix));
                     }
-                    (n, Some(true)) => {
-                        let new_content = content.replace(&actual_old_str, &actual_new_str);
-                        match fs::write(&path, new_content) {
-                            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
-                                "Successfully replaced {} occurrences of text in {}",
-                                n, path
-                            ))])),
-                            Err(e) => Ok(CallToolResult::error(vec![
-                                Content::text("WRITE_ERROR"),
-                                Content::text(format!("Cannot write to file: {}", e)),
-                            ])),
-                        }
-                    }
-                    (n, _) => Ok(CallToolResult::error(vec![
-                        Content::text("MULTIPLE_MATCHES"),
-                        Content::text(format!(
-                            "Found {} matches for replacement text. Please provide more context to make a unique match.",
-                            n
-                        )),
-                    ])),
+
+                    Ok(CallToolResult::success(vec![Content::text(result)]))
                 }
+                Err(e) => Ok(CallToolResult::error(vec![
+                    Content::text("READ_ERROR"),
+                    Content::text(format!("Cannot read remote directory: {}", e)),
+                ])),
             }
-            Err(e) => Ok(CallToolResult::error(vec![
-                Content::text("READ_ERROR"),
-                Content::text(format!("Cannot read file: {}", e)),
-            ])),
+        } else {
+            // Read remote file contents
+            match conn.read_file_to_string(remote_path).await {
+                Ok(content) => {
+                    let result = self.format_file_content(
+                        &content,
+                        original_path,
+                        view_range,
+                        max_lines,
+                        "Remote file",
+                    )?;
+
+                    let redacted_result = self
+                        .get_secret_manager()
+                        .redact_and_store_secrets(&result, Some(original_path));
+                    Ok(CallToolResult::success(vec![Content::text(
+                        &redacted_result,
+                    )]))
+                }
+                Err(e) => Ok(CallToolResult::error(vec![
+                    Content::text("READ_ERROR"),
+                    Content::text(format!("Cannot read remote file: {}", e)),
+                ])),
+            }
         }
     }
 
-    #[tool(
-        description = "Create a new file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist."
-    )]
-    pub fn create(
+    /// Format file content with line numbers and truncation - shared logic
+    fn format_file_content(
         &self,
-        Parameters(CreateRequest { path, file_text }): Parameters<CreateRequest>,
+        content: &str,
+        path: &str,
+        view_range: Option<[i32; 2]>,
+        max_lines: usize,
+        prefix: &str,
+    ) -> Result<String, McpError> {
+        let result = if let Some([start, end]) = view_range {
+            let lines: Vec<&str> = content.lines().collect();
+            let start_idx = if start <= 0 { 0 } else { (start - 1) as usize };
+            let end_idx = if end == -1 {
+                lines.len()
+            } else {
+                std::cmp::min(end as usize, lines.len())
+            };
+
+            if start_idx >= lines.len() {
+                return Err(McpError::internal_error(
+                    "Invalid range",
+                    Some(json!({
+                        "error": format!("Start line {} is beyond file length {}", start, lines.len())
+                    })),
+                ));
+            }
+
+            let selected_lines = &lines[start_idx..end_idx];
+            if selected_lines.len() <= max_lines {
+                format!(
+                    "{}: {} (lines {}-{})\n{}",
+                    prefix,
+                    path,
+                    start_idx + 1,
+                    end_idx,
+                    selected_lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:3}: {}", start_idx + i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            } else {
+                let selected_lines = selected_lines.iter().take(max_lines).collect::<Vec<_>>();
+                format!(
+                    "{}: {} (showing lines {}-{}, only the first {} lines of your view range)\n{}\n...",
+                    prefix,
+                    path,
+                    start_idx + 1,
+                    start_idx + 1 + max_lines,
+                    max_lines,
+                    selected_lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:4}: {}", start_idx + i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+        } else {
+            let lines: Vec<&str> = content.lines().collect();
+            if lines.len() <= max_lines {
+                format!(
+                    "{}: {} ({} lines)\n{}",
+                    prefix,
+                    path,
+                    lines.len(),
+                    lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            } else {
+                let selected_lines = lines.iter().take(max_lines).collect::<Vec<_>>();
+                format!(
+                    "{}: {} (showing {} / {} lines)\n{}\n...",
+                    prefix,
+                    path,
+                    max_lines,
+                    lines.len(),
+                    selected_lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:3}: {}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+        };
+
+        Ok(result)
+    }
+
+    /// Replace a specific string in a remote file
+    async fn str_replace_remote(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        old_str: &str,
+        new_str: &str,
+        replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
+        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
+        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
+
+        let content = conn.read_file_to_string(remote_path).await.map_err(|e| {
+            error!("Failed to read remote file for str_replace: {}", e);
+            McpError::internal_error(
+                "Failed to read remote file",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+        let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+
+        let matches: Vec<_> = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                if line.contains(&actual_old_str) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut replaced_count = 0;
+        for &i in &matches {
+            let line = lines[i].clone();
+            let new_line = line.replace(&actual_old_str, &actual_new_str);
+            lines[i] = new_line;
+            replaced_count += 1;
+            if replace_all.unwrap_or(false) {
+                continue;
+            }
+            break;
+        }
+
+        let new_content = lines.join("\n");
+        conn.write_file(remote_path, new_content.as_bytes())
+            .await
+            .map_err(|e| {
+                error!("Failed to write remote file for str_replace: {}", e);
+                McpError::internal_error(
+                    "Failed to write remote file",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        let output = format!(
+            "Successfully replaced {} occurrences of text in {} (remote)\n",
+            replaced_count, original_path
+        );
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    /// Replace a specific string in a local file
+    async fn str_replace_local(
+        &self,
+        path: &str,
+        old_str: &str,
+        new_str: &str,
+        replace_all: Option<bool>,
+    ) -> Result<CallToolResult, McpError> {
+        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
+        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
+
+        let mut lines: Vec<String> = fs::read_to_string(path)
+            .map(|content| content.lines().map(|line| line.to_string()).collect())
+            .map_err(|e| {
+                error!("Failed to read local file for str_replace: {}", e);
+                McpError::internal_error(
+                    "Failed to read local file",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        let matches: Vec<_> = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                if line.contains(&actual_old_str) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut replaced_count = 0;
+        for &i in &matches {
+            let line = lines[i].clone();
+            let new_line = line.replace(&actual_old_str, &actual_new_str);
+            lines[i] = new_line;
+            replaced_count += 1;
+            if replace_all.unwrap_or(false) {
+                continue;
+            }
+            break;
+        }
+
+        let new_content = lines.join("\n");
+        fs::write(path, new_content).map_err(|e| {
+            error!("Failed to write local file for str_replace: {}", e);
+            McpError::internal_error(
+                "Failed to write local file",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        let output = format!(
+            "Successfully replaced {} occurrences of text in {} (local)\n",
+            replaced_count, path
+        );
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    /// Create a remote file with the specified content
+    async fn create_remote(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        file_text: &str,
+    ) -> Result<CallToolResult, McpError> {
+        if conn.exists(remote_path).await {
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_EXISTS"),
+                Content::text(format!("Remote file already exists: {}", original_path)),
+            ]));
+        }
+
+        // Create parent directories if needed
+        if let Some(parent) = std::path::Path::new(remote_path).parent() {
+            let parent_str = parent.to_string_lossy().to_string();
+            if !parent_str.is_empty() && !conn.exists(&parent_str).await {
+                if let Err(e) = conn.create_directories(&parent_str).await {
+                    error!(
+                        "Failed to create remote parent directories '{}': {}",
+                        parent_str, e
+                    );
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("CREATE_DIR_ERROR"),
+                        Content::text(format!(
+                            "Failed to create remote parent directories '{}': {}",
+                            parent_str, e
+                        )),
+                    ]));
+                }
+            }
+        }
+
+        // Restore secrets in the file content before writing
+        let actual_file_text = self
+            .get_secret_manager()
+            .restore_secrets_in_string(file_text);
+
+        // Create the file using the correct SFTP method
+        if let Err(e) = conn
+            .create_file(remote_path, actual_file_text.as_bytes())
+            .await
+        {
+            error!("Failed to create remote file '{}': {}", remote_path, e);
+            return Ok(CallToolResult::error(vec![
+                Content::text("CREATE_ERROR"),
+                Content::text(format!(
+                    "Failed to create remote file '{}': {}",
+                    remote_path, e
+                )),
+            ]));
+        }
+
+        let lines = actual_file_text.lines().count();
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Successfully created remote file {} with {} lines",
+            original_path, lines
+        ))]))
+    }
+
+    /// Create a local file with the specified content  
+    fn create_local(&self, path: &str, file_text: &str) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
         if path_obj.exists() {
@@ -854,11 +1405,11 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         // Restore secrets in the file content before writing
         let actual_file_text = self
             .get_secret_manager()
-            .restore_secrets_in_string(&file_text);
+            .restore_secrets_in_string(file_text);
 
-        match fs::write(&path, actual_file_text) {
+        match fs::write(path, actual_file_text) {
             Ok(_) => {
-                let lines = fs::read_to_string(&path)
+                let lines = fs::read_to_string(path)
                     .map(|content| content.lines().count())
                     .unwrap_or(0);
                 Ok(CallToolResult::success(vec![Content::text(format!(
@@ -871,32 +1422,6 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
                 Content::text(format!("Cannot create file: {}", e)),
             ])),
         }
-    }
-
-    #[tool(
-        description = "Generate a secure password with the specified constraints. The password will be generated using the following constraints:
-- Length of the password (default: 15)
-- No symbols (default: false)
-"
-    )]
-    pub async fn generate_password(
-        &self,
-        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
-            GeneratePasswordRequest,
-        >,
-    ) -> Result<CallToolResult, McpError> {
-        let length = length.unwrap_or(15);
-        let no_symbols = no_symbols.unwrap_or(false);
-
-        let password = stakpak_shared::utils::generate_password(length, no_symbols);
-
-        let redacted_password = self
-            .get_secret_manager()
-            .redact_and_store_password(&password, &password);
-
-        Ok(CallToolResult::success(vec![Content::text(
-            &redacted_password,
-        )]))
     }
 }
 

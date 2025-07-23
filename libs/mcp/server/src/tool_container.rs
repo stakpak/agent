@@ -4,6 +4,7 @@ use rmcp::{
     service::RequestContext, tool_router,
 };
 use stakpak_api::{Client, ClientConfig};
+use stakpak_shared::remote_connection::RemoteConnectionManager;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ pub struct ToolContainer {
     pub client: Option<Client>,
     pub secret_manager: SecretManager,
     pub task_manager: Arc<TaskManagerHandle>,
+    pub remote_connection_manager: Arc<RemoteConnectionManager>,
     pub tool_router: ToolRouter<Self>,
 }
 
@@ -35,6 +37,7 @@ impl ToolContainer {
             client,
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             task_manager,
+            remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
             tool_router,
         })
     }
@@ -49,6 +52,10 @@ impl ToolContainer {
 
     pub fn get_task_manager(&self) -> &Arc<TaskManagerHandle> {
         &self.task_manager
+    }
+
+    pub fn get_remote_connection_manager(&self) -> &Arc<RemoteConnectionManager> {
+        &self.remote_connection_manager
     }
 }
 
