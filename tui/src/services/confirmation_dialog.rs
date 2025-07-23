@@ -196,7 +196,7 @@ fn render_enhanced_confirmation_dialog(
         let hint = Line::from(vec![
             Span::styled("💡 Tip: ", Style::default().fg(Color::Yellow)),
             Span::styled(
-                "Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool",
+                "Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool",
                 Style::default().fg(Color::Gray),
             ),
         ]);

@@ -67,16 +67,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         };
 
         let hint = Paragraph::new(Span::styled(
-            auto_approve_status,
+            format!("{} | Ctrl+O: toggle auto-approve", auto_approve_status),
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);
     } else if state.is_dialog_open {
         // Show focus information when dialog is open
         let focus_text = if state.dialog_focused {
-            "Press Tab to focus Chat view. Dialog focused | Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool"
+            "Press Tab to focus Chat view. Dialog focused | Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool"
         } else {
-            "Press Tab to focus Dialog. Chat view focused | Ctrl+O: toggle auto-approve | Ctrl+Shift+O: auto-approve this tool"
+            "Press Tab to focus Dialog. Chat view focused | Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool"
         };
 
         let hint = Paragraph::new(Span::styled(

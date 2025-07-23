@@ -169,10 +169,17 @@ pub fn update(
                 } else {
                     "disabled"
                 };
+
+                let status_color = if state.auto_approve_manager.is_enabled() {
+                    Color::Green
+                } else {
+                    Color::LightRed
+                };
+
                 push_styled_message(
                     state,
                     &format!("Auto-approve {}", status),
-                    Color::Green,
+                    status_color,
                     "",
                     Color::Green,
                 );
@@ -180,6 +187,7 @@ pub fn update(
         }
         InputEvent::AutoApproveCurrentTool => {
             if let Some(tool_call) = &state.dialog_command {
+                // Auto-approve current tool in dialog
                 let tool_name = tool_call.function.name.clone();
                 let tool_call_clone = tool_call.clone();
                 if let Err(e) = state
@@ -204,6 +212,45 @@ pub fn update(
                     state.dialog_command = None;
                     state.dialog_focused = false; // Reset focus when dialog closes
                 }
+            } else {
+                // No dialog open - show current auto-approve settings and allow disabling
+                let config = state.auto_approve_manager.get_config();
+                let auto_approved_tools: Vec<_> = config
+                    .tools
+                    .iter()
+                    .filter(|(_, policy)| **policy == crate::auto_approve::AutoApprovePolicy::Auto)
+                    .collect();
+
+                if auto_approved_tools.is_empty() {
+                    push_styled_message(
+                        state,
+                        "💡 No tools are currently set to auto-approve. Use Ctrl+Y when a dialog is open to enable auto-approve for a specific tool.",
+                        Color::Cyan,
+                        "",
+                        Color::Cyan,
+                    );
+                } else {
+                    let tool_list = auto_approved_tools
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    push_styled_message(
+                        state,
+                        &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
+                        Color::Yellow,
+                        "",
+                        Color::Yellow,
+                    );
+                    push_styled_message(
+                        state,
+                        "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
+                        Color::Cyan,
+                        "",
+                        Color::Cyan,
+                    );
+                }
             }
         }
         InputEvent::ToggleDialogFocus => {
@@ -223,6 +270,7 @@ pub fn update(
                 );
             }
         }
+
         InputEvent::ShowConfirmationDialog(tool_call) => {
             // Always show the styled command message first
             let full_command = extract_full_command_arguments(&tool_call);
@@ -750,6 +798,36 @@ fn handle_input_submitted(
         return;
     }
 
+    // Handle disable auto-approve command
+    if state.input.trim().starts_with("/disable_auto_approve ") {
+        let input_parts: Vec<&str> = state.input.split_whitespace().collect();
+        if input_parts.len() >= 2 {
+            let tool_name = input_parts[1];
+            if let Err(e) = state
+                .auto_approve_manager
+                .update_tool_policy(tool_name, crate::auto_approve::AutoApprovePolicy::Prompt)
+            {
+                push_error_message(
+                    state,
+                    &format!("Failed to disable auto-approve for {}: {}", tool_name, e),
+                );
+            } else {
+                push_styled_message(
+                    state,
+                    &format!("Auto-approve disabled for {} tool", tool_name),
+                    Color::Yellow,
+                    "",
+                    Color::Yellow,
+                );
+            }
+        } else {
+            push_error_message(state, "Usage: /disable_auto_approve <tool_name>");
+        }
+        state.input.clear();
+        state.cursor_position = 0;
+        return;
+    }
+
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
@@ -757,7 +835,6 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        eprintln!("state.dialog_selected: {}", state.dialog_selected);
         match state.dialog_selected {
             0 => {
                 // Option 1: Yes - Accept the tool call
@@ -796,12 +873,6 @@ fn handle_input_submitted(
             }
             2 => {
                 // Option 3: No, and tell Stakpak what to do differently
-                eprintln!(
-                    "Dialog selected: {}, is_dialog_open: {}, dialog_command: {:?}",
-                    state.dialog_selected,
-                    state.is_dialog_open,
-                    state.dialog_command.is_some()
-                );
                 handle_esc(state, output_tx, cancel_tx);
             }
             _ => {
@@ -872,6 +943,14 @@ fn handle_input_submitted(
                     state.cursor_position = 0;
                     let _ = input_tx.try_send(InputEvent::Quit);
                 }
+                "/disable_auto_approve" => {
+                    let input = "/disable_auto_approve ".to_string();
+                    state.input = input.clone();
+                    state.cursor_position = input.clone().len();
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+
                 _ => {}
             }
         }
