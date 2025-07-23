@@ -4511,7 +4511,6 @@ name = "stakpak-shared"
 version = "0.1.156"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum",
  "axum-server",
  "chrono",
