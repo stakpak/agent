@@ -661,9 +661,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
             state.helper_selected = 0;
         }
     }
-    // Send input to autocomplete worker (async, non-blocking)
-    if let Some(tx) = &state.autocomplete_tx {
-        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+    if !state.input.starts_with('/') {
+        // Send input to autocomplete worker (async, non-blocking)
+        if let Some(tx) = &state.autocomplete_tx {
+            let _ = tx.try_send((state.input.clone(), state.cursor_position));
+        }
     }
 
     if state.input.is_empty() {
