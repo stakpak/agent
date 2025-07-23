@@ -38,7 +38,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode {
+    if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",
             Style::default().fg(Color::Rgb(160, 92, 158)),
@@ -53,17 +53,39 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
             ),
             Line::from(format!(
-                "{} for shell mode    ↵ to send message    ctrl + c to quit",
+                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input.is_empty() {
-        let hint = Paragraph::new(Span::styled(
-            "? for shortcuts",
-            Style::default().fg(Color::DarkGray),
-        ));
-        f.render_widget(hint, area);
+        // Show both hints when appropriate
+        if state.latest_tool_call.is_some() {
+            // Create a line with both hints - shortcuts on left, retry on right
+            let shortcuts_text = "? for shortcuts";
+            let retry_text = "Ctrl+R to retry last command in shell mode";
+
+            // Calculate spacing to align retry hint to the right
+            let total_width = area.width as usize;
+            let shortcuts_len = shortcuts_text.len();
+            let retry_len = retry_text.len();
+            let spacing = total_width.saturating_sub(shortcuts_len + retry_len);
+
+            let spans = vec![
+                Span::styled(shortcuts_text, Style::default().fg(Color::DarkGray)),
+                Span::styled(" ".repeat(spacing), Style::default()),
+                Span::styled(retry_text, Style::default().fg(Color::Yellow)),
+            ];
+
+            let hint = Paragraph::new(Line::from(spans));
+            f.render_widget(hint, area);
+        } else {
+            let hint = Paragraph::new(Span::styled(
+                "? for shortcuts",
+                Style::default().fg(Color::DarkGray),
+            ));
+            f.render_widget(hint, area);
+        }
     }
 }

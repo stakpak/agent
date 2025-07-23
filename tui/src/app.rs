@@ -94,6 +94,7 @@ pub struct AppState {
     pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
+    pub latest_tool_call: Option<ToolCall>,
 }
 
 #[derive(Debug)]
@@ -147,7 +148,8 @@ pub enum InputEvent {
     InputCursorEnd,
     InputCursorPrevWord,
     InputCursorNextWord,
-    AttemptQuit, // First Ctrl+C press for quit sequence
+    RetryLastToolCall, // Ctrl+R to retry last tool call in shell mode
+    AttemptQuit,       // First Ctrl+C press for quit sequence
 }
 
 #[derive(Debug)]
@@ -229,6 +231,7 @@ impl AppState {
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            latest_tool_call: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
