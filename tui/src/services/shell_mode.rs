@@ -1,334 +1,28 @@
-use regex::Regex;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 
 use crate::services::bash_block::preprocess_terminal_output;
 
-fn is_input_prompt(line: &str) -> bool {
-    let trimmed = line.trim();
+// Global process registry to track running commands
+static PROCESS_REGISTRY: std::sync::OnceLock<Arc<Mutex<HashMap<String, u32>>>> =
+    std::sync::OnceLock::new();
 
-    // Empty or very short lines are not prompts
-    if trimmed.len() < 2 {
-        return false;
-    }
-
-    // Shell prompts - check for user@host patterns too
-    if trimmed.ends_with("$ ")
-        || trimmed.ends_with("# ")
-        || trimmed.ends_with("> ")
-        || trimmed.ends_with("% ")
-    {
-        return true;
-    }
-
-    // Interactive shell patterns
-    static SHELL_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let shell_regex = SHELL_REGEX
-        .get_or_init(|| Regex::new(r"^[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9_\-\.]+[:#\$%>]\s*$").ok());
-
-    if let Some(regex) = shell_regex {
-        if regex.is_match(trimmed) {
-            return true;
-        }
-    }
-
-    // Command continuation prompts
-    if trimmed == ">" || trimmed == ">>" || trimmed.starts_with("... ") {
-        return true;
-    }
-
-    // Interactive application prompts
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with("(") && lower.ends_with(")") && lower.len() > 4 {
-        return true; // (Pdb), (gdb), etc.
-    }
-
-    // Generic input patterns - be more specific
-    if trimmed.ends_with(": ")
-        && !lower.contains("error")
-        && !lower.contains("warning")
-        && !lower.contains("info")
-        && !lower.starts_with("http")
-        && trimmed.len() < 100
-    {
-        // Additional check: likely interactive if it's asking for something
-        if lower.contains("enter") || lower.contains("input") || lower.contains("type") {
-            return true;
-        }
-    }
-
-    false
+fn get_process_registry() -> Arc<Mutex<HashMap<String, u32>>> {
+    PROCESS_REGISTRY
+        .get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+        .clone()
 }
 
-/// Detects sensitive credential-related prompts
-fn contains_sensitive_terms(line: &str) -> bool {
-    let lower_line = line.to_lowercase();
-
-    // Must look like a prompt, not just contain sensitive words
-    let looks_like_prompt = lower_line.ends_with(": ")
-        || lower_line.ends_with("? ")
-        || lower_line.contains("enter ")
-        || lower_line.contains("provide ")
-        || lower_line.contains("input ")
-        || lower_line.contains("please ");
-
-    if !looks_like_prompt {
-        return false;
-    }
-
-    let sensitive_terms = [
-        "password",
-        "passphrase",
-        "secret",
-        "pin",
-        "code",
-        "api_key",
-        "api key",
-        "access_key",
-        "access key",
-        "token",
-        "auth",
-        "authentication",
-        "credential",
-        "cred",
-        "private key",
-        "private_key",
-        "ssh key",
-        "ssh_key",
-        "gpg key",
-        "gpg_key",
-        "pgp key",
-        "pgp_key",
-        "certificate",
-        "cert",
-        "pem",
-        "p12",
-        "pfx",
-        "keystore",
-        "truststore",
-        "wallet",
-        "seed phrase",
-        "mnemonic",
-        "recovery",
-        "backup phrase",
-        "master password",
-        "unlock",
-        "decrypt",
-        "2fa",
-        "mfa",
-        "totp",
-        "otp",
-        "verification",
-    ];
-
-    sensitive_terms.iter().any(|term| lower_line.contains(term))
-}
-
-/// Detects confirmation prompts (y/n, yes/no, etc.)
-fn is_confirmation_prompt(line: &str) -> bool {
-    let lower_line = line.to_lowercase();
-    let trimmed = line.trim();
-
-    // Direct y/n patterns
-    static CONFIRM_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let confirm_regex = CONFIRM_REGEX.get_or_init(|| {
-        Regex::new(
-            r"(?i)\[?\s*([yn])\s*/\s*([yn])\s*\]?:?\s*$|\[?\s*(yes|no)\s*/\s*(yes|no)\s*\]?:?\s*$",
-        )
-        .ok()
-    });
-
-    if let Some(regex) = confirm_regex {
-        if regex.is_match(trimmed) {
-            return true;
-        }
-    }
-
-    // Question patterns with confirmation words
-    if lower_line.ends_with("?") || lower_line.ends_with("? ") {
-        let confirmation_words = [
-            "continue",
-            "proceed",
-            "confirm",
-            "sure",
-            "agree",
-            "delete",
-            "remove",
-            "overwrite",
-            "replace",
-            "install",
-            "upgrade",
-            "downgrade",
-            "restart",
-            "reboot",
-            "shutdown",
-            "abort",
-            "cancel",
-            "skip",
-            "retry",
-            "force",
-            "accept",
-            "approve",
-            "allow",
-            "permit",
-            "enable",
-            "disable",
-            "destroy",
-            "purge",
-            "reset",
-            "clear",
-        ];
-
-        if confirmation_words
-            .iter()
-            .any(|word| lower_line.contains(word))
-        {
-            return true;
-        }
-    }
-
-    // Common prompt patterns
-    let prompt_patterns = [
-        "do you want to",
-        "would you like to",
-        "are you sure",
-        "should i",
-        "shall i",
-        "may i",
-        "can i",
-        "press any key",
-        "press enter",
-        "hit enter",
-        "type y",
-        "type yes",
-        "enter y",
-        "enter yes",
-        "confirm by typing",
-        "to confirm",
-    ];
-
-    prompt_patterns
-        .iter()
-        .any(|pattern| lower_line.contains(pattern))
-}
-
-/// Detects various waiting/loading states that might need interaction
-fn is_waiting_prompt(line: &str) -> bool {
-    let lower_line = line.to_lowercase();
-    let trimmed = line.trim();
-
-    // Loading patterns that might pause for input
-    let waiting_patterns = [
-        "loading...",
-        "please wait",
-        "processing...",
-        "connecting...",
-        "downloading...",
-        "installing...",
-        "updating...",
-        "press any key",
-        "press enter",
-        "hit enter",
-        "press return",
-        "press space",
-        "press esc",
-        "press ctrl+c",
-        "waiting for",
-        "paused",
-        "suspended",
-        "more --",
-        "-- more --",
-        "continue?",
-        "next?",
-        "more?",
-        "help?",
-        "(press h for help)",
-        "(? for help)",
-        "enter to continue",
-        "space to continue",
-        "q to quit",
-        "pager:",
-        "less:",
-        "more:",
-        "debugger",
-        "breakpoint",
-        "debugging",
-    ];
-
-    if waiting_patterns
-        .iter()
-        .any(|pattern| lower_line.contains(pattern))
-    {
-        return true;
-    }
-
-    // Interactive program indicators
-    if trimmed.starts_with("(") && trimmed.ends_with(")") {
-        let interactive_apps = ["pdb", "gdb", "lldb", "node", "python", "irb", "repl"];
-        if interactive_apps.iter().any(|app| lower_line.contains(app)) {
-            return true;
-        }
-    }
-
-    // Progress indicators that might stop
-    static PROGRESS_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let progress_regex = PROGRESS_REGEX
-        .get_or_init(|| Regex::new(r"^\s*\[[\s=>#\-\.]*\]\s*\d+%?\s*$|^\s*\d+%\s*$").ok());
-
-    // Don't flag normal progress bars, only ones that might pause
-    if let Some(regex) = progress_regex {
-        if regex.is_match(trimmed) && lower_line.contains("pause") {
-            return true;
-        }
-    }
-
-    // Menu selections
-    if (trimmed.starts_with("1)")
-        || trimmed.starts_with("a)")
-        || trimmed.starts_with("[1]")
-        || trimmed.starts_with("(1)"))
-        && (lower_line.contains("select")
-            || lower_line.contains("choose")
-            || lower_line.contains("option")
-            || lower_line.contains("menu"))
-    {
-        return true;
-    }
-
-    false
-}
-
-/// Master function combining all detection methods
+// Master function combining all detection methods
 fn is_interactive_prompt(line: &str) -> bool {
-    // Skip obviously non-interactive lines
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.len() > 500 {
-        return false;
-    }
-
-    // Skip common log patterns
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with("info:")
-        || lower.starts_with("debug:")
-        || lower.starts_with("warn:")
-        || lower.starts_with("error:")
-        || lower.starts_with("[info]")
-        || lower.starts_with("[debug]")
-        || lower.starts_with("[warn]")
-        || lower.starts_with("[error]")
-        || lower.contains("timestamp")
-        || lower.contains("iso8601")
-    {
-        return false;
-    }
-
-    // Check all prompt types
-    is_input_prompt(line)
-        || contains_sensitive_terms(line)
-        || is_confirmation_prompt(line)
-        || is_waiting_prompt(line)
+    let phrases = ["password", "passphrase"];
+    phrases
+        .iter()
+        .any(|phrase| line.to_lowercase().contains(phrase))
 }
 
 /// The shell prompt prefix used in the TUI
@@ -338,9 +32,9 @@ pub const SHELL_PROMPT_PREFIX: &str = "$ ";
 pub enum ShellEvent {
     Output(String),
     Error(String),
-    InputRequest(String), // For sensitive input prompts (passwords, secrets, keys, etc.)
-    Completed(i32),       // Exit code
-    Clear,                // Clear the output display
+    WaitingForInput, // Command is waiting for user input
+    Completed(i32),  // Exit code
+    Clear,           // Clear the output display
 }
 
 #[derive(Clone)]
@@ -354,6 +48,45 @@ pub struct ShellCommand {
 fn is_clear_command(command: &str) -> bool {
     let trimmed = command.trim();
     trimmed == "clear" || trimmed.starts_with("clear ") || trimmed.starts_with("clear\t")
+}
+
+impl ShellCommand {
+    /// Kill the running command by sending Ctrl+C and then using system kill
+    pub fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Try Ctrl+C through stdin multiple times
+        for _i in 0..3 {
+            let _ = self.stdin_tx.try_send("\x03".to_string());
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Also try sending Ctrl+C with newline
+        let _ = self.stdin_tx.try_send("\x03\n".to_string());
+
+        // Try to kill the process directly using the registry
+        let registry = get_process_registry();
+        if let Ok(registry) = registry.lock() {
+            if let Some(&pid) = registry.get(&self.id) {
+                #[cfg(unix)]
+                {
+                    use std::process::Command;
+                    // First try SIGTERM (graceful)
+                    let _ = Command::new("kill").args([&pid.to_string()]).output();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    // Then try SIGKILL (forceful)
+                    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+                }
+                #[cfg(windows)]
+                {
+                    use std::process::Command;
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/F"])
+                        .output();
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Run a shell command in the background while keeping the TUI active
@@ -408,12 +141,19 @@ pub fn run_background_shell_command(
             }
         };
 
+        // Register the PID in the global registry
+        let child_pid = child.id();
+        let registry = get_process_registry();
+        if let Ok(mut registry) = registry.lock() {
+            registry.insert(command_id.clone(), child_pid);
+        }
+
         // Handle stdin in a separate thread
         if let Some(mut stdin) = child.stdin.take() {
             std::thread::spawn(move || {
                 while let Some(input) = stdin_rx.blocking_recv() {
-                    if let Err(e) = writeln!(stdin, "{}", input) {
-                        eprintln!("Failed to write to stdin: {}", e);
+                    if let Err(_e) = writeln!(stdin, "{}", input) {
+                        // eprintln!("Failed to write to stdin: {}", e);
                         break;
                     }
                     if let Err(e) = stdin.flush() {
@@ -433,11 +173,11 @@ pub fn run_background_shell_command(
                     match line {
                         Ok(line) => {
                             let line = preprocess_terminal_output(&line);
-                            // Check for sensitive input prompts
+                            // Check if this is an interactive prompt
                             if is_interactive_prompt(&line) {
-                                let _ =
-                                    tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
+                                let _ = tx_clone.blocking_send(ShellEvent::WaitingForInput);
                             }
+                            // Always send the output so user can see the prompt
                             let _ = tx_clone.blocking_send(ShellEvent::Output(line));
                         }
                         Err(e) => {
@@ -457,13 +197,30 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            // Check for sensitive input prompts in stderr too
+                            // Check for interactive prompts in stderr too
                             let line = preprocess_terminal_output(&line);
                             if is_interactive_prompt(&line) {
-                                let _ =
-                                    tx_clone.blocking_send(ShellEvent::InputRequest(line.clone()));
+                                let _ = tx_clone.blocking_send(ShellEvent::WaitingForInput);
                             }
-                            let _ = tx_clone.blocking_send(ShellEvent::Error(line));
+
+                            // Check if this stderr line is actually an error or just progress info
+                            let lower_line = line.to_lowercase();
+                            let is_actual_error = lower_line.contains("error")
+                                || lower_line.contains("failed")
+                                || lower_line.contains("fatal")
+                                || lower_line.contains("exception")
+                                || lower_line.contains("panic")
+                                || lower_line.starts_with("error:")
+                                || lower_line.starts_with("fatal:")
+                                || lower_line.starts_with("exception:");
+
+                            if is_actual_error {
+                                let _ = tx_clone.blocking_send(ShellEvent::Error(line));
+                            } else {
+                                // Treat as normal output if it's not an actual error
+                                // Always send the output so user can see the prompt
+                                let _ = tx_clone.blocking_send(ShellEvent::Output(line));
+                            }
                         }
                         Err(e) => {
                             let _ = tx_clone
@@ -478,10 +235,22 @@ pub fn run_background_shell_command(
         match child.wait() {
             Ok(status) => {
                 let code = status.code().unwrap_or(-1);
+                // Give stdout/stderr threads a moment to finish sending their events
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                // Clean up the registry
+                let registry = get_process_registry();
+                if let Ok(mut registry) = registry.lock() {
+                    registry.remove(&command_id);
+                }
                 let _ = output_tx.blocking_send(ShellEvent::Completed(code));
             }
             Err(e) => {
                 let _ = output_tx.blocking_send(ShellEvent::Error(format!("Wait error: {}", e)));
+                // Clean up the registry
+                let registry = get_process_registry();
+                if let Ok(mut registry) = registry.lock() {
+                    registry.remove(&command_id);
+                }
                 let _ = output_tx.blocking_send(ShellEvent::Completed(-1));
             }
         }
@@ -547,6 +316,14 @@ pub fn run_pty_command(
             }
         };
 
+        // Register the PID in the global registry
+        if let Some(child_pid) = child.process_id() {
+            let registry = get_process_registry();
+            if let Ok(mut registry) = registry.lock() {
+                registry.insert(command_id.clone(), child_pid);
+            }
+        }
+
         // Take the writer for stdin
         let mut writer = match pair.master.take_writer() {
             Ok(w) => w,
@@ -601,21 +378,22 @@ pub fn run_pty_command(
                     // Process accumulated data
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
                         let text = preprocess_terminal_output(&text);
-                        // Look for sensitive input prompt patterns
+                        // Look for interactive prompt patterns
                         if is_interactive_prompt(&text) && !text.ends_with('\n') {
-                            // This is likely a sensitive input prompt without newline
-                            let _ = output_tx.blocking_send(ShellEvent::InputRequest(text.clone()));
+                            // This is likely an interactive prompt without newline
+                            let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
+                            // Always send the output so user can see the prompt
+                            let _ = output_tx.blocking_send(ShellEvent::Output(text.clone()));
                             accumulated.clear();
                         } else if text.contains('\n') {
                             // Process complete lines
                             for line in text.lines() {
                                 if is_interactive_prompt(line) {
-                                    let _ = output_tx
-                                        .blocking_send(ShellEvent::InputRequest(line.to_string()));
-                                } else {
-                                    let _ = output_tx
-                                        .blocking_send(ShellEvent::Output(line.to_string()));
+                                    let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
                                 }
+                                // Always send the output so user can see the prompt
+                                let _ =
+                                    output_tx.blocking_send(ShellEvent::Output(line.to_string()));
                             }
                             accumulated.clear();
                         }

@@ -97,6 +97,7 @@ pub struct AppState {
     pub interactive_commands: Vec<String>,
     pub auto_approve_manager: AutoApproveManager,
     pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
+    pub latest_tool_call: Option<ToolCall>,
 }
 
 #[derive(Debug)]
@@ -139,9 +140,10 @@ pub enum InputEvent {
     Tab,
     ShellOutput(String),
     ShellError(String),
-    ShellInputRequest(String),
+    ShellWaitingForInput,
     ShellCompleted(i32),
     ShellClear,
+    ShellKill,
     HandlePaste(String),
     InputDelete,
     InputDeleteWord,
@@ -149,10 +151,11 @@ pub enum InputEvent {
     InputCursorEnd,
     InputCursorPrevWord,
     InputCursorNextWord,
-    AttemptQuit, // First Ctrl+C press for quit sequence
     ToggleAutoApprove,
     AutoApproveCurrentTool,
     ToggleDialogFocus, // NEW: toggle between messages view and dialog focus
+    RetryLastToolCall, // Ctrl+R to retry last tool call in shell mode
+    AttemptQuit,       // First Ctrl+C press for quit sequence
 }
 
 #[derive(Debug)]
@@ -236,6 +239,7 @@ impl AppState {
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
             auto_approve_manager: AutoApproveManager::new(),
             dialog_focused: false, // Default to messages view focused
+            latest_tool_call: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
@@ -281,8 +285,8 @@ impl AppState {
                     ShellEvent::Error(line) => {
                         let _ = input_tx.send(InputEvent::ShellError(line)).await;
                     }
-                    ShellEvent::InputRequest(prompt) => {
-                        let _ = input_tx.send(InputEvent::ShellInputRequest(prompt)).await;
+                    ShellEvent::WaitingForInput => {
+                        let _ = input_tx.send(InputEvent::ShellWaitingForInput).await;
                     }
                     ShellEvent::Completed(code) => {
                         let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
@@ -315,7 +319,7 @@ impl AppState {
                     find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (self.input.trim() == "/")
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
-                    || (has_at_trigger && !is_files_empty);
+                    || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
         }
     }

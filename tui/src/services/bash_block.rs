@@ -511,6 +511,11 @@ pub fn render_result_block(
         return;
     }
     if tool_call_status == ToolCallResultStatus::Cancelled {
+        // Store the latest tool call for potential retry (only for run_command)
+        if tool_call.function.name == "run_command" {
+            state.latest_tool_call = Some(tool_call.clone());
+        }
+
         render_bash_block_rejected(
             &tool_call.function.name,
             &title,

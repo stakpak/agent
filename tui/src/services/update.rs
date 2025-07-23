@@ -4,8 +4,7 @@ use crate::services::bash_block::{
     preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_clear_message, push_error_message, push_help_message, push_memorize_message,
-    push_status_message, push_styled_message, render_system_message,
+    push_clear_message, push_error_message, push_help_message, push_memorize_message, push_status_message, push_styled_message, render_system_message
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
@@ -22,7 +21,8 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
-const SCROLL_LINES: usize = 3;
+// Reduced from 7 to 5 for smoother, less disorienting scrolling
+const SCROLL_LINES: usize = 5;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -272,7 +272,11 @@ pub fn update(
         }
 
         InputEvent::ShowConfirmationDialog(tool_call) => {
-            // Always show the styled command message first
+            // Store the latest tool call for potential retry (only for run_command)
+            if tool_call.function.name == "run_command" {
+                state.latest_tool_call = Some(tool_call.clone());
+            }
+            state.dialog_command = Some(tool_call.clone());
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
@@ -320,7 +324,7 @@ pub fn update(
             state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -337,45 +341,53 @@ pub fn update(
             // remove ansi codes
             let line = preprocess_terminal_output(&line);
             // normalize line endings
-            let line = line.replace("\r\n", "\n").replace('\r', "\n");
-            let mut redacted_line = state.secret_manager.redact_and_store_secrets(&line, None);
+            let mut line = line.replace("\r\n", "\n").replace('\r', "\n");
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
-                let text = format!("{}\n", redacted_line);
+                let text = format!("{}\n", line);
                 output.push_str(&text);
                 *output = truncate_output(output);
             }
 
-            redacted_line = truncate_output(&redacted_line);
+            line = truncate_output(&line);
+            state.messages.push(Message::plain_text(line));
 
-            state.messages.push(Message::plain_text(redacted_line));
-
-            adjust_scroll(state, message_area_height, message_area_width);
+            // Only adjust scroll if not streaming or if we're staying at bottom
+            if !state.is_streaming || state.stay_at_bottom {
+                adjust_scroll(state, message_area_height, message_area_width);
+            }
         }
 
         InputEvent::ShellError(line) => {
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
-            adjust_scroll(state, message_area_height, message_area_width);
+            // Only adjust scroll if not streaming or if we're staying at bottom
+            if !state.is_streaming || state.stay_at_bottom {
+                adjust_scroll(state, message_area_height, message_area_width);
+            }
         }
 
-        InputEvent::ShellInputRequest(prompt) => {
-            push_styled_message(
-                state,
-                &prompt,
-                Color::Rgb(180, 180, 180),
-                "?! ",
-                Color::Yellow,
-            );
+        InputEvent::ShellWaitingForInput => {
             state.waiting_for_shell_input = true;
+            // Allow user input when command is waiting
             adjust_scroll(state, message_area_height, message_area_width);
         }
 
         InputEvent::ShellCompleted(_code) => {
+            // Command completed, reset waiting state
+            state.waiting_for_shell_input = false;
+
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+                if let Some(dialog_command) = &state.dialog_command {
+                    if let Some(latest_tool_call) = &state.latest_tool_call {
+                        if dialog_command.id == latest_tool_call.id {
+                            state.latest_tool_call = None;
+                        }
+                    }
+                }
                 state.show_shell_mode = false;
                 state.dialog_command = None;
             }
@@ -386,11 +398,8 @@ pub fn update(
                 }
             }
 
-            if !state.ondemand_shell_mode {
-                state.active_shell_command = None;
-                state.active_shell_command_output = None;
-            }
-
+            state.active_shell_command = None;
+            state.active_shell_command_output = None;
             state.input.clear();
             state.cursor_position = 0;
             state.messages.push(Message::plain_text(""));
@@ -435,6 +444,18 @@ pub fn update(
 
             // Scroll to the bottom to show the cleared state
             adjust_scroll(state, message_area_height, message_area_width);
+        }
+        InputEvent::ShellKill => {
+            // Kill the running command if there is one
+            if let Some(cmd) = &state.active_shell_command {
+                if let Err(_e) = cmd.kill() {
+                    // eprintln!("Failed to kill command: {}", e);
+                }
+            }
+            // Reset shell state
+            state.active_shell_command = None;
+            state.active_shell_command_output = None;
+            state.waiting_for_shell_input = false;
         }
         InputEvent::HandlePaste(text) => {
             let text = preprocess_terminal_output(&text);
@@ -518,6 +539,39 @@ pub fn update(
             }
             state.cursor_position = pos;
         }
+        InputEvent::RetryLastToolCall => {
+            if let Some(tool_call) = &state.latest_tool_call {
+                // Extract the command from the tool call
+                let full_command = extract_full_command_arguments(tool_call);
+
+                // Extract just the command part (remove "command = " prefix)
+                let command = if full_command.starts_with("command = ") {
+                    full_command.trim_start_matches("command = ").to_string()
+                } else {
+                    full_command
+                };
+
+                let command_len = command.len();
+
+                // Enable shell mode
+                state.show_shell_mode = true;
+                state.is_dialog_open = false;
+                state.ondemand_shell_mode = false;
+                state.dialog_command = Some(tool_call.clone());
+                if state.shell_tool_calls.is_none() {
+                    state.shell_tool_calls = Some(Vec::new());
+                }
+
+                // Set the command in the input but don't execute it yet
+                state.input = command;
+                state.cursor_position = command_len;
+
+                // Clear any existing shell state
+                state.active_shell_command = None;
+                state.active_shell_command_output = None;
+                state.waiting_for_shell_input = false;
+            }
+        }
         InputEvent::AttemptQuit => {
             use std::time::Instant;
             let now = Instant::now();
@@ -546,17 +600,43 @@ fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
-        state.ondemand_shell_mode = state.dialog_command.is_none();
-        if state.ondemand_shell_mode && state.shell_tool_calls.is_none() {
-            state.shell_tool_calls = Some(Vec::new());
+        if let Some(dialog_command) = &state.dialog_command {
+            let full_command = extract_full_command_arguments(dialog_command);
+
+            // Extract just the command part (remove "command = " prefix)
+            let command = if full_command.starts_with("command = ") {
+                full_command.trim_start_matches("command = ").to_string()
+            } else {
+                full_command
+            };
+
+            let command_len = command.len();
+            state.input = command;
+            state.cursor_position = command_len;
         }
+        state.ondemand_shell_mode = state.dialog_command.is_none();
+        if state.ondemand_shell_mode {
+            if state.shell_tool_calls.is_none() {
+                state.shell_tool_calls = Some(Vec::new());
+            }
+            state.input.clear();
+            state.cursor_position = 0;
+        }
+    } else {
+        state.input.clear();
+        state.cursor_position = 0;
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
-        state.is_dialog_open = true;
+        // only show dialog if id of latest tool call is not the same as dialog_command id
+        if let Some(latest_tool_call) = &state.latest_tool_call {
+            if let Some(dialog_command) = &state.dialog_command {
+                if latest_tool_call.id != dialog_command.id {
+                    state.is_dialog_open = true;
+                }
+            }
+        }
         state.ondemand_shell_mode = false;
     }
-    state.input.clear();
-    state.cursor_position = 0;
 }
 
 fn handle_tab(state: &mut AppState) {
@@ -619,6 +699,12 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.cursor_position = 0;
         return;
     }
+    if state.show_shell_mode
+        && state.active_shell_command.is_some()
+        && !state.waiting_for_shell_input
+    {
+        return; // Block all input
+    }
     if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -661,8 +747,8 @@ fn handle_input_changed(state: &mut AppState, c: char) {
             state.helper_selected = 0;
         }
     }
-    if !state.input.starts_with('/') {
-        // Send input to autocomplete worker (async, non-blocking)
+  
+    if !state.waiting_for_shell_input && !state.input.starts_with('/') {
         if let Some(tx) = &state.autocomplete_tx {
             let _ = tx.try_send((state.input.clone(), state.cursor_position));
         }
@@ -716,6 +802,7 @@ fn handle_esc(
     state: &mut AppState,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    shell_tx: &Sender<InputEvent>,
 ) {
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
@@ -739,6 +826,9 @@ fn handle_esc(
         state.input.clear();
         state.cursor_position = 0;
     } else if state.show_shell_mode {
+        if state.active_shell_command.is_some() {
+            let _ = shell_tx.try_send(InputEvent::ShellKill);
+        }
         state.show_shell_mode = false;
         state.input.clear();
         state.cursor_position = 0;
@@ -772,7 +862,7 @@ fn handle_input_submitted(
             state.cursor_position = 0;
             state.waiting_for_shell_input = false;
 
-            // Send the password to the shell command
+            // Send the input to the shell command
             if let Some(cmd) = &state.active_shell_command {
                 let stdin_tx = cmd.stdin_tx.clone();
                 tokio::spawn(async move {
@@ -875,7 +965,7 @@ fn handle_input_submitted(
             }
             2 => {
                 // Option 3: No, and tell Stakpak what to do differently
-                handle_esc(state, output_tx, cancel_tx);
+                handle_esc(state, output_tx, cancel_tx, shell_tx);
             }
             _ => {
                 // Fallback to option 0 (Yes)
@@ -1030,6 +1120,15 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
         if let MessageContent::Plain(text, _) = &mut message.content {
             text.push_str(&s);
         }
+        // During streaming, only adjust scroll if we're staying at bottom
+        if state.stay_at_bottom {
+            let input_height = 3;
+            let total_lines = state.messages.len() * 2;
+            let max_visible_lines =
+                std::cmp::max(1, message_area_height.saturating_sub(input_height));
+            let max_scroll = total_lines.saturating_sub(max_visible_lines);
+            state.scroll = max_scroll;
+        }
     } else {
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
@@ -1171,7 +1270,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state
         .messages
         .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
-    state.streaming_tool_result_id = None;
+    state.latest_tool_call = None;
 }
 
 pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
