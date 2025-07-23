@@ -21,8 +21,6 @@ pub struct RemoteConnectionInfo {
     pub password: Option<String>,
     pub private_key_path: Option<String>,
 }
-///Users/georgefahmy/Desktop/projects/tmp/tmp-deply-eval/secrets/iac-eval-key  
-/// ubuntu@51.21.3.199    
 
 pub struct SSHClient;
 
