@@ -28,20 +28,8 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
         height: dialog_height,
     };
 
-    let message = if let Some(dialog_command) = state.dialog_command.as_ref() {
-        let command = dialog_command.function.arguments.clone();
-        if state
-            .interactive_commands
-            .iter()
-            .any(|cmd| command.contains(cmd))
-        {
-            "This is an interactive command. '$' to run the command yourself or Esc to cancel and reprompt".to_string()
-        } else {
-            "Press Enter to continue or Esc to cancel and reprompt".to_string()
-        }
-    } else {
-        "Press Enter to continue or Esc to cancel and reprompt".to_string()
-    };
+    let message =
+        "Press Enter to continue. '$' to run the command yourself or Esc to cancel and reprompt";
 
     let line = Line::from(vec![Span::styled(
         message,
