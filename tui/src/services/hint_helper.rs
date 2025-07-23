@@ -53,5 +53,37 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             Style::default().fg(Color::Cyan),
         ));
         f.render_widget(hint, area);
+    } else if !state.show_sessions_dialog && !state.is_dialog_open {
+        // Show auto-approve status
+        let auto_approve_status = if state.auto_approve_manager.is_enabled() {
+            "🔓 Auto-approve ON"
+        } else {
+            "🔒 Auto-approve OFF"
+        };
+        let status_color = if state.auto_approve_manager.is_enabled() {
+            Color::Green
+        } else {
+            Color::Red
+        };
+
+        let hint = Paragraph::new(Span::styled(
+            auto_approve_status,
+            Style::default().fg(status_color),
+        ));
+        f.render_widget(hint, area);
+    } else if state.is_dialog_open {
+        // Show focus information when dialog is open
+        let focus_text = if state.dialog_focused {
+            "Press Tab to focus Chat view. Dialog focused"
+        } else {
+            "Press Tab to focus Dialog. Chat view focused"
+        };
+
+        let hint = Paragraph::new(Span::styled(
+            focus_text,
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(ratatui::layout::Alignment::Right);
+        f.render_widget(hint, area);
     }
 }
