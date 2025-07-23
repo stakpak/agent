@@ -126,14 +126,15 @@ The auto-approve configuration is stored in:
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+O` | Toggle auto-approve on/off |
-| `Ctrl+Shift+O` | Auto-approve current tool |
-| `Tab` | Toggle focus between Chat view and Dialog |
-| `Up/Down` | Navigate dialog options (when dialog focused) |
-| `Enter` | Select current dialog option |
-| `Esc` | Cancel dialog and reject tool call |
+| Shortcut | Action | When to Use |
+|----------|--------|-------------|
+| `Ctrl+O` | Toggle auto-approve on/off | Anytime - enables/disables the entire auto-approve system |
+| `Ctrl+Y` | Auto-approve current tool (when dialog is open) | Only when a confirmation dialog is open - auto-approves the current tool call AND sets that tool to auto-approve in the future |
+| `Ctrl+Y` | Show auto-approve status (when no dialog) | When no dialog is open - shows which tools are auto-approved and how to disable them |
+| `Tab` | Toggle focus between Chat view and Dialog | When dialog is open - switches between scrolling messages and navigating dialog options |
+| `Up/Down` | Navigate dialog options (when dialog focused) | When dialog is open and focused - moves between Yes/Yes+Auto/No options |
+| `Enter` | Select current dialog option | When dialog is open - chooses the highlighted option |
+| `Esc` | Cancel dialog and reject tool call | When dialog is open - cancels and rejects the tool call |
 
 ### Focus System
 
@@ -154,6 +155,17 @@ When a tool call requires confirmation, users see three options:
 1. **Yes** - Accept the tool call once
 2. **Yes, and don't ask again for [tool] commands** - Accept and set auto-approve policy
 3. **No, and tell Stakpak what to do differently** - Reject and provide feedback
+
+### Managing Auto-Approved Tools
+
+#### **Viewing Auto-Approved Tools**
+- Press `Ctrl+Y` when no dialog is open to see which tools are auto-approved
+- Shows a list of tools currently set to auto-approve
+
+#### **Disabling Auto-Approved Tools**
+- Use the command: `/disable_auto_approve <tool_name>`
+- Example: `/disable_auto_approve run_command`
+- Sets the tool back to "Prompt" policy (requires confirmation)
 
 ## Tool Classification
 

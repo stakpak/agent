@@ -42,6 +42,7 @@ pub async fn run_tui(
         "/status",
         "/sessions",
         "/memorize",
+        "/disable_auto_approve",
         "/quit",
     ];
     let mut state = AppState::new(
