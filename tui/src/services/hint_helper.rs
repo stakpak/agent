@@ -9,6 +9,18 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
+    if !state.input.is_empty()
+        && !state.show_shell_mode
+        && !state.show_sessions_dialog
+        && !state.is_dialog_open
+    {
+        let hint = Paragraph::new(Span::styled(
+            "Press Enter to send",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(hint, area);
+        return;
+    }
     if state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
@@ -26,7 +38,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode {
+    if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",
             Style::default().fg(Color::Rgb(160, 92, 158)),
@@ -41,7 +53,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
             ),
             Line::from(format!(
-                "{} for shell mode     ↵ to send message    ctrl + c to quit",
+                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];

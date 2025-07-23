@@ -89,7 +89,7 @@ pub async fn run_tui(
 
                Some(event) = input_rx.recv() => {
                    if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
-                   InputEvent::ShellInputRequest(_) | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
+                   InputEvent::ShellWaitingForInput | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
             // These are shell events, forward them to the shell channel
             let _ = shell_event_tx.send(event).await;
             continue;
