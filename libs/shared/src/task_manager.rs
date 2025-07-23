@@ -706,8 +706,8 @@ impl TaskManagerHandle {
             .map_err(|_| TaskError::ManagerShutdown)?
             .ok_or_else(|| TaskError::TaskNotFound(task_id.clone()))?;
 
-        // If the task is not running, it means it failed to start or was cancelled
-        if task_info.status != TaskStatus::Running {
+        // If the task failed or was cancelled during start, return an error
+        if matches!(task_info.status, TaskStatus::Failed | TaskStatus::Cancelled) {
             return Err(TaskError::TaskFailedOnStart(
                 task_info
                     .output
