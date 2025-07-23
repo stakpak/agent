@@ -20,8 +20,14 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputDeleteWord)
                 }
+                KeyCode::Char('a')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key.modifiers.contains(KeyModifiers::SHIFT) =>
+                {
+                    Some(InputEvent::AutoApproveCurrentTool)
+                }
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::InputCursorStart)
+                    Some(InputEvent::ToggleAutoApprove)
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputCursorEnd)
@@ -78,7 +84,13 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::End => Some(InputEvent::InputCursorEnd),
                 KeyCode::PageUp => Some(InputEvent::PageUp),
                 KeyCode::PageDown => Some(InputEvent::PageDown),
-                KeyCode::Tab => Some(InputEvent::Tab),
+                KeyCode::Tab => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::Tab)
+                    } else {
+                        Some(InputEvent::ToggleDialogFocus)
+                    }
+                }
                 _ => None,
             }
         }

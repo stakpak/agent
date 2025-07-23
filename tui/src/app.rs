@@ -1,3 +1,4 @@
+use crate::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
@@ -94,6 +95,8 @@ pub struct AppState {
     pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
+    pub auto_approve_manager: AutoApproveManager,
+    pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
 }
 
 #[derive(Debug)]
@@ -147,6 +150,9 @@ pub enum InputEvent {
     InputCursorPrevWord,
     InputCursorNextWord,
     AttemptQuit, // First Ctrl+C press for quit sequence
+    ToggleAutoApprove,
+    AutoApproveCurrentTool,
+    ToggleDialogFocus, // NEW: toggle between messages view and dialog focus
 }
 
 #[derive(Debug)]
@@ -228,6 +234,8 @@ impl AppState {
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            auto_approve_manager: AutoApproveManager::new(),
+            dialog_focused: false, // Default to messages view focused
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {

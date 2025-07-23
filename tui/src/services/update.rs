@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
-const SCROLL_LINES: usize = 7;
+const SCROLL_LINES: usize = 3;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -45,6 +45,14 @@ pub fn update(
                 }
             } else if state.show_helper_dropdown {
                 handle_dropdown_up(state);
+            } else if state.is_dialog_open && state.dialog_focused {
+                // Handle dialog navigation only when dialog is focused
+                if state.dialog_selected > 0 {
+                    state.dialog_selected -= 1;
+                } else {
+                    // Wrap to the last option
+                    state.dialog_selected = 2;
+                }
             } else {
                 handle_scroll_up(state);
             }
@@ -56,12 +64,40 @@ pub fn update(
                 }
             } else if state.show_helper_dropdown {
                 handle_dropdown_down(state);
+            } else if state.is_dialog_open && state.dialog_focused {
+                // Handle dialog navigation only when dialog is focused
+                if state.dialog_selected < 2 {
+                    state.dialog_selected += 1;
+                } else {
+                    // Wrap to the first option
+                    state.dialog_selected = 0;
+                }
             } else {
                 handle_scroll_down(state, message_area_height, message_area_width);
             }
         }
         InputEvent::DropdownUp => handle_dropdown_up(state),
         InputEvent::DropdownDown => handle_dropdown_down(state),
+        InputEvent::DialogUp => {
+            if state.is_dialog_open {
+                if state.dialog_selected > 0 {
+                    state.dialog_selected -= 1;
+                } else {
+                    // Wrap to the last option
+                    state.dialog_selected = 2;
+                }
+            }
+        }
+        InputEvent::DialogDown => {
+            if state.is_dialog_open {
+                if state.dialog_selected < 2 {
+                    state.dialog_selected += 1;
+                } else {
+                    // Wrap to the first option
+                    state.dialog_selected = 0;
+                }
+            }
+        }
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
@@ -117,13 +153,101 @@ pub fn update(
             }
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
+        InputEvent::ToggleAutoApprove => {
+            if let Err(e) = state.auto_approve_manager.toggle_enabled() {
+                push_error_message(state, &format!("Failed to toggle auto-approve: {}", e));
+            } else {
+                let status = if state.auto_approve_manager.is_enabled() {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                push_styled_message(
+                    state,
+                    &format!("Auto-approve {}", status),
+                    Color::Green,
+                    "",
+                    Color::Green,
+                );
+            }
+        }
+        InputEvent::AutoApproveCurrentTool => {
+            if let Some(tool_call) = &state.dialog_command {
+                let tool_name = tool_call.function.name.clone();
+                let tool_call_clone = tool_call.clone();
+                if let Err(e) = state
+                    .auto_approve_manager
+                    .update_tool_policy(&tool_name, crate::auto_approve::AutoApprovePolicy::Auto)
+                {
+                    push_error_message(
+                        state,
+                        &format!("Failed to set auto-approve for {}: {}", tool_name, e),
+                    );
+                } else {
+                    push_styled_message(
+                        state,
+                        &format!("Auto-approve enabled for {} tool", tool_name),
+                        Color::Green,
+                        "",
+                        Color::Green,
+                    );
+                    // Auto-approve the current tool call
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
+                    state.is_dialog_open = false;
+                    state.dialog_command = None;
+                    state.dialog_focused = false; // Reset focus when dialog closes
+                }
+            }
+        }
+        InputEvent::ToggleDialogFocus => {
+            if state.is_dialog_open {
+                state.dialog_focused = !state.dialog_focused;
+                let focus_message = if state.dialog_focused {
+                    "Dialog focused"
+                } else {
+                    "Chat view focused"
+                };
+                push_styled_message(
+                    state,
+                    &format!("🎯 {}", focus_message),
+                    Color::DarkGray,
+                    "",
+                    Color::Cyan,
+                );
+            }
+        }
         InputEvent::ShowConfirmationDialog(tool_call) => {
-            state.dialog_command = Some(tool_call.clone());
+            // Always show the styled command message first
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
                 render_bash_block(&tool_call, &full_command, false, state, terminal_size);
             state.pending_bash_message_id = Some(message_id);
-            state.is_dialog_open = true;
+
+            // Check if auto-approve should be used
+            if state.auto_approve_manager.should_auto_approve(&tool_call) {
+                // Auto-approve the tool call
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+
+                // Show a brief message that the tool was auto-approved
+                let risk_level = state.auto_approve_manager.get_risk_level(&tool_call);
+                let risk_text = match risk_level {
+                    crate::auto_approve::RiskLevel::Low => "low-risk",
+                    crate::auto_approve::RiskLevel::Medium => "medium-risk",
+                    crate::auto_approve::RiskLevel::High => "high-risk",
+                    crate::auto_approve::RiskLevel::Critical => "critical-risk",
+                };
+
+                let auto_approve_message = format!(
+                    "🔓 Auto-approved {} tool ({})",
+                    tool_call.function.name, risk_text
+                );
+                push_styled_message(state, &auto_approve_message, Color::Green, "", Color::Green);
+            } else {
+                // Show confirmation dialog as usual
+                state.dialog_command = Some(tool_call.clone());
+                state.is_dialog_open = true;
+                state.dialog_focused = false; // Default to messages view focused when dialog opens
+            }
         }
         InputEvent::Loading(is_loading) => {
             state.is_streaming = is_loading;
@@ -542,6 +666,7 @@ fn handle_esc(
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
+        state.dialog_focused = false; // Reset focus when dialog closes
         state.input.clear();
         state.cursor_position = 0;
     } else if state.show_shell_mode {
@@ -650,21 +775,65 @@ fn handle_input_submitted(
             state.run_shell_command(command.to_string(), shell_tx);
             return;
         }
-        if state.dialog_selected == 0 {
-            if let Some(tool_call) = &state.dialog_command {
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+        match state.dialog_selected {
+            0 => {
+                // Option 1: Yes - Accept the tool call
+                if let Some(tool_call) = &state.dialog_command {
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                }
             }
-        } else {
-            // Clone dialog_command before mutating state
-            let tool_call_opt = state.dialog_command.clone();
-            if let Some(tool_call) = &tool_call_opt {
-                let truncated_command = extract_truncated_command_arguments(tool_call);
-                let title = get_command_type_name(tool_call);
-                render_bash_block_rejected(&truncated_command, &title, state, None);
+            1 => {
+                // Option 2: Yes, and don't ask again for this tool
+                if let Some(tool_call) = &state.dialog_command {
+                    let tool_name = tool_call.function.name.clone();
+                    let tool_call_clone = tool_call.clone();
+
+                    // Set auto-approve policy for this tool
+                    if let Err(e) = state.auto_approve_manager.update_tool_policy(
+                        &tool_name,
+                        crate::auto_approve::AutoApprovePolicy::Auto,
+                    ) {
+                        push_error_message(
+                            state,
+                            &format!("Failed to set auto-approve for {}: {}", tool_name, e),
+                        );
+                    } else {
+                        push_styled_message(
+                            state,
+                            &format!("Auto-approve enabled for {} tool", tool_name),
+                            Color::Green,
+                            "",
+                            Color::Green,
+                        );
+                    }
+
+                    // Accept the tool call
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
+                }
+            }
+            2 => {
+                // Option 3: No, and tell Claude what to do differently
+                let tool_call_opt = state.dialog_command.clone();
+                if let Some(tool_call) = &tool_call_opt {
+                    // Reject the tool call
+                    let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
+
+                    // Show the styled rejection message
+                    let truncated_command = extract_truncated_command_arguments(tool_call);
+                    let title = get_command_type_name(tool_call);
+                    render_bash_block_rejected(&truncated_command, &title, state, None);
+                }
+            }
+            _ => {
+                // Fallback to option 0 (Yes)
+                if let Some(tool_call) = &state.dialog_command {
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                }
             }
         }
 
         state.dialog_command = None;
+        state.dialog_focused = false; // Reset focus when dialog closes
     } else if state.show_helper_dropdown {
         if state.autocomplete.is_active() {
             let selected_file = state

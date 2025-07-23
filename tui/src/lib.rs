@@ -1,4 +1,5 @@
 mod app;
+mod auto_approve;
 mod event;
 mod terminal;
 mod view;
