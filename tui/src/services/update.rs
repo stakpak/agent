@@ -119,6 +119,10 @@ pub fn update(
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ShowConfirmationDialog(tool_call) => {
+            // Store the latest tool call for potential retry (only for run_command)
+            if tool_call.function.name == "run_command" {
+                state.latest_tool_call = Some(tool_call.clone());
+            }
             state.dialog_command = Some(tool_call.clone());
             let full_command = extract_full_command_arguments(&tool_call);
             let message_id =
@@ -187,6 +191,13 @@ pub fn update(
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+                if let Some(dialog_command) = &state.dialog_command {
+                    if let Some(latest_tool_call) = &state.latest_tool_call {
+                        if dialog_command.id == latest_tool_call.id {
+                            state.latest_tool_call = None;
+                        }
+                    }
+                }
                 state.show_shell_mode = false;
                 state.dialog_command = None;
             }
@@ -199,7 +210,6 @@ pub fn update(
 
             state.active_shell_command = None;
             state.active_shell_command_output = None;
-
             state.input.clear();
             state.cursor_position = 0;
             state.messages.push(Message::plain_text(""));
@@ -339,6 +349,39 @@ pub fn update(
             }
             state.cursor_position = pos;
         }
+        InputEvent::RetryLastToolCall => {
+            if let Some(tool_call) = &state.latest_tool_call {
+                // Extract the command from the tool call
+                let full_command = extract_full_command_arguments(tool_call);
+
+                // Extract just the command part (remove "command = " prefix)
+                let command = if full_command.starts_with("command = ") {
+                    full_command.trim_start_matches("command = ").to_string()
+                } else {
+                    full_command
+                };
+
+                let command_len = command.len();
+
+                // Enable shell mode
+                state.show_shell_mode = true;
+                state.is_dialog_open = false;
+                state.ondemand_shell_mode = false;
+                state.dialog_command = Some(tool_call.clone());
+                if state.shell_tool_calls.is_none() {
+                    state.shell_tool_calls = Some(Vec::new());
+                }
+
+                // Set the command in the input but don't execute it yet
+                state.input = command;
+                state.cursor_position = command_len;
+
+                // Clear any existing shell state
+                state.active_shell_command = None;
+                state.active_shell_command_output = None;
+                state.waiting_for_shell_input = false;
+            }
+        }
         InputEvent::AttemptQuit => {
             use std::time::Instant;
             let now = Instant::now();
@@ -367,17 +410,43 @@ fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
-        state.ondemand_shell_mode = state.dialog_command.is_none();
-        if state.ondemand_shell_mode && state.shell_tool_calls.is_none() {
-            state.shell_tool_calls = Some(Vec::new());
+        if let Some(dialog_command) = &state.dialog_command {
+            let full_command = extract_full_command_arguments(dialog_command);
+
+            // Extract just the command part (remove "command = " prefix)
+            let command = if full_command.starts_with("command = ") {
+                full_command.trim_start_matches("command = ").to_string()
+            } else {
+                full_command
+            };
+
+            let command_len = command.len();
+            state.input = command;
+            state.cursor_position = command_len;
         }
+        state.ondemand_shell_mode = state.dialog_command.is_none();
+        if state.ondemand_shell_mode {
+            if state.shell_tool_calls.is_none() {
+                state.shell_tool_calls = Some(Vec::new());
+            }
+            state.input.clear();
+            state.cursor_position = 0;
+        }
+    } else {
+        state.input.clear();
+        state.cursor_position = 0;
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
-        state.is_dialog_open = true;
+        // only show dialog if id of latest tool call is not the same as dialog_command id
+        if let Some(latest_tool_call) = &state.latest_tool_call {
+            if let Some(dialog_command) = &state.dialog_command {
+                if latest_tool_call.id != dialog_command.id {
+                    state.is_dialog_open = true;
+                }
+            }
+        }
         state.ondemand_shell_mode = false;
     }
-    state.input.clear();
-    state.cursor_position = 0;
 }
 
 fn handle_tab(state: &mut AppState) {
@@ -569,7 +638,7 @@ fn handle_esc(
         if state.active_shell_command.is_some() {
             let _ = shell_tx.try_send(InputEvent::ShellKill);
         }
-        // state.show_shell_mode = false;
+        state.show_shell_mode = false;
         state.input.clear();
         state.cursor_position = 0;
         if state.dialog_command.is_some() {
@@ -951,6 +1020,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
     state
         .messages
         .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
+    state.latest_tool_call = None;
 }
 
 pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
