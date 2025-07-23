@@ -9,18 +9,18 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if !state.input.is_empty()
-        && !state.show_shell_mode
-        && !state.show_sessions_dialog
-        && !state.is_dialog_open
-    {
-        let hint = Paragraph::new(Span::styled(
-            "Press Enter to send",
-            Style::default().fg(Color::DarkGray),
-        ));
-        f.render_widget(hint, area);
-        return;
-    }
+    // if !state.input.is_empty()
+    //     && !state.show_shell_mode
+    //     && !state.show_sessions_dialog
+    //     && !state.is_dialog_open
+    // {
+    //     let hint = Paragraph::new(Span::styled(
+    //         "Press Enter to send",
+    //         Style::default().fg(Color::DarkGray),
+    //     ));
+    //     f.render_widget(hint, area);
+    //     return;
+    // }
     if state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
@@ -60,11 +60,33 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input.is_empty() {
-        let hint = Paragraph::new(Span::styled(
-            "? for shortcuts",
-            Style::default().fg(Color::Cyan),
-        ));
-        f.render_widget(hint, area);
+        // Show both hints when appropriate
+        if state.latest_tool_call.is_some() {
+            // Create a line with both hints - shortcuts on left, retry on right
+            let shortcuts_text = "? for shortcuts";
+            let retry_text = "Ctrl+R to retry last command in shell mode";
+
+            // Calculate spacing to align retry hint to the right
+            let total_width = area.width as usize;
+            let shortcuts_len = shortcuts_text.len();
+            let retry_len = retry_text.len();
+            let spacing = total_width.saturating_sub(shortcuts_len + retry_len);
+
+            let spans = vec![
+                Span::styled(shortcuts_text, Style::default().fg(Color::Cyan)),
+                Span::styled(" ".repeat(spacing), Style::default()),
+                Span::styled(retry_text, Style::default().fg(Color::Yellow)),
+            ];
+
+            let hint = Paragraph::new(Line::from(spans));
+            f.render_widget(hint, area);
+        } else {
+            let hint = Paragraph::new(Span::styled(
+                "? for shortcuts",
+                Style::default().fg(Color::Cyan),
+            ));
+            f.render_widget(hint, area);
+        }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         // Show auto-approve status
         let auto_approve_status = if state.auto_approve_manager.is_enabled() {
@@ -73,9 +95,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             "🔒 Auto-approve OFF"
         };
         let status_color = if state.auto_approve_manager.is_enabled() {
-            Color::Green
+            Color::LightYellow
         } else {
-            Color::Red
+            Color::DarkGray
         };
 
         let hint = Paragraph::new(Span::styled(
