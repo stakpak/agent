@@ -1,0 +1,823 @@
+use anyhow::{Result, anyhow};
+use russh::client::{self, Handler};
+use russh_sftp::client::SftpSession;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
+use tracing::debug;
+use uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteConnectionInfo {
+    pub connection_string: String, // format: user@host:port
+    pub password: Option<String>,
+    pub private_key_path: Option<String>,
+}
+///Users/georgefahmy/Desktop/projects/tmp/tmp-deply-eval/secrets/iac-eval-key  
+/// ubuntu@51.21.3.199    
+
+pub struct SSHClient;
+
+impl Handler for SSHClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        // In production, you might want to verify the server key against known hosts
+        // For now, we accept all keys to avoid "Unknown server key" errors
+        Ok(true)
+    }
+}
+
+pub struct RemoteConnection {
+    sftp: SftpSession,
+    connection_info: RemoteConnectionInfo,
+}
+
+impl RemoteConnection {
+    pub fn get_default_key_files() -> Result<(PathBuf, PathBuf)> {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Home directory not found"))?;
+        let ssh_dir = home_dir.join(".ssh");
+
+        if !ssh_dir.is_dir() {
+            return Err(anyhow!("SSH directory not found: {}", ssh_dir.display()));
+        }
+
+        // Try common key file names in order of preference
+        let key_names = ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"];
+
+        for key_name in &key_names {
+            let private_key = ssh_dir.join(key_name);
+            let public_key = ssh_dir.join(format!("{}.pub", key_name));
+
+            if private_key.is_file() {
+                return Ok((private_key, public_key));
+            }
+        }
+
+        Err(anyhow!("No SSH private key found in {}", ssh_dir.display()))
+    }
+
+    /// Canonicalize a key path, handling both absolute and relative paths
+    pub fn canonicalize_key_path(path: &str) -> Result<PathBuf> {
+        let path_buf = PathBuf::from(path);
+
+        // If it's already absolute, try to canonicalize directly
+        if path_buf.is_absolute() {
+            return fs::canonicalize(&path_buf)
+                .map_err(|e| anyhow!("Failed to access private key at {}: {}", path, e));
+        }
+
+        // For relative paths, try current directory first
+        if let Ok(canonical) = fs::canonicalize(&path_buf) {
+            return Ok(canonical);
+        }
+
+        // If that fails, try relative to ~/.ssh/
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow!("Home directory not found for relative key path"))?;
+        let ssh_relative_path = home_dir.join(".ssh").join(&path_buf);
+
+        if ssh_relative_path.exists() {
+            return fs::canonicalize(ssh_relative_path)
+                .map_err(|e| anyhow!("Failed to access private key at ~/.ssh/{}: {}", path, e));
+        }
+
+        // If still not found, try to expand ~ manually
+        if let Some(stripped) = path.strip_prefix("~/") {
+            let expanded_path = home_dir.join(stripped);
+            return fs::canonicalize(expanded_path)
+                .map_err(|e| anyhow!("Failed to access private key at {}: {}", path, e));
+        }
+
+        Err(anyhow!(
+            "Private key not found at {} (tried current directory and ~/.ssh/)",
+            path
+        ))
+    }
+
+    pub async fn new(connection_info: RemoteConnectionInfo) -> Result<Self> {
+        // Parse connection string: user@host:port
+        let (username, host_port) = connection_info
+            .connection_string
+            .split_once('@')
+            .ok_or_else(|| {
+                anyhow!("Invalid connection string format. Expected: user@host or user@host:port")
+            })?;
+
+        let (hostname, port) = if let Some((host, port_str)) = host_port.split_once(':') {
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| anyhow!("Invalid port number: {}", port_str))?;
+            (host, port)
+        } else {
+            (host_port, 22)
+        };
+
+        debug!("Connecting to {}@{}:{}", username, hostname, port);
+
+        let config = client::Config::default();
+        let mut session = client::connect(config.into(), (hostname, port), SSHClient {})
+            .await
+            .map_err(|e| anyhow!("Failed to connect to SSH server: {}", e))?;
+
+        // Authenticate
+        if let Some(password) = &connection_info.password {
+            debug!("Authenticating with password");
+            let auth_result = session.authenticate_password(username, password).await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Password authentication failed"));
+            }
+        } else {
+            debug!("Authenticating with public key");
+            let private_key_path = if let Some(path) = &connection_info.private_key_path {
+                Self::canonicalize_key_path(path)?
+            } else {
+                Self::get_default_key_files()?.0
+            };
+
+            let keypair = russh::keys::load_secret_key(&private_key_path, None).map_err(|e| {
+                anyhow!(
+                    "Failed to load private key from {}: {}",
+                    private_key_path.display(),
+                    e
+                )
+            })?;
+
+            let auth_result = session
+                .authenticate_publickey(
+                    username,
+                    russh::keys::PrivateKeyWithHashAlg::new(
+                        Arc::new(keypair),
+                        Some(russh::keys::HashAlg::Sha256),
+                    ),
+                )
+                .await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Public key authentication failed"));
+            }
+        }
+
+        // Open SFTP channel
+        let channel = session
+            .channel_open_session()
+            .await
+            .map_err(|e| anyhow!("Failed to open SSH channel: {}", e))?;
+
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| anyhow!("Failed to request SFTP subsystem: {}", e))?;
+
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|e| anyhow!("Failed to create SFTP session: {}", e))?;
+
+        debug!("SFTP connection established successfully");
+
+        Ok(Self {
+            sftp,
+            connection_info,
+        })
+    }
+
+    pub async fn separator(&self) -> Result<char> {
+        // Try to determine the path separator by canonicalizing root
+        let canonical_path = self.sftp.canonicalize("/").await?;
+        Ok(if canonical_path.contains('\\') {
+            '\\'
+        } else {
+            '/'
+        })
+    }
+
+    pub async fn canonicalize(&self, path: &str) -> Result<String> {
+        self.sftp
+            .canonicalize(path)
+            .await
+            .map_err(|e| anyhow!("Failed to canonicalize path {}: {}", path, e))
+    }
+
+    pub async fn read_file(&self, path: &str) -> Result<Vec<u8>> {
+        self.sftp
+            .read(path)
+            .await
+            .map_err(|e| anyhow!("Failed to read file {}: {}", path, e))
+    }
+
+    pub async fn read_file_to_string(&self, path: &str) -> Result<String> {
+        let content = self.read_file(path).await?;
+        String::from_utf8(content)
+            .map_err(|e| anyhow!("File {} contains invalid UTF-8: {}", path, e))
+    }
+
+    pub async fn write_file(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.sftp
+            .write(path, data)
+            .await
+            .map_err(|e| anyhow!("Failed to write file {}: {}", path, e))
+    }
+
+    pub async fn create_file(&self, path: &str, data: &[u8]) -> Result<()> {
+        // Create the file and get a handle
+        let mut file_handle = self
+            .sftp
+            .create(path)
+            .await
+            .map_err(|e| anyhow!("Failed to create file {}: {}", path, e))?;
+
+        // Write data to the file handle
+        file_handle
+            .write_all(data)
+            .await
+            .map_err(|e| anyhow!("Failed to write data to file {}: {}", path, e))?;
+
+        // File handle is automatically closed when dropped
+        Ok(())
+    }
+
+    pub async fn create_directories(&self, path: &str) -> Result<()> {
+        let path_buf = PathBuf::from(path);
+        let mut current_path = PathBuf::new();
+
+        for component in path_buf.components() {
+            current_path.push(component);
+            let path_str = current_path.to_string_lossy().to_string();
+
+            if self.sftp.read_dir(&path_str).await.is_err() {
+                self.sftp
+                    .create_dir(&path_str)
+                    .await
+                    .map_err(|e| anyhow!("Failed to create directory {}: {}", path_str, e))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_directory(&self, path: &str) -> Result<Vec<String>> {
+        let entries = self
+            .sftp
+            .read_dir(path)
+            .await
+            .map_err(|e| anyhow!("Failed to read directory {}: {}", path, e))?;
+
+        let separator = self.separator().await?;
+        let mut result = Vec::new();
+
+        for entry in entries {
+            let entry_path = if path.ends_with(separator) {
+                format!("{}{}", path, entry.file_name())
+            } else {
+                format!("{}{}{}", path, separator, entry.file_name())
+            };
+            result.push(entry_path);
+        }
+
+        result.sort();
+        Ok(result)
+    }
+
+    pub async fn is_file(&self, path: &str) -> bool {
+        self.sftp
+            .metadata(path)
+            .await
+            .map(|metadata| !metadata.is_dir())
+            .unwrap_or(false)
+    }
+
+    pub async fn is_directory(&self, path: &str) -> bool {
+        self.sftp
+            .metadata(path)
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+    }
+
+    pub async fn exists(&self, path: &str) -> bool {
+        self.sftp.metadata(path).await.is_ok()
+    }
+
+    pub async fn execute_command_simple(&self, command: &str) -> Result<(String, i32)> {
+        // For command execution, we need a separate SSH session
+        let config = client::Config::default();
+
+        // Parse connection string again
+        let (username, host_port) = self
+            .connection_info
+            .connection_string
+            .split_once('@')
+            .ok_or_else(|| anyhow!("Invalid connection string format"))?;
+
+        let (hostname, port) = if let Some((host, port_str)) = host_port.split_once(':') {
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| anyhow!("Invalid port number: {}", port_str))?;
+            (host, port)
+        } else {
+            (host_port, 22)
+        };
+
+        let mut session = client::connect(config.into(), (hostname, port), SSHClient {}).await?;
+
+        // Authenticate (same as connection setup)
+        if let Some(password) = &self.connection_info.password {
+            let auth_result = session.authenticate_password(username, password).await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        } else {
+            let private_key_path = if let Some(path) = &self.connection_info.private_key_path {
+                Self::canonicalize_key_path(path)?
+            } else {
+                Self::get_default_key_files()?.0
+            };
+
+            let keypair = russh::keys::load_secret_key(&private_key_path, None)?;
+            let auth_result = session
+                .authenticate_publickey(
+                    username,
+                    russh::keys::PrivateKeyWithHashAlg::new(
+                        Arc::new(keypair),
+                        Some(russh::keys::HashAlg::Sha256),
+                    ),
+                )
+                .await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        }
+
+        // Execute command
+        let mut channel = session.channel_open_session().await?;
+        channel.exec(true, command).await?;
+
+        let mut output = String::new();
+        let mut exit_code = 0i32;
+
+        // Simple output collection without progress notifications
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                russh::ChannelMsg::Data { data } => {
+                    let text = String::from_utf8_lossy(&data);
+                    output.push_str(&text);
+                }
+                russh::ChannelMsg::ExtendedData { data, ext: _ } => {
+                    let text = String::from_utf8_lossy(&data);
+                    output.push_str(&text);
+                }
+                russh::ChannelMsg::ExitStatus { exit_status } => {
+                    exit_code = exit_status as i32;
+                }
+                russh::ChannelMsg::Eof => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok((output, exit_code))
+    }
+
+    pub async fn execute_command(
+        &self,
+        command: &str,
+        ctx: &rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<(String, i32)> {
+        // For command execution, we need a separate SSH session
+        let config = client::Config::default();
+
+        // Parse connection string again
+        let (username, host_port) = self
+            .connection_info
+            .connection_string
+            .split_once('@')
+            .ok_or_else(|| anyhow!("Invalid connection string format"))?;
+
+        let (hostname, port) = if let Some((host, port_str)) = host_port.split_once(':') {
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| anyhow!("Invalid port number: {}", port_str))?;
+            (host, port)
+        } else {
+            (host_port, 22)
+        };
+
+        let mut session = client::connect(config.into(), (hostname, port), SSHClient {}).await?;
+
+        // Authenticate (same as connection setup)
+        if let Some(password) = &self.connection_info.password {
+            let auth_result = session.authenticate_password(username, password).await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        } else {
+            let private_key_path = if let Some(path) = &self.connection_info.private_key_path {
+                Self::canonicalize_key_path(path)?
+            } else {
+                Self::get_default_key_files()?.0
+            };
+
+            let keypair = russh::keys::load_secret_key(&private_key_path, None)?;
+            let auth_result = session
+                .authenticate_publickey(
+                    username,
+                    russh::keys::PrivateKeyWithHashAlg::new(
+                        Arc::new(keypair),
+                        Some(russh::keys::HashAlg::Sha256),
+                    ),
+                )
+                .await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        }
+
+        // Execute command
+        let mut channel = session.channel_open_session().await?;
+        channel.exec(true, command).await?;
+
+        let mut output = String::new();
+        let mut exit_code = 0i32;
+        let progress_id = uuid::Uuid::new_v4();
+
+        // Stream output with progress notifications like local commands
+        let command_execution = async {
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { data } => {
+                        let text = String::from_utf8_lossy(&data);
+                        output.push_str(&text);
+
+                        // Send progress notification for streaming output
+                        if !text.trim().is_empty() {
+                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
+                                progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
+                                progress: 50,
+                                total: Some(100),
+                                message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: text.to_string(),
+                                }).unwrap_or_default()),
+                            }).await;
+                        }
+                    }
+                    russh::ChannelMsg::ExtendedData { data, ext: _ } => {
+                        let text = String::from_utf8_lossy(&data);
+                        output.push_str(&text);
+
+                        // Send progress notification for stderr output too
+                        if !text.trim().is_empty() {
+                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
+                                progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
+                                progress: 50,
+                                total: Some(100),
+                                message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: text.to_string(),
+                                }).unwrap_or_default()),
+                            }).await;
+                        }
+                    }
+                    russh::ChannelMsg::ExitStatus { exit_status } => {
+                        exit_code = exit_status as i32;
+                    }
+                    russh::ChannelMsg::Eof => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        // Add cancellation support like local commands
+        tokio::select! {
+            _ = command_execution => {},
+            _ = ctx.ct.cancelled() => {
+                // Close the channel on cancellation
+                let _ = channel.close().await;
+                return Err(anyhow!("Remote command execution was cancelled"));
+            }
+        }
+
+        Ok((output, exit_code))
+    }
+
+    pub async fn execute_command_with_streaming<F>(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+        cancel_rx: &mut tokio::sync::oneshot::Receiver<()>,
+        progress_callback: F,
+    ) -> Result<(String, i32)>
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        use regex::Regex;
+
+        // Compile regex for PID extraction
+        let pid_regex = Regex::new(r"PID:(\d+)").expect("Invalid PID regex");
+
+        // For command execution, we need a separate SSH session
+        let config = client::Config::default();
+
+        // Parse connection string again
+        let (username, host_port) = self
+            .connection_info
+            .connection_string
+            .split_once('@')
+            .ok_or_else(|| anyhow!("Invalid connection string format"))?;
+
+        let (hostname, port) = if let Some((host, port_str)) = host_port.split_once(':') {
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| anyhow!("Invalid port number: {}", port_str))?;
+            (host, port)
+        } else {
+            (host_port, 22)
+        };
+
+        let mut session = client::connect(config.into(), (hostname, port), SSHClient {}).await?;
+
+        // Authenticate (same as connection setup)
+        if let Some(password) = &self.connection_info.password {
+            let auth_result = session.authenticate_password(username, password).await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        } else {
+            let private_key_path = if let Some(path) = &self.connection_info.private_key_path {
+                Self::canonicalize_key_path(path)?
+            } else {
+                Self::get_default_key_files()?.0
+            };
+
+            let keypair = russh::keys::load_secret_key(&private_key_path, None)?;
+            let auth_result = session
+                .authenticate_publickey(
+                    username,
+                    russh::keys::PrivateKeyWithHashAlg::new(
+                        Arc::new(keypair),
+                        Some(russh::keys::HashAlg::Sha256),
+                    ),
+                )
+                .await?;
+            if !matches!(auth_result, russh::client::AuthResult::Success) {
+                return Err(anyhow!("Authentication failed"));
+            }
+        }
+
+        // Execute command
+        let mut channel = session.channel_open_session().await?;
+
+        // Wrap the command to get the PID and enable cleanup
+        let wrapped_command = format!(
+            "bash -c 'echo \"PID:$$\"; exec bash -c \"{}\"'",
+            command.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+
+        channel.exec(true, wrapped_command.as_str()).await?;
+
+        let mut output = String::new();
+        let mut exit_code = 0i32;
+        let mut remote_pid: Option<String> = None;
+
+        // Stream output with progress notifications like local commands
+        let command_execution = async {
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { data } => {
+                        let text = String::from_utf8_lossy(&data).to_string();
+
+                        // Extract PID from the output using regex
+                        if remote_pid.is_none() {
+                            if let Some(captures) = pid_regex.captures(&text) {
+                                if let Some(pid_match) = captures.get(1) {
+                                    remote_pid = Some(pid_match.as_str().to_string());
+                                    // Remove the PID line from output
+                                    let cleaned_text = pid_regex.replace_all(&text, "").to_string();
+                                    if !cleaned_text.trim().is_empty() {
+                                        output.push_str(&cleaned_text);
+                                        progress_callback(cleaned_text);
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Normal output processing
+                        output.push_str(&text);
+                        progress_callback(text);
+                    }
+                    russh::ChannelMsg::ExtendedData { data, ext: _ } => {
+                        let text = String::from_utf8_lossy(&data).to_string();
+                        output.push_str(&text);
+                        progress_callback(text);
+                    }
+                    russh::ChannelMsg::ExitStatus { exit_status } => {
+                        exit_code = exit_status as i32;
+                    }
+                    russh::ChannelMsg::Eof => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        // Execute with timeout and cancellation support with proper remote process cleanup
+        if let Some(timeout_duration) = timeout {
+            tokio::select! {
+                result = tokio::time::timeout(timeout_duration, command_execution) => {
+                    match result {
+                        Ok(_) => Ok((output, exit_code)),
+                        Err(_) => {
+                            // Kill remote process before timing out
+                            if let Some(pid) = &remote_pid {
+                                let kill_cmd = format!("kill -9 {}", pid);
+                                if let Ok(kill_channel) = session.channel_open_session().await {
+                                    let _ = kill_channel.exec(true, kill_cmd.as_str()).await;
+                                    let _ = kill_channel.close().await;
+                                }
+                            }
+                            Err(anyhow!("Command timed out"))
+                        }
+                    }
+                }
+                _ = cancel_rx => {
+                    // Kill the remote process before closing the channel
+                    if let Some(pid) = &remote_pid {
+                        let kill_cmd = format!("kill -9 {}", pid);
+                        if let Ok(kill_channel) = session.channel_open_session().await {
+                            let _ = kill_channel.exec(true, kill_cmd.as_str()).await;
+                            let _ = kill_channel.close().await;
+                        }
+                    }
+                    let _ = channel.close().await;
+                    Err(anyhow!("Command was cancelled"))
+                }
+            }
+        } else {
+            tokio::select! {
+                _ = command_execution => Ok((output, exit_code)),
+                _ = cancel_rx => {
+                    // Kill the remote process before closing the channel
+                    if let Some(pid) = &remote_pid {
+                        let kill_cmd = format!("kill -9 {}", pid);
+                        if let Ok(kill_channel) = session.channel_open_session().await {
+                            let _ = kill_channel.exec(true, kill_cmd.as_str()).await;
+                            let _ = kill_channel.close().await;
+                        }
+                    }
+                    let _ = channel.close().await;
+                    Err(anyhow!("Command was cancelled"))
+                }
+            }
+        }
+    }
+
+    pub fn connection_string(&self) -> &str {
+        &self.connection_info.connection_string
+    }
+}
+
+impl Display for RemoteConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SSH:{}", self.connection_info.connection_string)
+    }
+}
+
+// Global connection manager
+pub struct RemoteConnectionManager {
+    connections: RwLock<HashMap<String, Arc<RemoteConnection>>>,
+}
+
+impl RemoteConnectionManager {
+    pub fn new() -> Self {
+        Self {
+            connections: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub async fn get_connection(
+        &self,
+        connection_info: &RemoteConnectionInfo,
+    ) -> Result<Arc<RemoteConnection>> {
+        let key = connection_info.connection_string.clone();
+
+        // Check if connection already exists
+        {
+            let connections = self.connections.read().await;
+            if let Some(conn) = connections.get(&key) {
+                return Ok(conn.clone());
+            }
+        }
+
+        // Create new connection
+        let connection = RemoteConnection::new(connection_info.clone()).await?;
+        let arc_connection = Arc::new(connection);
+
+        // Store connection
+        {
+            let mut connections = self.connections.write().await;
+            connections.insert(key, arc_connection.clone());
+        }
+
+        Ok(arc_connection)
+    }
+
+    pub async fn remove_connection(&self, connection_string: &str) {
+        let mut connections = self.connections.write().await;
+        connections.remove(connection_string);
+    }
+
+    pub async fn list_connections(&self) -> Vec<String> {
+        let connections = self.connections.read().await;
+        connections.keys().cloned().collect()
+    }
+}
+
+impl Default for RemoteConnectionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PathLocation {
+    Local(String),
+    Remote {
+        connection: RemoteConnectionInfo,
+        path: String,
+    },
+}
+
+impl PathLocation {
+    /// Parse a path that might be local or remote
+    /// Remote paths are in the format: ssh://user@host:port/path or user@host:/path
+    pub fn parse(path_str: &str) -> Result<Self> {
+        if let Some(without_scheme) = path_str.strip_prefix("ssh://") {
+            // Format: ssh://user@host:port/path
+
+            if let Some((connection_part, path_part)) = without_scheme.split_once('/') {
+                let connection_info = RemoteConnectionInfo {
+                    connection_string: connection_part.to_string(),
+                    password: None,
+                    private_key_path: None,
+                };
+
+                return Ok(PathLocation::Remote {
+                    connection: connection_info,
+                    path: format!("/{}", path_part),
+                });
+            }
+        } else if path_str.contains('@') && path_str.contains(':') {
+            // Format: user@host:/path (traditional SCP format)
+            if let Some((connection_part, path_part)) = path_str.split_once(':') {
+                if path_part.starts_with('/') {
+                    let connection_info = RemoteConnectionInfo {
+                        connection_string: connection_part.to_string(),
+                        password: None,
+                        private_key_path: None,
+                    };
+
+                    return Ok(PathLocation::Remote {
+                        connection: connection_info,
+                        path: path_part.to_string(),
+                    });
+                }
+            }
+        }
+
+        // Default to local path
+        Ok(PathLocation::Local(path_str.to_string()))
+    }
+
+    pub fn is_remote(&self) -> bool {
+        matches!(self, PathLocation::Remote { .. })
+    }
+
+    pub fn as_local_path(&self) -> Option<&str> {
+        match self {
+            PathLocation::Local(path) => Some(path),
+            PathLocation::Remote { .. } => None,
+        }
+    }
+
+    pub fn as_remote_info(&self) -> Option<(&RemoteConnectionInfo, &str)> {
+        match self {
+            PathLocation::Local(_) => None,
+            PathLocation::Remote { connection, path } => Some((connection, path)),
+        }
+    }
+}
