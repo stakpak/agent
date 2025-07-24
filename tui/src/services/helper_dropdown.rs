@@ -36,10 +36,10 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                         format!("  {}  ", h.command),
                         Style::default().fg(Color::Cyan),
                     ),
-                    Span::styled(padding, Style::default().fg(Color::Gray)),
+                    Span::styled(padding, Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         format!(" – {}", h.description),
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(Color::DarkGray),
                     ),
                 ]))
                 .style(item_style)

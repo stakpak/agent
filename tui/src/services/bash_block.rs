@@ -1010,5 +1010,5 @@ fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     if tool_calls.contains(&tool_call_name.as_str()) {
         return true;
     }
-   false
+    false
 }
