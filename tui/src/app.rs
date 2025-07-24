@@ -25,10 +25,16 @@ const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
 // --- NEW: Async autocomplete result struct ---
 pub struct AutoCompleteResult {
-    pub filtered_helpers: Vec<&'static str>,
+    pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>,
     pub cursor_position: usize,
     pub input: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct HelperCommand {
+    pub command: &'static str,
+    pub description: &'static str,
 }
 
 #[derive(Debug)]
@@ -53,10 +59,10 @@ pub struct AppState {
     pub scroll: usize,
     pub scroll_to_bottom: bool,
     pub stay_at_bottom: bool,
-    pub helpers: Vec<&'static str>,
+    pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
-    pub filtered_helpers: Vec<&'static str>,
+    pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>, // NEW: for file autocomplete
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
@@ -170,12 +176,45 @@ pub enum OutputEvent {
 }
 
 impl AppState {
-    pub fn new(
-        helpers: Vec<&'static str>,
-        latest_version: Option<String>,
-        redact_secrets: bool,
-        privacy_mode: bool,
-    ) -> Self {
+    fn get_helper_commands() -> Vec<HelperCommand> {
+        vec![
+            HelperCommand {
+                command: "/help",
+                description: "Show help information and available commands",
+            },
+            HelperCommand {
+                command: "/clear",
+                description: "Clear the screen and show welcome message",
+            },
+            HelperCommand {
+                command: "/status",
+                description: "Show account status and current working directory",
+            },
+            HelperCommand {
+                command: "/sessions",
+                description: "List available sessions to switch to",
+            },
+            HelperCommand {
+                command: "/memorize",
+                description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/list_approved_tools",
+                description: "List all tools that are auto-approved",
+            },
+            HelperCommand {
+                command: "/toggle_auto_approve",
+                description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
+            },
+            HelperCommand {
+                command: "/quit",
+                description: "Quit the application",
+            },
+        ]
+    }
+
+    pub fn new(latest_version: Option<String>, redact_secrets: bool, privacy_mode: bool) -> Self {
+        let helpers = Self::get_helper_commands();
         let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
         let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
         let helpers_clone = helpers.clone();
@@ -314,10 +353,21 @@ impl AppState {
                 } else {
                     None
                 };
+
+                // Update filtered_helpers from async worker
+                self.filtered_helpers = result.filtered_helpers;
+
+                // Reset selection index if it's out of bounds
+                if !self.filtered_helpers.is_empty()
+                    && self.helper_selected >= self.filtered_helpers.len()
+                {
+                    self.helper_selected = 0;
+                }
+
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                self.show_helper_dropdown = (self.input.trim() == "/")
+                self.show_helper_dropdown = (self.input.trim().starts_with('/'))
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
                     || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
