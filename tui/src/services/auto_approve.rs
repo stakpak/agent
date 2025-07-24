@@ -181,6 +181,16 @@ impl AutoApproveManager {
         self.config.default_policy.clone()
     }
 
+    pub fn get_policy_for_tool_name(&self, tool_name: &str) -> AutoApprovePolicy {
+        // Check if there's a specific policy for this tool
+        if let Some(policy) = self.config.tools.get(tool_name) {
+            return policy.clone();
+        }
+
+        // Return default policy
+        self.config.default_policy.clone()
+    }
+
     pub fn get_risk_level(&self, tool_call: &ToolCall) -> RiskLevel {
         let command = self.extract_command(tool_call);
 

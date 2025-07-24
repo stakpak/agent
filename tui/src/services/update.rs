@@ -181,7 +181,7 @@ pub fn update(
             }
         }
         InputEvent::AutoApproveCurrentTool => {
-            // auto_approve_current_tool(state, output_tx);
+            list_auto_approved_tools(state);
         }
         InputEvent::ToggleDialogFocus => {
             if state.is_dialog_open {
@@ -526,7 +526,16 @@ fn handle_tab(state: &mut AppState) {
             }
             return;
         }
-        // Handle regular helper selection (existing behavior)
+        // Handle helper selection - auto-complete the selected helper
+        if !state.filtered_helpers.is_empty() && state.input.starts_with('/') {
+            let selected_helper = &state.filtered_helpers[state.helper_selected];
+            state.input = selected_helper.command.to_string();
+            state.cursor_position = selected_helper.command.len();
+            state.show_helper_dropdown = false;
+            state.filtered_helpers.clear();
+            state.helper_selected = 0;
+            return;
+        }
         return;
     }
     // Trigger file autocomplete with Tab
@@ -606,25 +615,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         if state.autocomplete.is_active() {
             state.autocomplete.reset();
         }
-
         state.show_helper_dropdown = true;
-        state.filtered_helpers = state
-            .helpers
-            .iter()
-            .filter(|h| h.starts_with(&state.input))
-            .cloned()
-            .collect();
-        if state.filtered_helpers.is_empty()
-            || state.helper_selected >= state.filtered_helpers.len()
-        {
-            state.helper_selected = 0;
-        }
     }
 
-    if !state.waiting_for_shell_input && !state.input.starts_with('/') {
-        if let Some(tx) = &state.autocomplete_tx {
-            let _ = tx.try_send((state.input.clone(), state.cursor_position));
-        }
+    if let Some(tx) = &state.autocomplete_tx {
+        let _ = tx.try_send((state.input.clone(), state.cursor_position));
     }
 
     if state.input.is_empty() {
@@ -661,6 +656,15 @@ fn handle_input_backspace(state: &mut AppState) {
     if let Some(tx) = &state.autocomplete_tx {
         let _ = tx.try_send((state.input.clone(), state.cursor_position));
     }
+
+    // Handle helper filtering after backspace
+    if state.input.starts_with('/') {
+        if state.autocomplete.is_active() {
+            state.autocomplete.reset();
+        }
+        state.show_helper_dropdown = true;
+    }
+
     // Hide dropdown if input is empty
     if state.input.is_empty() {
         state.show_helper_dropdown = false;
@@ -762,30 +766,46 @@ fn handle_input_submitted(
         return;
     }
 
-    // Handle disable auto-approve command
-    if state.input.trim().starts_with("/disable_auto_approve ") {
+    // Handle toggle auto-approve command
+    if state.input.trim().starts_with("/toggle_auto_approve") {
         let input_parts: Vec<&str> = state.input.split_whitespace().collect();
         if input_parts.len() >= 2 {
             let tool_name = input_parts[1];
+
+            // Get current policy for the tool
+            let current_policy = state
+                .auto_approve_manager
+                .get_policy_for_tool_name(tool_name);
+            let new_policy = if current_policy == AutoApprovePolicy::Auto {
+                AutoApprovePolicy::Prompt
+            } else {
+                AutoApprovePolicy::Auto
+            };
+
             if let Err(e) = state
                 .auto_approve_manager
-                .update_tool_policy(tool_name, AutoApprovePolicy::Prompt)
+                .update_tool_policy(tool_name, new_policy.clone())
             {
                 push_error_message(
                     state,
-                    &format!("Failed to disable auto-approve for {}: {}", tool_name, e),
+                    &format!("Failed to toggle auto-approve for {}: {}", tool_name, e),
                 );
             } else {
+                let status = if new_policy == AutoApprovePolicy::Auto {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
                 push_styled_message(
                     state,
-                    &format!("Auto-approve disabled for {} tool", tool_name),
+                    &format!("Auto-approve {} for {} tool", status, tool_name),
                     Color::Yellow,
                     "",
                     Color::Yellow,
                 );
             }
         } else {
-            push_error_message(state, "Usage: /disable_auto_approve <tool_name>");
+            push_error_message(state, "Usage: /toggle_auto_approve <tool_name>");
         }
         state.input.clear();
         state.cursor_position = 0;
@@ -817,9 +837,9 @@ fn handle_input_submitted(
             return;
         }
         if !state.filtered_helpers.is_empty() {
-            let selected = state.filtered_helpers[state.helper_selected];
+            let selected = &state.filtered_helpers[state.helper_selected];
 
-            match selected {
+            match selected.command {
                 "/sessions" => {
                     state.loading_type = LoadingType::Sessions;
                     state.loading = true;
@@ -861,10 +881,17 @@ fn handle_input_submitted(
                     state.cursor_position = 0;
                     let _ = input_tx.try_send(InputEvent::Quit);
                 }
-                "/disable_auto_approve" => {
-                    let input = "/disable_auto_approve ".to_string();
+                "/toggle_auto_approve" => {
+                    let input = "/toggle_auto_approve ".to_string();
                     state.input = input.clone();
                     state.cursor_position = input.clone().len();
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/list_approved_tools" => {
+                    list_auto_approved_tools(state);
+                    state.input.clear();
+                    state.cursor_position = 0;
                     state.show_helper_dropdown = false;
                     return;
                 }
@@ -1189,71 +1216,43 @@ fn handle_retry_tool_call(state: &mut AppState) {
 
 // auto approve current tool
 #[allow(dead_code)]
-fn auto_approve_current_tool(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    if let Some(tool_call) = &state.dialog_command {
-        // Auto-approve current tool in dialog
-        let tool_name = tool_call.function.name.clone();
-        let tool_call_clone = tool_call.clone();
-        if let Err(e) = state
-            .auto_approve_manager
-            .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
-        {
-            push_error_message(
-                state,
-                &format!("Failed to set auto-approve for {}: {}", tool_name, e),
-            );
-        } else {
-            push_styled_message(
-                state,
-                &format!("Auto-approve enabled for {} tool", tool_name),
-                Color::Green,
-                "",
-                Color::Green,
-            );
-            // Auto-approve the current tool call
-            let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
-            state.is_dialog_open = false;
-            state.dialog_command = None;
-            state.dialog_focused = false; // Reset focus when dialog closes
-        }
+fn list_auto_approved_tools(state: &mut AppState) {
+    // No dialog open - show current auto-approve settings and allow disabling
+    let config = state.auto_approve_manager.get_config();
+    let auto_approved_tools: Vec<_> = config
+        .tools
+        .iter()
+        .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
+        .collect();
+
+    if auto_approved_tools.is_empty() {
+        push_styled_message(
+            state,
+            "💡 No tools are currently set to auto-approve.",
+            Color::Cyan,
+            "",
+            Color::Cyan,
+        );
     } else {
-        // No dialog open - show current auto-approve settings and allow disabling
-        let config = state.auto_approve_manager.get_config();
-        let auto_approved_tools: Vec<_> = config
-            .tools
+        let tool_list = auto_approved_tools
             .iter()
-            .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
-            .collect();
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
 
-        if auto_approved_tools.is_empty() {
-            push_styled_message(
-                state,
-                "💡 No tools are currently set to auto-approve.",
-                Color::Cyan,
-                "",
-                Color::Cyan,
-            );
-        } else {
-            let tool_list = auto_approved_tools
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            push_styled_message(
-                state,
-                &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
-                Color::Yellow,
-                "",
-                Color::Yellow,
-            );
-            // push_styled_message(
-            //     state,
-            //     "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
-            //     Color::Cyan,
-            //     "",
-            //     Color::Cyan,
-            // );
-        }
+        push_styled_message(
+            state,
+            &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
+            Color::Yellow,
+            "",
+            Color::Yellow,
+        );
+        // push_styled_message(
+        //     state,
+        //     "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
+        //     Color::Cyan,
+        //     "",
+        //     Color::Cyan,
+        // );
     }
 }
