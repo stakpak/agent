@@ -34,22 +34,22 @@ impl Default for CommandPatterns {
     fn default() -> Self {
         CommandPatterns {
             safe_readonly: vec![
-                "ls".to_string(),       // ✅ Only lists, never writes
-                "pwd".to_string(),      // ✅ Only prints current directory
-                "whoami".to_string(),   // ✅ Only prints username
-                "date".to_string(),     // ✅ Only displays date/time
-                "uptime".to_string(),   // ✅ Only shows system uptime
-                "id".to_string(),       // ✅ Only shows user/group IDs
-                "groups".to_string(),   // ✅ Only shows group membership
-                "which".to_string(),    // ✅ Only shows command locations
-                "whereis".to_string(),  // ✅ Only locates files
-                "file".to_string(),     // ✅ Only identifies file types
-                "stat".to_string(),     // ✅ Only displays file stats
-                "du".to_string(),       // ✅ Only shows disk usage
-                "df".to_string(),       // ✅ Only shows filesystem usage
-                "ps".to_string(),       // ✅ Only lists processes
-                "env".to_string(),      // ✅ Only shows environment variables
-                "printenv".to_string(), // ✅ Only pri
+                // "ls".to_string(),       // ✅ Only lists, never writes
+                // "pwd".to_string(),      // ✅ Only prints current directory
+                // "whoami".to_string(),   // ✅ Only prints username
+                // "date".to_string(),     // ✅ Only displays date/time
+                // "uptime".to_string(),   // ✅ Only shows system uptime
+                // "id".to_string(),       // ✅ Only shows user/group IDs
+                // "groups".to_string(),   // ✅ Only shows group membership
+                // "which".to_string(),    // ✅ Only shows command locations
+                // "whereis".to_string(),  // ✅ Only locates files
+                // "file".to_string(),     // ✅ Only identifies file types
+                // "stat".to_string(),     // ✅ Only displays file stats
+                // "du".to_string(),       // ✅ Only shows disk usage
+                // "df".to_string(),       // ✅ Only shows filesystem usage
+                // "ps".to_string(),       // ✅ Only lists processes
+                // "env".to_string(),      // ✅ Only shows environment variables
+                // "printenv".to_string(), // ✅ Only pri
             ],
             sensitive_destructive: vec![],
             interactive_required: vec![],

@@ -781,6 +781,42 @@ pub fn render_bash_block_rejected(
     state: &mut AppState,
     message: Option<String>,
 ) {
+  render_styled_lines(command_name, title, state, message, None);
+}
+
+
+// fn collapsed_result_block(
+//     tool_call: &ToolCall,
+//     state: &mut AppState,
+//     message: Option<String>,
+// ) {
+//     let command_name = tool_call.function.name.clone();
+//     let title: String = get_command_type_name(tool_call);
+//     render_styled_lines(&command_name, &title, state, message, None);
+// }
+
+
+pub struct LinesColors {
+    pub dot: Color,
+    pub title: Color,
+    pub command: Color,
+    pub message: Color,
+}
+
+pub fn render_styled_lines(
+    command_name: &str,
+    title: &str,
+    state: &mut AppState,
+    message: Option<String>,
+    colors: Option<LinesColors>
+) {
+    let colors = colors.unwrap_or(LinesColors {
+        dot: Color::LightRed,
+        title: Color::White,
+        command: Color::Rgb(180, 180, 180),
+        message: Color::LightRed,
+    });
+
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
@@ -794,20 +830,20 @@ pub fn render_bash_block_rejected(
             Span::styled(
                 "● ",
                 Style::default()
-                    .fg(Color::LightRed)
+                    .fg(colors.dot)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 title,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(colors.title)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" ({})", command_name),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(colors.command),
             ),
-            Span::styled("...", Style::default().fg(Color::Gray)),
+            Span::styled("...", Style::default().fg(colors.command)),
         ]));
     } else {
         // Multi-line - title on first line, arguments on subsequent lines
@@ -815,7 +851,7 @@ pub fn render_bash_block_rejected(
             Span::styled(
                 "● ",
                 Style::default()
-                    .fg(Color::LightRed)
+                    .fg(colors.dot)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -824,7 +860,7 @@ pub fn render_bash_block_rejected(
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("...", Style::default().fg(Color::Gray)),
+            Span::styled("...", Style::default().fg(colors.command)),
         ]));
 
         // Split command arguments into multiple lines
@@ -840,13 +876,13 @@ pub fn render_bash_block_rejected(
                 // First line of arguments
                 lines.push(Line::from(vec![
                     Span::from(args_prefix.clone()),
-                    Span::styled(format!("({}", arg_line), Style::default().fg(Color::Gray)),
+                    Span::styled(format!("({}", arg_line), Style::default().fg(colors.command)),
                 ]));
             } else {
                 // Continuation lines
                 lines.push(Line::from(vec![
                     Span::from(args_prefix.clone()),
-                    Span::styled(arg_line.clone(), Style::default().fg(Color::Gray)),
+                    Span::styled(arg_line.clone(), Style::default().fg(colors.command)),
                 ]));
             }
         }
@@ -867,7 +903,7 @@ pub fn render_bash_block_rejected(
     let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
     lines.push(Line::from(vec![Span::styled(
         format!("  L {}", message),
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        Style::default().fg(colors.message).add_modifier(Modifier::BOLD),
     )]));
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
