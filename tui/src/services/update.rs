@@ -10,7 +10,8 @@ use crate::services::helper_block::{
     push_status_message, push_styled_message, render_system_message,
 };
 use crate::services::message::{
-    Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
+    Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
+    get_wrapped_message_lines,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
@@ -351,9 +352,7 @@ pub fn update(
         InputEvent::ShellKill => {
             // Kill the running command if there is one
             if let Some(cmd) = &state.active_shell_command {
-                if let Err(_e) = cmd.kill() {
-                    // eprintln!("Failed to kill command: {}", e);
-                }
+                if let Err(_e) = cmd.kill() {}
             }
             // Reset shell state
             state.active_shell_command = None;
@@ -444,6 +443,24 @@ pub fn update(
         }
         InputEvent::RetryLastToolCall => {
             handle_retry_tool_call(state);
+        }
+        InputEvent::ToggleCollapsedMessages => {
+            state.show_collapsed_messages = !state.show_collapsed_messages;
+            if state.show_collapsed_messages {
+                // Calculate the maximum scroll position to show the last line
+                let collapsed_messages: Vec<&Message> = state
+                    .messages
+                    .iter()
+                    .filter(|m| m.is_collapsed == Some(true))
+                    .collect();
+                let owned_messages: Vec<Message> =
+                    collapsed_messages.iter().map(|m| (*m).clone()).collect();
+                let all_lines =
+                    get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
+                let total_lines = all_lines.len();
+                let max_scroll = total_lines.saturating_sub(message_area_height);
+                state.collapsed_messages_scroll = max_scroll;
+            }
         }
         InputEvent::AttemptQuit => {
             use std::time::Instant;
@@ -819,6 +836,9 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
+        if let Some(dialog_command) = &state.dialog_command {
+            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+        }
         state.is_dialog_open = false;
         state.dialog_selected = 0;
         state.dialog_command = None;
@@ -1049,7 +1069,13 @@ fn handle_stream_tool_result(
 }
 
 fn handle_scroll_up(state: &mut AppState) {
-    if state.scroll >= SCROLL_LINES {
+    if state.show_collapsed_messages {
+        if state.collapsed_messages_scroll >= SCROLL_LINES {
+            state.collapsed_messages_scroll -= SCROLL_LINES;
+        } else {
+            state.collapsed_messages_scroll = 0;
+        }
+    } else if state.scroll >= SCROLL_LINES {
         state.scroll -= SCROLL_LINES;
         state.stay_at_bottom = false;
     } else {
@@ -1059,15 +1085,34 @@ fn handle_scroll_up(state: &mut AppState) {
 }
 
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
-    let total_lines = all_lines.len();
-    let max_scroll = total_lines.saturating_sub(message_area_height);
-    if state.scroll + SCROLL_LINES < max_scroll {
-        state.scroll += SCROLL_LINES;
-        state.stay_at_bottom = false;
+    if state.show_collapsed_messages {
+        // For collapsed messages popup, we need to calculate scroll based on collapsed messages only
+        let collapsed_messages: Vec<&Message> = state
+            .messages
+            .iter()
+            .filter(|m| m.is_collapsed == Some(true))
+            .collect();
+        let owned_messages: Vec<Message> =
+            collapsed_messages.iter().map(|m| (*m).clone()).collect();
+        let all_lines = get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
+        let total_lines = all_lines.len();
+        let max_scroll = total_lines.saturating_sub(message_area_height);
+        if state.collapsed_messages_scroll + SCROLL_LINES < max_scroll {
+            state.collapsed_messages_scroll += SCROLL_LINES;
+        } else {
+            state.collapsed_messages_scroll = max_scroll;
+        }
     } else {
-        state.scroll = max_scroll;
-        state.stay_at_bottom = true;
+        let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
+        let total_lines = all_lines.len();
+        let max_scroll = total_lines.saturating_sub(message_area_height);
+        if state.scroll + SCROLL_LINES < max_scroll {
+            state.scroll += SCROLL_LINES;
+            state.stay_at_bottom = false;
+        } else {
+            state.scroll = max_scroll;
+            state.stay_at_bottom = true;
+        }
     }
 }
 

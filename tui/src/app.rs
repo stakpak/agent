@@ -104,6 +104,8 @@ pub struct AppState {
     pub auto_approve_manager: AutoApproveManager,
     pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
     pub latest_tool_call: Option<ToolCall>,
+    pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
+    pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
 }
 
 #[derive(Debug)]
@@ -159,9 +161,10 @@ pub enum InputEvent {
     InputCursorNextWord,
     ToggleAutoApprove,
     AutoApproveCurrentTool,
-    ToggleDialogFocus, // NEW: toggle between messages view and dialog focus
-    RetryLastToolCall, // Ctrl+R to retry last tool call in shell mode
-    AttemptQuit,       // First Ctrl+C press for quit sequence
+    ToggleDialogFocus,       // NEW: toggle between messages view and dialog focus
+    RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
+    AttemptQuit,             // First Ctrl+C press for quit sequence
+    ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
 }
 
 #[derive(Debug)]
@@ -279,6 +282,8 @@ impl AppState {
             auto_approve_manager: AutoApproveManager::new(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
+            show_collapsed_messages: false,
+            collapsed_messages_scroll: 0,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
