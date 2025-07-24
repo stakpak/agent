@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Auto-Approve system is a sophisticated tool call approval mechanism that allows users to configure automatic approval policies for different tools and commands. It provides intelligent risk assessment, customizable policies, and a focus-based user interface for managing tool call confirmations.
+The Auto-Approve system is a tool call approval mechanism that allows users to configure automatic approval policies for different tools. It provides intelligent risk assessment, customizable policies, and a user interface for managing tool call confirmations.
 
 ## Features
 
@@ -18,12 +18,6 @@ The Auto-Approve system is a sophisticated tool call approval mechanism that all
 - **Four policy types**: Auto, Prompt, Smart, Never
 - **Persistent configuration** across sessions
 
-### 🎮 **Focus-Based UI**
-- **Tab to toggle** between Chat view and Dialog focus
-- **Visual indicators** for focus state
-- **Keyboard navigation** for dialog options
-- **Context-aware scrolling** and navigation
-
 ### 🛡️ **Safety Mechanisms**
 - **Fail-safe defaults** for unknown commands
 - **Emergency override** options
@@ -36,7 +30,6 @@ The Auto-Approve system is a sophisticated tool call approval mechanism that all
 
 The auto-approve configuration is stored in:
 - **Local**: `.stakpak/session/auto_approve.json` (current working directory)
-- **Global**: `$HOME/.stakpak/session/auto_approve.json` (fallback)
 
 ### Configuration Structure
 
@@ -54,26 +47,16 @@ The auto-approve configuration is stored in:
     "search_memory": "auto",
     "read_rulebook": "auto",
     "local_code_search": "auto",
-    "run_command": "smart",
-    "run_command_async": "smart",
+    "run_command": "prompt",
+    "run_command_async": "prompt",
     "get_all_tasks": "auto",
     "cancel_async_task": "prompt",
     "get_task_details": "auto"
   },
   "command_patterns": {
-    "safe_readonly": [
-      "ls", "cat", "grep", "find", "pwd", "whoami",
-      "echo", "head", "tail", "wc", "sort", "uniq"
-    ],
-    "sensitive_destructive": [
-      "rm", "mv", "cp", "chmod", "chown", "sudo", "su",
-      "dd", "mkfs", "fdisk", "format", "ssh-keygen",
-      "gpg", "openssl", "certutil", "keytool"
-    ],
-    "interactive_required": [
-      "ssh", "scp", "rsync", "vim", "nano", "less",
-      "more", "top", "htop", "man", "info"
-    ]
+    "safe_readonly": [],
+    "sensitive_destructive": [],
+    "interactive_required": []
   }
 }
 ```
@@ -88,12 +71,12 @@ The auto-approve configuration is stored in:
 ### ❓ **Prompt**
 - **Behavior**: Always require user confirmation
 - **Use case**: Potentially risky operations
-- **Examples**: `create`, `str_replace`, `cancel_async_task`
+- **Examples**: `create`, `str_replace`, `run_command`
 
 ### 🧠 **Smart**
 - **Behavior**: Auto-approve safe commands, prompt for risky ones
 - **Use case**: Commands that need intelligent assessment
-- **Examples**: `run_command`, `run_command_async`
+- **Examples**: `run_command` (when command patterns are configured)
 
 ### 🚫 **Never**
 - **Behavior**: Always block (not currently used in defaults)
@@ -110,17 +93,17 @@ The auto-approve configuration is stored in:
 ### 🟡 **Medium Risk**
 - **Criteria**: File operations outside current directory
 - **Auto-approval**: No
-- **Examples**: Operations with `../`, `/home/`, `/tmp/`
+- **Examples**: Operations with `../`, `/home/`, `/tmp/` - Not implemented yet
 
 ### 🟠 **High Risk**
 - **Criteria**: System modifications, privilege escalation
 - **Auto-approval**: No
-- **Examples**: `/etc/`, `/bin/`, `systemctl`, `service`
+- **Examples**: `/etc/`, `/bin/`, `systemctl`, `service` - Not implemented yet
 
 ### 🔴 **Critical Risk**
 - **Criteria**: Destructive operations, key generation
 - **Auto-approval**: No
-- **Examples**: `rm`, `sudo`, `ssh-keygen`, `gpg`, `openssl`
+- **Examples**: `rm`, `sudo`, `ssh-keygen`, `gpg`, `openssl` - Not implemented yet
 
 ## User Interface
 
@@ -129,65 +112,42 @@ The auto-approve configuration is stored in:
 | Shortcut | Action | When to Use |
 |----------|--------|-------------|
 | `Ctrl+O` | Toggle auto-approve on/off | Anytime - enables/disables the entire auto-approve system |
-| `Ctrl+Y` | Auto-approve current tool (when dialog is open) | Only when a confirmation dialog is open - auto-approves the current tool call AND sets that tool to auto-approve in the future |
-| `Ctrl+Y` | Show auto-approve status (when no dialog) | When no dialog is open - shows which tools are auto-approved and how to disable them |
-| `Tab` | Toggle focus between Chat view and Dialog | When dialog is open - switches between scrolling messages and navigating dialog options |
-| `Up/Down` | Navigate dialog options (when dialog focused) | When dialog is open and focused - moves between Yes/Yes+Auto/No options |
-| `Enter` | Select current dialog option | When dialog is open - chooses the highlighted option |
-| `Esc` | Cancel dialog and reject tool call | When dialog is open - cancels and rejects the tool call |
+| `Ctrl+Y` | Shows which tools are auto-approved |
 
-### Focus System
+### Command Interface
 
-#### **Chat View Focused**
-- **Border**: Dialog border is dark gray
-- **Navigation**: Up/Down arrows scroll messages
-- **Hint**: "Press Tab to focus Dialog. Chat view focused"
+#### **Toggle Auto-Approve for Specific Tool**
+- Command: `/toggle_auto_approve <tool_name>`
+- Example: `/toggle_auto_approve view`
+- Effect: Toggles the policy for the specified tool between Auto and Prompt
 
-#### **Dialog Focused**
-- **Border**: Dialog border is yellow
-- **Navigation**: Up/Down arrows navigate dialog options
-- **Hint**: "Press Tab to focus Chat view. Dialog focused"
-
-### Dialog Options
-
-When a tool call requires confirmation, users see three options:
-
-1. **Yes** - Accept the tool call once
-2. **Yes, and don't ask again for [tool] commands** - Accept and set auto-approve policy
-3. **No, and tell Stakpak what to do differently** - Reject and provide feedback
-
-### Managing Auto-Approved Tools
-
-#### **Viewing Auto-Approved Tools**
-- Press `Ctrl+Y` when no dialog is open to see which tools are auto-approved
+#### **View Auto-Approved Tools**
+- Press `Ctrl+Y` when no dialog is open
 - Shows a list of tools currently set to auto-approve
-
-#### **Disabling Auto-Approved Tools**
-- Use the command: `/disable_auto_approve <tool_name>`
-- Example: `/disable_auto_approve run_command`
-- Sets the tool back to "Prompt" policy (requires confirmation)
 
 ## Tool Classification
 
-### Local Tools
+### Auto-Approved Tools (Default)
 - **view**: Auto (read-only file viewing)
-- **create**: Prompt (file creation)
-- **str_replace**: Prompt (file modification)
 - **generate_password**: Auto (safe generation)
-
-### Remote Tools
-- **generate_code**: Prompt (code generation)
 - **search_docs**: Auto (information retrieval)
 - **search_memory**: Auto (information retrieval)
 - **read_rulebook**: Auto (information retrieval)
 - **local_code_search**: Auto (information retrieval)
-
-### Command Execution Tools
-- **run_command**: Smart (intelligent assessment)
-- **run_command_async**: Smart (intelligent assessment)
 - **get_all_tasks**: Auto (information retrieval)
-- **cancel_async_task**: Prompt (task management)
 - **get_task_details**: Auto (information retrieval)
+
+### Prompt-Required Tools (Default)
+- **create**: Prompt (file creation)
+- **str_replace**: Prompt (file modification)
+- **generate_code**: Prompt (code generation)
+- **run_command**: Prompt (command execution)
+- **run_command_async**: Prompt (async command execution)
+- **cancel_async_task**: Prompt (task management)
+
+### Smart Policy Tools
+- **run_command**: Smart (when command patterns are configured)
+- **run_command_async**: Smart (when command patterns are configured)
 
 ## Safety Features
 
@@ -197,31 +157,11 @@ When a tool call requires confirmation, users see three options:
 - **Network issues**: Default to local-only approval
 - **Permission errors**: Block auto-approval
 
-### User Override Options
-- **Emergency disable**: `Ctrl+A` to toggle off
-- **Temporary disable**: Available through UI
-- **Per-session override**: Configurable per session
-- **Audit logging**: Track all auto-approved actions
-
 ### Security Boundaries
 - **Never auto-approve**: `sudo`, `su`, `doas`
 - **Always prompt for**: Operations outside project directory
 - **Block auto-approval**: System file modifications
 - **Require confirmation**: Network operations to unknown hosts
-
-## Error Handling
-
-### Configuration Validation
-- **JSON schema validation** on config load
-- **Graceful degradation** for invalid tool names
-- **Warning messages** for deprecated options
-- **Automatic config repair** for common issues
-
-### Runtime Error Handling
-- **Fallback to manual approval** on classification errors
-- **Clear error messages** for configuration problems
-- **Option to reset** corrupted configuration
-- **Backup and restore** configuration capability
 
 ## Implementation Details
 
@@ -238,22 +178,16 @@ When a tool call requires confirmation, users see three options:
 - **Risk level classification**: Low, Medium, High, Critical
 - **Smart policy logic**: Auto-approve safe commands only
 
-#### **Focus Management System**
-- **State tracking**: Chat view vs Dialog focus
-- **Visual indicators**: Border colors and status messages
-- **Navigation routing**: Keyboard event handling
-
 ### File Structure
 
 ```
 tui/src/
-├── auto_approve.rs          # Core auto-approve logic
-├── app.rs                   # AppState with focus management
-├── event.rs                 # Keyboard event mapping
 ├── services/
-│   ├── update.rs           # Event handling and state updates
-│   ├── confirmation_dialog.rs  # Enhanced dialog UI
-│   └── hint_helper.rs      # Focus status display
+│   ├── auto_approve.rs       # Core auto-approve logic
+│   ├── update.rs             # Event handling and state updates
+│   └── hint_helper.rs        # Status display
+├── app.rs                    # AppState with auto-approve manager
+└── event.rs                  # Keyboard event mapping
 ```
 
 ## Best Practices
@@ -271,25 +205,20 @@ tui/src/
 4. **Use Smart policy** for potentially risky operations
 
 ### User Experience
-1. **Use focus system** to navigate efficiently
-2. **Leverage keyboard shortcuts** for quick actions
-3. **Review risk levels** before changing policies
-4. **Provide feedback** when rejecting tool calls
+1. **Use keyboard shortcuts** for quick actions
+2. **Review risk levels** before changing policies
+3. **Provide feedback** when rejecting tool calls
+4. **Check auto-approve status** regularly
 
 ## Troubleshooting
 
 ### Common Issues
 
 #### **Auto-approve not working**
-- Check if auto-approve is enabled (`Ctrl+A`)
+- Check if auto-approve is enabled (`Ctrl+O`)
 - Verify tool policy in configuration
 - Check risk level classification
 - Review configuration file permissions
-
-#### **Dialog not responding to keys**
-- Ensure dialog is focused (yellow border)
-- Use Tab to switch focus if needed
-- Check if dialog is open (`is_dialog_open`)
 
 #### **Configuration not saving**
 - Verify file permissions on config directory
@@ -299,11 +228,22 @@ tui/src/
 
 ### Debug Information
 
-Enable debug output by adding debug prints:
-```rust
-eprintln!("Dialog selected: {}, is_dialog_open: {}, dialog_command: {:?}", 
-    state.dialog_selected, state.is_dialog_open, state.dialog_command.is_some());
-```
+The system provides fallback behavior when configuration loading fails:
+- Creates default configuration if none exists
+- Falls back to Prompt policy for unknown tools
+- Logs errors to stderr for debugging
+
+## Current Limitations
+
+### No Commands Supported Initially
+- The system starts with no commands configured for auto-approve
+- Users must manually configure which tools to auto-approve
+- Default policy is "Prompt" for all tools
+
+### Configuration Management
+- Configuration is stored locally in `.stakpak/session/auto_approve.json`
+- No global configuration override
+- Manual configuration required for each project
 
 ## Future Enhancements
 
@@ -331,4 +271,4 @@ When contributing to the auto-approve system:
 
 ---
 
-*This documentation covers the comprehensive auto-approve system implementation. For specific implementation details, refer to the source code in `tui/src/auto_approve.rs`.* 
+*This documentation covers the current auto-approve system implementation. For specific implementation details, refer to the source code in `tui/src/services/auto_approve.rs`.* 
