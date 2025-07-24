@@ -336,31 +336,6 @@ pub fn push_clear_message(state: &mut AppState) {
     state.input.clear();
     state.cursor_position = 0;
     state.show_helper_dropdown = false;
-
     let welcome_msg = welcome_messages(state.latest_version.clone());
     state.messages.extend(welcome_msg);
-
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                "● ",
-                Style::default()
-                    .fg(Color::Rgb(128, 128, 128))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("/clear", Style::default().fg(Color::Rgb(180, 180, 180))),
-        ]),
-        Line::from(vec![Span::styled(
-            "  L (no content)",
-            Style::default()
-                .fg(Color::Rgb(128, 128, 128))
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::from("SPACING_MARKER")]),
-    ];
-
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-    });
 }
