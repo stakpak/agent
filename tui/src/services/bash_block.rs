@@ -235,7 +235,7 @@ pub fn render_styled_block_ansi_to_tui(
     // Strip ANSI codes for title border calculation
     let stripped_title = strip_ansi_codes(bubble_title);
     let title_border = {
-        let title_width = stripped_title.chars().count();
+        let title_width = calculate_display_width(&stripped_title);
         if title_width <= inner_width {
             let remaining_dashes = inner_width + 2 - title_width;
             Line::from(vec![Span::styled(
@@ -243,9 +243,20 @@ pub fn render_styled_block_ansi_to_tui(
                 Style::default().fg(border_color),
             )])
         } else {
-            let truncated_title = stripped_title.chars().take(inner_width).collect::<String>();
+            // Truncate based on display width, not character count
+            let mut truncated_chars = String::new();
+            let mut current_width = 0;
+            for ch in stripped_title.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if current_width + char_width <= inner_width {
+                    truncated_chars.push(ch);
+                    current_width += char_width;
+                } else {
+                    break;
+                }
+            }
             Line::from(vec![Span::styled(
-                format!("╭{}─╮", truncated_title),
+                format!("╭{}─╮", truncated_chars),
                 Style::default().fg(border_color),
             )])
         }
@@ -478,7 +489,13 @@ pub fn render_bash_block(
     state: &mut AppState,
     terminal_size: Size,
 ) -> Uuid {
-    let (command, outside_title, bubble_title, colors) = extract_bash_block_info(tool_call, output);
+    let (command, outside_title, mut bubble_title, colors) =
+        extract_bash_block_info(tool_call, output);
+
+    if state.auto_approve_manager.should_auto_approve(tool_call) {
+        bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
+    }
+
     render_styled_block_ansi_to_tui(
         &command,
         &outside_title,

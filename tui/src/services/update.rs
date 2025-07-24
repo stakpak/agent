@@ -104,14 +104,7 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(
-                    state,
-                    message_area_height,
-                    output_tx,
-                    input_tx,
-                    shell_tx,
-                    cancel_tx,
-                );
+                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
@@ -188,72 +181,7 @@ pub fn update(
             }
         }
         InputEvent::AutoApproveCurrentTool => {
-            if let Some(tool_call) = &state.dialog_command {
-                // Auto-approve current tool in dialog
-                let tool_name = tool_call.function.name.clone();
-                let tool_call_clone = tool_call.clone();
-                if let Err(e) = state
-                    .auto_approve_manager
-                    .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
-                {
-                    push_error_message(
-                        state,
-                        &format!("Failed to set auto-approve for {}: {}", tool_name, e),
-                    );
-                } else {
-                    push_styled_message(
-                        state,
-                        &format!("Auto-approve enabled for {} tool", tool_name),
-                        Color::Green,
-                        "",
-                        Color::Green,
-                    );
-                    // Auto-approve the current tool call
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
-                    state.is_dialog_open = false;
-                    state.dialog_command = None;
-                    state.dialog_focused = false; // Reset focus when dialog closes
-                }
-            } else {
-                // No dialog open - show current auto-approve settings and allow disabling
-                let config = state.auto_approve_manager.get_config();
-                let auto_approved_tools: Vec<_> = config
-                    .tools
-                    .iter()
-                    .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
-                    .collect();
-
-                if auto_approved_tools.is_empty() {
-                    push_styled_message(
-                        state,
-                        "💡 No tools are currently set to auto-approve. Use Ctrl+Y when a dialog is open to enable auto-approve for a specific tool.",
-                        Color::Cyan,
-                        "",
-                        Color::Cyan,
-                    );
-                } else {
-                    let tool_list = auto_approved_tools
-                        .iter()
-                        .map(|(name, _)| name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    push_styled_message(
-                        state,
-                        &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
-                        Color::Yellow,
-                        "",
-                        Color::Yellow,
-                    );
-                    push_styled_message(
-                        state,
-                        "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
-                        Color::Cyan,
-                        "",
-                        Color::Cyan,
-                    );
-                }
-            }
+            // auto_approve_current_tool(state, output_tx);
         }
         InputEvent::ToggleDialogFocus => {
             if state.is_dialog_open {
@@ -288,23 +216,6 @@ pub fn update(
             if state.auto_approve_manager.should_auto_approve(&tool_call) {
                 // Auto-approve the tool call
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-                // make tool name split by _ and make first letter capital
-                let tool_name = tool_call
-                    .function
-                    .name
-                    .clone()
-                    .split('_')
-                    .map(|s| {
-                        let mut chars = s.chars();
-                        match chars.next() {
-                            None => String::new(),
-                            Some(first) => first.to_uppercase().chain(chars).collect(),
-                        }
-                    })
-                    .collect::<Vec<String>>()
-                    .join(" ");
-                let auto_approve_message = format!("🔓 Auto-approved tool ({})", tool_name);
-                push_styled_message(state, &auto_approve_message, Color::Green, "", Color::Green);
             } else {
                 // Show confirmation dialog as usual
                 state.dialog_command = Some(tool_call.clone());
@@ -809,7 +720,6 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
-    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     if (state.is_streaming || state.loading) && !state.is_dialog_open {
         state.input.clear();
@@ -889,54 +799,8 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        match state.dialog_selected {
-            0 => {
-                // Option 1: Yes - Accept the tool call
-                if let Some(tool_call) = &state.dialog_command {
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-                }
-            }
-            1 => {
-                // Option 2: Yes, and don't ask again for this tool
-                if let Some(tool_call) = &state.dialog_command {
-                    let tool_name = tool_call.function.name.clone();
-                    let tool_call_clone = tool_call.clone();
-
-                    // Set auto-approve policy for this tool
-                    if let Err(e) = state
-                        .auto_approve_manager
-                        .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
-                    {
-                        push_error_message(
-                            state,
-                            &format!("Failed to set auto-approve for {}: {}", tool_name, e),
-                        );
-                    } else {
-                        push_styled_message(
-                            state,
-                            &format!("Auto-approve enabled for {} tool", tool_name),
-                            Color::Green,
-                            "",
-                            Color::Green,
-                        );
-                    }
-
-                    // Accept the tool call
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
-                }
-            }
-            2 => {
-                // Option 3: No, and tell Stakpak what to do differently
-                handle_esc(state, output_tx, cancel_tx, shell_tx);
-            }
-            _ => {
-                // Fallback to option 0 (Yes)
-                if let Some(tool_call) = &state.dialog_command {
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-                }
-            }
-        }
         state.is_dialog_open = false;
+        state.dialog_selected = 0;
         state.dialog_command = None;
         state.dialog_focused = false;
         state.input.clear();
@@ -1320,5 +1184,76 @@ fn handle_retry_tool_call(state: &mut AppState) {
         state.active_shell_command = None;
         state.active_shell_command_output = None;
         state.waiting_for_shell_input = false;
+    }
+}
+
+// auto approve current tool
+#[allow(dead_code)]
+fn auto_approve_current_tool(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    if let Some(tool_call) = &state.dialog_command {
+        // Auto-approve current tool in dialog
+        let tool_name = tool_call.function.name.clone();
+        let tool_call_clone = tool_call.clone();
+        if let Err(e) = state
+            .auto_approve_manager
+            .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
+        {
+            push_error_message(
+                state,
+                &format!("Failed to set auto-approve for {}: {}", tool_name, e),
+            );
+        } else {
+            push_styled_message(
+                state,
+                &format!("Auto-approve enabled for {} tool", tool_name),
+                Color::Green,
+                "",
+                Color::Green,
+            );
+            // Auto-approve the current tool call
+            let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call_clone));
+            state.is_dialog_open = false;
+            state.dialog_command = None;
+            state.dialog_focused = false; // Reset focus when dialog closes
+        }
+    } else {
+        // No dialog open - show current auto-approve settings and allow disabling
+        let config = state.auto_approve_manager.get_config();
+        let auto_approved_tools: Vec<_> = config
+            .tools
+            .iter()
+            .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
+            .collect();
+
+        if auto_approved_tools.is_empty() {
+            push_styled_message(
+                state,
+                "💡 No tools are currently set to auto-approve.",
+                Color::Cyan,
+                "",
+                Color::Cyan,
+            );
+        } else {
+            let tool_list = auto_approved_tools
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            push_styled_message(
+                state,
+                &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
+                Color::Yellow,
+                "",
+                Color::Yellow,
+            );
+            // push_styled_message(
+            //     state,
+            //     "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
+            //     Color::Cyan,
+            //     "",
+            //     Color::Cyan,
+            // );
+        }
     }
 }
