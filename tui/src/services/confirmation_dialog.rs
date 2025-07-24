@@ -1,10 +1,10 @@
 use crate::app::AppState;
-use crate::auto_approve::RiskLevel;
+use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::message::get_wrapped_message_lines;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
@@ -48,11 +48,6 @@ pub fn calculate_dialog_height(state: &AppState) -> u16 {
 
         // Add height for options list (minimum 3 options)
         height += 3;
-
-        // Add height for auto-approve hint if enabled
-        if state.auto_approve_manager.is_enabled() {
-            height += 1;
-        }
 
         // Add extra height for multi-line titles
         let title = get_command_title(dialog_command);
@@ -116,7 +111,7 @@ fn render_enhanced_confirmation_dialog(
     let dialog_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .title("Tool Call Confirmation");
+        .title("Confirmation");
 
     let inner_area = dialog_block.inner(area);
 
@@ -126,42 +121,21 @@ fn render_enhanced_confirmation_dialog(
             Constraint::Length(1), // Risk/Policy info
             Constraint::Length(1), // Command description
             Constraint::Min(3),    // Options list
-            Constraint::Length(1), // Hint (if enabled)
         ])
         .split(inner_area);
 
     // Risk level and policy info
-    let risk_level = state.auto_approve_manager.get_risk_level(tool_call);
     let policy = state.auto_approve_manager.get_policy_for_tool(tool_call);
 
-    let risk_color = match risk_level {
-        RiskLevel::Low => Color::Green,
-        RiskLevel::Medium => Color::Yellow,
-        RiskLevel::High => Color::Red,
-        RiskLevel::Critical => Color::Red,
-    };
-
-    let risk_text = match risk_level {
-        RiskLevel::Low => "Low Risk",
-        RiskLevel::Medium => "Medium Risk",
-        RiskLevel::High => "High Risk",
-        RiskLevel::Critical => "Critical Risk",
-    };
-
     let policy_text = match policy {
-        crate::auto_approve::AutoApprovePolicy::Auto => "Auto-approve",
-        crate::auto_approve::AutoApprovePolicy::Prompt => "Requires confirmation",
-        crate::auto_approve::AutoApprovePolicy::Smart => "Smart approval",
-        crate::auto_approve::AutoApprovePolicy::Never => "Always blocked",
+        AutoApprovePolicy::Auto => "Auto-approve",
+        AutoApprovePolicy::Prompt => "Requires confirmation",
+        AutoApprovePolicy::Smart => "Smart approval",
+        AutoApprovePolicy::Never => "Always blocked",
     };
 
     let risk_info = Line::from(vec![
-        Span::styled("Risk: ", Style::default().fg(Color::White)),
-        Span::styled(
-            risk_text,
-            Style::default().fg(risk_color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" | Policy: ", Style::default().fg(Color::White)),
+        Span::styled("Policy: ", Style::default().fg(Color::White)),
         Span::styled(policy_text, Style::default().fg(Color::Cyan)),
     ]);
 
@@ -183,27 +157,8 @@ fn render_enhanced_confirmation_dialog(
     let options = create_options_list(state, tool_call);
     let list_widget = List::new(options)
         .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::White))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+        .style(Style::default().fg(Color::White));
     f.render_widget(list_widget, chunks[2]);
-
-    // Auto-approve hint
-    if state.auto_approve_manager.is_enabled() {
-        let hint = Line::from(vec![
-            Span::styled("💡 Tip: ", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                "Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool",
-                Style::default().fg(Color::Gray),
-            ),
-        ]);
-        let hint_widget = Paragraph::new(hint).alignment(Alignment::Center);
-        f.render_widget(hint_widget, chunks[3]);
-    }
-
     // Render the dialog block
     f.render_widget(dialog_block, area);
 }
@@ -216,28 +171,58 @@ fn create_options_list(
 
     // Option 1: Yes
     let option1 = if state.dialog_selected == 0 {
-        "> Yes"
+        ListItem::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::LightYellow)),
+            Span::styled("Yes", Style::default().fg(Color::LightYellow)),
+        ]))
     } else {
-        "  Yes"
+        ListItem::new(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled("Yes", Style::default().fg(Color::DarkGray)),
+        ]))
     };
-    options.push(ListItem::new(option1));
+    options.push(option1);
 
     // Option 2: Yes, and don't ask again for this tool
     let tool_name = &tool_call.function.name;
     let option2 = if state.dialog_selected == 1 {
-        format!("> Yes, and don't ask again for {} commands", tool_name)
+        ListItem::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::LightYellow)),
+            Span::styled(
+                format!("Yes, and don't ask again for {} commands", tool_name),
+                Style::default().fg(Color::LightYellow),
+            ),
+        ]))
     } else {
-        format!("  Yes, and don't ask again for {} commands", tool_name)
+        ListItem::new(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("Yes, and don't ask again for {} commands", tool_name),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
     };
-    options.push(ListItem::new(option2));
+    options.push(option2);
 
     // Option 3: No, and tell Stakpak what to do differently
     let option3 = if state.dialog_selected == 2 {
-        "> No, and tell Stakpak what to do differently (esc)"
+        ListItem::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::LightYellow)),
+            Span::styled(
+                "No, and tell Stakpak what to do differently (esc)",
+                Style::default().fg(Color::LightYellow),
+            ),
+        ]))
     } else {
-        "  No, and tell Stakpak what to do differently (esc)"
+        ListItem::new(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                "No, and tell Stakpak what to do differently (esc)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
     };
-    options.push(ListItem::new(option3));
+    options.push(option3);
 
     options
 }

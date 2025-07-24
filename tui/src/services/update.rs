@@ -1,4 +1,6 @@
+use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
+use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{
     preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
@@ -13,14 +15,13 @@ use crate::services::message::{
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
+use serde_json;
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
     FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-
-use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 
 // Reduced from 7 to 5 for smoother, less disorienting scrolling
 const SCROLL_LINES: usize = 5;
@@ -193,7 +194,7 @@ pub fn update(
                 let tool_call_clone = tool_call.clone();
                 if let Err(e) = state
                     .auto_approve_manager
-                    .update_tool_policy(&tool_name, crate::auto_approve::AutoApprovePolicy::Auto)
+                    .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
                 {
                     push_error_message(
                         state,
@@ -219,7 +220,7 @@ pub fn update(
                 let auto_approved_tools: Vec<_> = config
                     .tools
                     .iter()
-                    .filter(|(_, policy)| **policy == crate::auto_approve::AutoApprovePolicy::Auto)
+                    .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
                     .collect();
 
                 if auto_approved_tools.is_empty() {
@@ -287,15 +288,6 @@ pub fn update(
             if state.auto_approve_manager.should_auto_approve(&tool_call) {
                 // Auto-approve the tool call
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-
-                // Show a brief message that the tool was auto-approved
-                let risk_level = state.auto_approve_manager.get_risk_level(&tool_call);
-                let risk_text = match risk_level {
-                    crate::auto_approve::RiskLevel::Low => "low-risk",
-                    crate::auto_approve::RiskLevel::Medium => "medium-risk",
-                    crate::auto_approve::RiskLevel::High => "high-risk",
-                    crate::auto_approve::RiskLevel::Critical => "critical-risk",
-                };
                 // make tool name split by _ and make first letter capital
                 let tool_name = tool_call
                     .function
@@ -311,8 +303,7 @@ pub fn update(
                     })
                     .collect::<Vec<String>>()
                     .join(" ");
-                let auto_approve_message =
-                    format!("🔓 Auto-approved {} tool ({})", tool_name, risk_text);
+                let auto_approve_message = format!("🔓 Auto-approved tool ({})", tool_name);
                 push_styled_message(state, &auto_approve_message, Color::Green, "", Color::Green);
             } else {
                 // Show confirmation dialog as usual
@@ -541,37 +532,7 @@ pub fn update(
             state.cursor_position = pos;
         }
         InputEvent::RetryLastToolCall => {
-            if let Some(tool_call) = &state.latest_tool_call {
-                // Extract the command from the tool call
-                let full_command = extract_full_command_arguments(tool_call);
-
-                // Extract just the command part (remove "command = " prefix)
-                let command = if full_command.starts_with("command = ") {
-                    full_command.trim_start_matches("command = ").to_string()
-                } else {
-                    full_command
-                };
-
-                let command_len = command.len();
-
-                // Enable shell mode
-                state.show_shell_mode = true;
-                state.is_dialog_open = false;
-                state.ondemand_shell_mode = false;
-                state.dialog_command = Some(tool_call.clone());
-                if state.shell_tool_calls.is_none() {
-                    state.shell_tool_calls = Some(Vec::new());
-                }
-
-                // Set the command in the input but don't execute it yet
-                state.input = command;
-                state.cursor_position = command_len;
-
-                // Clear any existing shell state
-                state.active_shell_command = None;
-                state.active_shell_command_output = None;
-                state.waiting_for_shell_input = false;
-            }
+            handle_retry_tool_call(state);
         }
         InputEvent::AttemptQuit => {
             use std::time::Instant;
@@ -898,7 +859,7 @@ fn handle_input_submitted(
             let tool_name = input_parts[1];
             if let Err(e) = state
                 .auto_approve_manager
-                .update_tool_policy(tool_name, crate::auto_approve::AutoApprovePolicy::Prompt)
+                .update_tool_policy(tool_name, AutoApprovePolicy::Prompt)
             {
                 push_error_message(
                     state,
@@ -942,10 +903,10 @@ fn handle_input_submitted(
                     let tool_call_clone = tool_call.clone();
 
                     // Set auto-approve policy for this tool
-                    if let Err(e) = state.auto_approve_manager.update_tool_policy(
-                        &tool_name,
-                        crate::auto_approve::AutoApprovePolicy::Auto,
-                    ) {
+                    if let Err(e) = state
+                        .auto_approve_manager
+                        .update_tool_policy(&tool_name, AutoApprovePolicy::Auto)
+                    {
                         push_error_message(
                             state,
                             &format!("Failed to set auto-approve for {}: {}", tool_name, e),
@@ -1305,5 +1266,59 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
             .cloned()
             .unwrap_or_default(),
         status: ToolCallResultStatus::Success,
+    }
+}
+
+fn handle_retry_tool_call(state: &mut AppState) {
+    if let Some(tool_call) = &state.latest_tool_call {
+        // Extract the command from the tool call
+        // Parse the function arguments as JSON and extract the command field
+        let command = if let Ok(json) =
+            serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+        {
+            if let Some(command_value) = json.get("command") {
+                if let Some(command_str) = command_value.as_str() {
+                    command_str.to_string()
+                } else {
+                    command_value.to_string()
+                }
+            } else {
+                // Fallback: try to extract from the full arguments string
+                tool_call.function.arguments.clone()
+            }
+        } else {
+            // If JSON parsing fails, try to extract command from the raw arguments string
+            if tool_call.function.arguments.contains("command = ") {
+                tool_call
+                    .function
+                    .arguments
+                    .split("command = ")
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                tool_call.function.arguments.clone()
+            }
+        };
+
+        let command_len = command.len();
+
+        // Enable shell mode
+        state.show_shell_mode = true;
+        state.is_dialog_open = false;
+        state.ondemand_shell_mode = false;
+        state.dialog_command = Some(tool_call.clone());
+        if state.shell_tool_calls.is_none() {
+            state.shell_tool_calls = Some(Vec::new());
+        }
+
+        // Set the command in the input but don't execute it yet
+        state.input = command;
+        state.cursor_position = command_len;
+
+        // Clear any existing shell state
+        state.active_shell_command = None;
+        state.active_shell_command_output = None;
+        state.waiting_for_shell_input = false;
     }
 }

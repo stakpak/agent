@@ -1,4 +1,4 @@
-use crate::auto_approve::AutoApproveManager;
+use crate::services::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
