@@ -233,7 +233,13 @@ pub fn update(
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
         }
-        InputEvent::Tab => handle_tab(state),
+        InputEvent::Tab => {
+            if state.show_collapsed_messages {
+                handle_collapsed_messages_tab(state, message_area_height, message_area_width);
+            } else {
+                handle_tab(state);
+            }
+        }
         InputEvent::SetSessions(sessions) => {
             state.sessions = sessions;
             state.loading = false;
@@ -447,19 +453,37 @@ pub fn update(
         InputEvent::ToggleCollapsedMessages => {
             state.show_collapsed_messages = !state.show_collapsed_messages;
             if state.show_collapsed_messages {
-                // Calculate the maximum scroll position to show the last line
+                // Calculate scroll position to show the top of the last message
                 let collapsed_messages: Vec<&Message> = state
                     .messages
                     .iter()
                     .filter(|m| m.is_collapsed == Some(true))
                     .collect();
-                let owned_messages: Vec<Message> =
-                    collapsed_messages.iter().map(|m| (*m).clone()).collect();
-                let all_lines =
-                    get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
-                let total_lines = all_lines.len();
-                let max_scroll = total_lines.saturating_sub(message_area_height);
-                state.collapsed_messages_scroll = max_scroll;
+
+                if !collapsed_messages.is_empty() {
+                    // Set selected to the last message
+                    state.collapsed_messages_selected = collapsed_messages.len() - 1;
+
+                    // Calculate scroll to show the top of the last message
+                    let mut line_count = 0;
+                    for (i, message) in collapsed_messages.iter().enumerate() {
+                        if i == state.collapsed_messages_selected {
+                            // This is the last message, set scroll to show its top
+                            state.collapsed_messages_scroll = line_count;
+                            break;
+                        }
+
+                        // Count lines for this message
+                        let message_lines = get_wrapped_collapsed_message_lines(
+                            &[(*message).clone()],
+                            message_area_width,
+                        );
+                        line_count += message_lines.len();
+                    }
+                } else {
+                    state.collapsed_messages_scroll = 0;
+                    state.collapsed_messages_selected = 0;
+                }
             }
         }
         InputEvent::AttemptQuit => {
@@ -1153,6 +1177,49 @@ fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_
     } else if state.scroll > max_scroll {
         state.scroll = max_scroll;
     }
+}
+
+fn handle_collapsed_messages_tab(
+    state: &mut AppState,
+    message_area_height: usize,
+    message_area_width: usize,
+) {
+    let collapsed_messages: Vec<&Message> = state
+        .messages
+        .iter()
+        .filter(|m| m.is_collapsed == Some(true))
+        .collect();
+
+    if collapsed_messages.is_empty() {
+        return;
+    }
+
+    // Move to next message
+    state.collapsed_messages_selected =
+        (state.collapsed_messages_selected + 1) % collapsed_messages.len();
+
+    // Calculate scroll position to show the top of the selected message
+    let mut line_count = 0;
+
+    for (i, message) in collapsed_messages.iter().enumerate() {
+        if i == state.collapsed_messages_selected {
+            // This is our target message, set scroll to show its top
+            state.collapsed_messages_scroll = line_count;
+            break;
+        }
+
+        // Count lines for this message
+        let message_lines =
+            get_wrapped_collapsed_message_lines(&[(*message).clone()], message_area_width);
+        line_count += message_lines.len();
+    }
+
+    // Ensure scroll doesn't exceed bounds
+    let owned_messages: Vec<Message> = collapsed_messages.iter().map(|m| (*m).clone()).collect();
+    let all_lines = get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
+    let total_lines = all_lines.len();
+    let max_scroll = total_lines.saturating_sub(message_area_height);
+    state.collapsed_messages_scroll = state.collapsed_messages_scroll.min(max_scroll);
 }
 
 pub fn clear_streaming_tool_results(state: &mut AppState) {

@@ -106,6 +106,7 @@ pub struct AppState {
     pub latest_tool_call: Option<ToolCall>,
     pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
+    pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 }
 
 #[derive(Debug)]
@@ -284,6 +285,7 @@ impl AppState {
             latest_tool_call: None,
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
+            collapsed_messages_selected: 0,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
