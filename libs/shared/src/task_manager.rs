@@ -600,9 +600,15 @@ impl TaskManager {
             }
         };
 
-        // Use streaming execution with proper cancellation and timeout
+        // Use unified execution with proper cancellation and timeout
+        let options = crate::remote_connection::CommandOptions {
+            timeout: task_timeout,
+            with_progress: false,
+            simple: false,
+        };
+
         match connection
-            .execute_command_with_streaming(&command, task_timeout, cancel_rx, progress_callback)
+            .execute_command_unified(&command, options, cancel_rx, Some(progress_callback), None)
             .await
         {
             Ok((output, exit_code)) => TaskCompletion {
