@@ -768,8 +768,9 @@ SECURITY FEATURES:
                     ])
                 })?;
 
+            let timeout_duration = timeout.map(std::time::Duration::from_secs);
             let (output, exit_code) = connection
-                .execute_command(&actual_command, ctx)
+                .execute_command(&actual_command, timeout_duration, Some(ctx))
                 .await
                 .map_err(|e| {
                     error!("Failed to execute remote command: {}", e);
