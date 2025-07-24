@@ -87,13 +87,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::End => Some(InputEvent::InputCursorEnd),
                 KeyCode::PageUp => Some(InputEvent::PageUp),
                 KeyCode::PageDown => Some(InputEvent::PageDown),
-                KeyCode::Tab => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        Some(InputEvent::Tab)
-                    } else {
-                        Some(InputEvent::ToggleDialogFocus)
-                    }
-                }
+                KeyCode::Tab => Some(InputEvent::Tab),
                 _ => None,
             }
         }

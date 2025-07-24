@@ -43,15 +43,12 @@ pub fn view(f: &mut Frame, state: &AppState) {
         margin_height
     };
 
-    let dialog_height = if state.show_sessions_dialog {
-        11
-    } else if state.is_dialog_open {
-        // Calculate dynamic dialog height for confirmation dialog
-        crate::services::confirmation_dialog::calculate_dialog_height(state)
+    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
+    let dialog_margin = if state.show_sessions_dialog || state.is_dialog_open {
+        2
     } else {
         0
     };
-    let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
     // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![

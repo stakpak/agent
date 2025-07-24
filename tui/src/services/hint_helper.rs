@@ -9,18 +9,6 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    // if !state.input.is_empty()
-    //     && !state.show_shell_mode
-    //     && !state.show_sessions_dialog
-    //     && !state.is_dialog_open
-    // {
-    //     let hint = Paragraph::new(Span::styled(
-    //         "Press Enter to send",
-    //         Style::default().fg(Color::DarkGray),
-    //     ));
-    //     f.render_widget(hint, area);
-    //     return;
-    // }
     if state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
@@ -101,18 +89,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         };
 
         let hint = Paragraph::new(Span::styled(
-            format!("{} | Ctrl+O: toggle auto-approve", auto_approve_status),
+            format!("{} | Ctrl+o: toggle auto-approve", auto_approve_status),
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);
     } else if state.is_dialog_open {
         // Show focus information when dialog is open
-        let focus_text = if state.dialog_focused {
-            "Press Tab to focus Chat view. Dialog focused | Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool"
-        } else {
-            "Press Tab to focus Dialog. Chat view focused | Ctrl+O: toggle auto-approve | Ctrl+Y: auto-approve this tool"
-        };
-
+        let focus_text = "Ctrl+o: toggle auto-approve";
         let hint = Paragraph::new(Span::styled(
             focus_text,
             Style::default().fg(Color::DarkGray),
