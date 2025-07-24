@@ -34,50 +34,25 @@ impl Default for CommandPatterns {
     fn default() -> Self {
         CommandPatterns {
             safe_readonly: vec![
-                "ls".to_string(),
-                "cat".to_string(),
-                "grep".to_string(),
-                "find".to_string(),
-                "pwd".to_string(),
-                "whoami".to_string(),
-                "echo".to_string(),
-                "head".to_string(),
-                "tail".to_string(),
-                "wc".to_string(),
-                "sort".to_string(),
-                "uniq".to_string(),
+                "ls".to_string(),       // ✅ Only lists, never writes
+                "pwd".to_string(),      // ✅ Only prints current directory
+                "whoami".to_string(),   // ✅ Only prints username
+                "date".to_string(),     // ✅ Only displays date/time
+                "uptime".to_string(),   // ✅ Only shows system uptime
+                "id".to_string(),       // ✅ Only shows user/group IDs
+                "groups".to_string(),   // ✅ Only shows group membership
+                "which".to_string(),    // ✅ Only shows command locations
+                "whereis".to_string(),  // ✅ Only locates files
+                "file".to_string(),     // ✅ Only identifies file types
+                "stat".to_string(),     // ✅ Only displays file stats
+                "du".to_string(),       // ✅ Only shows disk usage
+                "df".to_string(),       // ✅ Only shows filesystem usage
+                "ps".to_string(),       // ✅ Only lists processes
+                "env".to_string(),      // ✅ Only shows environment variables
+                "printenv".to_string(), // ✅ Only pri
             ],
-            sensitive_destructive: vec![
-                "rm".to_string(),
-                "mv".to_string(),
-                "cp".to_string(),
-                "chmod".to_string(),
-                "chown".to_string(),
-                "sudo".to_string(),
-                "su".to_string(),
-                "dd".to_string(),
-                "mkfs".to_string(),
-                "fdisk".to_string(),
-                "format".to_string(),
-                "ssh-keygen".to_string(),
-                "gpg".to_string(),
-                "openssl".to_string(),
-                "certutil".to_string(),
-                "keytool".to_string(),
-            ],
-            interactive_required: vec![
-                "ssh".to_string(),
-                "scp".to_string(),
-                "rsync".to_string(),
-                "vim".to_string(),
-                "nano".to_string(),
-                "less".to_string(),
-                "more".to_string(),
-                "top".to_string(),
-                "htop".to_string(),
-                "man".to_string(),
-                "info".to_string(),
-            ],
+            sensitive_destructive: vec![],
+            interactive_required: vec![],
         }
     }
 }
@@ -86,25 +61,23 @@ impl Default for AutoApproveConfig {
     fn default() -> Self {
         let mut tools = HashMap::new();
 
-        // Local tools - generally safer, can auto-approve most
+        // Auto-approve tools (always auto-approve):
         tools.insert("view".to_string(), AutoApprovePolicy::Auto);
-        tools.insert("create".to_string(), AutoApprovePolicy::Prompt);
-        tools.insert("str_replace".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("generate_password".to_string(), AutoApprovePolicy::Auto);
-
-        // Remote tools - require more caution
-        tools.insert("generate_code".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("search_docs".to_string(), AutoApprovePolicy::Auto);
         tools.insert("search_memory".to_string(), AutoApprovePolicy::Auto);
         tools.insert("read_rulebook".to_string(), AutoApprovePolicy::Auto);
         tools.insert("local_code_search".to_string(), AutoApprovePolicy::Auto);
-
-        // Command execution tools - require careful consideration
-        tools.insert("run_command".to_string(), AutoApprovePolicy::Smart);
-        tools.insert("run_command_async".to_string(), AutoApprovePolicy::Smart);
         tools.insert("get_all_tasks".to_string(), AutoApprovePolicy::Auto);
-        tools.insert("cancel_async_task".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("get_task_details".to_string(), AutoApprovePolicy::Auto);
+
+        // Prompt tools (always require confirmation):
+        tools.insert("create".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("str_replace".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("generate_code".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("run_command".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("run_command_async".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("cancel_async_task".to_string(), AutoApprovePolicy::Prompt);
 
         AutoApproveConfig {
             enabled: true,
