@@ -23,38 +23,11 @@ pub struct AutoApproveConfig {
     pub command_patterns: CommandPatterns,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CommandPatterns {
     pub safe_readonly: Vec<String>,
     pub sensitive_destructive: Vec<String>,
     pub interactive_required: Vec<String>,
-}
-
-impl Default for CommandPatterns {
-    fn default() -> Self {
-        CommandPatterns {
-            safe_readonly: vec![
-                // "ls".to_string(),       // ✅ Only lists, never writes
-                // "pwd".to_string(),      // ✅ Only prints current directory
-                // "whoami".to_string(),   // ✅ Only prints username
-                // "date".to_string(),     // ✅ Only displays date/time
-                // "uptime".to_string(),   // ✅ Only shows system uptime
-                // "id".to_string(),       // ✅ Only shows user/group IDs
-                // "groups".to_string(),   // ✅ Only shows group membership
-                // "which".to_string(),    // ✅ Only shows command locations
-                // "whereis".to_string(),  // ✅ Only locates files
-                // "file".to_string(),     // ✅ Only identifies file types
-                // "stat".to_string(),     // ✅ Only displays file stats
-                // "du".to_string(),       // ✅ Only shows disk usage
-                // "df".to_string(),       // ✅ Only shows filesystem usage
-                // "ps".to_string(),       // ✅ Only lists processes
-                // "env".to_string(),      // ✅ Only shows environment variables
-                // "printenv".to_string(), // ✅ Only pri
-            ],
-            sensitive_destructive: vec![],
-            interactive_required: vec![],
-        }
-    }
 }
 
 impl Default for AutoApproveConfig {
@@ -105,11 +78,18 @@ impl AutoApproveManager {
     pub fn new() -> Self {
         match Self::try_new() {
             Ok(manager) => manager,
-            Err(_) => {
+            Err(e) => {
                 // Fallback to default config if loading fails
                 let config_path = PathBuf::from(AUTO_APPROVE_CONFIG_PATH);
+                let config = AutoApproveConfig::default();
+                eprintln!("Failed to load auto-approve config: {}", e);
+                // Try to save the default config even if loading failed
+                if let Err(e) = config.save(&config_path) {
+                    eprintln!("Warning: Failed to save auto-approve config: {}", e);
+                }
+
                 AutoApproveManager {
-                    config: AutoApproveConfig::default(),
+                    config,
                     config_path,
                 }
             }
@@ -135,18 +115,9 @@ impl AutoApproveManager {
     }
 
     fn get_config_path() -> Result<PathBuf, String> {
-        // First try local config in current working directory
+        // Always use local config in current working directory
         let local_config = Path::new(AUTO_APPROVE_CONFIG_PATH);
-        if local_config.exists() {
-            return Ok(local_config.to_path_buf());
-        }
-
-        // Fallback to global config
-        let home_dir =
-            std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
-        let global_config = Path::new(&home_dir).join(AUTO_APPROVE_CONFIG_PATH);
-
-        Ok(global_config)
+        Ok(local_config.to_path_buf())
     }
 
     fn load_config(config_path: &Path) -> Result<AutoApproveConfig, String> {
@@ -160,7 +131,27 @@ impl AutoApproveManager {
         let content = fs::read_to_string(config_path)
             .map_err(|e| format!("Failed to read config file: {}", e))?;
 
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {}", e))
+        let mut config: AutoApproveConfig = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+
+        // Auto-update run_command policy based on command patterns
+        if !config.command_patterns.safe_readonly.is_empty()
+            || !config.command_patterns.sensitive_destructive.is_empty()
+            || !config.command_patterns.interactive_required.is_empty()
+        {
+            config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Smart);
+        } else {
+            config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
+        }
+
+        // Save the updated config back to file
+        config.save(config_path)?;
+
+        Ok(config)
     }
 
     pub fn should_auto_approve(&self, tool_call: &ToolCall) -> bool {
@@ -213,8 +204,45 @@ impl AutoApproveManager {
     }
 
     fn is_safe_command(&self, tool_call: &ToolCall) -> bool {
-        let risk_level = self.get_risk_level(tool_call);
-        matches!(risk_level, RiskLevel::Low)
+        let command = self.extract_command(tool_call);
+        let command_lower = command.to_lowercase();
+
+        // Check if command matches any safe_readonly patterns
+        for pattern in &self.config.command_patterns.safe_readonly {
+            if command_lower.contains(&pattern.to_lowercase()) {
+                return true;
+            }
+        }
+
+        // Check if command matches any sensitive_destructive patterns
+        for pattern in &self.config.command_patterns.sensitive_destructive {
+            if command_lower.contains(&pattern.to_lowercase()) {
+                return false;
+            }
+        }
+
+        // Check if command matches any interactive_required patterns
+        for pattern in &self.config.command_patterns.interactive_required {
+            if command_lower.contains(&pattern.to_lowercase()) {
+                return false;
+            }
+        }
+
+        // If no patterns are configured, fall back to risk level assessment
+        if self.config.command_patterns.safe_readonly.is_empty()
+            && self
+                .config
+                .command_patterns
+                .sensitive_destructive
+                .is_empty()
+            && self.config.command_patterns.interactive_required.is_empty()
+        {
+            let risk_level = self.get_risk_level(tool_call);
+            return matches!(risk_level, RiskLevel::Low);
+        }
+
+        // If patterns are configured but command doesn't match any safe patterns, it's not safe
+        false
     }
 
     fn is_critical_risk(&self, command: &str) -> bool {
@@ -272,6 +300,110 @@ impl AutoApproveManager {
         policy: AutoApprovePolicy,
     ) -> Result<(), String> {
         self.config.tools.insert(tool_name.to_string(), policy);
+        self.save_config()
+    }
+
+    pub fn update_command_patterns(
+        &mut self,
+        pattern_type: &str,
+        patterns: Vec<String>,
+    ) -> Result<(), String> {
+        match pattern_type {
+            "safe_readonly" => {
+                self.config.command_patterns.safe_readonly = patterns;
+            }
+            "sensitive_destructive" => {
+                self.config.command_patterns.sensitive_destructive = patterns;
+            }
+            "interactive_required" => {
+                self.config.command_patterns.interactive_required = patterns;
+            }
+            _ => return Err(format!("Unknown pattern type: {}", pattern_type)),
+        }
+
+        // If any command patterns are configured, change run_command from Prompt to Smart
+        if !self.config.command_patterns.safe_readonly.is_empty()
+            || !self
+                .config
+                .command_patterns
+                .sensitive_destructive
+                .is_empty()
+            || !self.config.command_patterns.interactive_required.is_empty()
+        {
+            self.config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Smart);
+        } else {
+            // If no patterns are configured, revert run_command back to Prompt
+            self.config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
+        }
+
+        self.save_config()
+    }
+
+    pub fn add_command_pattern(
+        &mut self,
+        pattern_type: &str,
+        pattern: String,
+    ) -> Result<(), String> {
+        let patterns = match pattern_type {
+            "safe_readonly" => &mut self.config.command_patterns.safe_readonly,
+            "sensitive_destructive" => &mut self.config.command_patterns.sensitive_destructive,
+            "interactive_required" => &mut self.config.command_patterns.interactive_required,
+            _ => return Err(format!("Unknown pattern type: {}", pattern_type)),
+        };
+
+        if !patterns.contains(&pattern) {
+            patterns.push(pattern);
+        }
+
+        // If any command patterns are configured, change run_command from Prompt to Smart
+        if !self.config.command_patterns.safe_readonly.is_empty()
+            || !self
+                .config
+                .command_patterns
+                .sensitive_destructive
+                .is_empty()
+            || !self.config.command_patterns.interactive_required.is_empty()
+        {
+            self.config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Smart);
+        }
+
+        self.save_config()
+    }
+
+    pub fn remove_command_pattern(
+        &mut self,
+        pattern_type: &str,
+        pattern: &str,
+    ) -> Result<(), String> {
+        let patterns = match pattern_type {
+            "safe_readonly" => &mut self.config.command_patterns.safe_readonly,
+            "sensitive_destructive" => &mut self.config.command_patterns.sensitive_destructive,
+            "interactive_required" => &mut self.config.command_patterns.interactive_required,
+            _ => return Err(format!("Unknown pattern type: {}", pattern_type)),
+        };
+
+        patterns.retain(|p| p != pattern);
+
+        // If no patterns are configured, revert run_command back to Prompt
+        if self.config.command_patterns.safe_readonly.is_empty()
+            && self
+                .config
+                .command_patterns
+                .sensitive_destructive
+                .is_empty()
+            && self.config.command_patterns.interactive_required.is_empty()
+        {
+            self.config
+                .tools
+                .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
+        }
+
         self.save_config()
     }
 

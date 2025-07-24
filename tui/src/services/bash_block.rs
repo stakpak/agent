@@ -781,9 +781,8 @@ pub fn render_bash_block_rejected(
     state: &mut AppState,
     message: Option<String>,
 ) {
-  render_styled_lines(command_name, title, state, message, None);
+    render_styled_lines(command_name, title, state, message, None);
 }
-
 
 // fn collapsed_result_block(
 //     tool_call: &ToolCall,
@@ -794,7 +793,6 @@ pub fn render_bash_block_rejected(
 //     let title: String = get_command_type_name(tool_call);
 //     render_styled_lines(&command_name, &title, state, message, None);
 // }
-
 
 pub struct LinesColors {
     pub dot: Color,
@@ -808,7 +806,7 @@ pub fn render_styled_lines(
     title: &str,
     state: &mut AppState,
     message: Option<String>,
-    colors: Option<LinesColors>
+    colors: Option<LinesColors>,
 ) {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -829,9 +827,7 @@ pub fn render_styled_lines(
         lines.push(Line::from(vec![
             Span::styled(
                 "● ",
-                Style::default()
-                    .fg(colors.dot)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 title,
@@ -850,9 +846,7 @@ pub fn render_styled_lines(
         lines.push(Line::from(vec![
             Span::styled(
                 "● ",
-                Style::default()
-                    .fg(colors.dot)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 title,
@@ -876,7 +870,10 @@ pub fn render_styled_lines(
                 // First line of arguments
                 lines.push(Line::from(vec![
                     Span::from(args_prefix.clone()),
-                    Span::styled(format!("({}", arg_line), Style::default().fg(colors.command)),
+                    Span::styled(
+                        format!("({}", arg_line),
+                        Style::default().fg(colors.command),
+                    ),
                 ]));
             } else {
                 // Continuation lines
@@ -903,7 +900,9 @@ pub fn render_styled_lines(
     let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
     lines.push(Line::from(vec![Span::styled(
         format!("  L {}", message),
-        Style::default().fg(colors.message).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(colors.message)
+            .add_modifier(Modifier::BOLD),
     )]));
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
