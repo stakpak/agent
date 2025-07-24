@@ -9,7 +9,7 @@ use serde_json::Value;
 use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use uuid::Uuid;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BubbleColors {
     pub border_color: Color,
     pub title_color: Color,
@@ -17,6 +17,7 @@ pub struct BubbleColors {
     pub tool_type: String,
 }
 
+#[derive(Clone, Debug)]
 pub enum MessageContent {
     Plain(String, Style),
     Styled(Line<'static>),
@@ -31,9 +32,11 @@ pub enum MessageContent {
     },
 }
 
+#[derive(Clone, Debug)]
 pub struct Message {
     pub id: Uuid,
     pub content: MessageContent,
+    pub is_collapsed: Option<bool>,
 }
 
 impl Message {
@@ -44,6 +47,7 @@ impl Message {
                 text.into(),
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
             ),
+            is_collapsed: None,
         }
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
@@ -53,24 +57,28 @@ impl Message {
                 text.into(),
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
             ),
+            is_collapsed: None,
         }
     }
     pub fn assistant(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
             id: id.unwrap_or(Uuid::new_v4()),
             content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
+            is_collapsed: None,
         }
     }
     pub fn styled(line: Line<'static>) -> Self {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::Styled(line),
+            is_collapsed: None,
         }
     }
     pub fn markdown(text: impl Into<String>) -> Self {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::Markdown(text.into()),
+            is_collapsed: None,
         }
     }
 
@@ -78,6 +86,7 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::PlainText(text.into()),
+            is_collapsed: None,
         }
     }
 }
@@ -253,11 +262,34 @@ pub fn get_wrapped_message_lines(
     messages: &[Message],
     width: usize,
 ) -> Vec<(Line<'static>, Style)> {
+    get_wrapped_message_lines_internal(messages, width, false)
+}
+
+pub fn get_wrapped_collapsed_message_lines(
+    messages: &[Message],
+    width: usize,
+) -> Vec<(Line<'static>, Style)> {
+    get_wrapped_message_lines_internal(messages, width, true)
+}
+
+fn get_wrapped_message_lines_internal(
+    messages: &[Message],
+    width: usize,
+    include_collapsed: bool,
+) -> Vec<(Line<'static>, Style)> {
+    let filtered_messages = if include_collapsed {
+        messages.iter().collect::<Vec<_>>()
+    } else {
+        messages
+            .iter()
+            .filter(|m| m.is_collapsed.is_none())
+            .collect::<Vec<_>>()
+    };
     let mut all_lines = Vec::new();
     let mut agent_mode_removed = false;
     let mut checkpoint_id_removed = false;
 
-    for msg in messages {
+    for msg in filtered_messages {
         match &msg.content {
             MessageContent::Plain(text, style) => {
                 let mut cleaned = text.to_string();

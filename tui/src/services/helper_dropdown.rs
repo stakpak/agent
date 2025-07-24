@@ -9,29 +9,42 @@ use ratatui::{
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
     let input = state.input.trim();
-    let show = input == "/" || state.helpers.iter().any(|h| *h == input);
+    let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
     if state.show_helper_dropdown && show {
         use ratatui::widgets::{List, ListItem, ListState};
         let item_style = Style::default();
-        let items: Vec<ListItem> = if state.input == "/" {
-            state
-                .helpers
-                .iter()
-                .map(|h| {
-                    ListItem::new(Line::from(vec![Span::raw(format!("  {}  ", h))]))
-                        .style(item_style)
-                })
-                .collect()
+        // Find the longest command name to calculate padding
+        let commands_to_show = if state.input == "/" {
+            &state.helpers
         } else {
-            state
-                .filtered_helpers
-                .iter()
-                .map(|h| {
-                    ListItem::new(Line::from(vec![Span::raw(format!("  {}  ", h))]))
-                        .style(item_style)
-                })
-                .collect()
+            &state.filtered_helpers
         };
+
+        let max_command_length = commands_to_show
+            .iter()
+            .map(|h| h.command.len())
+            .max()
+            .unwrap_or(0);
+
+        let items: Vec<ListItem> = commands_to_show
+            .iter()
+            .map(|h| {
+                let padding_needed = max_command_length - h.command.len();
+                let padding = " ".repeat(padding_needed);
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {}  ", h.command),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(padding, Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!(" – {}", h.description),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+                .style(item_style)
+            })
+            .collect();
         // No background block
         let mut list_state = ListState::default();
         list_state.select(Some(
