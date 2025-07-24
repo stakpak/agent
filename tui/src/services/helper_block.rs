@@ -60,6 +60,7 @@ pub fn push_status_message(state: &mut AppState) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
     });
 }
 
@@ -85,6 +86,7 @@ pub fn push_memorize_message(state: &mut AppState) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
     });
 }
 
@@ -195,6 +197,7 @@ pub fn push_help_message(state: &mut AppState) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
     });
 }
 
@@ -219,6 +222,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
     });
 }
 
@@ -249,6 +253,7 @@ pub fn push_error_message(state: &mut AppState, error: &str) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
+        is_collapsed: None,
     });
 }
 
