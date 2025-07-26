@@ -401,7 +401,7 @@ fn get_file_structure(
     Ok(file_structure)
 }
 
-fn get_git_info(dir_path: &str) -> GitInfo {
+pub fn get_git_info(dir_path: &str) -> GitInfo {
     let path = Path::new(dir_path);
 
     // Check if .git directory exists
