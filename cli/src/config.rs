@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub api_key: Option<String>,
     pub mcp_server_host: Option<String>,
     pub machine_name: Option<String>,
+    pub auto_append_gitignore: Option<bool>,
 }
 
 impl From<AppConfig> for ClientConfig {
@@ -34,6 +35,7 @@ impl AppConfig {
 
         let config = Config::builder()
             .set_default("api_endpoint", "https://apiv2.stakpak.dev")?
+            .set_default("auto_append_gitignore", true)?
             .add_source(Environment::with_prefix("STAKPAK"))
             .add_source(File::with_name(&config_path).required(false))
             .build()
