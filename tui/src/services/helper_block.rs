@@ -309,14 +309,38 @@ pub fn version_message(latest_version: Option<String>) -> Message {
     }
 }
 
+// pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
+//     vec![
+//         Message::info(
+//             r"
+//  ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
+// ▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █
+//  ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █
+// ▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
+//             Some(Style::default().fg(ratatui::style::Color::Cyan)),
+//         ),
+//         version_message(latest_version),
+//         Message::info("/help for help, /status for your current setup", None),
+//         Message::info(
+//             format!(
+//                 "cwd: {}",
+//                 std::env::current_dir().unwrap_or_default().display()
+//             ),
+//             None,
+//         ),
+//     ]
+// }
+
 pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
     vec![
         Message::info(
             r"
- ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
-▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  
- ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  
-▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
+   ██████╗████████╗ █████╗ ██╗  ██╗██████╗  █████╗ ██╗  ██╗
+   ██╔═══╝╚══██╔══╝██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║ ██╔╝
+   ███████╗  ██║   ███████║█████╔╝ ██████╔╝███████║█████╔╝ 
+   ╚════██║  ██║   ██╔══██║██╔═██╗ ██╔═══╝ ██╔══██║██╔═██╗ 
+   ███████║  ██║   ██║  ██║██║  ██╗██║     ██║  ██║██║  ██╗
+   ╚══════╝  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝",
             Some(Style::default().fg(ratatui::style::Color::Cyan)),
         ),
         version_message(latest_version),
