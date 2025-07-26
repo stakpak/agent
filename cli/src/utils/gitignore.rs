@@ -29,10 +29,8 @@ pub fn ensure_stakpak_in_gitignore(config: &AppConfig) -> Result<bool, String> {
     let gitignore_path = current_dir.join(".gitignore");
 
     // Check if .stakpak is already in .gitignore
-    if gitignore_path.exists() {
-        if stakpak_already_in_gitignore(&gitignore_path)? {
-            return Ok(false);
-        }
+    if gitignore_path.exists() && stakpak_already_in_gitignore(&gitignore_path)? {
+        return Ok(false);
     }
 
     // Append .stakpak to .gitignore
@@ -78,7 +76,7 @@ fn append_stakpak_to_gitignore(gitignore_path: &Path) -> Result<(), String> {
             let content = std::fs::read(gitignore_path)
                 .map_err(|e| format!("Failed to read .gitignore: {}", e))?;
 
-            !content.ends_with(&[b'\n'])
+            !content.ends_with(b"\n")
         } else {
             false
         }
@@ -92,8 +90,13 @@ fn append_stakpak_to_gitignore(gitignore_path: &Path) -> Result<(), String> {
     }
 
     // Add a blank line for separation (if file has content)
-    if gitignore_path.exists() && std::fs::metadata(gitignore_path).unwrap().len() > 0 {
-        writeln!(file).map_err(|e| format!("Failed to write blank line to .gitignore: {}", e))?;
+    if gitignore_path.exists() {
+        if let Ok(metadata) = std::fs::metadata(gitignore_path) {
+            if metadata.len() > 0 {
+                writeln!(file)
+                    .map_err(|e| format!("Failed to write blank line to .gitignore: {}", e))?;
+            }
+        }
     }
 
     // Add comment and .stakpak entry
