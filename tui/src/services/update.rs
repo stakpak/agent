@@ -743,8 +743,7 @@ fn handle_esc(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    let _ = input_tx
-        .try_send(InputEvent::EmergencyClearTerminal);
+    let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
@@ -889,7 +888,7 @@ fn handle_input_submitted(
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
         if let Some(dialog_command) = &state.dialog_command {
-            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));  
+            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
         }
         state.is_dialog_open = false;
         state.dialog_selected = 0;
