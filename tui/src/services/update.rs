@@ -511,31 +511,20 @@ pub fn update(
     adjust_scroll(state, message_area_height, message_area_width);
 }
 
-fn extract_command_from_tool_call(tool_call: &ToolCall) -> String {
-    // First try to parse as JSON and extract the command field
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
-        if let Some(command_value) = json.get("command") {
-            if let Some(command_str) = command_value.as_str() {
-                return command_str.to_string();
-            } else {
-                return command_value.to_string();
-            }
+fn extract_command_from_tool_call(tool_call: &ToolCall) -> Result<String, String> {
+    // Parse as JSON and extract the command field
+    let json = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    if let Some(command_value) = json.get("command") {
+        if let Some(command_str) = command_value.as_str() {
+            return Ok(command_str.to_string());
+        } else {
+            return Ok(command_value.to_string());
         }
     }
 
-    // If JSON parsing fails, try to extract from the raw arguments string
-    if tool_call.function.arguments.contains("command = ") {
-        return tool_call
-            .function
-            .arguments
-            .split("command = ")
-            .nth(1)
-            .unwrap_or("")
-            .to_string();
-    }
-
-    // If all else fails, return the full arguments
-    tool_call.function.arguments.clone()
+    Err("No 'command' field found in JSON arguments".to_string())
 }
 
 fn handle_shell_mode(state: &mut AppState) {
@@ -543,7 +532,13 @@ fn handle_shell_mode(state: &mut AppState) {
     if state.show_shell_mode {
         state.is_dialog_open = false;
         if let Some(dialog_command) = &state.dialog_command {
-            let command = extract_command_from_tool_call(dialog_command);
+            let command = match extract_command_from_tool_call(dialog_command) {
+                Ok(command) => command,
+                Err(e) => {
+                    eprintln!("Error extracting command: {}", e);
+                    return;
+                }
+            };
             let command_len = command.len();
             state.input = command;
             state.cursor_position = command_len;
@@ -1314,8 +1309,13 @@ fn handle_retry_tool_call(
 
     if let Some(tool_call) = &state.latest_tool_call {
         // Extract the command from the tool call
-        let command = extract_command_from_tool_call(tool_call);
-
+        let command = match extract_command_from_tool_call(tool_call) {
+            Ok(command) => command,
+            Err(e) => {
+                eprintln!("Error extracting command: {}", e);
+                return;
+            }
+        };
         let command_len = command.len();
 
         // Enable shell mode
