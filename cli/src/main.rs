@@ -19,6 +19,7 @@ use commands::{
 use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::{auto_update, check_update};
+use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
 use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
@@ -137,6 +138,10 @@ async fn main() {
                     if config.api_key.is_none() && command.requires_auth() {
                         prompt_for_api_key(&mut config);
                     }
+
+                    // Ensure .stakpak is in .gitignore (after workdir is set, before command execution)
+                    let _ = gitignore::ensure_stakpak_in_gitignore(&config);
+
                     match command.run(config).await {
                         Ok(_) => {}
                         Err(e) => {
@@ -200,6 +205,9 @@ async fn main() {
                     } else {
                         cli.max_steps // Use user setting or default (50)
                     };
+
+                    // Ensure .stakpak is in .gitignore before running agent
+                    let _ = gitignore::ensure_stakpak_in_gitignore(&config);
 
                     match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
