@@ -419,31 +419,46 @@ mod password_tests {
     }
 }
 
-/// Generate a tree view of a directory structure
-pub fn generate_directory_tree(
-    path: &Path,
+/// Directory entry information for tree generation
+#[derive(Debug, Clone)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+}
+
+/// Trait for abstracting file system operations for tree generation
+#[async_trait::async_trait]
+pub trait FileSystemProvider {
+    type Error: std::fmt::Display;
+    
+    /// List directory contents
+    async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error>;
+}
+
+/// Generate a tree view of a directory structure using a generic file system provider
+pub async fn generate_directory_tree<P: FileSystemProvider>(
+    provider: &P,
+    path: &str,
     prefix: &str,
     max_depth: usize,
     current_depth: usize,
-) -> Result<String, std::io::Error> {
+) -> Result<String, P::Error> {
     let mut result = String::new();
 
     if current_depth >= max_depth {
         return Ok(result);
     }
 
-    let entries = fs::read_dir(path)?;
-    let mut items: Vec<_> = entries.collect::<Result<Vec<_>, _>>()?;
+    let entries = provider.list_directory(path).await?;
+    let mut items = entries;
 
     // Sort items: directories first, then alphabetically
     items.sort_by(|a, b| {
-        match (
-            a.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-            b.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-        ) {
+        match (a.is_directory, b.is_directory) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => a.file_name().cmp(&b.file_name()),
+            _ => a.name.cmp(&b.name),
         }
     });
 
@@ -455,34 +470,54 @@ pub fn generate_directory_tree(
             "├── "
         };
 
-        let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
+        if entry.is_directory {
+            result.push_str(&format!("{}{}{}/\n", prefix, current_prefix, entry.name));
 
-        match entry.file_type() {
-            Ok(ft) if ft.is_dir() => {
-                result.push_str(&format!("{}{}{}/\n", prefix, current_prefix, file_name_str));
+            // Recursively process subdirectory
+            let next_prefix =
+                format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
 
-                // Recursively process subdirectory
-                let next_prefix =
-                    format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
-
-                if let Ok(subtree) = generate_directory_tree(
-                    &entry.path(),
-                    &next_prefix,
-                    max_depth,
-                    current_depth + 1,
-                ) {
-                    result.push_str(&subtree);
-                }
+            if let Ok(subtree) = Box::pin(generate_directory_tree(
+                provider,
+                &entry.path,
+                &next_prefix,
+                max_depth,
+                current_depth + 1,
+            )).await {
+                result.push_str(&subtree);
             }
-            Ok(_) => {
-                result.push_str(&format!("{}{}{}\n", prefix, current_prefix, file_name_str));
-            }
-            Err(_) => {
-                result.push_str(&format!("{}{}{}?\n", prefix, current_prefix, file_name_str));
-            }
+        } else {
+            result.push_str(&format!("{}{}{}\n", prefix, current_prefix, entry.name));
         }
     }
 
     Ok(result)
+}
+
+/// Local file system provider implementation
+pub struct LocalFileSystemProvider;
+
+#[async_trait::async_trait]
+impl FileSystemProvider for LocalFileSystemProvider {
+    type Error = std::io::Error;
+    
+    async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
+        let entries = fs::read_dir(path)?;
+        let mut result = Vec::new();
+        
+        for entry in entries {
+            let entry = entry?;
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let file_path = entry.path().to_string_lossy().to_string();
+            let is_directory = entry.file_type()?.is_dir();
+            
+            result.push(DirectoryEntry {
+                name: file_name,
+                path: file_path,
+                is_directory,
+            });
+        }
+        
+        Ok(result)
+    }
 }

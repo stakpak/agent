@@ -4,14 +4,14 @@ use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
-use stakpak_shared::remote_connection::{PathLocation, RemoteConnection, RemoteConnectionInfo};
+use stakpak_shared::remote_connection::{PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider};
 
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
-use stakpak_shared::utils::generate_directory_tree;
+use stakpak_shared::utils::{generate_directory_tree, LocalFileSystemProvider};
 use std::fs::{self};
 use std::path::Path;
 use std::sync::Arc;
@@ -534,7 +534,7 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
                 .await
             {
                 Ok((conn, remote_path)) => {
-                    self.view_remote_path(&conn, &remote_path, &path, view_range, MAX_LINES)
+                    self.view_remote_path(&conn, &remote_path, &path, view_range, MAX_LINES, tree)
                         .await
                 }
                 Err(error_result) => Ok(error_result),
@@ -960,7 +960,10 @@ SECURITY FEATURES:
 
         if path_obj.is_dir() {
             let depth = if tree.unwrap_or(false) { 3 } else { 1 };
-            match generate_directory_tree(path_obj, "", depth, 0) {
+            let provider = LocalFileSystemProvider;
+            let path_str = path_obj.to_string_lossy();
+            
+            match generate_directory_tree(&provider, &path_str, "", depth, 0).await {
                 Ok(tree_content) => {
                     let result = format!(
                         "Directory tree for \"{}\":\n{}\n{}",
@@ -1008,6 +1011,7 @@ SECURITY FEATURES:
         original_path: &str,
         view_range: Option<[i32; 2]>,
         max_lines: usize,
+        tree: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
         if !conn.exists(remote_path).await {
             return Ok(CallToolResult::error(vec![
@@ -1020,29 +1024,17 @@ SECURITY FEATURES:
         }
 
         if conn.is_directory(remote_path).await {
-            // List remote directory contents
-            match conn.list_directory(remote_path).await {
-                Ok(entries) => {
-                    let mut result =
-                        format!("Remote directory listing for \"{}\":\n", original_path);
-
-                    let mut sorted_entries = entries;
-                    sorted_entries.sort();
-
-                    for (i, entry) in sorted_entries.iter().enumerate() {
-                        let is_last = i == sorted_entries.len() - 1;
-                        let prefix = if is_last { "└── " } else { "├── " };
-
-                        let entry_name = entry.split('/').next_back().unwrap_or(entry);
-                        let suffix = if conn.is_directory(entry).await {
-                            "/"
-                        } else {
-                            ""
-                        };
-
-                        result.push_str(&format!("{}{}{}\n", prefix, entry_name, suffix));
-                    }
-
+            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            let provider = RemoteFileSystemProvider::new(conn.clone());
+            
+            match generate_directory_tree(&provider, remote_path, "", depth, 0).await {
+                Ok(tree_content) => {
+                    let result = format!(
+                        "Remote directory tree for \"{}\":\n{}\n{}",
+                        original_path,
+                        remote_path.split('/').next_back().unwrap_or(remote_path),
+                        tree_content
+                    );
                     Ok(CallToolResult::success(vec![Content::text(result)]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
