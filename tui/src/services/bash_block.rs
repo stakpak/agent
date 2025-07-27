@@ -520,7 +520,13 @@ pub fn render_result_block(
     let tool_call_status = tool_call_result.status.clone();
     let title: String = get_command_type_name(&tool_call);
     let command_args = extract_truncated_command_arguments(&tool_call);
-    let is_collapsed = is_collapsed_tool_call(&tool_call);
+
+    let preprocessed_result = preprocess_terminal_output(&result);
+
+    // Since the content is plain text without ANSI codes, just create a simple Text
+    let result_text = ratatui::text::Text::from(preprocessed_result);
+
+    let is_collapsed = is_collapsed_tool_call(&tool_call) && result_text.lines.len() > 3;
     if tool_call_status == ToolCallResultStatus::Error {
         render_bash_block_rejected(&command_args, &title, state, Some(result.to_string()));
         return;
@@ -722,10 +728,6 @@ pub fn render_result_block(
         lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     }
     // Preprocess result to handle terminal control sequences
-    let preprocessed_result = preprocess_terminal_output(&result);
-
-    // Since the content is plain text without ANSI codes, just create a simple Text
-    let result_text = ratatui::text::Text::from(preprocessed_result);
 
     if is_collapsed {
         let message = format!("Read {} lines (ctrl+t to expand)", result_text.lines.len());
