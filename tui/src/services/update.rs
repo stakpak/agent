@@ -510,20 +510,39 @@ pub fn update(
     adjust_scroll(state, message_area_height, message_area_width);
 }
 
+fn extract_command_from_tool_call(tool_call: &ToolCall) -> String {
+    // First try to parse as JSON and extract the command field
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
+        if let Some(command_value) = json.get("command") {
+            if let Some(command_str) = command_value.as_str() {
+                return command_str.to_string();
+            } else {
+                return command_value.to_string();
+            }
+        }
+    }
+
+    // If JSON parsing fails, try to extract from the raw arguments string
+    if tool_call.function.arguments.contains("command = ") {
+        return tool_call
+            .function
+            .arguments
+            .split("command = ")
+            .nth(1)
+            .unwrap_or("")
+            .to_string();
+    }
+
+    // If all else fails, return the full arguments
+    tool_call.function.arguments.clone()
+}
+
 fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
     if state.show_shell_mode {
         state.is_dialog_open = false;
         if let Some(dialog_command) = &state.dialog_command {
-            let full_command = extract_full_command_arguments(dialog_command);
-
-            // Extract just the command part (remove "command = " prefix)
-            let command = if full_command.starts_with("command = ") {
-                full_command.trim_start_matches("command = ").to_string()
-            } else {
-                full_command
-            };
-
+            let command = extract_command_from_tool_call(dialog_command);
             let command_len = command.len();
             state.input = command;
             state.cursor_position = command_len;
@@ -1280,34 +1299,7 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
 fn handle_retry_tool_call(state: &mut AppState) {
     if let Some(tool_call) = &state.latest_tool_call {
         // Extract the command from the tool call
-        // Parse the function arguments as JSON and extract the command field
-        let command = if let Ok(json) =
-            serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-        {
-            if let Some(command_value) = json.get("command") {
-                if let Some(command_str) = command_value.as_str() {
-                    command_str.to_string()
-                } else {
-                    command_value.to_string()
-                }
-            } else {
-                // Fallback: try to extract from the full arguments string
-                tool_call.function.arguments.clone()
-            }
-        } else {
-            // If JSON parsing fails, try to extract command from the raw arguments string
-            if tool_call.function.arguments.contains("command = ") {
-                tool_call
-                    .function
-                    .arguments
-                    .split("command = ")
-                    .nth(1)
-                    .unwrap_or("")
-                    .to_string()
-            } else {
-                tool_call.function.arguments.clone()
-            }
-        };
+        let command = extract_command_from_tool_call(tool_call);
 
         let command_len = command.len();
 
