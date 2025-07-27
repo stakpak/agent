@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use tracing::debug;
 use uuid;
 use crate::utils::{FileSystemProvider, DirectoryEntry};
+use async_trait::async_trait;
 
 #[derive(Debug)]
 struct ParsedConnection {
@@ -341,6 +342,31 @@ impl RemoteConnection {
         Ok(result)
     }
 
+    /// List directory with file type information (more efficient for tree generation)
+    pub async fn list_directory_with_types(&self, path: &str) -> Result<Vec<(String, bool)>> {
+        let entries = self
+            .sftp
+            .read_dir(path)
+            .await
+            .map_err(|e| anyhow!("Failed to read directory {}: {}", path, e))?;
+
+        let separator = self.separator().await?;
+        let mut result = Vec::new();
+
+        for entry in entries {
+            let entry_path = if path.ends_with(separator) {
+                format!("{}{}", path, entry.file_name())
+            } else {
+                format!("{}{}{}", path, separator, entry.file_name())
+            };
+            let is_directory = entry.metadata().is_dir();
+            result.push((entry_path, is_directory));
+        }
+
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(result)
+    }
+
     pub async fn is_file(&self, path: &str) -> bool {
         self.sftp
             .metadata(path)
@@ -593,18 +619,24 @@ impl RemoteFileSystemProvider {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl FileSystemProvider for RemoteFileSystemProvider {
     type Error = String;
     
     async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
-        let entries = self.connection.list_directory(path).await
-            .map_err(|e| format!("Failed to list remote directory: {}", e))?;
+        // Reduce timeout for better responsiveness in tree operations
+        let timeout_duration = std::time::Duration::from_secs(10);
+        
+        let entries = tokio::time::timeout(
+            timeout_duration,
+            self.connection.list_directory_with_types(path)
+        ).await
+        .map_err(|_| format!("Timeout listing remote directory: {}", path))?
+        .map_err(|e| format!("Failed to list remote directory: {}", e))?;
         
         let mut result = Vec::new();
-        for entry_path in entries {
+        for (entry_path, is_directory) in entries {
             let name = entry_path.split('/').next_back().unwrap_or(&entry_path).to_string();
-            let is_directory = self.connection.is_directory(&entry_path).await;
             
             result.push(DirectoryEntry {
                 name,

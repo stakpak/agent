@@ -4516,6 +4516,7 @@ dependencies = [
  "axum-server",
  "chrono",
  "dirs",
+ "futures",
  "hyper",
  "notify",
  "once_cell",
