@@ -1233,12 +1233,14 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
         state.completed_tool_calls.insert(tool_call_id);
     }
 
-    // Clear the streaming data and remove the streaming message
+    // Clear the streaming data and remove the streaming message and pending bash message id
     state.streaming_tool_results.clear();
-    state
-        .messages
-        .retain(|m| m.id != state.streaming_tool_result_id.unwrap_or_default());
+    state.messages.retain(|m| {
+        m.id != state.streaming_tool_result_id.unwrap_or_default()
+            && m.id != state.pending_bash_message_id.unwrap_or_default()
+    });
     state.latest_tool_call = None;
+    state.pending_bash_message_id = None;
 }
 
 pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
