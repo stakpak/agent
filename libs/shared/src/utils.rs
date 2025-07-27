@@ -2,6 +2,7 @@ use rand::Rng;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
+use async_trait::async_trait;
 
 /// Read .gitignore patterns from the specified base directory
 pub fn read_gitignore_patterns(base_dir: &str) -> Vec<String> {
@@ -428,7 +429,7 @@ pub struct DirectoryEntry {
 }
 
 /// Trait for abstracting file system operations for tree generation
-#[async_trait::async_trait]
+#[async_trait]
 pub trait FileSystemProvider {
     type Error: std::fmt::Display;
     
@@ -446,7 +447,8 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
 ) -> Result<String, P::Error> {
     let mut result = String::new();
 
-    if current_depth >= max_depth {
+    // Safety check: limit absolute depth to prevent infinite recursion
+    if current_depth >= max_depth || current_depth >= 10 {
         return Ok(result);
     }
 
@@ -462,6 +464,10 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
         }
     });
 
+    // Separate file entries from directory entries for processing
+    let mut file_entries = Vec::new();
+    let mut dir_entries = Vec::new();
+    
     for (i, entry) in items.iter().enumerate() {
         let is_last_item = i == items.len() - 1;
         let current_prefix = if is_last_item {
@@ -471,23 +477,48 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
         };
 
         if entry.is_directory {
-            result.push_str(&format!("{}{}{}/\n", prefix, current_prefix, entry.name));
-
-            // Recursively process subdirectory
-            let next_prefix =
-                format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
-
-            if let Ok(subtree) = Box::pin(generate_directory_tree(
-                provider,
-                &entry.path,
-                &next_prefix,
-                max_depth,
-                current_depth + 1,
-            )).await {
+            // Skip directories that might cause loops (. and ..)
+            if entry.name == "." || entry.name == ".." {
+                continue;
+            }
+            
+            let next_prefix = format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
+            dir_entries.push((entry.clone(), current_prefix.to_string(), next_prefix));
+        } else {
+            file_entries.push((entry.clone(), current_prefix.to_string()));
+        }
+    }
+    
+    // Add all file entries to result first
+    for (entry, prefix_str) in file_entries {
+        result.push_str(&format!("{}{}{}\n", prefix, prefix_str, entry.name));
+    }
+    
+    // Add directory headers and process subdirectories in parallel
+    for (entry, prefix_str, _) in &dir_entries {
+        result.push_str(&format!("{}{}{}/\n", prefix, prefix_str, entry.name));
+    }
+    
+    // Process all subdirectories concurrently
+    if !dir_entries.is_empty() {
+        let dir_futures: Vec<_> = dir_entries.into_iter().map(|(entry, _, next_prefix)| {
+            let entry_path = entry.path.clone();
+            async move {
+                generate_directory_tree(
+                    provider,
+                    &entry_path,
+                    &next_prefix,
+                    max_depth,
+                    current_depth + 1,
+                ).await
+            }
+        }).collect();
+        
+        let subtree_results = futures::future::join_all(dir_futures).await;
+        for subtree_result in subtree_results {
+            if let Ok(subtree) = subtree_result {
                 result.push_str(&subtree);
             }
-        } else {
-            result.push_str(&format!("{}{}{}\n", prefix, current_prefix, entry.name));
         }
     }
 
@@ -497,7 +528,7 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
 /// Local file system provider implementation
 pub struct LocalFileSystemProvider;
 
-#[async_trait::async_trait]
+#[async_trait]
 impl FileSystemProvider for LocalFileSystemProvider {
     type Error = std::io::Error;
     
