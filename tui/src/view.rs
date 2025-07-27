@@ -350,7 +350,7 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightMagenta))
         .style(ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(31, 32, 44)))
         .title(ratatui::text::Span::styled(
-            "Expanded Messages (Ctrl+T to close, Tab to navigate, ↑/↓ to scroll)",
+            "Expanded Messages (Ctrl+T to close, Tab to previous message, ↑/↓ to scroll)",
             ratatui::style::Style::default()
                 .fg(ratatui::style::Color::LightMagenta)
                 .add_modifier(ratatui::style::Modifier::BOLD),
