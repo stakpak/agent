@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stakpak_shared::utils::{generate_directory_tree, LocalFileSystemProvider};
+use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -39,7 +39,7 @@ pub struct GitInfo {
 impl LocalContext {
     pub async fn format_display(&self) -> Result<String, Box<dyn std::error::Error>> {
         let mut result = String::new();
-        
+
         result.push_str("# System Details\n");
         result.push_str(&format!("Machine Name: {}\n", self.machine_name));
         result.push_str(&format!(

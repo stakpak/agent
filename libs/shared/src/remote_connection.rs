@@ -1,4 +1,6 @@
+use crate::utils::{DirectoryEntry, FileSystemProvider};
 use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use russh::client::{self, Handler};
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
@@ -14,8 +16,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::debug;
 use uuid;
-use crate::utils::{FileSystemProvider, DirectoryEntry};
-use async_trait::async_trait;
 
 #[derive(Debug)]
 struct ParsedConnection {
@@ -622,29 +622,34 @@ impl RemoteFileSystemProvider {
 #[async_trait]
 impl FileSystemProvider for RemoteFileSystemProvider {
     type Error = String;
-    
+
     async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
         // Reduce timeout for better responsiveness in tree operations
         let timeout_duration = std::time::Duration::from_secs(10);
-        
+
         let entries = tokio::time::timeout(
             timeout_duration,
-            self.connection.list_directory_with_types(path)
-        ).await
+            self.connection.list_directory_with_types(path),
+        )
+        .await
         .map_err(|_| format!("Timeout listing remote directory: {}", path))?
         .map_err(|e| format!("Failed to list remote directory: {}", e))?;
-        
+
         let mut result = Vec::new();
         for (entry_path, is_directory) in entries {
-            let name = entry_path.split('/').next_back().unwrap_or(&entry_path).to_string();
-            
+            let name = entry_path
+                .split('/')
+                .next_back()
+                .unwrap_or(&entry_path)
+                .to_string();
+
             result.push(DirectoryEntry {
                 name,
                 path: entry_path,
                 is_directory,
             });
         }
-        
+
         Ok(result)
     }
 }

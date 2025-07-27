@@ -4,14 +4,16 @@ use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
-use stakpak_shared::remote_connection::{PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider};
+use stakpak_shared::remote_connection::{
+    PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
+};
 
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
-use stakpak_shared::utils::{generate_directory_tree, LocalFileSystemProvider};
+use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
 use std::fs::{self};
 use std::path::Path;
 use std::sync::Arc;
@@ -962,7 +964,7 @@ SECURITY FEATURES:
             let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = LocalFileSystemProvider;
             let path_str = path_obj.to_string_lossy();
-            
+
             match generate_directory_tree(&provider, &path_str, "", depth, 0).await {
                 Ok(tree_content) => {
                     let result = format!(
@@ -1026,7 +1028,7 @@ SECURITY FEATURES:
         if conn.is_directory(remote_path).await {
             let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = RemoteFileSystemProvider::new(conn.clone());
-            
+
             match generate_directory_tree(&provider, remote_path, "", depth, 0).await {
                 Ok(tree_content) => {
                     let result = format!(
