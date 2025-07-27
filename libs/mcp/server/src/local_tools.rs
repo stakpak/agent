@@ -11,6 +11,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
+use stakpak_shared::utils::generate_directory_tree;
 use std::fs::{self};
 use std::path::Path;
 use std::sync::Arc;
@@ -71,6 +72,8 @@ pub struct ViewRequest {
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
     pub private_key_path: Option<String>,
+    #[schemars(description = "Display directory as a nested tree structure (default: false)")]
+    pub tree: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -500,6 +503,10 @@ REMOTE FILE ACCESS:
   * 'user@server.com:/home/user/documents' - Remote directory listing
   * '/local/path/file.txt' - Local file (default behavior)
 
+For directories:
+- Default behavior: Lists immediate directory contents
+- With tree=true: Displays nested directory structure as a tree (limited to 3 levels deep)
+
 SECRET HANDLING:
 - File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
 - These placeholders represent actual secret values that are safely stored for later use
@@ -514,6 +521,7 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
             view_range,
             password,
             private_key_path,
+            tree,
         }): Parameters<ViewRequest>,
     ) -> Result<CallToolResult, McpError> {
         const MAX_LINES: usize = 300;
@@ -533,7 +541,8 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
             }
         } else {
             // Handle local file/directory viewing
-            self.view_local_path(&path, view_range, MAX_LINES).await
+            self.view_local_path(&path, view_range, MAX_LINES, tree)
+                .await
         }
     }
 
@@ -938,6 +947,7 @@ SECURITY FEATURES:
         path: &str,
         view_range: Option<[i32; 2]>,
         max_lines: usize,
+        tree: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(path);
 
@@ -949,49 +959,18 @@ SECURITY FEATURES:
         }
 
         if path_obj.is_dir() {
-            // List directory contents
-            match fs::read_dir(path) {
-                Ok(entries) => {
-                    let mut result = format!("Directory listing for \"{}\":\n", path);
-                    let mut items: Vec<_> = entries.collect();
-                    items.sort_by(|a, b| match (a, b) {
-                        (Ok(a_entry), Ok(b_entry)) => {
-                            match (
-                                a_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-                                b_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-                            ) {
-                                (true, false) => std::cmp::Ordering::Less,
-                                (false, true) => std::cmp::Ordering::Greater,
-                                _ => a_entry.file_name().cmp(&b_entry.file_name()),
-                            }
-                        }
-                        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-                        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-                        (Err(_), Err(_)) => std::cmp::Ordering::Equal,
-                    });
-
-                    for (i, entry) in items.iter().enumerate() {
-                        let is_last = i == items.len() - 1;
-                        let prefix = if is_last { "└── " } else { "├── " };
-                        match entry {
-                            Ok(entry) => {
-                                let suffix = match entry.file_type() {
-                                    Ok(ft) if ft.is_dir() => "/",
-                                    Ok(_) => "",
-                                    Err(_) => "?",
-                                };
-                                result.push_str(&format!(
-                                    "{}{}{}\n",
-                                    prefix,
-                                    entry.file_name().to_string_lossy(),
-                                    suffix
-                                ));
-                            }
-                            Err(e) => {
-                                result.push_str(&format!("Error reading entry: {}\n", e));
-                            }
-                        }
-                    }
+            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            match generate_directory_tree(path_obj, "", depth, 0) {
+                Ok(tree_content) => {
+                    let result = format!(
+                        "Directory tree for \"{}\":\n{}\n{}",
+                        path,
+                        path_obj
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.to_string()),
+                        tree_content
+                    );
                     Ok(CallToolResult::success(vec![Content::text(result)]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![

@@ -4552,6 +4552,7 @@ dependencies = [
  "portable-pty",
  "ratatui",
  "regex",
+ "serde",
  "serde_json",
  "stakpak-shared",
  "tokio",
