@@ -728,17 +728,21 @@ pub fn render_result_block(
     let result_text = ratatui::text::Text::from(preprocessed_result);
 
     if is_collapsed {
-        let message = format!(
-            "Read {} of lines (ctrl+t to expand)",
-            result_text.lines.len()
-        );
+        let message = format!("Read {} lines (ctrl+t to expand)", result_text.lines.len());
         let colors = LinesColors {
             dot: Color::LightGreen,
             title: Color::White,
             command: Color::Rgb(180, 180, 180),
             message: Color::Rgb(180, 180, 180),
         };
-        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
+        render_styled_lines(
+            &command_args,
+            &title,
+            state,
+            Some(message),
+            Some(colors),
+            true,
+        );
     }
 
     // Use compact indentation like bash blocks
@@ -870,7 +874,7 @@ pub fn render_bash_block_rejected(
     state: &mut AppState,
     message: Option<String>,
 ) {
-    render_styled_lines(command_name, title, state, message, None);
+    render_styled_lines(command_name, title, state, message, None, false);
 }
 
 pub struct LinesColors {
@@ -886,6 +890,7 @@ pub fn render_styled_lines(
     state: &mut AppState,
     message: Option<String>,
     colors: Option<LinesColors>,
+    is_collapsed: bool,
 ) {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -895,7 +900,9 @@ pub fn render_styled_lines(
     });
 
     let mut lines = Vec::new();
-    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    if !is_collapsed {
+        lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    }
 
     // Handle multi-line command name if needed
     let title_with_args = format!("{} ({})", title, command_name);
@@ -1006,7 +1013,7 @@ pub fn render_styled_lines(
 
 fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_call_name = tool_call.function.name.clone();
-    let tool_calls = ["view", "search_memory", "local_code_search"];
+    let tool_calls = ["view", "search_memory", "search_docs", "local_code_search"];
     if tool_calls.contains(&tool_call_name.as_str()) {
         return true;
     }

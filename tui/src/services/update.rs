@@ -221,7 +221,7 @@ pub fn update(
                 // Show confirmation dialog as usual
                 state.dialog_command = Some(tool_call.clone());
                 state.is_dialog_open = true;
-                state.dialog_focused = true; // Default to dialog focused when dialog opens
+                state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
             }
         }
         InputEvent::Loading(is_loading) => {
@@ -728,6 +728,8 @@ fn handle_esc(
     state.is_streaming = false;
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
+    } else if state.show_collapsed_messages {
+        state.show_collapsed_messages = false;
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;
     } else if state.is_dialog_open {
@@ -850,6 +852,7 @@ fn handle_input_submitted(
         }
         state.input.clear();
         state.cursor_position = 0;
+        state.show_helper_dropdown = false;
         return;
     }
 
