@@ -80,6 +80,10 @@ pub async fn run_tui(
             let _ = shell_event_tx.send(event).await;
             continue;
         }
+                   if let InputEvent::EmergencyClearTerminal = event {
+                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    continue;
+                   }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
@@ -155,6 +159,10 @@ pub async fn run_tui(
                     //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
                     //     }
                     //    }
+                    if let InputEvent::EmergencyClearTerminal = event {
+                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    continue;
+                   }
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
                    }
@@ -189,5 +197,30 @@ pub async fn run_tui(
         crossterm::terminal::LeaveAlternateScreen,
         DisableBracketedPaste
     )?;
+    Ok(())
+}
+
+pub fn emergency_clear_and_redraw<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    state: &AppState,
+) -> io::Result<()> {
+    use crossterm::{
+        cursor::MoveTo,
+        execute,
+        terminal::{Clear, ClearType},
+    };
+
+    // Nuclear option - clear everything including scrollback
+    execute!(
+        std::io::stdout(),
+        Clear(ClearType::All),
+        Clear(ClearType::Purge),
+        MoveTo(0, 0)
+    )?;
+
+    // Force a complete redraw of the TUI
+    terminal.clear()?;
+    terminal.draw(|f| view::view(f, state))?;
+
     Ok(())
 }
