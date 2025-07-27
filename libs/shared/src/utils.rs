@@ -1,8 +1,8 @@
+use async_trait::async_trait;
 use rand::Rng;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
-use async_trait::async_trait;
 
 /// Read .gitignore patterns from the specified base directory
 pub fn read_gitignore_patterns(base_dir: &str) -> Vec<String> {
@@ -432,7 +432,7 @@ pub struct DirectoryEntry {
 #[async_trait]
 pub trait FileSystemProvider {
     type Error: std::fmt::Display;
-    
+
     /// List directory contents
     async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error>;
 }
@@ -456,18 +456,16 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
     let mut items = entries;
 
     // Sort items: directories first, then alphabetically
-    items.sort_by(|a, b| {
-        match (a.is_directory, b.is_directory) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
+    items.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
 
     // Separate file entries from directory entries for processing
     let mut file_entries = Vec::new();
     let mut dir_entries = Vec::new();
-    
+
     for (i, entry) in items.iter().enumerate() {
         let is_last_item = i == items.len() - 1;
         let current_prefix = if is_last_item {
@@ -481,39 +479,43 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
             if entry.name == "." || entry.name == ".." {
                 continue;
             }
-            
+
             let next_prefix = format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
             dir_entries.push((entry.clone(), current_prefix.to_string(), next_prefix));
         } else {
             file_entries.push((entry.clone(), current_prefix.to_string()));
         }
     }
-    
+
     // Add all file entries to result first
     for (entry, prefix_str) in file_entries {
         result.push_str(&format!("{}{}{}\n", prefix, prefix_str, entry.name));
     }
-    
+
     // Add directory headers and process subdirectories in parallel
     for (entry, prefix_str, _) in &dir_entries {
         result.push_str(&format!("{}{}{}/\n", prefix, prefix_str, entry.name));
     }
-    
+
     // Process all subdirectories concurrently
     if !dir_entries.is_empty() {
-        let dir_futures: Vec<_> = dir_entries.into_iter().map(|(entry, _, next_prefix)| {
-            let entry_path = entry.path.clone();
-            async move {
-                generate_directory_tree(
-                    provider,
-                    &entry_path,
-                    &next_prefix,
-                    max_depth,
-                    current_depth + 1,
-                ).await
-            }
-        }).collect();
-        
+        let dir_futures: Vec<_> = dir_entries
+            .into_iter()
+            .map(|(entry, _, next_prefix)| {
+                let entry_path = entry.path.clone();
+                async move {
+                    generate_directory_tree(
+                        provider,
+                        &entry_path,
+                        &next_prefix,
+                        max_depth,
+                        current_depth + 1,
+                    )
+                    .await
+                }
+            })
+            .collect();
+
         let subtree_results = futures::future::join_all(dir_futures).await;
         for subtree_result in subtree_results {
             if let Ok(subtree) = subtree_result {
@@ -531,24 +533,24 @@ pub struct LocalFileSystemProvider;
 #[async_trait]
 impl FileSystemProvider for LocalFileSystemProvider {
     type Error = std::io::Error;
-    
+
     async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
         let entries = fs::read_dir(path)?;
         let mut result = Vec::new();
-        
+
         for entry in entries {
             let entry = entry?;
             let file_name = entry.file_name().to_string_lossy().to_string();
             let file_path = entry.path().to_string_lossy().to_string();
             let is_directory = entry.file_type()?.is_dir();
-            
+
             result.push(DirectoryEntry {
                 name: file_name,
                 path: file_path,
                 is_directory,
             });
         }
-        
+
         Ok(result)
     }
 }

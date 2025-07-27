@@ -154,11 +154,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                         // Add local context to the user input
                         let (user_input, local_context) =
-                            add_local_context(&messages, &user_input, &config.local_context).await
-                            .map_err(|e| format!("Failed to format local context: {}", e))?;
+                            add_local_context(&messages, &user_input, &config.local_context)
+                                .await
+                                .map_err(|e| format!("Failed to format local context: {}", e))?;
                         if let Some(local_context) = local_context {
-                            let context_display = local_context.format_display().await
-                                .map_err(|e| format!("Failed to format local context display: {}", e))?;
+                            let context_display =
+                                local_context.format_display().await.map_err(|e| {
+                                    format!("Failed to format local context display: {}", e)
+                                })?;
                             send_input_event(
                                 &input_tx,
                                 InputEvent::InputSubmittedWithColor(
