@@ -9,18 +9,6 @@ use ratatui::{
 };
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
-    if !state.input.is_empty()
-        && !state.show_shell_mode
-        && !state.show_sessions_dialog
-        && !state.is_dialog_open
-    {
-        let hint = Paragraph::new(Span::styled(
-            "Press Enter to send",
-            Style::default().fg(Color::DarkGray),
-        ));
-        f.render_widget(hint, area);
-        return;
-    }
     if state.is_pasting {
         let hint = Paragraph::new(Span::styled(
             "Pasting text...",
@@ -73,7 +61,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let spacing = total_width.saturating_sub(shortcuts_len + retry_len);
 
             let spans = vec![
-                Span::styled(shortcuts_text, Style::default().fg(Color::DarkGray)),
+                Span::styled(shortcuts_text, Style::default().fg(Color::Cyan)),
                 Span::styled(" ".repeat(spacing), Style::default()),
                 Span::styled(retry_text, Style::default().fg(Color::Yellow)),
             ];
@@ -83,9 +71,36 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             let hint = Paragraph::new(Span::styled(
                 "? for shortcuts",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Cyan),
             ));
             f.render_widget(hint, area);
         }
+    } else if !state.show_sessions_dialog && !state.is_dialog_open {
+        // Show auto-approve status
+        let auto_approve_status = if state.auto_approve_manager.is_enabled() {
+            "🔓 Auto-approve ON"
+        } else {
+            "🔒 Auto-approve OFF"
+        };
+        let status_color = if state.auto_approve_manager.is_enabled() {
+            Color::LightYellow
+        } else {
+            Color::DarkGray
+        };
+
+        let hint = Paragraph::new(Span::styled(
+            format!("{} | Ctrl+o: toggle auto-approve", auto_approve_status),
+            Style::default().fg(status_color),
+        ));
+        f.render_widget(hint, area);
+    } else if state.is_dialog_open {
+        // Show focus information when dialog is open
+        let focus_text = "Ctrl+o: toggle auto-approve";
+        let hint = Paragraph::new(Span::styled(
+            focus_text,
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(ratatui::layout::Alignment::Right);
+        f.render_widget(hint, area);
     }
 }
