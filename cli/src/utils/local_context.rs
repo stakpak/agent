@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use stakpak_shared::utils::generate_directory_tree;
 use std::collections::HashMap;
 use std::env;
 use std::fmt;
@@ -82,57 +83,23 @@ impl fmt::Display for LocalContext {
             "# Current Working Directory ({})",
             self.working_directory
         )?;
-        if self.file_structure.is_empty() {
-            writeln!(f, "(No files or directories found)")?;
-        } else {
-            // Sort entries for consistent output
-            let mut entries: Vec<_> = self.file_structure.iter().collect();
-            entries.sort_by_key(|(name, info)| (info.is_directory, name.to_lowercase()));
 
-            // Display as tree structure like ls output
-            for (i, (name, info)) in entries.iter().enumerate() {
-                let is_last = i == entries.len() - 1;
-                let prefix = if is_last { "└── " } else { "├── " };
-
-                write!(f, "{}", prefix)?;
-
-                if info.is_directory {
-                    write!(f, "{}/", name)?;
-                    if let Some(children) = &info.children {
-                        if !children.is_empty() {
-                            write!(f, " ({} items)", children.len())?;
-                        } else {
-                            write!(f, " (empty)")?;
-                        }
-                    }
+        // Use the shared directory tree function for better structure visualization
+        let working_dir_path = Path::new(&self.working_directory);
+        match generate_directory_tree(working_dir_path, "", 1, 0) {
+            Ok(tree_content) => {
+                if tree_content.trim().is_empty() {
+                    writeln!(f, "(No files or directories found)")?;
                 } else {
-                    write!(f, "{}", name)?;
-                    if let Some(size) = info.size {
-                        write!(f, " ({})", format_file_size(size))?;
-                    }
+                    write!(f, "{}", tree_content)?;
                 }
-                writeln!(f)?;
+            }
+            Err(_) => {
+                writeln!(f, "(No files or directories found)")?;
             }
         }
 
         Ok(())
-    }
-}
-
-fn format_file_size(size: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    let mut size_f = size as f64;
-    let mut unit_index = 0;
-
-    while size_f >= 1024.0 && unit_index < UNITS.len() - 1 {
-        size_f /= 1024.0;
-        unit_index += 1;
-    }
-
-    if unit_index == 0 {
-        format!("{} {}", size, UNITS[unit_index])
-    } else {
-        format!("{:.1} {}", size_f, UNITS[unit_index])
     }
 }
 
@@ -401,7 +368,7 @@ fn get_file_structure(
     Ok(file_structure)
 }
 
-fn get_git_info(dir_path: &str) -> GitInfo {
+pub fn get_git_info(dir_path: &str) -> GitInfo {
     let path = Path::new(dir_path);
 
     // Check if .git directory exists

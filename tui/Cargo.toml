@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 stakpak-shared = { path = "../libs/shared" }
 regex = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 ratatui = "0.29"
 crossterm = "0.29"
