@@ -56,6 +56,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('>') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorNextWord)
                 }
+                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::EmergencyClearTerminal)
+                }
                 KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
                 KeyCode::Backspace => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {

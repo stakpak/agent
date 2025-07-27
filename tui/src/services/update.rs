@@ -228,7 +228,7 @@ pub fn update(
             state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -448,7 +448,7 @@ pub fn update(
             state.cursor_position = pos;
         }
         InputEvent::RetryLastToolCall => {
-            handle_retry_tool_call(state);
+            handle_retry_tool_call(state, input_tx, cancel_tx);
         }
         InputEvent::ToggleCollapsedMessages => {
             state.show_collapsed_messages = !state.show_collapsed_messages;
@@ -505,6 +505,7 @@ pub fn update(
                 let _ = input_tx.try_send(InputEvent::Quit);
             }
         }
+
         _ => {}
     }
     adjust_scroll(state, message_area_height, message_area_width);
@@ -739,11 +740,16 @@ fn handle_esc(
     state: &mut AppState,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
+    let _ = input_tx
+        .try_send(InputEvent::EmergencyClearTerminal);
+
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
     }
+
     state.is_streaming = false;
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
@@ -883,7 +889,7 @@ fn handle_input_submitted(
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
         if let Some(dialog_command) = &state.dialog_command {
-            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));  
         }
         state.is_dialog_open = false;
         state.dialog_selected = 0;
@@ -1296,7 +1302,17 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
     }
 }
 
-fn handle_retry_tool_call(state: &mut AppState) {
+fn handle_retry_tool_call(
+    state: &mut AppState,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+) {
+    let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
+
+    if let Some(cancel_tx) = cancel_tx {
+        let _ = cancel_tx.send(());
+    }
+
     if let Some(tool_call) = &state.latest_tool_call {
         // Extract the command from the tool call
         let command = extract_command_from_tool_call(tool_call);
