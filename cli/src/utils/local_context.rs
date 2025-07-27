@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stakpak_shared::utils::generate_directory_tree;
+use stakpak_shared::utils::{generate_directory_tree, LocalFileSystemProvider};
 use std::collections::HashMap;
 use std::env;
-use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -37,69 +36,67 @@ pub struct GitInfo {
     pub remote_url: Option<String>,
 }
 
-impl fmt::Display for LocalContext {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "# System Details")?;
-        writeln!(f, "Machine Name: {}", self.machine_name)?;
-        writeln!(
-            f,
-            "Current Date/Time: {}",
+impl LocalContext {
+    pub async fn format_display(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut result = String::new();
+        
+        result.push_str("# System Details\n");
+        result.push_str(&format!("Machine Name: {}\n", self.machine_name));
+        result.push_str(&format!(
+            "Current Date/Time: {}\n",
             self.current_datetime_utc.format("%Y-%m-%d %H:%M:%S UTC")
-        )?;
-        writeln!(f, "Operating System: {}", self.operating_system)?;
-        writeln!(f, "Shell Type: {}", self.shell_type)?;
-        writeln!(
-            f,
-            "Running in Container Environment: {}",
+        ));
+        result.push_str(&format!("Operating System: {}\n", self.operating_system));
+        result.push_str(&format!("Shell Type: {}\n", self.shell_type));
+        result.push_str(&format!(
+            "Running in Container Environment: {}\n",
             if self.is_container { "yes" } else { "no" }
-        )?;
+        ));
 
         // Display git information
         if let Some(git_info) = &self.git_info {
             if git_info.is_git_repo {
-                writeln!(f, "Git Repository: yes")?;
+                result.push_str("Git Repository: yes\n");
                 if let Some(branch) = &git_info.current_branch {
-                    writeln!(f, "Current Branch: {}", branch)?;
+                    result.push_str(&format!("Current Branch: {}\n", branch));
                 }
                 if let Some(has_changes) = git_info.has_uncommitted_changes {
-                    writeln!(
-                        f,
-                        "Uncommitted Changes: {}",
+                    result.push_str(&format!(
+                        "Uncommitted Changes: {}\n",
                         if has_changes { "yes" } else { "no" }
-                    )?;
+                    ));
                 } else {
-                    writeln!(f, "Uncommitted Changes: no")?;
+                    result.push_str("Uncommitted Changes: no\n");
                 }
                 if let Some(remote) = &git_info.remote_url {
-                    writeln!(f, "Remote URL: {}", remote)?;
+                    result.push_str(&format!("Remote URL: {}\n", remote));
                 }
             } else {
-                writeln!(f, "Git Repository: no")?;
+                result.push_str("Git Repository: no\n");
             }
         }
 
-        writeln!(
-            f,
-            "# Current Working Directory ({})",
+        result.push_str(&format!(
+            "# Current Working Directory ({})\n",
             self.working_directory
-        )?;
+        ));
 
         // Use the shared directory tree function for better structure visualization
-        let working_dir_path = Path::new(&self.working_directory);
-        match generate_directory_tree(working_dir_path, "", 1, 0) {
+        let provider = LocalFileSystemProvider;
+        match generate_directory_tree(&provider, &self.working_directory, "", 1, 0).await {
             Ok(tree_content) => {
                 if tree_content.trim().is_empty() {
-                    writeln!(f, "(No files or directories found)")?;
+                    result.push_str("(No files or directories found)\n");
                 } else {
-                    write!(f, "{}", tree_content)?;
+                    result.push_str(&tree_content);
                 }
             }
             Err(_) => {
-                writeln!(f, "(No files or directories found)")?;
+                result.push_str("(No files or directories found)\n");
             }
         }
 
-        Ok(())
+        Ok(result)
     }
 }
 

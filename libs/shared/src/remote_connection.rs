@@ -14,6 +14,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::debug;
 use uuid;
+use crate::utils::{FileSystemProvider, DirectoryEntry};
 
 #[derive(Debug)]
 struct ParsedConnection {
@@ -578,6 +579,41 @@ impl RemoteConnection {
 
     pub fn connection_string(&self) -> &str {
         &self.connection_info.connection_string
+    }
+}
+
+/// Remote file system provider implementation for tree generation
+pub struct RemoteFileSystemProvider {
+    connection: Arc<RemoteConnection>,
+}
+
+impl RemoteFileSystemProvider {
+    pub fn new(connection: Arc<RemoteConnection>) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait::async_trait]
+impl FileSystemProvider for RemoteFileSystemProvider {
+    type Error = String;
+    
+    async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
+        let entries = self.connection.list_directory(path).await
+            .map_err(|e| format!("Failed to list remote directory: {}", e))?;
+        
+        let mut result = Vec::new();
+        for entry_path in entries {
+            let name = entry_path.split('/').next_back().unwrap_or(&entry_path).to_string();
+            let is_directory = self.connection.is_directory(&entry_path).await;
+            
+            result.push(DirectoryEntry {
+                name,
+                path: entry_path,
+                is_directory,
+            });
+        }
+        
+        Ok(result)
     }
 }
 

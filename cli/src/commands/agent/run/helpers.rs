@@ -42,24 +42,25 @@ pub fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
     }
 }
 
-pub fn add_local_context<'a>(
+pub async fn add_local_context<'a>(
     messages: &'a [ChatMessage],
     user_input: &'a str,
     local_context: &'a Option<LocalContext>,
-) -> (String, Option<&'a LocalContext>) {
+) -> Result<(String, Option<&'a LocalContext>), Box<dyn std::error::Error>> {
     if let Some(local_context) = local_context {
         // only add local context if this is the first message
         if messages.is_empty() {
+            let context_display = local_context.format_display().await?;
             let formatted_input = format!(
                 "{}\n\n<local_context>\n{}\n</local_context>",
-                user_input, local_context
+                user_input, context_display
             );
-            (formatted_input, Some(local_context))
+            Ok((formatted_input, Some(local_context)))
         } else {
-            (user_input.to_string(), None)
+            Ok((user_input.to_string(), None))
         }
     } else {
-        (user_input.to_string(), None)
+        Ok((user_input.to_string(), None))
     }
 }
 
