@@ -166,6 +166,7 @@ pub enum InputEvent {
     RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
+    EmergencyClearTerminal,
 }
 
 #[derive(Debug)]
