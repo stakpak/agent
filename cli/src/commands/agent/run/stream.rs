@@ -132,7 +132,7 @@ pub async fn process_responses_stream(
                 }
             }
             Err(e) => {
-                //TODO: Handle Stream Error
+                send_input_event(input_tx, InputEvent::Error(format!("{:?}", e))).await?;
             }
         }
     }

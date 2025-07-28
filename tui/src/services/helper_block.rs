@@ -388,3 +388,15 @@ pub fn push_clear_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
     });
 }
+
+const EXCEEDED_API_LIMIT_ERROR: &str = "Exceeded API limit";
+const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str =
+    "Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.";
+
+pub fn handle_errors(error: String) -> String {
+    if format!("{:?}", error).contains(EXCEEDED_API_LIMIT_ERROR) {
+        EXCEEDED_API_LIMIT_ERROR_MESSAGE.to_string()
+    } else {
+        format!("{:?}", error)
+    }
+}

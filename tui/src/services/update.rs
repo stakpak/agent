@@ -4,8 +4,8 @@ use crate::services::bash_block::{
     preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_clear_message, push_error_message, push_help_message, push_memorize_message,
-    push_status_message, render_system_message,
+    handle_errors, push_clear_message, push_error_message, push_help_message,
+    push_memorize_message, push_status_message, render_system_message,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_message_lines,
@@ -82,6 +82,15 @@ pub fn update(
         }
         InputEvent::StreamToolResult(progress) => {
             handle_stream_tool_result(state, progress, terminal_size)
+        }
+        InputEvent::Error(err) => {
+            let error_message = handle_errors(err);
+            // TODO: THIS IS ONLY FOR TESTING, REMOVE THIS MESSAGE BECAUSE ITS A BUG
+            if error_message.contains("https://stakpak.dev/settings/billing") {
+                handle_retry_mechanism(state, &error_message, output_tx, input_tx);
+            } else {
+                push_error_message(state, &error_message);
+            }
         }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
@@ -1041,5 +1050,173 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
             .cloned()
             .unwrap_or_default(),
         status: ToolCallResultStatus::Success,
+    }
+}
+
+fn handle_retry_mechanism(
+    state: &mut AppState,
+    _error_message: &str,
+    output_tx: &Sender<OutputEvent>,
+    _input_tx: &Sender<InputEvent>,
+) {
+    // First time encountering this error
+    if state.retry_attempts == 0 {
+        // Store the last user message for retry
+        if let Some(last_message) = state.messages.iter().rev().find(|m| {
+            if let MessageContent::Plain(text, _) = &m.content {
+                text.starts_with("> ")
+            } else {
+                false
+            }
+        }) {
+            if let MessageContent::Plain(text, _) = &last_message.content {
+                state.last_user_message_for_retry = Some(text[2..].to_string());
+            }
+        }
+
+        // Remove the last assistant message if it exists (look for non-user messages)
+        let last_assistant_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| !matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_assistant_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        // Remove the last user message
+        let last_user_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_user_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        state.retry_attempts = 1;
+
+        // Push retry message
+        push_error_message(
+            state,
+            "There was an issue sending your request, retrying attempt...1",
+        );
+
+        // Re-add the user message that was deleted
+        if let Some(user_message) = &state.last_user_message_for_retry {
+            state
+                .messages
+                .push(Message::user(format!("> {}", user_message), None));
+        }
+
+        // Set loading state and send the retry request
+        if let Some(user_message) = &state.last_user_message_for_retry {
+            state.loading = true;
+            state.spinner_frame = 0;
+            let _ = output_tx.try_send(OutputEvent::UserMessage(user_message.clone(), None));
+        }
+    } else if state.retry_attempts < state.max_retry_attempts {
+        // Increment retry count
+        state.retry_attempts += 1;
+
+        // Remove the last assistant message if it exists (look for non-user messages)
+        let last_assistant_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| !matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_assistant_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        // Remove the last user message
+        let last_user_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_user_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        // Push sleep message
+        push_error_message(
+            state,
+            &format!("Retrying attempt {}...", state.retry_attempts),
+        );
+
+        // Re-add the user message that was deleted
+        if let Some(user_message) = &state.last_user_message_for_retry {
+            state
+                .messages
+                .push(Message::user(format!("> {}", user_message), None));
+        }
+
+        // Set loading state
+        state.loading = true;
+        state.spinner_frame = 0;
+
+        // Schedule retry after 1 second
+        let output_tx_clone = output_tx.clone();
+        let user_message = state.last_user_message_for_retry.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            if let Some(msg) = user_message {
+                let _ = output_tx_clone.try_send(OutputEvent::UserMessage(msg, None));
+            }
+        });
+    } else {
+        // Remove the last assistant message if it exists
+        let last_assistant_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| !matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_assistant_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        // Remove the last user message
+        let last_user_id = state
+            .messages
+            .iter()
+            .rev()
+            .find(
+                |m| matches!(&m.content, MessageContent::Plain(text, _) if text.starts_with("> ")),
+            )
+            .map(|m| m.id);
+
+        if let Some(id) = last_user_id {
+            state.messages.retain(|m| m.id != id);
+        }
+
+        // Max retries reached - reset retry state
+        state.retry_attempts = 0;
+        state.last_user_message_for_retry = None;
+
+        push_error_message(
+            state,
+            "Maximum retry attempts reached. Please try again later.",
+        );
     }
 }

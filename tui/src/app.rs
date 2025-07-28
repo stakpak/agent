@@ -95,6 +95,11 @@ pub struct AppState {
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
     pub latest_tool_call: Option<ToolCall>,
+    // Retry mechanism state
+    pub retry_attempts: usize,
+    pub max_retry_attempts: usize,
+    pub last_user_message_for_retry: Option<String>,
+    pub is_retrying: bool,
 }
 
 #[derive(Debug)]
@@ -232,6 +237,10 @@ impl AppState {
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
             latest_tool_call: None,
+            retry_attempts: 0,
+            max_retry_attempts: 3,
+            last_user_message_for_retry: None,
+            is_retrying: false,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
