@@ -8,11 +8,14 @@ use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
 
+use html2md;
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
 use std::fs::{self};
 use std::path::Path;
@@ -20,6 +23,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::error;
+use url;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -128,6 +132,12 @@ pub struct GeneratePasswordRequest {
     pub length: Option<usize>,
     #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
     pub no_symbols: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ViewWebPageRequest {
+    #[schemars(description = "The HTTPS URL of the web page to fetch and convert to markdown")]
+    pub url: String,
 }
 
 #[tool_router(router = tool_router_local, vis = "pub")]
@@ -687,6 +697,95 @@ SECURITY FEATURES:
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
+        )]))
+    }
+
+    #[tool(
+        description = "Fetch and view the text content of a web page by converting its HTML to markdown format.
+
+SECURITY FEATURES:
+- Only allows HTTPS URLs for secure connections
+- Follows redirects safely with limits
+
+The tool fetches the HTML content from the specified URL and converts it to clean, readable markdown. This is useful for reading web articles, documentation, or any web content in a text-friendly format.
+
+The response will be truncated if it exceeds 300 lines, with the full content saved to a local file."
+    )]
+    pub async fn view_web_page(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(ViewWebPageRequest { url }): Parameters<ViewWebPageRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let parsed_url = match url::Url::parse(&url) {
+            Ok(u) => u,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_URL"),
+                    Content::text(format!("Invalid URL format: {}", e)),
+                ]));
+            }
+        };
+
+        if parsed_url.scheme() != "https" {
+            return Ok(CallToolResult::error(vec![
+                Content::text("INSECURE_URL"),
+                Content::text("Only HTTPS URLs are allowed for security reasons"),
+            ]));
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("Mozilla/5.0 (compatible; StakPak-MCP-Bot/1.0)"),
+        );
+
+        let client =
+            create_tls_client(TlsClientConfig::default().with_headers(headers)).map_err(|e| {
+                error!("Failed to create HTTP client: {}", e);
+                McpError::internal_error(
+                    "Failed to create HTTP client",
+                    Some(json!({ "error": e.to_string() })),
+                )
+            })?;
+
+        let response = match client.get(&url).send().await {
+            Ok(response) => response,
+            Err(e) => {
+                error!("Failed to fetch web page: {}", e);
+                return Ok(CallToolResult::error(vec![
+                    Content::text("FAILED_TO_FETCH_WEB_PAGE"),
+                    Content::text(format!("Failed to fetch web page: {}", e)),
+                ]));
+            }
+        };
+
+        if !response.status().is_success() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("HTTP_ERROR"),
+                Content::text(format!(
+                    "HTTP request failed with status: {}",
+                    response.status()
+                )),
+            ]));
+        }
+
+        let html_content = response.text().await.map_err(|e| {
+            error!("Failed to read response body: {}", e);
+            McpError::internal_error(
+                "Failed to read response body",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
+
+        // is this enough? or do we need to sanitize the html before turning it to markdown
+        let markdown_content = html2md::rewrite_html(&html_content, false);
+
+        let result = handle_large_output(&markdown_content, "webpage")?;
+
+        let formatted_output = format!("# Web Page Content: {}\n\n{}", url, result);
+
+        Ok(CallToolResult::success(vec![Content::text(
+            &formatted_output,
         )]))
     }
 

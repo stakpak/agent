@@ -4,6 +4,7 @@ use reqwest::{Client as ReqwestClient, Error as ReqwestError, Response, header};
 use rmcp::model::Content;
 use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
+use stakpak_shared::tls_client::TlsClientConfig;
 use stakpak_shared::tls_client::create_tls_client;
 use url::Url;
 pub mod models;
@@ -85,7 +86,7 @@ impl Client {
                 .expect("Invalid user agent format"),
         );
 
-        let client = create_tls_client(headers)?;
+        let client = create_tls_client(TlsClientConfig::default().with_headers(headers))?;
 
         Ok(Self {
             client,
