@@ -1183,7 +1183,9 @@ SECURITY FEATURES:
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
-                Content::text("The old string and new string are identical - no replacement needed"),
+                Content::text(
+                    "The old string and new string are identical - no replacement needed",
+                ),
             ]));
         }
 
@@ -1261,7 +1263,9 @@ SECURITY FEATURES:
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
-                Content::text("The old string and new string are identical - no replacement needed"),
+                Content::text(
+                    "The old string and new string are identical - no replacement needed",
+                ),
             ]));
         }
 
