@@ -1278,7 +1278,6 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
         let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
 
-        // Check if old and new strings are identical
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
@@ -1295,41 +1294,30 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
                 Some(json!({ "error": e.to_string() })),
             )
         })?;
-        let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
 
-        let matches: Vec<_> = lines
-            .iter()
-            .enumerate()
-            .filter_map(|(i, line)| {
-                if line.contains(&actual_old_str) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Check if no occurrences were found
-        if matches.is_empty() {
+        if !content.contains(&actual_old_str) {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
             ]));
         }
 
-        let mut replaced_count = 0;
-        for &i in &matches {
-            let line = lines[i].clone();
-            let new_line = line.replace(&actual_old_str, &actual_new_str);
-            lines[i] = new_line;
-            replaced_count += 1;
-            if replace_all.unwrap_or(false) {
-                continue;
-            }
-            break;
-        }
+        let new_content = if replace_all.unwrap_or(false) {
+            content.replace(&actual_old_str, &actual_new_str)
+        } else {
+            content.replacen(&actual_old_str, &actual_new_str, 1)
+        };
 
-        let new_content = lines.join("\n");
+        let replaced_count = if replace_all.unwrap_or(false) {
+            content.matches(&actual_old_str).count()
+        } else {
+            if content.contains(&actual_old_str) {
+                1
+            } else {
+                0
+            }
+        };
+
         conn.write_file(remote_path, new_content.as_bytes())
             .await
             .map_err(|e| {
@@ -1358,7 +1346,6 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
         let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
 
-        // Check if old and new strings are identical
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
@@ -1368,50 +1355,38 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let mut lines: Vec<String> = fs::read_to_string(path)
-            .map(|content| content.lines().map(|line| line.to_string()).collect())
-            .map_err(|e| {
-                error!("Failed to read local file for str_replace: {}", e);
-                McpError::internal_error(
-                    "Failed to read local file",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            error!("Failed to read local file for str_replace: {}", e);
+            McpError::internal_error(
+                "Failed to read local file",
+                Some(json!({ "error": e.to_string() })),
+            )
+        })?;
 
-        let matches: Vec<_> = lines
-            .iter()
-            .enumerate()
-            .filter_map(|(i, line)| {
-                if line.contains(&actual_old_str) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Check if no occurrences were found
-        if matches.is_empty() {
+        if !content.contains(&actual_old_str) {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
             ]));
         }
 
-        let mut replaced_count = 0;
-        for &i in &matches {
-            let line = lines[i].clone();
-            let new_line = line.replace(&actual_old_str, &actual_new_str);
-            lines[i] = new_line;
-            replaced_count += 1;
-            if replace_all.unwrap_or(false) {
-                continue;
-            }
-            break;
-        }
+        let new_content = if replace_all.unwrap_or(false) {
+            content.replace(&actual_old_str, &actual_new_str)
+        } else {
+            content.replacen(&actual_old_str, &actual_new_str, 1)
+        };
 
-        let new_content = lines.join("\n");
-        fs::write(path, new_content).map_err(|e| {
+        let replaced_count = if replace_all.unwrap_or(false) {
+            content.matches(&actual_old_str).count()
+        } else {
+            if content.contains(&actual_old_str) {
+                1
+            } else {
+                0
+            }
+        };
+
+        fs::write(path, &new_content).map_err(|e| {
             error!("Failed to write local file for str_replace: {}", e);
             McpError::internal_error(
                 "Failed to write local file",
