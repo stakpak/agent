@@ -178,6 +178,7 @@ pub enum OutputEvent {
     UserMessage(String, Option<Vec<ToolCallResult>>),
     AcceptTool(ToolCall),
     RejectTool(ToolCall),
+    RetryLastMessage,
     ListSessions,
     SwitchToSession(String),
     Memorize,

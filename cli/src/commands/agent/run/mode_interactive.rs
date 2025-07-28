@@ -108,8 +108,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     });
 
     // Spawn client task
-    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> =
-        tokio::spawn(async move {
+    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> = tokio::spawn(
+        async move {
             let client = Client::new(&ClientConfig {
                 api_key: ctx.api_key.clone(),
                 api_endpoint: ctx.api_endpoint.clone(),
@@ -248,6 +248,44 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                         continue;
                     }
+                    OutputEvent::RetryLastMessage => {
+                        let mut user_message_index = None;
+                        let mut assistant_message_index = None;
+
+                        // Search backwards through messages to find the user message and assistant message
+                        for (i, message) in messages.iter().enumerate().rev() {
+                            if let Some(content) = &message.content {
+                                if let stakpak_shared::models::integrations::openai::MessageContent::String(text) = content {
+                                    if text.starts_with("> ") {
+                                        // Found user message, now look for assistant message after it
+                                        user_message_index = Some(i);
+                                        // Look for assistant message after this user message
+                                        for j in (i + 1)..messages.len() {
+                                            if messages[j].role == stakpak_shared::models::integrations::openai::Role::Assistant {
+                                                assistant_message_index = Some(j);
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Remove the messages if found
+                        if let (Some(user_idx), Some(assistant_idx)) =
+                            (user_message_index, assistant_message_index)
+                        {
+                            // Remove in reverse order to maintain indices
+                            if assistant_idx < messages.len() {
+                                messages.remove(assistant_idx);
+                            }
+                            if user_idx < messages.len() {
+                                messages.remove(user_idx);
+                            }
+                        }
+                        continue;
+                    }
                     OutputEvent::ListSessions => {
                         match list_sessions(&client).await {
                             Ok(sessions) => {
@@ -349,7 +387,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
 
             Ok(messages)
-        });
+        },
+    );
 
     // Wait for all tasks to finish
     let (client_res, _, _, _) =
