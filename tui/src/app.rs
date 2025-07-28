@@ -1,3 +1,4 @@
+use crate::services::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
@@ -24,10 +25,16 @@ const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
 // --- NEW: Async autocomplete result struct ---
 pub struct AutoCompleteResult {
-    pub filtered_helpers: Vec<&'static str>,
+    pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>,
     pub cursor_position: usize,
     pub input: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct HelperCommand {
+    pub command: &'static str,
+    pub description: &'static str,
 }
 
 #[derive(Debug)]
@@ -52,10 +59,10 @@ pub struct AppState {
     pub scroll: usize,
     pub scroll_to_bottom: bool,
     pub stay_at_bottom: bool,
-    pub helpers: Vec<&'static str>,
+    pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
-    pub filtered_helpers: Vec<&'static str>,
+    pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>, // NEW: for file autocomplete
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
@@ -94,12 +101,17 @@ pub struct AppState {
     pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
+    pub auto_approve_manager: AutoApproveManager,
+    pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
     pub latest_tool_call: Option<ToolCall>,
     // Retry mechanism state
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
+    pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
+    pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
+    pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 }
 
 #[derive(Debug)]
@@ -153,8 +165,12 @@ pub enum InputEvent {
     InputCursorEnd,
     InputCursorPrevWord,
     InputCursorNextWord,
-    RetryLastToolCall, // Ctrl+R to retry last tool call in shell mode
-    AttemptQuit,       // First Ctrl+C press for quit sequence
+    ToggleAutoApprove,
+    AutoApproveCurrentTool,
+    ToggleDialogFocus,       // NEW: toggle between messages view and dialog focus
+    RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
+    AttemptQuit,             // First Ctrl+C press for quit sequence
+    ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
 }
 
 #[derive(Debug)]
@@ -169,12 +185,45 @@ pub enum OutputEvent {
 }
 
 impl AppState {
-    pub fn new(
-        helpers: Vec<&'static str>,
-        latest_version: Option<String>,
-        redact_secrets: bool,
-        privacy_mode: bool,
-    ) -> Self {
+    fn get_helper_commands() -> Vec<HelperCommand> {
+        vec![
+            HelperCommand {
+                command: "/help",
+                description: "Show help information and available commands",
+            },
+            HelperCommand {
+                command: "/clear",
+                description: "Clear the screen and show welcome message",
+            },
+            HelperCommand {
+                command: "/status",
+                description: "Show account status and current working directory",
+            },
+            HelperCommand {
+                command: "/sessions",
+                description: "List available sessions to switch to",
+            },
+            HelperCommand {
+                command: "/memorize",
+                description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/list_approved_tools",
+                description: "List all tools that are auto-approved",
+            },
+            HelperCommand {
+                command: "/toggle_auto_approve",
+                description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
+            },
+            HelperCommand {
+                command: "/quit",
+                description: "Quit the application",
+            },
+        ]
+    }
+
+    pub fn new(latest_version: Option<String>, redact_secrets: bool, privacy_mode: bool) -> Self {
+        let helpers = Self::get_helper_commands();
         let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
         let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
         let helpers_clone = helpers.clone();
@@ -236,11 +285,16 @@ impl AppState {
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            auto_approve_manager: AutoApproveManager::new(),
+            dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
             retry_attempts: 0,
             max_retry_attempts: 3,
             last_user_message_for_retry: None,
             is_retrying: false,
+            show_collapsed_messages: false,
+            collapsed_messages_scroll: 0,
+            collapsed_messages_selected: 0,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
@@ -315,10 +369,21 @@ impl AppState {
                 } else {
                     None
                 };
+
+                // Update filtered_helpers from async worker
+                self.filtered_helpers = result.filtered_helpers;
+
+                // Reset selection index if it's out of bounds
+                if !self.filtered_helpers.is_empty()
+                    && self.helper_selected >= self.filtered_helpers.len()
+                {
+                    self.helper_selected = 0;
+                }
+
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                self.show_helper_dropdown = (self.input.trim() == "/")
+                self.show_helper_dropdown = (self.input.trim().starts_with('/'))
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
                     || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
