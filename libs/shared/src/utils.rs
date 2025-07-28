@@ -517,10 +517,8 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
             .collect();
 
         let subtree_results = futures::future::join_all(dir_futures).await;
-        for subtree_result in subtree_results {
-            if let Ok(subtree) = subtree_result {
-                result.push_str(&subtree);
-            }
+        for subtree in subtree_results.into_iter().flatten() {
+            result.push_str(&subtree);
         }
     }
 
