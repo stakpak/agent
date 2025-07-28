@@ -132,7 +132,9 @@ pub async fn process_responses_stream(
                 }
             }
             Err(e) => {
-                send_input_event(input_tx, InputEvent::Error(format!("{:?}", e))).await?;
+                // return error
+                return Err(format!("{:?}", e));
+                // send_input_event(input_tx, InputEvent::Error(format!("{:?}", e))).await?;
             }
         }
     }

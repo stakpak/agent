@@ -123,12 +123,8 @@ pub fn update(
         }
         InputEvent::Error(err) => {
             let error_message = handle_errors(err);
-            // TODO: THIS IS ONLY FOR TESTING, REMOVE THIS MESSAGE BECAUSE ITS A BUG
-            if error_message.contains("https://stakpak.dev/settings/billing") {
-                handle_retry_mechanism(state, output_tx);
-            } else {
-                push_error_message(state, &error_message);
-            }
+
+            push_error_message(state, &error_message);
         }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
@@ -1349,7 +1345,6 @@ fn handle_retry_mechanism(state: &mut AppState, output_tx: &Sender<OutputEvent>)
         if let Some(user_message) = &state.last_user_message_for_retry {
             state.loading = true;
             state.spinner_frame = 0;
-            let _ = output_tx.try_send(OutputEvent::RetryLastMessage);
             let _ = output_tx.try_send(OutputEvent::UserMessage(user_message.clone(), None));
         }
     } else if state.retry_attempts < state.max_retry_attempts {
