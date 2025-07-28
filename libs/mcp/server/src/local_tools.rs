@@ -961,7 +961,7 @@ SECURITY FEATURES:
         }
 
         if path_obj.is_dir() {
-            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            let depth = if tree.unwrap_or(false) { 4 } else { 1 };
             let provider = LocalFileSystemProvider;
             let path_str = path_obj.to_string_lossy();
 
@@ -1026,7 +1026,7 @@ SECURITY FEATURES:
         }
 
         if conn.is_directory(remote_path).await {
-            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            let depth = if tree.unwrap_or(false) { 4 } else { 1 };
             let provider = RemoteFileSystemProvider::new(conn.clone());
 
             match generate_directory_tree(&provider, remote_path, "", depth, 0).await {
@@ -1179,6 +1179,16 @@ SECURITY FEATURES:
         let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
         let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
 
+        // Check if old and new strings are identical
+        if actual_old_str == actual_new_str {
+            return Ok(CallToolResult::error(vec![
+                Content::text("OLD_STR_NEW_STR_IDENTICAL"),
+                Content::text(
+                    "The old string and new string are identical - no replacement needed",
+                ),
+            ]));
+        }
+
         let content = conn.read_file_to_string(remote_path).await.map_err(|e| {
             error!("Failed to read remote file for str_replace: {}", e);
             McpError::internal_error(
@@ -1199,6 +1209,14 @@ SECURITY FEATURES:
                 }
             })
             .collect();
+
+        // Check if no occurrences were found
+        if matches.is_empty() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("STRING_NOT_FOUND"),
+                Content::text("The string old_str was not found in the file"),
+            ]));
+        }
 
         let mut replaced_count = 0;
         for &i in &matches {
@@ -1241,6 +1259,16 @@ SECURITY FEATURES:
         let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
         let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
 
+        // Check if old and new strings are identical
+        if actual_old_str == actual_new_str {
+            return Ok(CallToolResult::error(vec![
+                Content::text("OLD_STR_NEW_STR_IDENTICAL"),
+                Content::text(
+                    "The old string and new string are identical - no replacement needed",
+                ),
+            ]));
+        }
+
         let mut lines: Vec<String> = fs::read_to_string(path)
             .map(|content| content.lines().map(|line| line.to_string()).collect())
             .map_err(|e| {
@@ -1262,6 +1290,14 @@ SECURITY FEATURES:
                 }
             })
             .collect();
+
+        // Check if no occurrences were found
+        if matches.is_empty() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("STRING_NOT_FOUND"),
+                Content::text("The string old_str was not found in the file"),
+            ]));
+        }
 
         let mut replaced_count = 0;
         for &i in &matches {
