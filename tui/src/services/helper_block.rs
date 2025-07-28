@@ -376,6 +376,14 @@ const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str =
 pub fn handle_errors(error: String) -> String {
     if format!("{:?}", error).contains(EXCEEDED_API_LIMIT_ERROR) {
         EXCEEDED_API_LIMIT_ERROR_MESSAGE.to_string()
+    } else if error.contains("Unknown(\"") && error.ends_with("\")") {
+        let start = 9; // length of "Unknown(\""
+        let end = error.len() - 2; // remove ")" and "\""
+        if start < end {
+            return error[start..end].to_string();
+        } else {
+            return format!("{:?}", error);
+        }
     } else {
         format!("{:?}", error)
     }
