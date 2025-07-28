@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use rand::Rng;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -419,33 +420,51 @@ mod password_tests {
     }
 }
 
-/// Generate a tree view of a directory structure
-pub fn generate_directory_tree(
-    path: &Path,
+/// Directory entry information for tree generation
+#[derive(Debug, Clone)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+}
+
+/// Trait for abstracting file system operations for tree generation
+#[async_trait]
+pub trait FileSystemProvider {
+    type Error: std::fmt::Display;
+
+    /// List directory contents
+    async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error>;
+}
+
+/// Generate a tree view of a directory structure using a generic file system provider
+pub async fn generate_directory_tree<P: FileSystemProvider>(
+    provider: &P,
+    path: &str,
     prefix: &str,
     max_depth: usize,
     current_depth: usize,
-) -> Result<String, std::io::Error> {
+) -> Result<String, P::Error> {
     let mut result = String::new();
 
-    if current_depth >= max_depth {
+    // Safety check: limit absolute depth to prevent infinite recursion
+    if current_depth >= max_depth || current_depth >= 10 {
         return Ok(result);
     }
 
-    let entries = fs::read_dir(path)?;
-    let mut items: Vec<_> = entries.collect::<Result<Vec<_>, _>>()?;
+    let entries = provider.list_directory(path).await?;
+    let mut items = entries;
 
     // Sort items: directories first, then alphabetically
-    items.sort_by(|a, b| {
-        match (
-            a.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-            b.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
-        ) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.file_name().cmp(&b.file_name()),
-        }
+    items.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
+
+    // Separate file entries from directory entries for processing
+    let mut file_entries = Vec::new();
+    let mut dir_entries = Vec::new();
 
     for (i, entry) in items.iter().enumerate() {
         let is_last_item = i == items.len() - 1;
@@ -455,34 +474,83 @@ pub fn generate_directory_tree(
             "├── "
         };
 
-        let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
+        if entry.is_directory {
+            // Skip directories that might cause loops (. and ..)
+            if entry.name == "." || entry.name == ".." {
+                continue;
+            }
 
-        match entry.file_type() {
-            Ok(ft) if ft.is_dir() => {
-                result.push_str(&format!("{}{}{}/\n", prefix, current_prefix, file_name_str));
+            let next_prefix = format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
+            dir_entries.push((entry.clone(), current_prefix.to_string(), next_prefix));
+        } else {
+            file_entries.push((entry.clone(), current_prefix.to_string()));
+        }
+    }
 
-                // Recursively process subdirectory
-                let next_prefix =
-                    format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
+    // Add all file entries to result first
+    for (entry, prefix_str) in file_entries {
+        result.push_str(&format!("{}{}{}\n", prefix, prefix_str, entry.name));
+    }
 
-                if let Ok(subtree) = generate_directory_tree(
-                    &entry.path(),
-                    &next_prefix,
-                    max_depth,
-                    current_depth + 1,
-                ) {
-                    result.push_str(&subtree);
+    // Add directory headers and process subdirectories in parallel
+    for (entry, prefix_str, _) in &dir_entries {
+        result.push_str(&format!("{}{}{}/\n", prefix, prefix_str, entry.name));
+    }
+
+    // Process all subdirectories concurrently
+    if !dir_entries.is_empty() {
+        let dir_futures: Vec<_> = dir_entries
+            .into_iter()
+            .map(|(entry, _, next_prefix)| {
+                let entry_path = entry.path.clone();
+                async move {
+                    generate_directory_tree(
+                        provider,
+                        &entry_path,
+                        &next_prefix,
+                        max_depth,
+                        current_depth + 1,
+                    )
+                    .await
                 }
-            }
-            Ok(_) => {
-                result.push_str(&format!("{}{}{}\n", prefix, current_prefix, file_name_str));
-            }
-            Err(_) => {
-                result.push_str(&format!("{}{}{}?\n", prefix, current_prefix, file_name_str));
+            })
+            .collect();
+
+        let subtree_results = futures::future::join_all(dir_futures).await;
+        for subtree_result in subtree_results {
+            if let Ok(subtree) = subtree_result {
+                result.push_str(&subtree);
             }
         }
     }
 
     Ok(result)
+}
+
+/// Local file system provider implementation
+pub struct LocalFileSystemProvider;
+
+#[async_trait]
+impl FileSystemProvider for LocalFileSystemProvider {
+    type Error = std::io::Error;
+
+    async fn list_directory(&self, path: &str) -> Result<Vec<DirectoryEntry>, Self::Error> {
+        let entries = fs::read_dir(path)?;
+        let mut result = Vec::new();
+
+        for entry in entries {
+            let entry = entry?;
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let file_path = entry.path().to_string_lossy().to_string();
+            let is_directory = entry.file_type()?.is_dir();
+
+            result.push(DirectoryEntry {
+                name: file_name,
+                path: file_path,
+                is_directory,
+            });
+        }
+
+        Ok(result)
+    }
 }
