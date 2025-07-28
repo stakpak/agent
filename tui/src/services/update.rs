@@ -6,8 +6,8 @@ use crate::services::bash_block::{
     preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    handle_errors, push_clear_message, push_error_message, push_help_message, push_memorize_message,
-    push_status_message, push_styled_message, render_system_message,
+    handle_errors, push_clear_message, push_error_message, push_help_message,
+    push_memorize_message, push_status_message, push_styled_message, render_system_message,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
