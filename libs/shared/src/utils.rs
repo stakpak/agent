@@ -1,4 +1,5 @@
 use rand::Rng;
+use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
 
@@ -416,4 +417,72 @@ mod password_tests {
         // Very unlikely to generate the same password twice
         assert_ne!(password1, password2);
     }
+}
+
+/// Generate a tree view of a directory structure
+pub fn generate_directory_tree(
+    path: &Path,
+    prefix: &str,
+    max_depth: usize,
+    current_depth: usize,
+) -> Result<String, std::io::Error> {
+    let mut result = String::new();
+
+    if current_depth >= max_depth {
+        return Ok(result);
+    }
+
+    let entries = fs::read_dir(path)?;
+    let mut items: Vec<_> = entries.collect::<Result<Vec<_>, _>>()?;
+
+    // Sort items: directories first, then alphabetically
+    items.sort_by(|a, b| {
+        match (
+            a.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
+            b.file_type().map(|ft| ft.is_dir()).unwrap_or(false),
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.file_name().cmp(&b.file_name()),
+        }
+    });
+
+    for (i, entry) in items.iter().enumerate() {
+        let is_last_item = i == items.len() - 1;
+        let current_prefix = if is_last_item {
+            "└── "
+        } else {
+            "├── "
+        };
+
+        let file_name = entry.file_name();
+        let file_name_str = file_name.to_string_lossy();
+
+        match entry.file_type() {
+            Ok(ft) if ft.is_dir() => {
+                result.push_str(&format!("{}{}{}/\n", prefix, current_prefix, file_name_str));
+
+                // Recursively process subdirectory
+                let next_prefix =
+                    format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
+
+                if let Ok(subtree) = generate_directory_tree(
+                    &entry.path(),
+                    &next_prefix,
+                    max_depth,
+                    current_depth + 1,
+                ) {
+                    result.push_str(&subtree);
+                }
+            }
+            Ok(_) => {
+                result.push_str(&format!("{}{}{}\n", prefix, current_prefix, file_name_str));
+            }
+            Err(_) => {
+                result.push_str(&format!("{}{}{}?\n", prefix, current_prefix, file_name_str));
+            }
+        }
+    }
+
+    Ok(result)
 }

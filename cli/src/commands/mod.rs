@@ -40,6 +40,9 @@ pub enum Commands {
         /// Set machine name for device identification
         #[arg(long = "machine-name")]
         machine_name: Option<String>,
+        /// Enable or disable auto-appending .stakpak to .gitignore files
+        #[arg(long = "auto-append-gitignore")]
+        auto_append_gitignore: Option<bool>,
     },
 
     /// Show current configuration
@@ -268,18 +271,37 @@ impl Commands {
                     .save()
                     .map_err(|e| format!("Failed to save config: {}", e))?;
             }
-            Commands::Set { machine_name } => {
+            Commands::Set {
+                machine_name,
+                auto_append_gitignore,
+            } => {
                 let mut updated_config = config.clone();
+                let mut config_updated = false;
 
                 if let Some(name) = machine_name {
                     updated_config.machine_name = Some(name.clone());
+                    config_updated = true;
+                    println!("Machine name set to: {}", name);
+                }
+
+                if let Some(append) = auto_append_gitignore {
+                    updated_config.auto_append_gitignore = Some(append);
+                    config_updated = true;
+                    println!("Auto-appending .stakpak to .gitignore: {}", append);
+                }
+
+                if config_updated {
                     updated_config
                         .save()
                         .map_err(|e| format!("Failed to save config: {}", e))?;
-                    println!("Machine name set to: {}", name);
                 } else {
                     println!("No configuration option provided. Available options:");
-                    println!("  --machine-name <name>  Set machine name for device identification");
+                    println!(
+                        "  --machine-name <name>        Set machine name for device identification"
+                    );
+                    println!(
+                        "  --auto-append-gitignore <bool>  Enable/disable auto-appending .stakpak to .gitignore"
+                    );
                 }
             }
             Commands::Config => {
@@ -287,6 +309,10 @@ impl Commands {
                 println!(
                     "  Machine name: {}",
                     config.machine_name.as_deref().unwrap_or("(not set)")
+                );
+                println!(
+                    "  Auto-append .stakpak to .gitignore: {}",
+                    config.auto_append_gitignore.unwrap_or(true)
                 );
                 println!("  API endpoint: {}", config.api_endpoint);
                 let api_key_display = match &config.api_key {

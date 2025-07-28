@@ -6,7 +6,7 @@ use std::path::Path;
 use tokio::sync::mpsc;
 
 use crate::AppState;
-use crate::app::AutoCompleteResult;
+use crate::app::{AutoCompleteResult, HelperCommand};
 
 #[derive(Debug, Clone)]
 pub struct AutoComplete {
@@ -385,19 +385,27 @@ impl DebouncedFilter {
 pub async fn autocomplete_worker(
     mut rx: mpsc::Receiver<(String, usize)>, // (input, cursor_position)
     tx: mpsc::Sender<AutoCompleteResult>,
-    helpers: Vec<&'static str>,
+    helpers: Vec<HelperCommand>,
     mut autocomplete: AutoComplete,
 ) {
     if let Ok(current_dir) = std::env::current_dir() {
         autocomplete.load_files_from_directory(&current_dir);
     }
     while let Some((input, cursor_position)) = rx.recv().await {
-        // Filter helpers
-        let filtered_helpers: Vec<&'static str> = helpers
-            .iter()
-            .filter(|h| h.starts_with(&input) && !input.is_empty())
-            .copied()
-            .collect();
+        // Filter helpers - only when input starts with '/' and is not empty
+        let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
+            helpers
+                .iter()
+                .filter(|h| {
+                    h.command
+                        .to_lowercase()
+                        .contains(&input[1..].to_lowercase())
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let mut filtered_files = Vec::new();
         // Detect @ trigger using new signature
