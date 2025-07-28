@@ -125,7 +125,7 @@ pub fn update(
             let error_message = handle_errors(err);
             // TODO: THIS IS ONLY FOR TESTING, REMOVE THIS MESSAGE BECAUSE ITS A BUG
             if error_message.contains("https://stakpak.dev/settings/billing") {
-                handle_retry_mechanism(state, &error_message, output_tx, input_tx);
+                handle_retry_mechanism(state, output_tx);
             } else {
                 push_error_message(state, &error_message);
             }
@@ -1286,12 +1286,7 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
     }
 }
 
-fn handle_retry_mechanism(
-    state: &mut AppState,
-    _error_message: &str,
-    output_tx: &Sender<OutputEvent>,
-    _input_tx: &Sender<InputEvent>,
-) {
+fn handle_retry_mechanism(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     // First time encountering this error
     if state.retry_attempts == 0 {
         // Store the last user message for retry
@@ -1340,7 +1335,7 @@ fn handle_retry_mechanism(
         // Push retry message
         push_error_message(
             state,
-            "There was an issue sending your request, retrying attempt...1",
+            "There was an issue sending your request, retrying attempt 1...",
         );
 
         // Re-add the user message that was deleted
@@ -1354,6 +1349,7 @@ fn handle_retry_mechanism(
         if let Some(user_message) = &state.last_user_message_for_retry {
             state.loading = true;
             state.spinner_frame = 0;
+            let _ = output_tx.try_send(OutputEvent::RetryLastMessage);
             let _ = output_tx.try_send(OutputEvent::UserMessage(user_message.clone(), None));
         }
     } else if state.retry_attempts < state.max_retry_attempts {
