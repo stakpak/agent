@@ -34,7 +34,7 @@ pub struct GenerateCodeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchDocsRequest {
     #[schemars(
-        description = "Space-separated keywords (e.g., 'kubernetes ingress nginx ssl'). Use hyphens for compound terms like 'cloud-native'."    
+        description = "Space-separated keywords (e.g., 'kubernetes ingress nginx ssl'). Use hyphens for compound terms like 'cloud-native'."
     )]
     pub keywords: String,
     #[schemars(
@@ -374,10 +374,10 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         let limit = limit.map(|l| l.min(5)).or(Some(5));
 
         // Split keywords into array
-        let keywords_array: Vec<String> = keywords.split_whitespace().map(|s| s.to_string()).collect();
-        let exclude_keywords_array: Option<Vec<String>> = exclude_keywords.map(|s| {
-            s.split_whitespace().map(|word| word.to_string()).collect()
-        });
+        let keywords_array: Vec<String> =
+            keywords.split_whitespace().map(|s| s.to_string()).collect();
+        let exclude_keywords_array: Option<Vec<String>> =
+            exclude_keywords.map(|s| s.split_whitespace().map(|word| word.to_string()).collect());
 
         let response = match self
             .get_client()
@@ -424,7 +424,8 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         // let limit = limit.map(|l| l.min(5)).or(Some(5));
 
         // Split keywords into array
-        let keywords_array: Vec<String> = keywords.split_whitespace().map(|s| s.to_string()).collect();
+        let keywords_array: Vec<String> =
+            keywords.split_whitespace().map(|s| s.to_string()).collect();
 
         let response = match self
             .get_client()
@@ -546,7 +547,10 @@ This tool searches through the locally indexed code blocks using text matching a
 
         let search_limit = limit.unwrap_or(10) as usize;
         let show_deps = show_dependencies.unwrap_or(false);
-        let keywords_lower: Vec<String> = keywords.split_whitespace().map(|s| s.to_lowercase()).collect();
+        let keywords_lower: Vec<String> = keywords
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
+            .collect();
 
         // Search through blocks
         let mut matching_blocks = Vec::new();
