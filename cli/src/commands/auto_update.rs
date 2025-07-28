@@ -1,7 +1,6 @@
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::plugins::{PluginConfig, extract_tar_gz, extract_zip, get_download_info};
-use reqwest::header::HeaderMap;
-use stakpak_shared::tls_client::create_tls_client;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -126,7 +125,7 @@ async fn download_and_extract_binary(config: &PluginConfig) -> Result<String, St
     println!("Downloading {}...", config.name);
 
     // Download the archive
-    let client = create_tls_client(HeaderMap::new())?;
+    let client = create_tls_client(TlsClientConfig::default())?;
     let response = client
         .get(&download_url)
         .send()
