@@ -24,6 +24,11 @@ chrono = { workspace = true }
 rmcp = { workspace = true }
 reqwest = { workspace = true }
 rustls-platform-verifier = { workspace = true }
+russh = { version = "0.53.0" }
+russh-sftp = { version = "2.1.1" }
+dirs = "5.0"
+async-trait = "0.1"
+futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.0"
