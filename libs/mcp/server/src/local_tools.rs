@@ -1310,12 +1310,10 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
 
         let replaced_count = if replace_all.unwrap_or(false) {
             content.matches(&actual_old_str).count()
+        } else if content.contains(&actual_old_str) {
+            1
         } else {
-            if content.contains(&actual_old_str) {
-                1
-            } else {
-                0
-            }
+            0
         };
 
         conn.write_file(remote_path, new_content.as_bytes())
@@ -1378,12 +1376,10 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
 
         let replaced_count = if replace_all.unwrap_or(false) {
             content.matches(&actual_old_str).count()
+        } else if content.contains(&actual_old_str) {
+            1
         } else {
-            if content.contains(&actual_old_str) {
-                1
-            } else {
-                0
-            }
+            0
         };
 
         fs::write(path, &new_content).map_err(|e| {
