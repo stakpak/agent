@@ -918,9 +918,8 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             .stderr(std::process::Stdio::piped());
         #[cfg(target_os = "linux")]
         {
-            cmd = cmd
-                .env("DEBIAN_FRONTEND", "noninteractive")
-                .env("SUDO_ASKPASS", "/bin/false")
+            cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                .env("SUDO_ASKPASS", "/bin/false");
         }
         let mut child = cmd.process_group(0).spawn().map_err(|e| {
             error!("Failed to run command: {}", e);
