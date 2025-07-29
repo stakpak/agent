@@ -261,21 +261,12 @@ pub fn update(
 
             line = truncate_output(&line);
             state.messages.push(Message::plain_text(line));
-
-            // Only adjust scroll if not streaming or if we're staying at bottom
-            if !state.is_streaming || state.stay_at_bottom {
-                adjust_scroll(state, message_area_height, message_area_width);
-            }
         }
 
         InputEvent::ShellError(line) => {
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
-            // Only adjust scroll if not streaming or if we're staying at bottom
-            if !state.is_streaming || state.stay_at_bottom {
-                adjust_scroll(state, message_area_height, message_area_width);
-            }
         }
 
         InputEvent::ShellWaitingForInput => {
@@ -632,17 +623,6 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-    if (state.is_streaming || state.loading) && !state.is_dialog_open {
-        state.input.clear();
-        state.cursor_position = 0;
-        return;
-    }
-    if state.show_shell_mode
-        && state.active_shell_command.is_some()
-        && !state.waiting_for_shell_input
-    {
-        return; // Block all input
-    }
     if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -787,11 +767,6 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    if (state.is_streaming || state.loading) && !state.is_dialog_open {
-        state.input.clear();
-        state.cursor_position = 0;
-        return;
-    }
     if state.show_shell_mode {
         // Check if we're waiting for shell input (like password)
         if state.waiting_for_shell_input {
