@@ -12,7 +12,5 @@ futures-util = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
-rustls = { workspace = true }
-rustls-platform-verifier = { workspace = true }
 eventsource-stream = "0.2.3"
 url = "2.5.0"

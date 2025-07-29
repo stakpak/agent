@@ -1,6 +1,6 @@
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
-use stakpak_shared::tls_client::create_tls_client;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
 
 use crate::commands::auto_update::run_auto_update;
@@ -34,7 +34,7 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static("update-checker"));
 
-    let client = create_tls_client(headers)?;
+    let client = create_tls_client(TlsClientConfig::default().with_headers(headers))?;
 
     let url = "https://api.github.com/repos/stakpak/cli/releases/latest".to_string();
 

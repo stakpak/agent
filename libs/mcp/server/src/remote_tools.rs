@@ -34,13 +34,13 @@ pub struct GenerateCodeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchDocsRequest {
     #[schemars(
-        description = "List of keywords to search for in the documentation. Searches against the url, title, description, and content of documentation chunks."
+        description = "Space-separated keywords (e.g., 'kubernetes ingress nginx ssl'). Use hyphens for compound terms like 'cloud-native'."
     )]
-    pub keywords: Vec<String>,
+    pub keywords: String,
     #[schemars(
-        description = "List of keywords to exclude from the search results. This is useful for filtering out documentation sources that are not relevant to the query."
+        description = "Space-separated keywords to exclude from the search results (e.g., 'deprecated legacy'). This is useful for filtering out documentation sources that are not relevant to the query."
     )]
-    pub exclude_keywords: Option<Vec<String>>,
+    pub exclude_keywords: Option<String>,
     #[schemars(description = "The maximum number of results to return (default: 5, max: 5)")]
     pub limit: Option<u32>,
 }
@@ -48,9 +48,9 @@ pub struct SearchDocsRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchMemoryRequest {
     #[schemars(
-        description = "List of keywords to search for in your memory. Searches against the title, tags, and content of your memory."
+        description = "Space-separated keywords to search for in your memory (e.g., 'kubernetes deployment config'). Searches against the title, tags, and content of your memory."
     )]
-    pub keywords: Vec<String>,
+    pub keywords: String,
     #[schemars(
         description = "Start time for filtering memories by creation time (inclusive range, ISO 8601 format)"
     )]
@@ -72,9 +72,9 @@ pub struct ReadRulebookRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LocalCodeSearchRequest {
     #[schemars(
-        description = "List of keywords to search for in code blocks. Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword."
+        description = "Space-separated keywords to search for in code blocks (e.g., 'kubernetes service deployment'). Searches against block names, types, content, and file paths. Blocks matching multiple keywords will be ranked higher than those matching only one keyword."
     )]
-    pub keywords: Vec<String>,
+    pub keywords: String,
     #[schemars(description = "Maximum number of results to return (default: 10)")]
     pub limit: Option<u32>,
     #[schemars(
@@ -347,11 +347,18 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
     }
 
     #[tool(
-        description = "Web search for technical documentation. This includes documentation for cloud-native tools, cloud providers, development frameworks, release notes, and other technical resources.
+        description = "Web search for technical documentation. This includes documentation for tools, cloud providers, development frameworks, release notes, and other technical resources. searches against the url, title, description, and content of documentation chunks.
+KEYWORD FORMAT REQUIREMENTS:
+- Keywords should be provided as space-separated strings
+- Use hyphens for compound terms (e.g., 'cloud-native', 'service-mesh')
+
+CORRECT EXAMPLES:
+✅ keywords: 'kubernetes ingress nginx ssl'
+✅ keywords: 'docker multi-stage build'
 
 QUERY STRATEGY GUIDANCE:
-- For SPECIFIC queries: Use many related keywords in a single call to get highly targeted results (e.g., ['kubernetes', 'ingress', 'nginx', 'ssl', 'tls'] for a specific SSL setup question)
-- For BROAD knowledge gathering: Break down into multiple calls with fewer keywords each to cover more ground (e.g., separate calls for ['kubernetes', 'networking'], ['kubernetes', 'storage'], ['kubernetes', 'security'] instead of cramming all topics into one call)
+- For more fine-grained queries: Use many keywords in a single call to get highly targeted results (e.g., 'kubernetes ingress nginx ssl tls' for a specific SSL setup question)
+- For broader knowledge gathering: Break down your query into multiple parallel calls with fewer keywords each to cover more ground (e.g., separate calls for 'kubernetes networking', 'kubernetes storage', 'kubernetes security' instead of cramming all topics into one call)
 
 If your goal requires understanding multiple distinct topics or technologies, make separate search calls rather than combining all keywords into one overly-specific search that may miss relevant documentation."
     )]
@@ -366,6 +373,12 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         // Cap the limit to a maximum of 5
         let limit = limit.map(|l| l.min(5)).or(Some(5));
 
+        // Split keywords into array
+        let keywords_array: Vec<String> =
+            keywords.split_whitespace().map(|s| s.to_string()).collect();
+        let exclude_keywords_array: Option<Vec<String>> =
+            exclude_keywords.map(|s| s.split_whitespace().map(|word| word.to_string()).collect());
+
         let response = match self
             .get_client()
             .ok_or_else(|| {
@@ -377,8 +390,8 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_docs".to_string(),
                 arguments: json!({
-                    "keywords": keywords,
-                    "exclude_keywords": exclude_keywords,
+                    "keywords": keywords_array,
+                    "exclude_keywords": exclude_keywords_array,
                     "limit": limit,
                 }),
             })
@@ -410,6 +423,10 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         // // Cap the limit to a maximum of 5
         // let limit = limit.map(|l| l.min(5)).or(Some(5));
 
+        // Split keywords into array
+        let keywords_array: Vec<String> =
+            keywords.split_whitespace().map(|s| s.to_string()).collect();
+
         let response = match self
             .get_client()
             .ok_or_else(|| {
@@ -421,7 +438,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_memory".to_string(),
                 arguments: json!({
-                    "keywords": keywords,
+                    "keywords": keywords_array,
                     "start_time": start_time,
                     "end_time": end_time,
                     // "limit": limit,
@@ -530,7 +547,10 @@ This tool searches through the locally indexed code blocks using text matching a
 
         let search_limit = limit.unwrap_or(10) as usize;
         let show_deps = show_dependencies.unwrap_or(false);
-        let keywords_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();
+        let keywords_lower: Vec<String> = keywords
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
+            .collect();
 
         // Search through blocks
         let mut matching_blocks = Vec::new();
