@@ -108,8 +108,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     });
 
     // Spawn client task
-    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> = tokio::spawn(
-        async move {
+    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> =
+        tokio::spawn(async move {
             let client = Client::new(&ClientConfig {
                 api_key: ctx.api_key.clone(),
                 api_endpoint: ctx.api_endpoint.clone(),
@@ -140,7 +140,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
 
             let mut retry_attempts = 0;
-            const MAX_RETRY_ATTEMPTS: u32 = 3;
+            const MAX_RETRY_ATTEMPTS: u32 = 2;
 
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
@@ -372,11 +372,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 }
                                 // we should sent the tui an event to delete this message
 
+                                // we need to set messages and remove some message through events
+
                                 // Show retry message in TUI
                                 send_input_event(
                                     &input_tx,
-                                    InputEvent::Error(format!("There was an issue sending your request, retrying attempt {}...", retry_attempts))
-                                ).await?;
+                                    InputEvent::Error(format!("RETRY_ATTEMPT_{}", retry_attempts)),
+                                )
+                                .await?;
 
                                 // Wait before retry (except first attempt)
                                 if retry_attempts > 1 {
@@ -413,12 +416,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                                 send_input_event(
                                     &input_tx,
-                                    InputEvent::Error(
-                                        "Maximum retry attempts reached. Please try again later."
-                                            .to_string(),
-                                    ),
+                                    InputEvent::Error("MAX_RETRY.".to_string()),
                                 )
                                 .await?;
+                                retry_attempts = 0;
                             } else {
                                 send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
                             }
@@ -454,8 +455,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
 
             Ok(messages)
-        },
-    );
+        });
 
     // Wait for all tasks to finish
     let (client_res, _, _, _) =
