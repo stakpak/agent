@@ -321,13 +321,13 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                 }
 
-                let response = loop {
+                let response_result = loop {
                     let mut stream = client
                         .chat_completion_stream(messages.clone(), Some(tools.clone()))
                         .await?;
 
                     match process_responses_stream(&mut stream, &input_tx).await {
-                        Ok(response) => break response,
+                        Ok(response) => break Ok(response),
                         Err(e) => {
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
@@ -364,6 +364,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     // This includes the user message + any partial assistant responses
                                     messages.truncate(index);
                                 }
+                                // we should sent the tui an event to delete this message
 
                                 // Show retry message in TUI
                                 send_input_event(
@@ -385,21 +386,23 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 continue; // This continues the loop to retry
                             }
 
-                            // Max retries reached - clean up everything including the user message
+                            // Max retries reached or non-retryable error
                             if retry_attempts >= MAX_RETRY_ATTEMPTS {
-                                // Remove the entire failed conversation turn including the user message
-                                let mut user_index = None;
+                                // Just clean up any partial assistant responses, but keep the user message
+                                // Find any assistant messages after the last user message and remove them
+                                let mut last_user_index = None;
                                 for (i, msg) in messages.iter().enumerate().rev() {
                                     if msg.role
                                         == stakpak_shared::models::integrations::openai::Role::User
                                     {
-                                        user_index = Some(i);
+                                        last_user_index = Some(i);
                                         break;
                                     }
                                 }
 
-                                if let Some(index) = user_index {
-                                    messages.truncate(index); // Remove user message and everything after it
+                                if let Some(user_index) = last_user_index {
+                                    // Remove only assistant messages after the user message, keep the user message
+                                    messages.truncate(user_index + 1);
                                 }
 
                                 send_input_event(
@@ -414,21 +417,31 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
                             }
 
-                            return Err(e);
+                            // Break with error result instead of returning
+                            break Err(e);
                         }
                     }
                 };
 
-                messages.push(response.choices[0].message.clone());
+                match response_result {
+                    Ok(response) => {
+                        messages.push(response.choices[0].message.clone());
 
-                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
-                // Send tool calls to TUI if present
-                if let Some(tool_calls) = &response.choices[0].message.tool_calls {
-                    tools_queue.extend(tool_calls.clone());
-                    if !tools_queue.is_empty() {
-                        let tool_call = tools_queue.remove(0);
-                        send_tool_call(&input_tx, &tool_call).await?;
+                        // Send tool calls to TUI if present
+                        if let Some(tool_calls) = &response.choices[0].message.tool_calls {
+                            tools_queue.extend(tool_calls.clone());
+                            if !tools_queue.is_empty() {
+                                let tool_call = tools_queue.remove(0);
+                                send_tool_call(&input_tx, &tool_call).await?;
+                                continue;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Max retries reached or other error - just continue the main loop
+                        // The user message is preserved, error message shown, ready for next input
                         continue;
                     }
                 }
