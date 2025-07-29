@@ -268,10 +268,6 @@ pub async fn run_default_warden(
         cmd.args(["--volume", &volume]);
     }
 
-    // TODO: enable mTLS to work with Warden
-    // Disable mTLS for the MCP server/client when running with warden
-    cmd.args(["--", "stakpak --disable-mcp-mtls"]);
-
     // Execute the warden command with TTY support
     execute_warden_command(cmd, true)
 }

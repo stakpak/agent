@@ -53,10 +53,8 @@ impl CertificateChain {
 
         server_params.subject_alt_names = vec![
             SanType::DnsName("localhost".to_string()),
+            SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))),
             SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
-            SanType::IpAddress(std::net::IpAddr::V6(std::net::Ipv6Addr::new(
-                0, 0, 0, 0, 0, 0, 0, 1,
-            ))),
         ];
 
         server_params.key_usages = vec![
