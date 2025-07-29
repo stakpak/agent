@@ -57,8 +57,9 @@ pub fn matches_gitignore_pattern(pattern: &str, path: &str) -> bool {
     let pattern = pattern.trim_end_matches('/'); // Remove trailing slash
 
     if pattern.contains('*') {
-        // Simple wildcard matching
-        if pattern.starts_with('*') && pattern.ends_with('*') {
+        if pattern == "*" {
+            true
+        } else if pattern.starts_with('*') && pattern.ends_with('*') {
             let middle = &pattern[1..pattern.len() - 1];
             path.contains(middle)
         } else if let Some(suffix) = pattern.strip_prefix('*') {
