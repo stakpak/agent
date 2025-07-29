@@ -910,19 +910,25 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         timeout: Option<u64>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<String, CallToolResult> {
-        let mut child = Command::new("sh")
-            .arg("-c")
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(actual_command)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                error!("Failed to run command: {}", e);
-                CallToolResult::error(vec![
-                    Content::text("COMMAND_ERROR"),
-                    Content::text(format!("Failed to run command: {}", e)),
-                ])
-            })?;
+            .stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "linux")]
+        {
+            cmd = cmd
+                .env("DEBIAN_FRONTEND", "noninteractive")
+                .env("SUDO_ASKPASS", "/bin/false")
+        }
+        let mut child = cmd.process_group(0).spawn().map_err(|e| {
+            error!("Failed to run command: {}", e);
+            CallToolResult::error(vec![
+                Content::text("COMMAND_ERROR"),
+                Content::text(format!("Failed to run command: {}", e)),
+            ])
+        })?;
 
         #[allow(clippy::unwrap_used)]
         let stdout = child.stdout.take().unwrap();
