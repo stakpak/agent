@@ -123,14 +123,16 @@ pub fn update(
         }
         InputEvent::Error(err) => {
             let mut error_message = handle_errors(err);
-            if error_message.contains("RETRY_ATTEMPT") || error_message.contains("MAX_RETRY") {
+            if error_message.contains("RETRY_ATTEMPT")
+                || error_message.contains("MAX_RETRY_REACHED")
+            {
                 if error_message.contains("RETRY_ATTEMPT") {
                     let retry_attempt = error_message.split("RETRY_ATTEMPT_").last().unwrap_or("1");
                     error_message = format!(
                         "There was an issue sending your request, retrying attempt {}...",
                         retry_attempt
                     );
-                } else if error_message.contains("MAX_RETRY") {
+                } else if error_message.contains("MAX_RETRY_REACHED") {
                     error_message =
                         "Maximum retry attempts reached. Please try again later.".to_string();
                 }

@@ -13,6 +13,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
+use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
@@ -333,99 +334,45 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         .await?;
 
                     match process_responses_stream(&mut stream, &input_tx).await {
-                        Ok(response) => break Ok(response),
+                        Ok(response) => {
+                            retry_attempts = 0;
+                            break Ok(response);
+                        }
                         Err(e) => {
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            if matches!(e, ApiStreamError::AgentInvalidResponseStream) {
+                                if retry_attempts < MAX_RETRY_ATTEMPTS {
+                                    retry_attempts += 1;
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::Error(format!(
+                                            "RETRY_ATTEMPT_{}",
+                                            retry_attempts
+                                        )),
+                                    )
+                                    .await?;
 
-                            // Handle retry logic for AgentInvalidResponseStream errors
-                            if e.contains("AgentInvalidResponseStream")
-                                && retry_attempts < MAX_RETRY_ATTEMPTS
-                            {
-                                retry_attempts += 1;
-
-                                // Find the failed user message before removing it
-                                let mut failed_user_message = None;
-                                for msg in messages.iter().rev() {
-                                    if msg.role
-                                        == stakpak_shared::models::integrations::openai::Role::User
-                                    {
-                                        failed_user_message = Some(msg.clone());
-                                        break;
+                                    // Wait before retry (except first attempt)
+                                    if retry_attempts > 1 {
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(1))
+                                            .await;
                                     }
+
+                                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                                    continue;
+                                } else {
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::Error("MAX_RETRY_REACHED".to_string()),
+                                    )
+                                    .await?;
+                                    break Err(e);
                                 }
-
-                                // Remove the failed conversation turn (user message and ANY assistant messages after it)
-                                let mut user_index = None;
-                                for (i, msg) in messages.iter().enumerate().rev() {
-                                    if msg.role
-                                        == stakpak_shared::models::integrations::openai::Role::User
-                                    {
-                                        user_index = Some(i);
-                                        break;
-                                    }
-                                }
-
-                                if let Some(index) = user_index {
-                                    // Remove everything from the user message onwards
-                                    // This includes the user message + any partial assistant responses
-                                    messages.truncate(index);
-                                }
-                                // we should sent the tui an event to delete this message
-
-                                // we need to set messages and remove some message through events
-
-                                // Show retry message in TUI
-                                send_input_event(
-                                    &input_tx,
-                                    InputEvent::Error(format!("RETRY_ATTEMPT_{}", retry_attempts)),
-                                )
-                                .await?;
-
-                                // Wait before retry (except first attempt)
-                                if retry_attempts > 1 {
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                }
-
-                                // RETRY: Add the same user message back and try again
-                                if let Some(user_msg) = failed_user_message {
-                                    messages.push(user_msg);
-                                }
-
-                                send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                                continue; // This continues the loop to retry
-                            }
-
-                            // Max retries reached or non-retryable error
-                            if retry_attempts >= MAX_RETRY_ATTEMPTS {
-                                // Just clean up any partial assistant responses, but keep the user message
-                                // Find any assistant messages after the last user message and remove them
-                                let mut last_user_index = None;
-                                for (i, msg) in messages.iter().enumerate().rev() {
-                                    if msg.role
-                                        == stakpak_shared::models::integrations::openai::Role::User
-                                    {
-                                        last_user_index = Some(i);
-                                        break;
-                                    }
-                                }
-
-                                if let Some(user_index) = last_user_index {
-                                    // Remove only assistant messages after the user message, keep the user message
-                                    messages.truncate(user_index + 1);
-                                }
-
-                                send_input_event(
-                                    &input_tx,
-                                    InputEvent::Error("MAX_RETRY.".to_string()),
-                                )
-                                .await?;
-                                retry_attempts = 0;
                             } else {
-                                send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
+                                send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
+                                    .await?;
+                                break Err(e);
                             }
-
-                            // Break with error result instead of returning
-                            break Err(e);
                         }
                     }
                 };
