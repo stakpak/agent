@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub async fn process_responses_stream(
     stream: impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-) -> Result<ChatCompletionResponse, String> {
+) -> Result<ChatCompletionResponse, ApiStreamError> {
     let mut stream = Box::pin(stream);
 
     let mut chat_completion_response = ChatCompletionResponse {
@@ -132,9 +132,7 @@ pub async fn process_responses_stream(
                 }
             }
             Err(e) => {
-                // return error
-                return Err(format!("{:?}", e));
-                // send_input_event(input_tx, InputEvent::Error(format!("{:?}", e))).await?;
+                return Err(e.clone());
             }
         }
     }
