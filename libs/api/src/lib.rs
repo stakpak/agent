@@ -86,7 +86,11 @@ impl Client {
                 .expect("Invalid user agent format"),
         );
 
-        let client = create_tls_client(TlsClientConfig::default().with_headers(headers))?;
+        let client = create_tls_client(
+            TlsClientConfig::default()
+                .with_headers(headers)
+                .with_timeout(std::time::Duration::from_secs(300)),
+        )?;
 
         Ok(Self {
             client,
