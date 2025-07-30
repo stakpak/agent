@@ -201,15 +201,24 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         let mut should_stop = false;
 
                         if let Some(result) = result {
-                            let result_content = result
+                            let content_parts: Vec<String> = result
                                 .content
                                 .iter()
                                 .map(|c| match c.raw.as_text() {
                                     Some(text) => text.text.clone(),
                                     None => String::new(),
                                 })
-                                .collect::<Vec<String>>()
-                                .join("\n");
+                                .filter(|s| !s.is_empty())
+                                .collect();
+
+                            let result_content = if result.get_status()
+                                == ToolCallResultStatus::Error
+                                && content_parts.len() >= 2
+                            {
+                                format!("[{}] {}", content_parts[0], content_parts[1..].join(": "))
+                            } else {
+                                content_parts.join("\n")
+                            };
 
                             messages
                                 .push(tool_result(tool_call.clone().id, result_content.clone()));
