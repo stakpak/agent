@@ -352,12 +352,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     )
                                     .await?;
 
-                                    // Wait before retry (except first attempt)
-                                    if retry_attempts > 1 {
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1))
-                                            .await;
-                                    }
-
                                     send_input_event(&input_tx, InputEvent::Loading(true)).await?;
                                     continue;
                                 } else {
@@ -394,8 +388,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                     }
                     Err(_) => {
-                        // Max retries reached or other error - just continue the main loop
-                        // The user message is preserved, error message shown, ready for next input
                         continue;
                     }
                 }
