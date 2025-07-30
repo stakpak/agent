@@ -11,6 +11,56 @@ pub struct GetFlowPermission {
     pub write: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum ApiStreamError {
+    AgentInputInvalid(String),
+    AgentStateInvalid,
+    AgentNotSupported,
+    AgentExecutionLimitExceeded,
+    AgentInvalidResponseStream,
+    InvalidGeneratedCode,
+    CopilotError,
+    SaveError,
+    Unknown(String),
+}
+
+impl From<&str> for ApiStreamError {
+    fn from(error_str: &str) -> Self {
+        match error_str {
+            s if s.contains("Agent not supported") => ApiStreamError::AgentNotSupported,
+            s if s.contains("Agent state is not valid") => ApiStreamError::AgentStateInvalid,
+            s if s.contains("Agent thinking limit exceeded") => {
+                ApiStreamError::AgentExecutionLimitExceeded
+            }
+            s if s.contains("Invalid response stream") => {
+                ApiStreamError::AgentInvalidResponseStream
+            }
+            s if s.contains("Invalid generated code") => ApiStreamError::InvalidGeneratedCode,
+            s if s.contains(
+                "Our copilot is handling too many requests at this time, please try again later.",
+            ) =>
+            {
+                ApiStreamError::CopilotError
+            }
+            s if s
+                .contains("An error occurred while saving your data. Please try again later.") =>
+            {
+                ApiStreamError::SaveError
+            }
+            s if s.contains("Agent input is not valid: ") => {
+                ApiStreamError::AgentInputInvalid(s.replace("Agent input is not valid: ", ""))
+            }
+            _ => ApiStreamError::Unknown(error_str.to_string()),
+        }
+    }
+}
+
+impl From<String> for ApiStreamError {
+    fn from(error_str: String) -> Self {
+        ApiStreamError::from(error_str.as_str())
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Flow {
     pub id: Uuid,

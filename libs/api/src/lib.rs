@@ -57,7 +57,7 @@ impl Client {
                 Ok(response) => {
                     if response.error.key == "EXCEEDED_API_LIMIT" {
                         Err(format!(
-                            "{}.\n\nPlease top up your account at https://stakpak.dev/george/settings/billing to keep Stakpaking.",
+                            "{}.\n\nPlease top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.",
                             response.error.message
                         ))
                     } else {
@@ -624,7 +624,8 @@ impl Client {
         &self,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
-    ) -> Result<impl Stream<Item = Result<ChatCompletionStreamResponse, String>>, String> {
+    ) -> Result<impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>, String>
+    {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
         let input = ChatCompletionRequest::new(messages, tools, Some(true));
@@ -640,10 +641,16 @@ impl Client {
         let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {
             event
-                .map_err(|_| "Failed to read response".to_string())
-                .and_then(|event| {
-                    serde_json::from_str::<ChatCompletionStreamResponse>(&event.data)
-                        .map_err(|_| "Failed to parse JSON from Anthropic response".to_string())
+                .map_err(|_| ApiStreamError::Unknown("Failed to read response".to_string()))
+                .and_then(|event| match event.event.as_str() {
+                    "error" => Err(ApiStreamError::from(event.data)),
+                    _ => serde_json::from_str::<ChatCompletionStreamResponse>(&event.data).map_err(
+                        |_| {
+                            ApiStreamError::Unknown(
+                                "Failed to parse JSON from Anthropic response".to_string(),
+                            )
+                        },
+                    ),
                 })
         });
 

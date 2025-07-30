@@ -104,6 +104,11 @@ pub struct AppState {
     pub auto_approve_manager: AutoApproveManager,
     pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
     pub latest_tool_call: Option<ToolCall>,
+    // Retry mechanism state
+    pub retry_attempts: usize,
+    pub max_retry_attempts: usize,
+    pub last_user_message_for_retry: Option<String>,
+    pub is_retrying: bool,
     pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
@@ -284,6 +289,10 @@ impl AppState {
             auto_approve_manager: AutoApproveManager::new(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
+            retry_attempts: 0,
+            max_retry_attempts: 3,
+            last_user_message_for_retry: None,
+            is_retrying: false,
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,

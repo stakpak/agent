@@ -13,6 +13,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
+use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
@@ -139,6 +140,9 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 messages.extend(chat_messages);
             }
 
+            let mut retry_attempts = 0;
+            const MAX_RETRY_ATTEMPTS: u32 = 2;
+
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
@@ -263,6 +267,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                         continue;
                     }
+
                     OutputEvent::ListSessions => {
                         match list_sessions(&client).await {
                             Ok(sessions) => {
@@ -332,32 +337,66 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                 }
 
-                let mut stream = client
-                    .chat_completion_stream(messages.clone(), Some(tools.clone()))
-                    .await?;
+                let response_result = loop {
+                    let mut stream = client
+                        .chat_completion_stream(messages.clone(), Some(tools.clone()))
+                        .await?;
 
-                let response = match process_responses_stream(&mut stream, &input_tx).await {
-                    Ok(response) => response,
-                    Err(e) => {
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                        input_tx
-                            .send(InputEvent::Quit)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        return Err(e.to_string());
+                    match process_responses_stream(&mut stream, &input_tx).await {
+                        Ok(response) => {
+                            retry_attempts = 0;
+                            break Ok(response);
+                        }
+                        Err(e) => {
+                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            if matches!(e, ApiStreamError::AgentInvalidResponseStream) {
+                                if retry_attempts < MAX_RETRY_ATTEMPTS {
+                                    retry_attempts += 1;
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::Error(format!(
+                                            "RETRY_ATTEMPT_{}",
+                                            retry_attempts
+                                        )),
+                                    )
+                                    .await?;
+
+                                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                                    continue;
+                                } else {
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::Error("MAX_RETRY_REACHED".to_string()),
+                                    )
+                                    .await?;
+                                    break Err(e);
+                                }
+                            } else {
+                                send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
+                                    .await?;
+                                break Err(e);
+                            }
+                        }
                     }
                 };
 
-                messages.push(response.choices[0].message.clone());
+                match response_result {
+                    Ok(response) => {
+                        messages.push(response.choices[0].message.clone());
 
-                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
-                // Send tool calls to TUI if present
-                if let Some(tool_calls) = &response.choices[0].message.tool_calls {
-                    tools_queue.extend(tool_calls.clone());
-                    if !tools_queue.is_empty() {
-                        let tool_call = tools_queue.remove(0);
-                        send_tool_call(&input_tx, &tool_call).await?;
+                        // Send tool calls to TUI if present
+                        if let Some(tool_calls) = &response.choices[0].message.tool_calls {
+                            tools_queue.extend(tool_calls.clone());
+                            if !tools_queue.is_empty() {
+                                let tool_call = tools_queue.remove(0);
+                                send_tool_call(&input_tx, &tool_call).await?;
+                                continue;
+                            }
+                        }
+                    }
+                    Err(_) => {
                         continue;
                     }
                 }
