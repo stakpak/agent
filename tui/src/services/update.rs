@@ -6,8 +6,8 @@ use crate::services::bash_block::{
     preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
 };
 use crate::services::helper_block::{
-    push_clear_message, push_error_message, push_help_message, push_memorize_message,
-    push_status_message, push_styled_message, render_system_message,
+    handle_errors, push_clear_message, push_error_message, push_help_message,
+    push_memorize_message, push_status_message, push_styled_message, render_system_message,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
@@ -120,6 +120,26 @@ pub fn update(
         }
         InputEvent::StreamToolResult(progress) => {
             handle_stream_tool_result(state, progress, terminal_size)
+        }
+        InputEvent::Error(err) => {
+            let mut error_message = handle_errors(err);
+            if error_message.contains("RETRY_ATTEMPT")
+                || error_message.contains("MAX_RETRY_REACHED")
+            {
+                if error_message.contains("RETRY_ATTEMPT") {
+                    let retry_attempt = error_message.split("RETRY_ATTEMPT_").last().unwrap_or("1");
+                    error_message = format!(
+                        "There was an issue sending your request, retrying attempt {}...",
+                        retry_attempt
+                    );
+                } else if error_message.contains("MAX_RETRY_REACHED") {
+                    error_message =
+                        "Maximum retry attempts reached. Please try again later.".to_string();
+                }
+                handle_retry_mechanism(state);
+            }
+
+            push_error_message(state, &error_message);
         }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
@@ -1293,6 +1313,12 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
             .cloned()
             .unwrap_or_default(),
         status: ToolCallResultStatus::Success,
+    }
+}
+
+fn handle_retry_mechanism(state: &mut AppState) {
+    if state.messages.len() >= 2 {
+        state.messages.pop();
     }
 }
 
