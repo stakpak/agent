@@ -31,7 +31,7 @@ flate2 = "1.1"
 zip = "4.2"
 rand = { workspace = true }
 rustls = { workspace = true }
-crossterm = "0.28"
+crossterm = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"

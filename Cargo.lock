@@ -4632,7 +4632,7 @@ dependencies = [
  "chrono",
  "clap 4.5.41",
  "config",
- "crossterm 0.28.1",
+ "crossterm 0.29.0",
  "flate2",
  "futures-util",
  "names",
