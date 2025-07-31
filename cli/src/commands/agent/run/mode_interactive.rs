@@ -142,6 +142,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
             let mut retry_attempts = 0;
             const MAX_RETRY_ATTEMPTS: u32 = 2;
+            let mut request_id: Option<String> = None;
 
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
@@ -335,12 +336,20 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                         continue;
                     }
+
+                    OutputEvent::CancelStream => {
+                        if let Some(request_id) = request_id {
+                            client.cancel_stream(request_id).await?;
+                        }
+                    }
                 }
 
                 let response_result = loop {
-                    let mut stream = client
+                    let (mut stream, current_request_id) = client
                         .chat_completion_stream(messages.clone(), Some(tools.clone()))
                         .await?;
+
+                    request_id = current_request_id;
 
                     match process_responses_stream(&mut stream, &input_tx).await {
                         Ok(response) => {
