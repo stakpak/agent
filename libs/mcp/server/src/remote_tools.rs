@@ -351,6 +351,7 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
 KEYWORD FORMAT REQUIREMENTS:
 - Keywords should be provided as space-separated strings
 - Use hyphens for compound terms (e.g., 'cloud-native', 'service-mesh')
+- keywords must include version numbers if specified by the user , if not specified, use the  keyword *latest*
 
 CORRECT EXAMPLES:
 ✅ keywords: 'kubernetes ingress nginx ssl'
