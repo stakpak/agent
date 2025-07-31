@@ -1060,7 +1060,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         }
 
         if path_obj.is_dir() {
-            let depth = if tree.unwrap_or(false) { 2 } else { 1 };
+            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = LocalFileSystemProvider;
             let path_str = path_obj.to_string_lossy();
 
@@ -1125,7 +1125,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         }
 
         if conn.is_directory(remote_path).await {
-            let depth = if tree.unwrap_or(false) { 4 } else { 1 };
+            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = RemoteFileSystemProvider::new(conn.clone());
 
             match generate_directory_tree(&provider, remote_path, "", depth, 0).await {
