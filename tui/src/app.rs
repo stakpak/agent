@@ -183,6 +183,7 @@ pub enum OutputEvent {
     SwitchToSession(String),
     Memorize,
     SendToolResult(ToolCallResult),
+    CancelStream,
 }
 
 impl AppState {

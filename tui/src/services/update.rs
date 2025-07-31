@@ -744,6 +744,10 @@ fn handle_esc(
         let _ = cancel_tx.send(());
     }
 
+    if state.is_streaming {
+        let _ = output_tx.try_send(OutputEvent::CancelStream);
+    }
+
     state.is_streaming = false;
     if state.show_sessions_dialog {
         state.show_sessions_dialog = false;
