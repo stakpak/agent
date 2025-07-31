@@ -1035,3 +1035,35 @@ pub struct CodeIndex {
     pub last_updated: DateTime<Utc>,
     pub index: BuildCodeIndexOutput,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AgentSessionStats {
+    pub aborted_tool_calls: u32,
+    pub analysis_period: Option<String>,
+    pub failed_tool_calls: u32,
+    pub from_date: Option<String>,
+    pub sessions_with_activity: u32,
+    pub successful_tool_calls: u32,
+    pub to_date: Option<String>,
+    pub tools_usage: Vec<ToolUsageStats>,
+    pub total_sessions: u32,
+    pub total_time_saved_seconds: Option<u32>,
+    pub total_tool_calls: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ToolUsageStats {
+    pub display_name: String,
+    pub time_saved_per_call: Option<f64>,
+    pub time_saved_seconds: Option<u32>,
+    pub tool_name: String,
+    pub usage_counts: ToolUsageCounts,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ToolUsageCounts {
+    pub aborted: u32,
+    pub failed: u32,
+    pub successful: u32,
+    pub total: u32,
+}
