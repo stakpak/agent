@@ -173,10 +173,6 @@ pub fn run_background_shell_command(
                     match line {
                         Ok(line) => {
                             let line = preprocess_terminal_output(&line);
-                            // Check if this is an interactive prompt
-                            if is_interactive_prompt(&line) {
-                                let _ = tx_clone.blocking_send(ShellEvent::WaitingForInput);
-                            }
                             // Always send the output so user can see the prompt
                             let _ = tx_clone.blocking_send(ShellEvent::Output(line));
                         }
@@ -199,9 +195,6 @@ pub fn run_background_shell_command(
                         Ok(line) => {
                             // Check for interactive prompts in stderr too
                             let line = preprocess_terminal_output(&line);
-                            if is_interactive_prompt(&line) {
-                                let _ = tx_clone.blocking_send(ShellEvent::WaitingForInput);
-                            }
 
                             // Check if this stderr line is actually an error or just progress info
                             let lower_line = line.to_lowercase();
@@ -379,13 +372,15 @@ pub fn run_pty_command(
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
                         let text = preprocess_terminal_output(&text);
                         // Look for interactive prompt patterns
-                        if is_interactive_prompt(&text) && !text.ends_with('\n') {
+                        if !text.ends_with('\n') {
                             // This is likely an interactive prompt without newline
-                            let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
+                            if is_interactive_prompt(&text) {
+                                let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
+                            }
                             // Always send the output so user can see the prompt
                             let _ = output_tx.blocking_send(ShellEvent::Output(text.clone()));
                             accumulated.clear();
-                        } else if text.contains('\n') {
+                        } else {
                             // Process complete lines
                             for line in text.lines() {
                                 if is_interactive_prompt(line) {

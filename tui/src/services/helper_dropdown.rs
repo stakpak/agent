@@ -39,7 +39,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                     Span::styled(padding, Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         format!(" – {}", h.description),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(Color::Rgb(180, 180, 180)),
                     ),
                 ]))
                 .style(item_style)
@@ -54,7 +54,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::REVERSED)
-                    .bg(Color::DarkGray),
+                    .bg(Color::White),
             )
             .block(Block::default());
         f.render_stateful_widget(dropdown_widget, dropdown_area, &mut list_state);
