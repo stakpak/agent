@@ -281,21 +281,12 @@ pub fn update(
 
             line = truncate_output(&line);
             state.messages.push(Message::plain_text(line));
-
-            // Only adjust scroll if not streaming or if we're staying at bottom
-            if !state.is_streaming || state.stay_at_bottom {
-                adjust_scroll(state, message_area_height, message_area_width);
-            }
         }
 
         InputEvent::ShellError(line) => {
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
             push_error_message(state, &line);
-            // Only adjust scroll if not streaming or if we're staying at bottom
-            if !state.is_streaming || state.stay_at_bottom {
-                adjust_scroll(state, message_area_height, message_area_width);
-            }
         }
 
         InputEvent::ShellWaitingForInput => {
@@ -305,7 +296,7 @@ pub fn update(
         }
 
         InputEvent::ShellCompleted(_code) => {
-            // Command completed, reset waiting state
+            // Command completed, reset active command state
             state.waiting_for_shell_input = false;
 
             if state.dialog_command.is_some() {
@@ -652,17 +643,6 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-    if (state.is_streaming || state.loading) && !state.is_dialog_open {
-        state.input.clear();
-        state.cursor_position = 0;
-        return;
-    }
-    if state.show_shell_mode
-        && state.active_shell_command.is_some()
-        && !state.waiting_for_shell_input
-    {
-        return; // Block all input
-    }
     if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
         state.show_shortcuts = !state.show_shortcuts;
         return;
@@ -807,18 +787,11 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    if (state.is_streaming || state.loading) && !state.is_dialog_open {
-        state.input.clear();
-        state.cursor_position = 0;
-        return;
-    }
     if state.show_shell_mode {
-        // Check if we're waiting for shell input (like password)
-        if state.waiting_for_shell_input {
+        if state.active_shell_command.is_some() {
             let input = state.input.clone();
             state.input.clear();
             state.cursor_position = 0;
-            state.waiting_for_shell_input = false;
 
             // Send the input to the shell command
             if let Some(cmd) = &state.active_shell_command {
@@ -827,6 +800,8 @@ fn handle_input_submitted(
                     let _ = stdin_tx.send(input).await;
                 });
             }
+            state.waiting_for_shell_input = false;
+
             return;
         }
 
@@ -838,7 +813,7 @@ fn handle_input_submitted(
             state.show_helper_dropdown = false;
 
             // Run the shell command with the shell event channel
-            state.run_shell_command(command, shell_tx);
+            state.run_shell_command(command.clone(), shell_tx);
         }
         return;
     }
@@ -1096,7 +1071,6 @@ fn handle_stream_tool_result(
     terminal_size: Size,
 ) {
     let tool_call_id = progress.id;
-
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
         return;
