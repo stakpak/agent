@@ -916,12 +916,19 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             cmd.env("DEBIAN_FRONTEND", "noninteractive")
-                .env("SUDO_ASKPASS", "/bin/false");
+                .env("SUDO_ASKPASS", "/bin/false")
+                .process_group(0);
         }
-        let mut child = cmd.process_group(0).spawn().map_err(|e| {
+        #[cfg(windows)]
+        {
+            // On Windows, create a new process group
+            cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
             error!("Failed to run command: {}", e);
             CallToolResult::error(vec![
                 Content::text("COMMAND_ERROR"),
