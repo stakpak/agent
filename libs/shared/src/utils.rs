@@ -448,79 +448,108 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
 ) -> Result<String, P::Error> {
     let mut result = String::new();
 
-    // Safety check: limit absolute depth to prevent infinite recursion
     if current_depth >= max_depth || current_depth >= 10 {
         return Ok(result);
     }
 
     let entries = provider.list_directory(path).await?;
-    let mut items = entries;
-
-    // Sort items: directories first, then alphabetically
-    items.sort_by(|a, b| match (a.is_directory, b.is_directory) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.cmp(&b.name),
-    });
-
-    // Separate file entries from directory entries for processing
     let mut file_entries = Vec::new();
     let mut dir_entries = Vec::new();
+    for entry in entries.iter() {
+        if entry.is_directory {
+            if entry.name == "."
+                || entry.name == ".."
+                || entry.name == ".git"
+                || entry.name == "node_modules"
+            {
+                continue;
+            }
+            dir_entries.push(entry.clone());
+        } else {
+            file_entries.push(entry.clone());
+        }
+    }
 
-    for (i, entry) in items.iter().enumerate() {
-        let is_last_item = i == items.len() - 1;
-        let current_prefix = if is_last_item {
+    dir_entries.sort_by(|a, b| a.name.cmp(&b.name));
+    file_entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+    const MAX_ITEMS: usize = 5;
+    let total_items = dir_entries.len() + file_entries.len();
+    let should_limit = current_depth > 0 && total_items > MAX_ITEMS;
+
+    if should_limit {
+        if dir_entries.len() > MAX_ITEMS {
+            dir_entries.truncate(MAX_ITEMS);
+            file_entries.clear();
+        } else {
+            let remaining_items = MAX_ITEMS - dir_entries.len();
+            file_entries.truncate(remaining_items);
+        }
+    }
+
+    let mut dir_headers = Vec::new();
+    let mut dir_futures = Vec::new();
+    for (i, entry) in dir_entries.iter().enumerate() {
+        let is_last_dir = i == dir_entries.len() - 1;
+        let is_last_overall = is_last_dir && file_entries.is_empty() && !should_limit;
+        let current_prefix = if is_last_overall {
             "└── "
         } else {
             "├── "
         };
+        let next_prefix = format!(
+            "{}{}",
+            prefix,
+            if is_last_overall { "    " } else { "│   " }
+        );
 
-        if entry.is_directory {
-            // Skip directories that might cause loops (. and ..)
-            if entry.name == "." || entry.name == ".." {
-                continue;
-            }
+        let header = format!("{}{}{}/\n", prefix, current_prefix, entry.name);
+        dir_headers.push(header);
 
-            let next_prefix = format!("{}{}", prefix, if is_last_item { "    " } else { "│   " });
-            dir_entries.push((entry.clone(), current_prefix.to_string(), next_prefix));
-        } else {
-            file_entries.push((entry.clone(), current_prefix.to_string()));
-        }
+        let entry_path = entry.path.clone();
+        let next_prefix_clone = next_prefix.clone();
+        let future = async move {
+            generate_directory_tree(
+                provider,
+                &entry_path,
+                &next_prefix_clone,
+                max_depth,
+                current_depth + 1,
+            )
+            .await
+        };
+        dir_futures.push(future);
     }
-
-    // Add all file entries to result first
-    for (entry, prefix_str) in file_entries {
-        result.push_str(&format!("{}{}{}\n", prefix, prefix_str, entry.name));
-    }
-
-    // Add directory headers and process subdirectories in parallel
-    for (entry, prefix_str, _) in &dir_entries {
-        result.push_str(&format!("{}{}{}/\n", prefix, prefix_str, entry.name));
-    }
-
-    // Process all subdirectories concurrently
-    if !dir_entries.is_empty() {
-        let dir_futures: Vec<_> = dir_entries
-            .into_iter()
-            .map(|(entry, _, next_prefix)| {
-                let entry_path = entry.path.clone();
-                async move {
-                    generate_directory_tree(
-                        provider,
-                        &entry_path,
-                        &next_prefix,
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    .await
-                }
-            })
-            .collect();
-
+    if !dir_futures.is_empty() {
         let subtree_results = futures::future::join_all(dir_futures).await;
-        for subtree in subtree_results.into_iter().flatten() {
-            result.push_str(&subtree);
+
+        for (i, header) in dir_headers.iter().enumerate() {
+            result.push_str(header);
+            if let Some(Ok(subtree)) = subtree_results.get(i) {
+                result.push_str(subtree);
+            }
         }
+    }
+
+    for (i, entry) in file_entries.iter().enumerate() {
+        let is_last_file = i == file_entries.len() - 1;
+        let is_last_overall = is_last_file && !should_limit;
+        let current_prefix = if is_last_overall {
+            "└── "
+        } else {
+            "├── "
+        };
+        result.push_str(&format!("{}{}{}\n", prefix, current_prefix, entry.name));
+    }
+
+    if should_limit {
+        let remaining_count = total_items - MAX_ITEMS;
+        result.push_str(&format!(
+            "{}└── ... {} more item{}\n",
+            prefix,
+            remaining_count,
+            if remaining_count == 1 { "" } else { "s" }
+        ));
     }
 
     Ok(result)
