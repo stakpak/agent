@@ -338,9 +338,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
 
                     OutputEvent::CancelStream => {
-                        if let Some(request_id) = request_id {
-                            client.cancel_stream(request_id).await?;
+                        if let Some(request_id) = &request_id {
+                            client.cancel_stream(request_id.clone()).await?;
                         }
+                        // Skip the stream processing when cancelled
+                        continue;
                     }
                 }
 
