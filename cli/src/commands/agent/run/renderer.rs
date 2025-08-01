@@ -1,4 +1,6 @@
+use crossterm::style::{Color, Stylize};
 use serde_json::Value;
+use stakpak_api::models::{AgentSessionStats, ToolUsageStats};
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use std::fmt;
 
@@ -418,6 +420,128 @@ impl OutputRenderer {
         }
 
         wrapped_lines
+    }
+
+    pub fn render_session_stats(&self, stats: &AgentSessionStats) -> String {
+        match &self.format {
+            OutputFormat::Json => {
+                serde_json::to_string_pretty(stats).unwrap_or_else(|_| "{}".to_string())
+            }
+            OutputFormat::Text => {
+                if let Some(total_time_saved) = stats.total_time_saved_seconds {
+                    self.render_time_saved_stats(total_time_saved, &stats.tools_usage)
+                } else {
+                    String::new()
+                }
+            }
+        }
+    }
+
+    fn render_time_saved_stats(&self, total_seconds: u32, tool_stats: &[ToolUsageStats]) -> String {
+        if total_seconds == 0 {
+            return String::new();
+        }
+
+        let mut output = String::new();
+
+        // Convert seconds to minutes for display
+        let total_minutes = total_seconds / 60;
+        let remaining_seconds = total_seconds % 60;
+
+        // Main ROI-focused header
+        output.push_str(&format!("\n{}\n", "━".repeat(50).with(Color::Cyan)));
+
+        if total_minutes >= 60 {
+            let hours = total_minutes / 60;
+            let mins = total_minutes % 60;
+            output.push_str(&format!(
+                "{}\n\n",
+                format!("You just saved {}h {}m of work!", hours, mins)
+                    .with(Color::Cyan)
+                    .bold()
+            ));
+        } else {
+            output.push_str(&format!(
+                "{}\n\n",
+                format!(
+                    "You just saved {}m {}s of work!",
+                    total_minutes, remaining_seconds
+                )
+                .with(Color::Cyan)
+                .bold()
+            ));
+        }
+
+        // Filter tools that actually saved time and sort by time saved
+        let mut time_saving_tools: Vec<_> = tool_stats
+            .iter()
+            .filter(|tool| tool.time_saved_seconds.unwrap_or(0) > 0)
+            .collect();
+
+        time_saving_tools.sort_by(|a, b| {
+            b.time_saved_seconds
+                .unwrap_or(0)
+                .cmp(&a.time_saved_seconds.unwrap_or(0))
+        });
+
+        if !time_saving_tools.is_empty() {
+            output.push_str(&format!(
+                "{}\n",
+                "Top time savers:".with(Color::Cyan).bold()
+            ));
+
+            for (i, tool) in time_saving_tools.iter().take(3).enumerate() {
+                let saved_seconds = tool.time_saved_seconds.unwrap_or(0);
+                let saved_minutes = saved_seconds / 60;
+                let remaining_secs = saved_seconds % 60;
+
+                let time_display = if saved_minutes > 0 {
+                    format!("{}m {}s", saved_minutes, remaining_secs)
+                } else {
+                    format!("{}s", remaining_secs)
+                };
+
+                let bullet = match i {
+                    0 => "▶".with(Color::Cyan),
+                    1 => "▶".with(Color::Cyan),
+                    2 => "▶".with(Color::Cyan),
+                    _ => "▷".with(Color::DarkGrey),
+                };
+
+                output.push_str(&format!(
+                    "  {} {} - {}\n",
+                    bullet,
+                    tool.display_name.clone().with(Color::White),
+                    time_display.with(Color::Cyan)
+                ));
+            }
+
+            output.push('\n');
+        }
+
+        // Motivational ROI message
+        let daily_estimate = (total_seconds as f64 / 3600.0) * 3.0; // Assume 3 sessions per day
+        let weekly_estimate = daily_estimate * 5.0;
+
+        if weekly_estimate >= 1.0 {
+            output.push_str(&format!(
+                "At this pace, you could save {} per week!\n",
+                format!("{}h", (weekly_estimate as u32))
+                    .to_string()
+                    .with(Color::Magenta)
+                    .bold()
+            ));
+        } else {
+            let weekly_minutes = (weekly_estimate * 60.0) as u32;
+            output.push_str(&format!(
+                "At this pace, you could save {} per week!\n",
+                format!("{}m", weekly_minutes).with(Color::Magenta).bold()
+            ));
+        }
+
+        output.push_str(&format!("{}\n\n", "━".repeat(50).with(Color::Cyan)));
+
+        output
     }
 }
 
