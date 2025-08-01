@@ -122,6 +122,10 @@ pub fn update(
             handle_stream_tool_result(state, progress, terminal_size)
         }
         InputEvent::Error(err) => {
+            if err == "STREAM_CANCELLED" {
+                render_bash_block_rejected("Interrupted by user", "System", state, None);
+                return;
+            }
             let mut error_message = handle_errors(err);
             if error_message.contains("RETRY_ATTEMPT")
                 || error_message.contains("MAX_RETRY_REACHED")
@@ -742,10 +746,6 @@ fn handle_esc(
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
-    }
-
-    if state.is_streaming {
-        let _ = output_tx.try_send(OutputEvent::CancelStream);
     }
 
     state.is_streaming = false;

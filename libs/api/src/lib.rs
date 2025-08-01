@@ -6,7 +6,6 @@ use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
 use stakpak_shared::tls_client::TlsClientConfig;
 use stakpak_shared::tls_client::create_tls_client;
-use std::io::Write;
 use url::Url;
 pub mod models;
 use futures_util::Stream;
@@ -671,22 +670,12 @@ impl Client {
     }
 
     pub async fn cancel_stream(&self, request_id: String) -> Result<(), String> {
-        // write debugs to debug.log
-        let mut file = std::fs::File::create("debug.log").unwrap();
-        file.write_all(request_id.as_bytes()).unwrap();
-
         let url = format!("{}/agents/requests/{}/cancel", self.base_url, request_id);
-        let response = self
-            .client
+        self.client
             .post(&url)
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
-
-        file.write_all(format!("url: {}\n", url).as_bytes())
-            .unwrap();
-        file.write_all(format!("response: {}\n", response.status()).as_bytes())
-            .unwrap();
 
         Ok(())
     }
