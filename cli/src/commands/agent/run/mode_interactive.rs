@@ -109,8 +109,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     });
 
     // Spawn client task
-    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> =
-        tokio::spawn(async move {
+    let client_handle: tokio::task::JoinHandle<Result<Vec<ChatMessage>, String>> = tokio::spawn(
+        async move {
             let client = Client::new(&ClientConfig {
                 api_key: ctx.api_key.clone(),
                 api_endpoint: ctx.api_endpoint.clone(),
@@ -338,11 +338,27 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
 
                 let response_result = loop {
-                    let mut stream = client
+                    let (mut stream, current_request_id) = client
                         .chat_completion_stream(messages.clone(), Some(tools.clone()))
                         .await?;
 
-                    match process_responses_stream(&mut stream, &input_tx).await {
+                    // Create a cancellation receiver for this iteration
+                    let mut cancel_rx_iter = cancel_rx.resubscribe();
+
+                    // Race between stream processing and cancellation
+
+                    match tokio::select! {
+
+                        result = process_responses_stream(&mut stream, &input_tx) => result,
+                        _ = cancel_rx_iter.recv() => {
+                            // Stream was cancelled
+                            if let Some(request_id) = &current_request_id {
+                                client.cancel_stream(request_id.clone()).await?;
+                            }
+                            send_input_event(&input_tx, InputEvent::Error("STREAM_CANCELLED".to_string())).await?;
+                            break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
+                        }
+                    } {
                         Ok(response) => {
                             retry_attempts = 0;
                             break Ok(response);
@@ -397,13 +413,15 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         }
                     }
                     Err(_) => {
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         continue;
                     }
                 }
             }
 
             Ok(messages)
-        });
+        },
+    );
 
     // Wait for all tasks to finish
     let (client_res, _, _, _) =
