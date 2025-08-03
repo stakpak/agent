@@ -9,7 +9,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ratatui = "0.29"
-crossterm = "0.29"
+crossterm = { workspace = true }
 tokio = { version = "1.39", features = ["full"] }
 unicode-width = "0.2.0"
 uuid = { workspace = true }
