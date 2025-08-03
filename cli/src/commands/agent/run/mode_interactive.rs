@@ -371,6 +371,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if let Some(request_id) = &current_request_id {
                             client.cancel_stream(request_id.clone()).await?;
                         }
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         send_input_event(&input_tx, InputEvent::Error("STREAM_CANCELLED".to_string())).await?;
                         break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
                     }
@@ -401,6 +402,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 break Err(e);
                             }
                         } else {
+                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                             send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
                                 .await?;
                             break Err(e);
@@ -426,6 +428,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                 }
                 Err(_) => {
+                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                     continue;
                 }
             }
