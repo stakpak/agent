@@ -651,8 +651,13 @@ impl Client {
         &self,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
-    ) -> Result<impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>, String>
-    {
+    ) -> Result<
+        (
+            impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
+            Option<String>,
+        ),
+        String,
+    > {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
         let input = ChatCompletionRequest::new(messages, tools, Some(true));
@@ -664,6 +669,13 @@ impl Client {
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        // Extract x-request-id from headers
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
 
         let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {
@@ -681,7 +693,18 @@ impl Client {
                 })
         });
 
-        Ok(stream)
+        Ok((stream, request_id))
+    }
+
+    pub async fn cancel_stream(&self, request_id: String) -> Result<(), String> {
+        let url = format!("{}/agents/requests/{}/cancel", self.base_url, request_id);
+        self.client
+            .post(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        Ok(())
     }
 
     pub async fn generate_code(
