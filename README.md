@@ -2,10 +2,7 @@
 
 **The most secure agent built for operations & DevOps.** Designed for the grittiest parts of software development with enterprise-grade security features including mutual TLS (mTLS) encryption, dynamic secret redaction, and privacy-first architecture.
 
-<img src="assets/TUIOverview.jpeg" width="800">
-
-> **Warning**
-> This CLI tool is under heavy development, and breaking changes should be expected. Use with caution 🚧
+<img src="assets/TUIOverview.png" width="800">
 
 ## 🔒 Security Hardened
 
