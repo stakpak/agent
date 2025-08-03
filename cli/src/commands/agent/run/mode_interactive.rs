@@ -34,6 +34,7 @@ pub struct RunInteractiveConfig {
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_mtls: bool,
+    pub inline_mode: bool,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -103,6 +104,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             latest_version.ok(),
             config.redact_secrets,
             config.privacy_mode,
+            config.inline_mode,
         )
         .await
         .map_err(|e| e.to_string());

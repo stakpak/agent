@@ -9,12 +9,15 @@ use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message,
     push_memorize_message, push_status_message, push_styled_message, render_system_message,
 };
+use crate::services::inline_mode::push_inline_message;
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
     get_wrapped_message_lines,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use ratatui::Terminal;
 use ratatui::layout::Size;
+use ratatui::prelude::CrosstermBackend;
 use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
@@ -36,9 +39,10 @@ pub fn update(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
-    terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) {
+    let terminal_size = terminal.size().unwrap_or_default();
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
@@ -105,18 +109,36 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
+                handle_input_submitted(
+                    state,
+                    message_area_height,
+                    output_tx,
+                    input_tx,
+                    shell_tx,
+                    terminal,
+                );
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
-            handle_input_submitted_with(state, s, None, message_area_height)
+            handle_input_submitted_with(state, s, None, message_area_height, terminal)
         }
         InputEvent::InputSubmittedWithColor(s, color) => {
-            handle_input_submitted_with(state, s, Some(color), message_area_height)
+            handle_input_submitted_with(state, s, Some(color), message_area_height, terminal)
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
+        }
+        InputEvent::StreamEnd(id) => {
+            // get the message
+            let message = state.messages.iter().find(|m| m.id == id);
+            if let Some(message) = message {
+                if state.inline_mode {
+                    let _ = push_inline_message(message, terminal);
+                }
+            }
+            state.is_streaming = false;
+            state.loading = false;
         }
         InputEvent::StreamToolResult(progress) => {
             handle_stream_tool_result(state, progress, terminal_size)
@@ -252,7 +274,7 @@ pub fn update(
             state.is_streaming = is_loading;
             state.loading = is_loading;
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx),
+        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx),
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -463,7 +485,7 @@ pub fn update(
             state.cursor_position = pos;
         }
         InputEvent::RetryLastToolCall => {
-            handle_retry_tool_call(state, input_tx, cancel_tx);
+            handle_retry_tool_call(state, cancel_tx);
         }
         InputEvent::ToggleCollapsedMessages => {
             state.show_collapsed_messages = !state.show_collapsed_messages;
@@ -739,11 +761,8 @@ fn handle_esc(
     state: &mut AppState,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
-    input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
-
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
     }
@@ -790,6 +809,7 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) {
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
@@ -983,13 +1003,16 @@ fn handle_input_submitted(
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
+
         let _ = output_tx.try_send(OutputEvent::UserMessage(
             state.input.clone(),
             state.shell_tool_calls.clone(),
         ));
-        state
-            .messages
-            .push(Message::user(format!("> {}", state.input), None));
+        let message = Message::user(format!("> {}", state.input), None);
+        state.messages.push(message.clone());
+        if state.inline_mode {
+            let _ = push_inline_message(&message, terminal);
+        }
         state.input.clear();
         state.cursor_position = 0;
         let total_lines = state.messages.len() * 2;
@@ -1009,6 +1032,7 @@ fn handle_input_submitted_with(
     s: String,
     color: Option<Color>,
     message_area_height: usize,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) {
     state.shell_tool_calls = None;
     let input_height = 3;
@@ -1016,11 +1040,11 @@ fn handle_input_submitted_with(
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.scroll == max_scroll;
-    state.messages.push(Message::assistant(
-        None,
-        s.clone(),
-        color.map(|c| Style::default().fg(c)),
-    ));
+    let message = Message::assistant(None, s.clone(), color.map(|c| Style::default().fg(c)));
+    state.messages.push(message.clone());
+    if state.inline_mode {
+        let _ = push_inline_message(&message, terminal);
+    }
     state.input.clear();
     state.cursor_position = 0;
     let total_lines = state.messages.len() * 2;
@@ -1034,6 +1058,7 @@ fn handle_input_submitted_with(
 
 fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area_height: usize) {
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
+        // Streaming continues - update existing message
         state.is_streaming = true;
         if let MessageContent::Plain(text, _) = &mut message.content {
             text.push_str(&s);
@@ -1048,6 +1073,7 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
             state.scroll = max_scroll;
         }
     } else {
+        // New message started - streaming begins
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -1065,7 +1091,7 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
-        state.is_streaming = false;
+        state.is_streaming = true; // Streaming started
     }
 }
 
@@ -1302,11 +1328,8 @@ fn handle_retry_mechanism(state: &mut AppState) {
 
 fn handle_retry_tool_call(
     state: &mut AppState,
-    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
-
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
     }

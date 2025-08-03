@@ -80,6 +80,10 @@ struct Cli {
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
     disable_mcp_mtls: bool,
 
+    /// Run the agent in inline mode (compact UI at bottom of terminal)
+    #[arg(long = "inline-mode", default_value_t = false)]
+    inline_mode: bool,
+
     /// Prompt to run the agent with (required when using --print or --async)
     #[clap(required_if_eq("print", "true"))]
     prompt: Option<String>,
@@ -235,26 +239,29 @@ async fn main() {
                             }
                         },
 
-                        // Interactive mode: run in TUI
-                        false => match agent::run::run_interactive(
-                            config,
-                            RunInteractiveConfig {
-                                checkpoint_id: cli.checkpoint_id,
-                                local_context,
-                                redact_secrets: !cli.disable_secret_redaction,
-                                privacy_mode: cli.privacy_mode,
-                                rulebooks,
-                                enable_mtls: !cli.disable_mcp_mtls,
-                            },
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                eprintln!("Ops! something went wrong: {}", e);
-                                std::process::exit(1);
+                        // Interactive mode: run in TUI (full screen or inline)
+                        false => {
+                            match agent::run::run_interactive(
+                                config,
+                                RunInteractiveConfig {
+                                    checkpoint_id: cli.checkpoint_id,
+                                    local_context,
+                                    redact_secrets: !cli.disable_secret_redaction,
+                                    privacy_mode: cli.privacy_mode,
+                                    rulebooks,
+                                    enable_mtls: !cli.disable_mcp_mtls,
+                                    inline_mode: cli.inline_mode,
+                                },
+                            )
+                            .await
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    eprintln!("Ops! something went wrong: {}", e);
+                                    std::process::exit(1);
+                                }
                             }
-                        },
+                        }
                     }
                 }
             }

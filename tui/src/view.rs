@@ -15,13 +15,100 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
 const DROPDOWN_MAX_HEIGHT: usize = 8;
 
 pub fn view(f: &mut Frame, state: &AppState) {
+    if state.inline_mode {
+        render_inline_view(f, state);
+    } else {
+        render_full_view(f, state);
+    }
+}
+
+fn calculate_compact_input_height(state: &AppState) -> u16 {
+    let mut total_height = if state.show_sessions_dialog || state.dialog_command.is_some() {
+        0 // No input height when dialogs are open
+    } else {
+        3 // Base input height
+    };
+
+    // Add height for content below input (dropdowns and hints)
+    if state.show_helper_dropdown && !state.filtered_helpers.is_empty() && !state.is_dialog_open {
+        total_height += state.filtered_helpers.len().min(6) as u16; // Limit dropdown height
+    } else {
+        total_height += 1; // Hint area
+    }
+
+    // Add height for content above input (dialogs)
+    let mut above_input_height = 0;
+    if state.show_sessions_dialog {
+        // Sessions dialog should use most of the available height
+        above_input_height += 30; // Much larger for sessions dialog
+    }
+
+    if state.dialog_command.is_some() {
+        above_input_height += 15; // Confirmation dialog height (increased for compact view)
+    }
+
+    // Add space for loading spinner if loading
+    if state.loading {
+        above_input_height += 1;
+    }
+
+    total_height += above_input_height;
+
+    total_height
+}
+
+fn render_inline_view(f: &mut Frame, state: &AppState) {
+    // For inline mode, we only render the bottom widget
+    // Messages are printed to stdout, not rendered in TUI
+
+    let area = f.area();
+
+    // Use shared height calculation
+    let total_height = calculate_compact_input_height(state);
+
+    // Ensure we don't exceed screen height
+    let final_height = if total_height > area.height {
+        area.height
+    } else {
+        total_height
+    };
+
+    // Create layout based on whether dialogs are open
+    let chunks = if state.show_sessions_dialog || state.dialog_command.is_some() {
+        // When dialogs are open, use bottom layout
+        ratatui::layout::Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1), // Spacer to push to bottom
+                Constraint::Length(final_height),
+            ])
+            .split(area)
+    } else {
+        // When no dialogs, position input 2 lines from top
+        ratatui::layout::Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Spacer to push down from top
+                Constraint::Length(final_height),
+                Constraint::Min(1), // Remaining space at bottom
+            ])
+            .split(area)
+    };
+
+    let widget_area = chunks[1];
+
+    // Render the compact input widget
+    render_compact_input(f, state, widget_area);
+}
+
+fn render_full_view(f: &mut Frame, state: &AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
@@ -478,4 +565,217 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(input_widget, area);
+}
+
+fn render_compact_input(f: &mut Frame, state: &AppState, area: Rect) {
+    // Create a compact layout for the inline widget
+    let mut constraints = vec![];
+
+    // Only add input area if no dialogs are open
+    if !state.show_sessions_dialog && !state.is_dialog_open {
+        constraints.push(Constraint::Length(3)); // Input area
+    }
+
+    // Add constraints for content below input (dropdowns and hints)
+    if state.show_helper_dropdown && !state.filtered_helpers.is_empty() && !state.is_dialog_open {
+        constraints.push(Constraint::Length(
+            state.filtered_helpers.len().min(6) as u16
+        )); // Helper dropdown
+    } else {
+        constraints.push(Constraint::Length(if state.show_shortcuts { 2 } else { 1 })); // Hint area - 2 lines for shortcuts, 1 for normal
+    }
+
+    // Add constraints for content above input (dialogs and loading)
+    let mut above_constraints = vec![];
+
+    if state.loading {
+        above_constraints.push(Constraint::Length(1)); // Loading spinner
+    }
+
+    if state.show_sessions_dialog {
+        above_constraints.push(Constraint::Length(30)); // Sessions dialog (much larger for compact view)
+    } else if state.is_dialog_open {
+        above_constraints.push(Constraint::Length(4)); // Confirmation dialog (increased for compact view)
+    }
+
+    // Combine constraints: above content + input + below content
+    let above_constraints_len = above_constraints.len();
+    let mut all_constraints = above_constraints;
+    all_constraints.extend(constraints);
+
+    let chunks = ratatui::layout::Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(all_constraints)
+        .split(area);
+
+    let input_area = if !state.show_sessions_dialog && !state.is_dialog_open {
+        chunks[above_constraints_len] // Input is after above content
+    } else {
+        Rect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        } // Empty area when dialogs are open
+    };
+    let below_content_area = chunks.get(
+        above_constraints_len
+            + if !state.show_sessions_dialog && !state.is_dialog_open {
+                1
+            } else {
+                0
+            },
+    ); // Below input
+
+    // Render content above input (dialogs and loading)
+    let mut content_index = 0;
+
+    // Render loading spinner if loading
+    if state.loading {
+        if let Some(area) = chunks.get(content_index) {
+            render_compact_loading(f, state, *area);
+        }
+        content_index += 1;
+    }
+
+    // Render dialogs above input
+    if state.show_sessions_dialog {
+        if let Some(area) = chunks.get(content_index) {
+            render_compact_sessions_dialog(f, state, *area);
+        }
+    } else if state.dialog_command.is_some() {
+        if let Some(area) = chunks.get(content_index) {
+            render_compact_confirmation_dialog(f, *area);
+        }
+    } else {
+        // Render the input with proper styling
+        render_multiline_input(f, state, input_area);
+    }
+
+    // Render content below input (dropdowns and hints)
+    if let Some(area) = below_content_area {
+        if state.show_helper_dropdown && !state.filtered_helpers.is_empty() && !state.is_dialog_open
+        {
+            render_helper_dropdown(f, state, *area);
+        } else {
+            render_hint_or_shortcuts(f, state, *area);
+        }
+    }
+}
+
+fn render_compact_loading(f: &mut Frame, state: &AppState, area: Rect) {
+    if area.height > 0 {
+        let loading_line = render_loading_spinner(state);
+        let loading_widget = Paragraph::new(vec![loading_line])
+            .style(ratatui::style::Style::default().fg(Color::LightRed));
+        f.render_widget(loading_widget, area);
+    }
+}
+
+fn render_compact_sessions_dialog(f: &mut Frame, state: &AppState, area: Rect) {
+    let dialog_height = area.height.saturating_sub(1); // Leave space for hint
+
+    let dialog_area = Rect {
+        x: area.x + 1,
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: dialog_height,
+    };
+
+    // Render the dialog block
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::LightYellow))
+        .title(Span::styled(
+            "View session",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ));
+    f.render_widget(block, dialog_area);
+
+    // Render session list
+    let list_area = Rect {
+        x: dialog_area.x + 2,
+        y: dialog_area.y + 1,
+        width: dialog_area.width - 4,
+        height: dialog_area.height.saturating_sub(2), // More space for list in larger dialog
+    };
+
+    let items: Vec<ratatui::widgets::ListItem> = state
+        .sessions
+        .iter()
+        .map(|s| {
+            let formatted_datetime = if let Ok(dt) =
+                chrono::DateTime::parse_from_rfc3339(&s.updated_at.replace(" UTC", "+00:00"))
+            {
+                dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+            } else {
+                let parts = s.updated_at.split('T').collect::<Vec<_>>();
+                let date = parts.first().unwrap_or(&"");
+                let time = parts.get(1).and_then(|t| t.split('.').next()).unwrap_or("");
+                format!("{} {} UTC", date, time)
+            };
+
+            let text = format!("{} . {}", formatted_datetime, s.title);
+            ratatui::widgets::ListItem::new(Line::from(vec![Span::raw(text)]))
+        })
+        .collect();
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(state.session_selected));
+    let list = ratatui::widgets::List::new(items)
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default());
+    f.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Help text
+    let help = "press enter to choose · esc to cancel";
+    let help_area = Rect {
+        x: dialog_area.x + 2,
+        y: dialog_area.y + dialog_area.height - 1,
+        width: dialog_area.width - 4,
+        height: 1,
+    };
+    let help_widget = Paragraph::new(help)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(ratatui::layout::Alignment::Left);
+    f.render_widget(help_widget, help_area);
+}
+
+fn render_compact_confirmation_dialog(f: &mut Frame, area: Rect) {
+    let dialog_height = area.height.saturating_sub(1); // Leave space for hint
+
+    let dialog_area = Rect {
+        x: area.x + 1,
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: dialog_height,
+    };
+
+    // Single line message
+    let message =
+        "Press Enter to continue. '$' to run the command yourself or Esc to cancel and reprompt";
+
+    let line = Line::from(vec![Span::styled(
+        message,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )]);
+    let dialog = Paragraph::new(vec![line])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::LightYellow))
+                .title("Confirmation"),
+        )
+        .alignment(ratatui::layout::Alignment::Center);
+    f.render_widget(dialog, dialog_area);
 }

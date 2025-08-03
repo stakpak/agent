@@ -156,5 +156,8 @@ pub async fn process_responses_stream(
         logprobs: None,
     });
 
+    // Send StreamEnd event when streaming is complete
+    send_input_event(input_tx, InputEvent::StreamEnd(message_id)).await?;
+
     Ok(chat_completion_response)
 }

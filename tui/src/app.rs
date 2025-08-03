@@ -112,12 +112,14 @@ pub struct AppState {
     pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
+    pub inline_mode: bool,                  // NEW: toggle between inline mode and full screen mode
 }
 
 #[derive(Debug)]
 pub enum InputEvent {
     AssistantMessage(String),
     StreamAssistantMessage(Uuid, String),
+    StreamEnd(Uuid),
     RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
     StreamToolResult(ToolCallResultProgress),
@@ -296,6 +298,7 @@ impl AppState {
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
+            inline_mode: false,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {

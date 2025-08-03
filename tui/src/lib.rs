@@ -1,23 +1,25 @@
 mod app;
 mod event;
+mod services;
 mod terminal;
 mod view;
 
 pub use app::{AppState, InputEvent, OutputEvent, SessionInfo};
+pub use event::map_crossterm_event_to_input_event;
 pub use ratatui::style::Color;
-
-mod services;
+pub use terminal::TerminalGuard;
+pub use view::view;
 
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::{execute, terminal::EnterAlternateScreen};
-pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
-pub use terminal::TerminalGuard;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
-pub use view::view;
 
+use crate::services::inline_mode::push_inline_history_messages;
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
@@ -26,18 +28,35 @@ pub async fn run_tui(
     latest_version: Option<String>,
     redact_secrets: bool,
     privacy_mode: bool,
+    inline_mode: bool,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
-    execute!(
-        std::io::stdout(),
-        EnterAlternateScreen,
-        EnableBracketedPaste
-    )?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let mut state = AppState::new(latest_version, redact_secrets, privacy_mode);
+    let mut state = AppState::new(latest_version.clone(), redact_secrets, privacy_mode);
+    state.inline_mode = inline_mode;
 
+    // Initialize terminal based on mode
+    let mut terminal = if inline_mode {
+        ratatui::init_with_options(ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Inline(10), // Dynamic viewport height
+        })
+    } else {
+        // For full screen mode, use alternate screen
+        execute!(
+            std::io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste
+        )?;
+        Terminal::new(CrosstermBackend::new(std::io::stdout()))?
+    };
+
+    // get terminal width
+    let terminal_size: ratatui::prelude::Size = terminal.size()?;
+
+    if state.inline_mode {
+        push_inline_history_messages(&state.messages, &mut terminal)?;
+    }
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let internal_tx_thread = internal_tx.clone();
@@ -56,12 +75,16 @@ pub async fn run_tui(
     let shell_event_tx = internal_tx.clone();
 
     let mut spinner_interval = interval(Duration::from_millis(100));
-    // get terminal width
-    let terminal_size = terminal.size()?;
+
     // Main async update/view loop
-    terminal.draw(|f| view::view(f, &state))?;
     let mut should_quit = false;
+    let mut redraw = true;
     loop {
+        if redraw {
+            terminal.draw(|f| view::view(f, &state))?;
+            redraw = false;
+        }
+
         // Check if double Ctrl+C timer expired
         if state.ctrl_c_pressed_once {
             if let Some(timer) = state.ctrl_c_timer {
@@ -84,10 +107,14 @@ pub async fn run_tui(
                     emergency_clear_and_redraw(&mut terminal, &state)?;
                     continue;
                    }
+
+
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, &mut terminal);
                        state.poll_autocomplete_results();
-                       terminal.draw(|f| view::view(f, &state))?;
+                       redraw = true;
+
+
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
@@ -121,8 +148,9 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, &mut terminal);
                        state.poll_autocomplete_results();
+
                    }
                }
                Some(event) = internal_rx.recv() => {
@@ -152,18 +180,12 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                    //    if let InputEvent::InputSubmitted = event {
-                    //     if (state.show_helper_dropdown && state.autocomplete.is_active()) || (state.show_shell_mode && !state.waiting_for_shell_input) {
-                    //         // Do nothing for these cases
-                    //     } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') && state.input.trim() != "clear" {
-                    //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
-                    //     }
-                    //    }
+
                     if let InputEvent::EmergencyClearTerminal = event {
                     emergency_clear_and_redraw(&mut terminal, &state)?;
                     continue;
                    }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, &mut terminal);
                        state.poll_autocomplete_results();
                    }
                }
@@ -179,17 +201,21 @@ pub async fn run_tui(
                    }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
                    state.poll_autocomplete_results();
-                   terminal.draw(|f| view::view(f, &state))?;
+                   redraw = true;
+
+
                }
            }
         if should_quit {
             break;
         }
         state.poll_autocomplete_results();
-        terminal.draw(|f| view::view(f, &state))?;
     }
 
+   if !state.inline_mode {
     println!("Quitting...");
+   }
+   
     let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(

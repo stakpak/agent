@@ -5,6 +5,7 @@ pub mod confirmation_dialog;
 pub mod helper_block;
 pub mod helper_dropdown;
 pub mod hint_helper;
+pub mod inline_mode;
 pub mod markdown;
 pub mod message;
 pub mod message_pattern;
