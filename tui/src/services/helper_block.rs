@@ -266,12 +266,24 @@ pub fn render_loading_spinner(state: &AppState) -> Line {
         "Stakpaking..."
     };
 
-    Line::from(vec![Span::styled(
-        format!("{} {}", spinner, spinner_text),
-        Style::default()
-            .fg(Color::LightRed)
-            .add_modifier(Modifier::BOLD),
-    )])
+    if state.loading_type == LoadingType::Sessions {
+        Line::from(vec![Span::styled(
+            format!("{} {}", spinner, spinner_text),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        )])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                format!("{} {}", spinner, spinner_text),
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - Esc to cancel", Style::default().fg(Color::DarkGray)),
+        ])
+    }
 }
 
 pub fn push_styled_message(
