@@ -30,7 +30,7 @@ pub fn view(f: &mut Frame, state: &AppState) {
 }
 
 fn calculate_compact_input_height(state: &AppState) -> u16 {
-    let mut total_height = if state.show_sessions_dialog || state.dialog_command.is_some() {
+    let mut total_height = if state.show_sessions_dialog || state.is_dialog_open {
         0 // No input height when dialogs are open
     } else {
         3 // Base input height
@@ -50,7 +50,7 @@ fn calculate_compact_input_height(state: &AppState) -> u16 {
         above_input_height += 30; // Much larger for sessions dialog
     }
 
-    if state.dialog_command.is_some() {
+    if state.is_dialog_open {
         above_input_height += 15; // Confirmation dialog height (increased for compact view)
     }
 
@@ -81,7 +81,7 @@ fn render_inline_view(f: &mut Frame, state: &AppState) {
     };
 
     // Create layout based on whether dialogs are open
-    let chunks = if state.show_sessions_dialog || state.dialog_command.is_some() {
+    let chunks = if state.show_sessions_dialog || state.is_dialog_open {
         // When dialogs are open, use bottom layout
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
@@ -643,7 +643,7 @@ fn render_compact_input(f: &mut Frame, state: &AppState, area: Rect) {
         if let Some(area) = chunks.get(content_index) {
             render_compact_sessions_dialog(f, state, *area);
         }
-    } else if state.dialog_command.is_some() {
+    } else if state.is_dialog_open {
         if let Some(area) = chunks.get(content_index) {
             render_compact_confirmation_dialog(f, *area);
         }

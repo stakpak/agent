@@ -39,7 +39,7 @@ pub async fn run_tui(
     // Initialize terminal based on mode
     let mut terminal = if inline_mode {
         ratatui::init_with_options(ratatui::TerminalOptions {
-            viewport: ratatui::Viewport::Inline(10), // Dynamic viewport height
+            viewport: ratatui::Viewport::Inline(12), // Dynamic viewport height
         })
     } else {
         // For full screen mode, use alternate screen

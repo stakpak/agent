@@ -37,6 +37,7 @@ pub struct Message {
     pub id: Uuid,
     pub content: MessageContent,
     pub is_collapsed: Option<bool>,
+    pub is_streaming: Option<bool>,
 }
 
 impl Message {
@@ -48,6 +49,7 @@ impl Message {
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
             ),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
@@ -58,6 +60,7 @@ impl Message {
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
             ),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
     pub fn assistant(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
@@ -65,6 +68,7 @@ impl Message {
             id: id.unwrap_or(Uuid::new_v4()),
             content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
     pub fn styled(line: Line<'static>) -> Self {
@@ -72,6 +76,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Styled(line),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
     pub fn markdown(text: impl Into<String>) -> Self {
@@ -79,6 +84,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Markdown(text.into()),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
 
@@ -87,6 +93,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::PlainText(text.into()),
             is_collapsed: None,
+            is_streaming: None,
         }
     }
 }

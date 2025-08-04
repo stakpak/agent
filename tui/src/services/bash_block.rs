@@ -401,6 +401,7 @@ pub fn render_styled_block_ansi_to_tui(
         id: message_id,
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
+        is_streaming: None,
     });
     message_id
 }
@@ -866,6 +867,7 @@ pub fn render_result_block(
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: if is_collapsed { Some(true) } else { None },
+        is_streaming: None,
     });
 }
 
@@ -1010,6 +1012,7 @@ pub fn render_styled_lines(
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
+        is_streaming: None,
     });
 }
 
