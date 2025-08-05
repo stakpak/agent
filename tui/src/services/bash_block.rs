@@ -397,7 +397,7 @@ pub fn render_styled_block_ansi_to_tui(
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
     // Store as StyledBlock (same as result block) instead of BashBubble
-    state.messages.push(Message {
+    state.add_message(Message {
         id: message_id,
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
@@ -863,7 +863,7 @@ pub fn render_result_block(
         })
         .collect();
 
-    state.messages.push(Message {
+    state.add_message(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: if is_collapsed { Some(true) } else { None },
@@ -1008,7 +1008,7 @@ pub fn render_styled_lines(
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
+    state.add_message(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,

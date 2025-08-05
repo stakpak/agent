@@ -64,6 +64,14 @@ pub fn update(
                 handle_scroll_up(state);
             }
         }
+
+        InputEvent::AddMessage(message) => {
+            state.messages.push(message.clone());
+            if state.inline_mode && message.is_streaming.is_none() {
+                let _ = push_inline_message(&message, terminal);
+            }
+        }
+
         InputEvent::Down => {
             if state.show_sessions_dialog {
                 if state.session_selected + 1 < state.sessions.len() {
@@ -109,22 +117,15 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if !state.is_pasting {
-                handle_input_submitted(
-                    state,
-                    message_area_height,
-                    output_tx,
-                    input_tx,
-                    shell_tx,
-                    terminal,
-                );
+                handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
         }
         InputEvent::InputChangedNewline => handle_input_changed(state, '\n'),
         InputEvent::InputSubmittedWith(s) => {
-            handle_input_submitted_with(state, s, None, message_area_height, terminal)
+            handle_input_submitted_with(state, s, None, message_area_height)
         }
         InputEvent::InputSubmittedWithColor(s, color) => {
-            handle_input_submitted_with(state, s, Some(color), message_area_height, terminal)
+            handle_input_submitted_with(state, s, Some(color), message_area_height)
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
@@ -306,7 +307,7 @@ pub fn update(
             }
 
             line = truncate_output(&line);
-            state.messages.push(Message::plain_text(line));
+            state.add_message(Message::plain_text(line));
         }
 
         InputEvent::ShellError(line) => {
@@ -349,7 +350,7 @@ pub fn update(
             state.active_shell_command_output = None;
             state.input.clear();
             state.cursor_position = 0;
-            state.messages.push(Message::plain_text(""));
+            state.add_message(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
         }
@@ -809,7 +810,6 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) {
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
@@ -1009,10 +1009,7 @@ fn handle_input_submitted(
             state.shell_tool_calls.clone(),
         ));
         let message = Message::user(format!("> {}", state.input), None);
-        state.messages.push(message.clone());
-        if state.inline_mode {
-            let _ = push_inline_message(&message, terminal);
-        }
+        state.add_message(message.clone());
         state.input.clear();
         state.cursor_position = 0;
         let total_lines = state.messages.len() * 2;
@@ -1032,7 +1029,6 @@ fn handle_input_submitted_with(
     s: String,
     color: Option<Color>,
     message_area_height: usize,
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) {
     state.shell_tool_calls = None;
     let input_height = 3;
@@ -1041,10 +1037,7 @@ fn handle_input_submitted_with(
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.scroll == max_scroll;
     let message = Message::assistant(None, s.clone(), color.map(|c| Style::default().fg(c)));
-    state.messages.push(message.clone());
-    if state.inline_mode {
-        let _ = push_inline_message(&message, terminal);
-    }
+    state.add_message(message);
     state.input.clear();
     state.cursor_position = 0;
     let total_lines = state.messages.len() * 2;

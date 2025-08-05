@@ -57,7 +57,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(format!("  L Name: {}", name)),
         Line::from(""),
     ];
-    state.messages.push(Message {
+    state.add_message(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -84,7 +84,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         )]),
         Line::from(""),
     ];
-    state.messages.push(Message {
+    state.add_message(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -196,7 +196,7 @@ pub fn push_help_message(state: &mut AppState) {
         ]));
     }
     lines.push(Line::from(""));
-    state.messages.push(Message {
+    state.add_message(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -222,7 +222,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
     lines.push(message);
     lines.push(Line::from(vec![Span::raw(" ")]));
 
-    state.messages.push(Message {
+    state.add_message(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
@@ -254,7 +254,7 @@ pub fn push_error_message(state: &mut AppState, error: &str) {
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
+    state.add_message(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
@@ -302,7 +302,7 @@ pub fn push_styled_message(
         Span::styled(icon.to_string(), Style::default().fg(icon_color)),
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
-    state.messages.push(Message::styled(line));
+    state.add_message(Message::styled(line));
 }
 
 pub fn version_message(latest_version: Option<String>) -> Message {

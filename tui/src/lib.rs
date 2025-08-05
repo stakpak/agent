@@ -76,6 +76,8 @@ pub async fn run_tui(
 
     let mut spinner_interval = interval(Duration::from_millis(100));
 
+    state.input_tx = Some(internal_tx.clone());
+
     // Main async update/view loop
     let mut should_quit = false;
     let mut redraw = true;
@@ -212,10 +214,10 @@ pub async fn run_tui(
         state.poll_autocomplete_results();
     }
 
-   if !state.inline_mode {
-    println!("Quitting...");
-   }
-   
+    if !state.inline_mode {
+        println!("Quitting...");
+    }
+
     let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(

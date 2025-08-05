@@ -113,6 +113,7 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
     pub inline_mode: bool,                  // NEW: toggle between inline mode and full screen mode
+    pub input_tx: Option<mpsc::Sender<InputEvent>>,
 }
 
 #[derive(Debug)]
@@ -174,6 +175,7 @@ pub enum InputEvent {
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
     EmergencyClearTerminal,
+    AddMessage(Message),
 }
 
 #[derive(Debug)]
@@ -299,6 +301,7 @@ impl AppState {
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
             inline_mode: false,
+            input_tx: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
@@ -391,6 +394,12 @@ impl AppState {
                     || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
                     || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
+        }
+    }
+
+    pub fn add_message(&mut self, message: Message) {
+        if let Some(tx) = &mut self.input_tx {
+            let _ = tx.try_send(InputEvent::AddMessage(message));
         }
     }
 }

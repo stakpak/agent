@@ -259,16 +259,11 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
     total_lines
 }
 
-fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
-    f.render_widget(ratatui::widgets::Clear, area);
-    let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
-    if state.loading {
-        let loading_line = render_loading_spinner(state);
-        all_lines.push((loading_line, Style::default()));
-    }
-
-    // Pre-process ALL lines completely and consistently
-    let mut processed_lines: Vec<Line> = Vec::new();
+pub fn render_processed_lines<'a>(
+    width: usize,
+    all_lines: Vec<(Line<'a>, Style)>,
+) -> Vec<Line<'a>> {
+    let mut processed_lines: Vec<Line<'a>> = Vec::new();
 
     for (i, (line, _style)) in all_lines.iter().enumerate() {
         let line_text = spans_to_string(line);
@@ -310,10 +305,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
         // Process the line and add all resulting lines
         if line_text.contains("<checkpoint_id>") {
-            let processed = process_checkpoint_patterns(
-                &[(line.clone(), Style::default())],
-                f.area().width as usize,
-            );
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
@@ -366,6 +358,19 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             }
         }
     }
+
+    processed_lines
+}
+fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
+    f.render_widget(ratatui::widgets::Clear, area);
+    let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
+    if state.loading {
+        let loading_line = render_loading_spinner(state);
+        all_lines.push((loading_line, Style::default()));
+    }
+
+    // Pre-process ALL lines completely and consistently
+    let processed_lines = render_processed_lines(f.area().width as usize, all_lines.clone());
 
     let total_lines = processed_lines.len();
 
