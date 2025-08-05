@@ -179,7 +179,15 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             .await
         {
             Ok(mut result) => {
-                result = handle_large_output(&result, "command.output")?;
+                result = match handle_large_output(&result, "command.output") {
+                    Ok(result) => result,
+                    Err(e) => {
+                        return Ok(CallToolResult::error(vec![
+                            Content::text("OUTPUT_HANDLING_ERROR"),
+                            Content::text(format!("Failed to handle command output: {}", e)),
+                        ]));
+                    }
+                };
 
                 if result.is_empty() {
                     return Ok(CallToolResult::success(vec![Content::text("No output")]));
@@ -463,12 +471,20 @@ Use this tool to check the progress and results of long-running background tasks
                     .redact_and_store_secrets(&task_info.command, None);
 
                 let redacted_output = if let Some(ref output) = task_info.output {
-                    handle_large_output(
+                    match handle_large_output(
                         &self
                             .get_secret_manager()
                             .redact_and_store_secrets(output, None),
                         "task.output",
-                    )?
+                    ) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![
+                                Content::text("OUTPUT_HANDLING_ERROR"),
+                                Content::text(format!("Failed to handle task output: {}", e)),
+                            ]));
+                        }
+                    }
                 } else {
                     "No output available".to_string()
                 };
@@ -739,14 +755,16 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             HeaderValue::from_static("Mozilla/5.0 (compatible; StakPak-MCP-Bot/1.0)"),
         );
 
-        let client =
-            create_tls_client(TlsClientConfig::default().with_headers(headers)).map_err(|e| {
+        let client = match create_tls_client(TlsClientConfig::default().with_headers(headers)) {
+            Ok(client) => client,
+            Err(e) => {
                 error!("Failed to create HTTP client: {}", e);
-                McpError::internal_error(
-                    "Failed to create HTTP client",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+                return Ok(CallToolResult::error(vec![
+                    Content::text("HTTP_CLIENT_ERROR"),
+                    Content::text(format!("Failed to create HTTP client: {}", e)),
+                ]));
+            }
+        };
 
         let response = match client.get(&url).send().await {
             Ok(response) => response,
@@ -769,18 +787,29 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let html_content = response.text().await.map_err(|e| {
-            error!("Failed to read response body: {}", e);
-            McpError::internal_error(
-                "Failed to read response body",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+        let html_content = match response.text().await {
+            Ok(content) => content,
+            Err(e) => {
+                error!("Failed to read response body: {}", e);
+                return Ok(CallToolResult::error(vec![
+                    Content::text("RESPONSE_READ_ERROR"),
+                    Content::text(format!("Failed to read response body: {}", e)),
+                ]));
+            }
+        };
 
         // is this enough? or do we need to sanitize the html before turning it to markdown
         let markdown_content = html2md::rewrite_html(&html_content, false);
 
-        let result = handle_large_output(&markdown_content, "webpage")?;
+        let result = match handle_large_output(&markdown_content, "webpage") {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("OUTPUT_HANDLING_ERROR"),
+                    Content::text(format!("Failed to handle output: {}", e)),
+                ]));
+            }
+        };
 
         let formatted_output = format!("# Web Page Content: {}\n\n{}", url, result);
 
@@ -1098,8 +1127,17 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             // Read file contents
             match fs::read_to_string(path) {
                 Ok(content) => {
-                    let result =
-                        self.format_file_content(&content, path, view_range, max_lines, "File")?;
+                    let result = match self
+                        .format_file_content(&content, path, view_range, max_lines, "File")
+                    {
+                        Ok(result) => result,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![
+                                Content::text("FORMAT_ERROR"),
+                                Content::text(format!("Failed to format file content: {}", e)),
+                            ]));
+                        }
+                    };
 
                     let redacted_result = self
                         .get_secret_manager()
@@ -1159,13 +1197,24 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             // Read remote file contents
             match conn.read_file_to_string(remote_path).await {
                 Ok(content) => {
-                    let result = self.format_file_content(
+                    let result = match self.format_file_content(
                         &content,
                         original_path,
                         view_range,
                         max_lines,
                         "Remote file",
-                    )?;
+                    ) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![
+                                Content::text("FORMAT_ERROR"),
+                                Content::text(format!(
+                                    "Failed to format remote file content: {}",
+                                    e
+                                )),
+                            ]));
+                        }
+                    };
 
                     let redacted_result = self
                         .get_secret_manager()
@@ -1299,13 +1348,16 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let content = conn.read_file_to_string(remote_path).await.map_err(|e| {
-            error!("Failed to read remote file for str_replace: {}", e);
-            McpError::internal_error(
-                "Failed to read remote file",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+        let content = match conn.read_file_to_string(remote_path).await {
+            Ok(content) => content,
+            Err(e) => {
+                error!("Failed to read remote file for str_replace: {}", e);
+                return Ok(CallToolResult::error(vec![
+                    Content::text("REMOTE_FILE_READ_ERROR"),
+                    Content::text(format!("Failed to read remote file: {}", e)),
+                ]));
+            }
+        };
 
         if !content.contains(&actual_old_str) {
             return Ok(CallToolResult::error(vec![
@@ -1328,15 +1380,13 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             0
         };
 
-        conn.write_file(remote_path, new_content.as_bytes())
-            .await
-            .map_err(|e| {
-                error!("Failed to write remote file for str_replace: {}", e);
-                McpError::internal_error(
-                    "Failed to write remote file",
-                    Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+        if let Err(e) = conn.write_file(remote_path, new_content.as_bytes()).await {
+            error!("Failed to write remote file for str_replace: {}", e);
+            return Ok(CallToolResult::error(vec![
+                Content::text("REMOTE_FILE_WRITE_ERROR"),
+                Content::text(format!("Failed to write remote file: {}", e)),
+            ]));
+        }
 
         let output = format!(
             "Successfully replaced {} occurrences of text in {} (remote)\n",
@@ -1365,13 +1415,16 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let content = fs::read_to_string(path).map_err(|e| {
-            error!("Failed to read local file for str_replace: {}", e);
-            McpError::internal_error(
-                "Failed to read local file",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) => {
+                error!("Failed to read local file for str_replace: {}", e);
+                return Ok(CallToolResult::error(vec![
+                    Content::text("FILE_READ_ERROR"),
+                    Content::text(format!("Failed to read local file: {}", e)),
+                ]));
+            }
+        };
 
         if !content.contains(&actual_old_str) {
             return Ok(CallToolResult::error(vec![
@@ -1394,13 +1447,13 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             0
         };
 
-        fs::write(path, &new_content).map_err(|e| {
+        if let Err(e) = fs::write(path, &new_content) {
             error!("Failed to write local file for str_replace: {}", e);
-            McpError::internal_error(
-                "Failed to write local file",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+            return Ok(CallToolResult::error(vec![
+                Content::text("FILE_WRITE_ERROR"),
+                Content::text(format!("Failed to write local file: {}", e)),
+            ]));
+        }
 
         let output = format!(
             "Successfully replaced {} occurrences of text in {} (local)\n",
@@ -1530,14 +1583,16 @@ fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpErr
             file_prefix,
             rand::rng().random_range(0..=0xFFFFFF)
         );
-        let output_file_path =
-            LocalStore::write_session_data(&output_file, output).map_err(|e| {
+        let output_file_path = match LocalStore::write_session_data(&output_file, output) {
+            Ok(path) => path,
+            Err(e) => {
                 error!("Failed to write session data to {}: {}", output_file, e);
-                McpError::internal_error(
+                return Err(McpError::internal_error(
                     "Failed to write session data",
                     Some(json!({ "error": e.to_string() })),
-                )
-            })?;
+                ));
+            }
+        };
 
         Ok(format!(
             "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
