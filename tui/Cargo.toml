@@ -17,6 +17,7 @@ tui-markdown = "0.3.5"
 chrono = "0.4"
 console = "0.15"
 ansi-to-tui = "7.0.0"
+tui-textarea = "0.7.0"
 
 [lints.clippy]
 unwrap_used = "deny"

@@ -33,7 +33,11 @@ fn calculate_compact_input_height(state: &AppState) -> u16 {
     let mut total_height = if state.show_sessions_dialog || state.is_dialog_open {
         0 // No input height when dialogs are open
     } else {
-        3 // Base input height
+        // Calculate dynamic input height based on content
+        // Use a reasonable width for calculation (will be adjusted in render_compact_input)
+        let input_area_width = 80; // Default width for calculation
+        let input_lines = calculate_input_lines(&state.input, input_area_width);
+        (input_lines + 2) as u16 // +2 for borders
     };
 
     // Add height for content below input (dropdowns and hints)
@@ -73,11 +77,18 @@ fn render_inline_view(f: &mut Frame, state: &AppState) {
     // Use shared height calculation
     let total_height = calculate_compact_input_height(state);
 
-    // Ensure we don't exceed screen height
+    // Ensure we don't exceed screen height, but allow at least 3 lines for input
     let final_height = if total_height > area.height {
-        area.height
+        area.height.saturating_sub(2) // Leave some space for the prompt
     } else {
         total_height
+    };
+
+    let padded_area = Rect {
+        x: area.x+1,
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: area.height,
     };
 
     // Create layout based on whether dialogs are open
@@ -89,7 +100,7 @@ fn render_inline_view(f: &mut Frame, state: &AppState) {
                 Constraint::Min(1), // Spacer to push to bottom
                 Constraint::Length(final_height),
             ])
-            .split(area)
+            .split(padded_area)
     } else {
         // When no dialogs, position input 2 lines from top
         ratatui::layout::Layout::default()
@@ -99,7 +110,7 @@ fn render_inline_view(f: &mut Frame, state: &AppState) {
                 Constraint::Length(final_height),
                 Constraint::Min(1), // Remaining space at bottom
             ])
-            .split(area)
+            .split(padded_area)
     };
 
     let widget_area = chunks[1];
@@ -204,7 +215,7 @@ fn render_full_view(f: &mut Frame, state: &AppState) {
 }
 
 // Calculate how many lines the input will take up when wrapped
-fn calculate_input_lines(input: &str, width: usize) -> usize {
+pub fn calculate_input_lines(input: &str, width: usize) -> usize {
     if input.is_empty() {
         return 1; // At least one line
     }
@@ -578,7 +589,11 @@ fn render_compact_input(f: &mut Frame, state: &AppState, area: Rect) {
 
     // Only add input area if no dialogs are open
     if !state.show_sessions_dialog && !state.is_dialog_open {
-        constraints.push(Constraint::Length(3)); // Input area
+        // Calculate dynamic input height based on content
+        let input_area_width = area.width.saturating_sub(4) as usize;
+        let input_lines = calculate_input_lines(&state.input, input_area_width);
+        let input_height = (input_lines + 2) as u16; // +2 for borders
+        constraints.push(Constraint::Length(input_height));
     }
 
     // Add constraints for content below input (dropdowns and hints)

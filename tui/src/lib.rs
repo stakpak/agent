@@ -11,9 +11,9 @@ pub use terminal::TerminalGuard;
 pub use view::view;
 
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
-use crossterm::{execute, terminal::EnterAlternateScreen};
+use crossterm::{execute, terminal::EnterAlternateScreen, cursor};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io;
+use std::io::{self, stdout};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 
@@ -54,6 +54,8 @@ pub async fn run_tui(
     // get terminal width
     let terminal_size: ratatui::prelude::Size = terminal.size()?;
 
+    let mut current_inline_mode = state.inline_mode;
+
     if state.inline_mode {
         push_inline_history_messages(&state.messages, &mut terminal)?;
     }
@@ -82,6 +84,104 @@ pub async fn run_tui(
     let mut should_quit = false;
     let mut redraw = true;
     loop {
+
+                    if state.inline_mode != current_inline_mode {
+                eprintln!("Switching terminal mode: inline={}", state.inline_mode);
+                
+                // Clean up current terminal
+                if current_inline_mode {
+                    eprintln!("Switching from inline to full view");
+                    // clear all terminal and scrollback
+                    execute!(
+                        std::io::stdout(),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::Purge),
+                    )?;
+
+                    // get terminal size
+                    let terminal_size: ratatui::prelude::Size = terminal.size()?;
+                    eprintln!("Terminal size: {}x{}", terminal_size.width, terminal_size.height);
+
+                    terminal = Terminal::with_options(
+                        CrosstermBackend::new(stdout()),
+                        ratatui::TerminalOptions {
+                            viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, terminal_size.width, terminal_size.height)),
+                        },
+                    )?;
+                    eprintln!("Successfully created full view terminal");
+               
+                } else {
+                    eprintln!("Switching from full view to inline");
+                    
+                    // Reset terminal state completely
+                    crossterm::terminal::disable_raw_mode()?;
+                    std::thread::sleep(Duration::from_millis(50));
+                    crossterm::terminal::enable_raw_mode()?;
+                    
+                    // Clear screen and position cursor
+                    let (_, rows) = crossterm::terminal::size()?;
+                    execute!(
+                        std::io::stdout(),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::cursor::MoveTo(0, rows.saturating_sub(12))
+                    )?;
+                    
+                    // Print some lines to establish the viewport area
+                    for _ in 0..12 {
+                        println!();
+                    }
+                    
+                    // Wait for terminal to stabilize
+                    std::thread::sleep(Duration::from_millis(100));
+                    
+                    // Try to create inline terminal with a different approach
+                    let terminal_result = std::panic::catch_unwind(|| {
+                        // Force cursor to a known position first
+                        execute!(
+                            std::io::stdout(),
+                            crossterm::cursor::MoveTo(0, 0)
+                        ).ok();
+                        
+                        // Create terminal with fixed viewport instead of inline
+                        Terminal::with_options(
+                            CrosstermBackend::new(stdout()),
+                            ratatui::TerminalOptions {
+                                viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, rows.saturating_sub(12), 149, 12)),
+                            },
+                        )
+                    });
+                    
+                    match terminal_result {
+                        Ok(Ok(new_terminal)) => {
+                            terminal = new_terminal;
+                            eprintln!("Successfully created inline terminal");
+                            
+                            push_inline_history_messages(&state.messages, &mut terminal)?;
+                            terminal.draw(|f| view::view(f, &state))?;
+                            eprintln!("Successfully drew inline terminal");
+                        }
+                        Ok(Err(e)) => {
+                            eprintln!("Error creating inline terminal: {:?}", e);
+                            // Fallback: don't change the terminal
+                            return Ok(());
+                        }
+                        Err(_) => {
+                            eprintln!("Panic occurred while creating inline terminal");
+                            // Fallback: don't change the terminal
+                            return Ok(());
+                        }
+                    }
+                } 
+                
+                current_inline_mode = state.inline_mode;
+                redraw = true;
+                eprintln!("Terminal mode switch completed successfully");
+                push_inline_history_messages(&state.messages, &mut terminal)?;
+
+                // Force immediate redraw to show messages
+                terminal.draw(|f| view::view(f, &state))?;
+            }
+        
         if redraw {
             terminal.draw(|f| view::view(f, &state))?;
             redraw = false;

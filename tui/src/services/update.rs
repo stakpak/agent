@@ -407,7 +407,7 @@ pub fn update(
             let text = preprocess_terminal_output(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
             let line_count = text.lines().count();
-            if line_count > 10 {
+            if line_count > 5 {
                 state.pasted_long_text = Some(text.clone());
                 let placeholder = format!("[Pasted text of {} lines]", line_count);
                 state.pasted_placeholder = Some(placeholder.clone());
@@ -491,12 +491,18 @@ pub fn update(
         InputEvent::ToggleCollapsedMessages => {
             state.show_collapsed_messages = !state.show_collapsed_messages;
             if state.show_collapsed_messages {
+                // Switch to full view for collapsed messages popup
+                state.inline_mode = false;
+                
                 // Calculate scroll position to show the top of the last message
                 let collapsed_messages: Vec<&Message> = state
                     .messages
                     .iter()
                     .filter(|m| m.is_collapsed == Some(true))
                     .collect();
+
+                // Debug: Print number of collapsed messages
+                eprintln!("Ctrl+T pressed. Found {} collapsed messages, switching to full view", collapsed_messages.len());
 
                 if !collapsed_messages.is_empty() {
                     // Set selected to the last message
@@ -522,6 +528,10 @@ pub fn update(
                     state.collapsed_messages_scroll = 0;
                     state.collapsed_messages_selected = 0;
                 }
+            } else {
+                // When closing collapsed messages, switch back to inline mode
+                state.inline_mode = true;
+                eprintln!("Closing collapsed messages, switching back to inline mode");
             }
         }
         InputEvent::AttemptQuit => {
