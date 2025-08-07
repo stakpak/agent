@@ -317,7 +317,7 @@ impl AppState {
                 match run_pty_command(command.clone(), shell_tx) {
                     Ok(cmd) => cmd,
                     Err(e) => {
-                        push_error_message(self, &format!("Failed to run command: {}", e));
+                        push_error_message(self, &format!("Failed to run command: {}", e), None);
                         return;
                     }
                 }

@@ -207,7 +207,7 @@ impl Commands {
                             }
                             Err(e) => {
                                 eprintln!("Failed to build code index: {}", e);
-                                std::process::exit(1);
+                                // Continue without code indexing instead of exiting
                             }
                         }
                     }
