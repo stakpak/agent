@@ -1,5 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
 };
@@ -750,7 +751,16 @@ pub fn render_result_block(
     // Use compact indentation like bash blocks
     let line_indent = "  "; // 2 spaces for compact style
 
-    for text_line in result_text.lines.iter() {
+    let mut result_text_lines = result_text.lines.clone();
+    if is_collapsed {
+        // get extension from  command args
+        // let extension = command_args.split(".").last().unwrap_or("md");
+        result_text_lines = render_markdown_to_lines(&result_text.to_string()).unwrap_or_default();
+        eprintln!("result_text_lines: {:?}", result_text_lines);
+        // result_text_lines = apply_syntax_highlighting(&result_text.to_string(), Some(extension));
+    }
+
+    for text_line in result_text_lines.iter() {
         if text_line.spans.is_empty() {
             // Empty line with border
             let mut line_spans = vec![];
