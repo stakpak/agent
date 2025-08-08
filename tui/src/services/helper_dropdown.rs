@@ -28,19 +28,30 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
 
         let items: Vec<ListItem> = commands_to_show
             .iter()
-            .map(|h| {
+            .enumerate()
+            .map(|(i, h)| {
                 let padding_needed = max_command_length - h.command.len();
                 let padding = " ".repeat(padding_needed);
+                let is_selected = i == state.helper_selected;
+
+                let command_style = if is_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
+
+                let description_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Rgb(180, 180, 180))
+                } else {
+                    Style::default().fg(Color::Rgb(180, 180, 180))
+                };
+
                 ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("  {}  ", h.command),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled(format!("  {}  ", h.command), command_style),
                     Span::styled(padding, Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        format!(" – {}", h.description),
-                        Style::default().fg(Color::Rgb(180, 180, 180)),
-                    ),
+                    Span::styled(format!(" – {}", h.description), description_style),
                 ]))
                 .style(item_style)
             })
@@ -50,13 +61,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
         list_state.select(Some(
             state.helper_selected.min(items.len().saturating_sub(1)),
         ));
-        let dropdown_widget = List::new(items)
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::REVERSED)
-                    .bg(Color::White),
-            )
-            .block(Block::default());
+        let dropdown_widget = List::new(items).block(Block::default());
         f.render_stateful_widget(dropdown_widget, dropdown_area, &mut list_state);
     }
 }

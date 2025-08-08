@@ -927,7 +927,6 @@ pub fn render_styled_lines(
                 format!(" ({})", command_name),
                 Style::default().fg(colors.command),
             ),
-            Span::styled("...", Style::default().fg(colors.command)),
         ]));
     } else {
         // Multi-line - title on first line, arguments on subsequent lines
@@ -942,7 +941,6 @@ pub fn render_styled_lines(
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("...", Style::default().fg(colors.command)),
         ]));
 
         // Split command arguments into multiple lines
