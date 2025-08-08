@@ -356,9 +356,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
 
             let response_result = loop {
-                let (mut stream, current_request_id) = client
+                let stream_result = client
                     .chat_completion_stream(messages.clone(), Some(tools.clone()))
-                    .await?;
+                    .await;
+
+                let (mut stream, current_request_id) = match stream_result {
+                    Ok(result) => result,
+                    Err(e) => {
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
+                        break Err(ApiStreamError::Unknown(e));
+                    }
+                };
 
                 // Create a cancellation receiver for this iteration
                 let mut cancel_rx_iter = cancel_rx.resubscribe();
