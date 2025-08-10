@@ -265,14 +265,33 @@ async fn main() {
 
 fn prompt_for_api_key(config: &mut AppConfig) {
     println!();
-    println!("Stakpak API Key not found!");
-    println!("- Go to http://stakpak.dev/generate-api-key. Get your api key and paste it below");
-    print!("Enter your API Key: ");
+
+    // Centered header with colored border and text
+    println!("\x1b[1;36m┌──────────────────────────────────────────────────────────────┐\x1b[0m");
+    println!(
+        "\x1b[1;36m│\x1b[0m \x1b[1;33m                  Stakpak API Key Required                  \x1b[0m \x1b[1;36m│\x1b[0m"
+    );
+    println!("\x1b[1;36m└──────────────────────────────────────────────────────────────┘\x1b[0m");
+    println!();
+
+    // Colored steps with highlighted keywords
+    println!("1. \x1b[1;34mVisit:\x1b[0m http://stakpak.dev/generate-api-key");
+    println!("2. \x1b[1;34mCopy\x1b[0m your API key (starts with '\x1b[1;32mstkpk_api\x1b[0m')");
+    println!("3. \x1b[1;34mEnter\x1b[0m it below");
+    println!();
+
+    // Clean separator
+    println!("─────────────────────────────────────────────────────────────────────────────");
+    println!();
+
+    // Colored input prompt
+    print!("\x1b[1;34mPaste\x1b[0m your key here: ");
     if let Err(e) = std::io::stdout().flush() {
         eprintln!("Failed to flush stdout: {}", e);
         std::process::exit(1);
     }
-
+    println!();
+    println!();
     let api_key = match rpassword::read_password() {
         Ok(key) => key,
         Err(e) => {
@@ -284,6 +303,7 @@ fn prompt_for_api_key(config: &mut AppConfig) {
     let api_key = api_key.trim();
     if api_key.is_empty() || !api_key.starts_with("stkpk_api") {
         eprintln!("\nInvalid API key format.");
+        eprintln!("API key must start with 'stkpk_api' and cannot be empty.");
         std::process::exit(1);
     }
 
@@ -293,5 +313,18 @@ fn prompt_for_api_key(config: &mut AppConfig) {
         eprintln!("Failed to save config: {}", e);
     }
 
-    println!("API Key saved successfully!");
+    // Clean success message
+    println!();
+    println!(
+        "\x1b[1;36m┌─────────────────────────────────────────────────────────────────┐\x1b[0m"
+    );
+    println!(
+        "\x1b[1;36m│\x1b[0m \x1b[1;32m                  API Key Saved Successfully!                  \x1b[0m \x1b[1;36m│\x1b[0m"
+    );
+    println!(
+        "\x1b[1;36m└─────────────────────────────────────────────────────────────────┘\x1b[0m"
+    );
+    println!();
+    println!("You're all set! You can now use Stakpak CLI.");
+    println!();
 }
