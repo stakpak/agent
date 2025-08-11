@@ -32,6 +32,7 @@ zip = "4.2"
 rand = { workspace = true }
 rustls = { workspace = true }
 crossterm = { workspace = true }
+open = "5.3.2"
 
 [lints.clippy]
 unwrap_used = "deny"
