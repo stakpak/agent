@@ -18,6 +18,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
     mut input_rx: Receiver<InputEvent>,
     output_tx: Sender<OutputEvent>,
@@ -26,6 +27,7 @@ pub async fn run_tui(
     latest_version: Option<String>,
     redact_secrets: bool,
     privacy_mode: bool,
+    is_git_repo: bool,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -36,7 +38,7 @@ pub async fn run_tui(
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let mut state = AppState::new(latest_version, redact_secrets, privacy_mode);
+    let mut state = AppState::new(latest_version, redact_secrets, privacy_mode, is_git_repo);
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
