@@ -189,7 +189,7 @@ pub enum OutputEvent {
 }
 
 impl AppState {
-    fn get_helper_commands() -> Vec<HelperCommand> {
+    pub fn get_helper_commands() -> Vec<HelperCommand> {
         vec![
             HelperCommand {
                 command: "/help",
