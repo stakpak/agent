@@ -8,11 +8,13 @@ use crate::services::bash_block::{
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message,
     push_memorize_message, push_status_message, push_styled_message, render_system_message,
+    welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
     get_wrapped_message_lines,
 };
+use crate::services::sessions_dialog::read_session_info;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
@@ -928,6 +930,31 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                     return;
                 }
+                "/resume" => {
+                    let session_info = read_session_info().unwrap_or(None);
+                    if let Some(session_info) = session_info {
+                        let checkpoint_id = session_info.checkpoint_id;
+                        if let Some(_checkpoint_id) = checkpoint_id {
+                            state.loading_type = LoadingType::Sessions;
+                            state.loading = true;
+                            let _ = output_tx.try_send(OutputEvent::ResumeSession);
+                            state.messages.clear();
+                            state
+                                .messages
+                                .extend(welcome_messages(state.latest_version.clone()));
+                            render_system_message(state, "Resuming last session.");
+                        } else {
+                            render_system_message(state, "No session found.");
+                        }
+                    } else {
+                        render_system_message(state, "No session found.");
+                    }
+                    state.input.clear();
+                    state.cursor_position = 0;
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+
                 "/clear" => {
                     push_clear_message(state);
                     return;

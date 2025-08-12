@@ -112,6 +112,8 @@ pub struct AppState {
     pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
+
+    pub is_git_repo: bool,
 }
 
 #[derive(Debug)]
@@ -183,6 +185,7 @@ pub enum OutputEvent {
     SwitchToSession(String),
     Memorize,
     SendToolResult(ToolCallResult),
+    ResumeSession,
 }
 
 impl AppState {
@@ -205,6 +208,10 @@ impl AppState {
                 description: "List available sessions to switch to",
             },
             HelperCommand {
+                command: "/resume",
+                description: "Resume the last session",
+            },
+            HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
             },
@@ -223,7 +230,12 @@ impl AppState {
         ]
     }
 
-    pub fn new(latest_version: Option<String>, redact_secrets: bool, privacy_mode: bool) -> Self {
+    pub fn new(
+        latest_version: Option<String>,
+        redact_secrets: bool,
+        privacy_mode: bool,
+        is_git_repo: bool,
+    ) -> Self {
         let helpers = Self::get_helper_commands();
         let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
         let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
@@ -296,6 +308,7 @@ impl AppState {
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
+            is_git_repo,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {

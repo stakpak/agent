@@ -260,6 +260,7 @@ async fn main() {
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
                                 enable_mtls: !cli.disable_mcp_mtls,
+                                is_git_repo: gitignore::is_git_repo(),
                             },
                         )
                         .await
