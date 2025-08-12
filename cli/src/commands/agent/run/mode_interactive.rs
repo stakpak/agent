@@ -274,7 +274,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         continue;
                     }
                 }
-                OutputEvent::RejectTool(_tool_call) => {
+                OutputEvent::RejectTool(tool_call) => {
+                    messages.push(tool_result(
+                        tool_call.id.clone(),
+                        "TOOL_CALL_REJECTED".to_string(),
+                    ));
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
