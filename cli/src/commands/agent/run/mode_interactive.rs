@@ -14,6 +14,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
+use crate::utils::session::{read_session_info, write_session_start_info};
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
@@ -34,6 +35,7 @@ pub struct RunInteractiveConfig {
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_mtls: bool,
+    pub is_git_repo: bool,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -103,6 +105,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             latest_version.ok(),
             config.redact_secrets,
             config.privacy_mode,
+            config.is_git_repo,
         )
         .await
         .map_err(|e| e.to_string());
@@ -118,7 +121,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     // Spawn client task
     let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
         let mut current_session_id: Option<Uuid> = None;
-
         let client = Client::new(&ClientConfig {
             api_key: ctx.api_key.clone(),
             api_endpoint: ctx.api_endpoint.clone(),
@@ -274,7 +276,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         continue;
                     }
                 }
-                OutputEvent::RejectTool(_tool_call) => {
+                OutputEvent::RejectTool(tool_call) => {
+                    messages.push(tool_result(
+                        tool_call.id.clone(),
+                        "TOOL_CALL_REJECTED".to_string(),
+                    ));
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
@@ -292,6 +298,48 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     continue;
                 }
+
+                OutputEvent::ResumeSession => {
+                    let session_info = read_session_info()?;
+
+                    if let Some(session_info) = session_info {
+                        if let Some(checkpoint_id) = &session_info.checkpoint_id {
+                            let checkpoint_uuid =
+                                Uuid::parse_str(checkpoint_id).map_err(|e| e.to_string())?;
+                            let checkpoint = client.get_agent_checkpoint(checkpoint_uuid).await?;
+
+                            // Track the current session ID from the checkpoint
+                            current_session_id = Some(checkpoint.session.id);
+
+                            // Write session info when switching to checkpoint
+                            let _ = write_session_start_info(
+                                &current_session_id,
+                                &Some(checkpoint_uuid),
+                            );
+
+                            let (chat_messages, tool_calls) =
+                                extract_checkpoint_messages_and_tool_calls(
+                                    &checkpoint_uuid.to_string(),
+                                    &input_tx,
+                                    get_messages_from_checkpoint_output(&checkpoint.output),
+                                )
+                                .await?;
+
+                            messages.extend(chat_messages);
+                            tools_queue.extend(tool_calls.clone());
+
+                            if !tools_queue.is_empty() {
+                                let initial_tool_call = tools_queue.remove(0);
+                                send_tool_call(&input_tx, &initial_tool_call).await?;
+                            }
+                        }
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        continue;
+                    } else {
+                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        continue;
+                    }
+                }
                 OutputEvent::SwitchToSession(session_id) => {
                     send_input_event(&input_tx, InputEvent::Loading(true)).await?;
                     let session_uuid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
@@ -302,6 +350,12 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         Ok(checkpoint) => {
                             // Track the current session ID
                             current_session_id = Some(checkpoint.session.id);
+
+                            // Write session info when switching to session
+                            let _ = write_session_start_info(
+                                &current_session_id,
+                                &Some(checkpoint.checkpoint.id),
+                            );
 
                             let (chat_messages, tool_calls) =
                                 extract_checkpoint_messages_and_tool_calls(
@@ -485,6 +539,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
 
     if let Some(latest_checkpoint) = latest_checkpoint {
+        let _ = write_session_start_info(&final_session_id, &Some(latest_checkpoint));
         println!(
             r#"To resume, run:
 stakpak -c {}
