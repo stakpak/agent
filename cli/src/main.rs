@@ -2,8 +2,9 @@ use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{Client, ClientConfig};
-use std::{env, io::Write, path::Path};
+use std::{env, path::Path};
 
+mod apkey_auth;
 mod code_index;
 mod commands;
 mod config;
@@ -22,6 +23,7 @@ use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
+use crate::apkey_auth::prompt_for_api_key;
 use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
@@ -136,7 +138,7 @@ async fn main() {
                 Some(command) => {
                     let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
                     if config.api_key.is_none() && command.requires_auth() {
-                        prompt_for_api_key(&mut config);
+                        prompt_for_api_key(&mut config).await;
                     }
 
                     // Ensure .stakpak is in .gitignore (after workdir is set, before command execution)
@@ -152,7 +154,7 @@ async fn main() {
                 }
                 None => {
                     if config.api_key.is_none() {
-                        prompt_for_api_key(&mut config);
+                        prompt_for_api_key(&mut config).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
                     let api_config: ClientConfig = config.clone().into();
@@ -162,6 +164,19 @@ async fn main() {
                         eprintln!("Failed to create client");
                         std::process::exit(1);
                     };
+
+                    match client.get_my_account().await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!();
+                            println!("❌ API key validation failed: {}", e);
+                            println!("Please check your API key and run the below command");
+                            println!();
+                            println!("\x1b[1;34mstakpak login --api-key <your-api-key>\x1b[0m");
+                            println!();
+                            std::process::exit(1);
+                        }
+                    }
                     let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                         rulebooks
                             .into_iter()
@@ -245,6 +260,7 @@ async fn main() {
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
                                 enable_mtls: !cli.disable_mcp_mtls,
+                                is_git_repo: gitignore::is_git_repo(),
                             },
                         )
                         .await
@@ -261,37 +277,4 @@ async fn main() {
         }
         Err(e) => eprintln!("Failed to load config: {}", e),
     }
-}
-
-fn prompt_for_api_key(config: &mut AppConfig) {
-    println!();
-    println!("Stakpak API Key not found!");
-    println!("- Go to http://stakpak.dev/generate-api-key. Get your api key and paste it below");
-    print!("Enter your API Key: ");
-    if let Err(e) = std::io::stdout().flush() {
-        eprintln!("Failed to flush stdout: {}", e);
-        std::process::exit(1);
-    }
-
-    let api_key = match rpassword::read_password() {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("\nFailed to read API key: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    let api_key = api_key.trim();
-    if api_key.is_empty() || !api_key.starts_with("stkpk_api") {
-        eprintln!("\nInvalid API key format.");
-        std::process::exit(1);
-    }
-
-    config.api_key = Some(api_key.trim().to_string());
-
-    if let Err(e) = config.save() {
-        eprintln!("Failed to save config: {}", e);
-    }
-
-    println!("API Key saved successfully!");
 }

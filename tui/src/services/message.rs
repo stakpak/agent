@@ -423,6 +423,8 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
                     || key_lower.contains("file")
                     || key_lower.contains("uri")
                     || key_lower.contains("url")
+                    || key_lower.contains("command")
+                    || key_lower.contains("keywords")
                 {
                     let formatted_val = format_simple_value(val);
                     return format!("{} = {}", key, formatted_val);

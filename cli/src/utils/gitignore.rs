@@ -107,3 +107,9 @@ fn append_stakpak_to_gitignore(gitignore_path: &Path) -> Result<(), String> {
 
     Ok(())
 }
+
+pub fn is_git_repo() -> bool {
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let git_info = crate::utils::local_context::get_git_info(&current_dir.to_string_lossy());
+    git_info.is_git_repo
+}
