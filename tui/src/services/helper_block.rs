@@ -360,8 +360,11 @@ pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
    ╚══════╝  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝ ",
             Some(Style::default().fg(ratatui::style::Color::Cyan)),
         ),
+        Message::info("SPACING_MARKER", None),
         version_message(latest_version),
+        Message::info("SPACING_MARKER", None),
         Message::info("/help for help, /status for your current setup", None),
+        Message::info("SPACING_MARKER", None),
         Message::info(
             format!(
                 "cwd: {}",

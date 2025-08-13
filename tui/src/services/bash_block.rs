@@ -1,5 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
 };
@@ -510,6 +511,41 @@ pub fn render_bash_block(
     )
 }
 
+pub fn render_markdown_block(
+    preprocessed_result: String,
+    command_args: String,
+    title: String,
+    state: &mut AppState,
+) {
+    let processed_result = preprocess_terminal_output(&preprocessed_result);
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    lines.extend(render_styled_header_with_dot(
+        &title,
+        &command_args,
+        Some(LinesColors {
+            dot: Color::Magenta,
+            title: Color::Yellow,
+            command: Color::Rgb(180, 180, 180),
+            message: Color::LightGreen,
+        }),
+    ));
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    let content_lines = render_markdown_to_lines(&processed_result.to_string()).unwrap_or_default();
+
+    for line in content_lines {
+        lines.push(line);
+    }
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+        is_collapsed: Some(true),
+    });
+}
+
 pub fn render_result_block(
     tool_call_result: &ToolCallResult,
     state: &mut AppState,
@@ -519,15 +555,10 @@ pub fn render_result_block(
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
     let title: String = get_command_type_name(&tool_call);
-    let mut command_args = extract_truncated_command_arguments(&tool_call);
-    command_args = preprocess_terminal_output(&command_args);
-    command_args = command_args.replace("\\", "");
-    let preprocessed_result = preprocess_terminal_output(&result);
+    let command_args = extract_truncated_command_arguments(&tool_call);
 
-    // Since the content is plain text without ANSI codes, just create a simple Text
-    let result_text = ratatui::text::Text::from(preprocessed_result);
+    let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
-    let is_collapsed = is_collapsed_tool_call(&tool_call) && result_text.lines.len() > 3;
     if tool_call_status == ToolCallResultStatus::Error {
         render_bash_block_rejected(&command_args, &title, state, Some(result.to_string()));
         return;
@@ -546,6 +577,23 @@ pub fn render_result_block(
         );
         return;
     }
+
+    if is_collapsed {
+        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
+        let colors = LinesColors {
+            dot: Color::LightGreen,
+            title: Color::White,
+            command: Color::Rgb(180, 180, 180),
+            message: Color::Rgb(180, 180, 180),
+        };
+        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
+    }
+
+    if command_args.contains(".md") && is_collapsed_tool_call(&tool_call) {
+        render_markdown_block(result, command_args, title, state);
+        return;
+    }
+
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
         terminal_width - 4
@@ -735,27 +783,23 @@ pub fn render_result_block(
     // Preprocess result to handle terminal control sequences
 
     if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result_text.lines.len());
+        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
         let colors = LinesColors {
             dot: Color::LightGreen,
             title: Color::White,
             command: Color::Rgb(180, 180, 180),
             message: Color::Rgb(180, 180, 180),
         };
-        render_styled_lines(
-            &command_args,
-            &title,
-            state,
-            Some(message),
-            Some(colors),
-            true,
-        );
+        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
     }
 
     // Use compact indentation like bash blocks
     let line_indent = "  "; // 2 spaces for compact style
 
-    for text_line in result_text.lines.iter() {
+    let preprocessed_result: String = preprocess_terminal_output(&result);
+    let result_text = ratatui::text::Text::from(preprocessed_result);
+
+    for text_line in result_text.iter() {
         if text_line.spans.is_empty() {
             // Empty line with border
             let mut line_spans = vec![];
@@ -887,14 +931,45 @@ pub fn render_bash_block_rejected(
     state: &mut AppState,
     message: Option<String>,
 ) {
-    render_styled_lines(command_name, title, state, message, None, false);
+    render_styled_lines(command_name, title, state, message, None);
 }
 
+#[derive(Clone)]
 pub struct LinesColors {
     pub dot: Color,
     pub title: Color,
     pub command: Color,
     pub message: Color,
+}
+
+fn render_styled_header_with_dot(
+    title: &str,
+    command_name: &str,
+    colors: Option<LinesColors>,
+) -> Vec<Line<'static>> {
+    let colors = colors.unwrap_or(LinesColors {
+        dot: Color::LightRed,
+        title: Color::White,
+        command: Color::Rgb(180, 180, 180),
+        message: Color::LightRed,
+    });
+    vec![Line::from(vec![
+        Span::styled(
+            "● ",
+            Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(colors.title)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" ({})", command_name),
+            Style::default().fg(colors.command),
+        ),
+        Span::styled("...", Style::default().fg(colors.command)),
+    ])]
 }
 
 pub fn render_styled_lines(
@@ -903,7 +978,6 @@ pub fn render_styled_lines(
     state: &mut AppState,
     message: Option<String>,
     colors: Option<LinesColors>,
-    is_collapsed: bool,
 ) {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -913,9 +987,8 @@ pub fn render_styled_lines(
     });
 
     let mut lines = Vec::new();
-    if !is_collapsed {
-        lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-    }
+
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
     // Handle multi-line command name if needed
     let title_with_args = format!("{} ({})", title, command_name);
@@ -923,22 +996,11 @@ pub fn render_styled_lines(
 
     if title_with_args.len() <= max_width {
         // Single line
-        lines.push(Line::from(vec![
-            Span::styled(
-                "● ",
-                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(colors.title)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" ({})", command_name),
-                Style::default().fg(colors.command),
-            ),
-        ]));
+        lines.extend(render_styled_header_with_dot(
+            title,
+            command_name,
+            Some(colors.clone()),
+        ));
     } else {
         // Multi-line - title on first line, arguments on subsequent lines
         lines.push(Line::from(vec![

@@ -7,8 +7,7 @@ use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines,
 };
 use crate::services::message_pattern::{
-    process_agent_mode_patterns, process_checkpoint_patterns, process_section_title_patterns,
-    spans_to_string,
+    process_agent_mode_patterns, process_checkpoint_patterns, spans_to_string,
 };
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
@@ -69,6 +68,15 @@ pub fn view(f: &mut Frame, state: &AppState) {
         .split(f.area());
 
     let message_area = chunks[0];
+
+    // Create padded message area for content rendering
+    let padded_message_area = Rect {
+        x: message_area.x + 1,
+        y: message_area.y,
+        width: message_area.width.saturating_sub(2),
+        height: message_area.height,
+    };
+
     let mut input_area = Rect {
         x: 0,
         y: 0,
@@ -88,13 +96,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
     }
 
-    let message_area_width = message_area.width as usize;
+    let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
     render_messages(
         f,
         state,
-        message_area,
+        padded_message_area,
         message_area_width,
         message_area_height,
     );
@@ -191,26 +199,15 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         if i > 0 {
             if line_text.contains("<checkpoint_id>") || line_text.contains("<agent_mode>") {
                 should_add_spacing = true;
-            } else {
-                let section_tags = [
-                    "planning",
-                    "reasoning",
-                    "notes",
-                    "progress",
-                    "local_context",
-                    "todo",
-                    "application_analysis",
-                    "scratchpad",
-                    "report",
-                    "current_context",
-                    "rulebooks",
-                    "current_analysis",
-                ];
-
-                for tag in &section_tags {
-                    if line_text.contains(&format!("<{}>", tag)) {
-                        should_add_spacing = true;
-                        break;
+            } else if line_text.contains('<') && line_text.contains('>') {
+                // Only add spacing for opening tags, not closing tags
+                if let Some(tag_start) = line_text.find('<') {
+                    if let Some(tag_end) = line_text.find('>') {
+                        let tag_content = &line_text[tag_start + 1..tag_end];
+                        if !tag_content.starts_with('/') {
+                            // Only opening tags get spacing
+                            should_add_spacing = true;
+                        }
                     }
                 }
             }
@@ -218,15 +215,19 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
         // Add spacing before the line if needed
         if should_add_spacing {
-            processed_lines.push(Line::from(""));
+            // Only add spacing if the last line wasn't already empty
+            if processed_lines.is_empty()
+                || !processed_lines
+                    .last()
+                    .is_none_or(|last| last.spans.is_empty())
+            {
+                processed_lines.push(Line::from(""));
+            }
         }
 
         // Process the line and add all resulting lines
         if line_text.contains("<checkpoint_id>") {
-            let processed = process_checkpoint_patterns(
-                &[(line.clone(), Style::default())],
-                f.area().width as usize,
-            );
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
@@ -235,48 +236,44 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
-        } else {
-            let section_tags = [
-                "planning",
-                "reasoning",
-                "notes",
-                "progress",
-                "local_context",
-                "todo",
-                "application_analysis",
-                "scratchpad",
-                "report",
-                "current_context",
-                "rulebooks",
-                "current_analysis",
-            ];
-            let mut found = false;
+        } else if line_text.contains('<') && line_text.contains('>') {
+            // Dynamic XML tag processing - extract tag name and process
+            if let Some(tag_start) = line_text.find('<') {
+                if let Some(tag_end) = line_text.find('>') {
+                    let tag_content = &line_text[tag_start + 1..tag_end];
 
-            for tag in &section_tags {
-                let closing_tag = format!("</{}>", tag);
-                if line_text.trim() == closing_tag {
-                    processed_lines.push(Line::from(""));
-                    found = true;
-                    break;
-                }
-                if line_text.contains(&format!("<{}>", tag)) {
-                    let processed =
-                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
-                    for (processed_line, _) in processed {
-                        processed_lines.push(processed_line);
+                    if tag_content.starts_with('/') {
+                        // Closing tag - just add spacing, don't include the tag
+                        // Only add spacing if the last line wasn't already empty
+                        if processed_lines.is_empty()
+                            || !processed_lines
+                                .last()
+                                .is_none_or(|last| last.spans.is_empty())
+                        {
+                            processed_lines.push(Line::from(""));
+                        }
+                    } else {
+                        // Opening tag - create header directly
+                        let tag_name = tag_content;
+                        let title = tag_name[..1].to_uppercase() + &tag_name[1..].to_lowercase();
+                        let header_line = Line::from(vec![ratatui::text::Span::styled(
+                            title,
+                            ratatui::style::Style::default()
+                                .fg(ratatui::style::Color::LightMagenta)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        )]);
+                        processed_lines.push(header_line);
                     }
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                if line_text.trim() == "SPACING_MARKER" {
-                    processed_lines.push(Line::from(""));
                 } else {
                     processed_lines.push(line.clone());
                 }
+            } else {
+                processed_lines.push(line.clone());
             }
+        } else if line_text.trim() == "SPACING_MARKER" {
+            processed_lines.push(Line::from(""));
+        } else {
+            processed_lines.push(line.clone());
         }
     }
 
@@ -320,6 +317,8 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         }
     }
 
+    // Add a space after the last message if we have content
+
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
 }
@@ -358,9 +357,9 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
 
     // Calculate content area (inside borders)
     let content_area = Rect {
-        x: popup_area.x + 1,
+        x: popup_area.x + 3,
         y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(2),
+        width: popup_area.width.saturating_sub(6),
         height: popup_area.height.saturating_sub(2),
     };
 

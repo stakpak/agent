@@ -119,6 +119,7 @@ pub struct AppState {
 #[derive(Debug)]
 pub enum InputEvent {
     AssistantMessage(String),
+    AddUserMessage(String),
     StreamAssistantMessage(Uuid, String),
     RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
