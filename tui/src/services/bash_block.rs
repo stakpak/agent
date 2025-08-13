@@ -1,5 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::file_diff::preview_str_replace_editor_style;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
 };
@@ -510,6 +511,29 @@ pub fn render_bash_block(
     )
 }
 
+fn render_file_diff_block(tool_call_result: &ToolCallResult, state: &mut AppState, terminal_size: Size) {
+    
+    let args: serde_json::Value = serde_json::from_str(&tool_call_result.call.function.arguments)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    
+    let old_str = args["old_str"].as_str().unwrap_or("");
+    let new_str = args["new_str"].as_str().unwrap_or("");
+    let path = args["path"].as_str().unwrap_or("");
+    let replace_all = args["replace_all"].as_bool().unwrap_or(false);
+    
+  
+    
+    // Now you can use these variables with preview_str_replace_editor_style
+    let diff_lines = preview_str_replace_editor_style(path, old_str, new_str, replace_all)
+        .unwrap_or_else(|_| vec![Line::from("Failed to generate diff preview")]);
+
+    state.messages.push(Message {
+        id: Uuid::new_v4(),
+        content: MessageContent::StyledBlock(diff_lines),
+        is_collapsed: None,
+    });
+}
+
 pub fn render_result_block(
     tool_call_result: &ToolCallResult,
     state: &mut AppState,
@@ -518,6 +542,10 @@ pub fn render_result_block(
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
+    if tool_call.function.name == "str_replace" {
+        render_file_diff_block(tool_call_result, state, terminal_size);
+        return;
+    }
     let title: String = get_command_type_name(&tool_call);
     let mut command_args = extract_truncated_command_arguments(&tool_call);
     command_args = preprocess_terminal_output(&command_args);

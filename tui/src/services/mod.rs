@@ -12,3 +12,4 @@ pub mod render_input;
 pub mod sessions_dialog;
 pub mod shell_mode;
 pub mod update;
+pub mod file_diff;
