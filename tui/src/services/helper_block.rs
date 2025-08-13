@@ -155,19 +155,13 @@ pub fn push_help_message(state: &mut AppState) {
     )]));
 
     // Slash-commands list
-    let commands = vec![
-        ("/help", "show this help overlay"),
-        ("/clear", "clear the screen"),
-        ("/status", "show account status"),
-        ("/sessions", "show list of sessions"),
-        ("/memorize", "memorize the conversation history"),
-        ("/quit", "quit the app"),
-    ];
-    for (cmd, desc) in commands {
+    let commands = crate::app::AppState::get_helper_commands();
+
+    for cmd in &commands {
         lines.push(Line::from(vec![
-            Span::styled(cmd, Style::default().fg(Color::Cyan)),
+            Span::styled(cmd.command, Style::default().fg(Color::Cyan)),
             Span::raw(" – "),
-            Span::raw(desc),
+            Span::raw(cmd.description),
         ]));
     }
     lines.push(Line::from(""));

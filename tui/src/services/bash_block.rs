@@ -519,8 +519,9 @@ pub fn render_result_block(
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
     let title: String = get_command_type_name(&tool_call);
-    let command_args = extract_truncated_command_arguments(&tool_call);
-
+    let mut command_args = extract_truncated_command_arguments(&tool_call);
+    command_args = preprocess_terminal_output(&command_args);
+    command_args = command_args.replace("\\", "");
     let preprocessed_result = preprocess_terminal_output(&result);
 
     // Since the content is plain text without ANSI codes, just create a simple Text
@@ -659,68 +660,72 @@ pub fn render_result_block(
 
         lines.push(Line::from(header_spans));
 
-        let title_indent = if !is_collapsed { 4 } else { 2 }; // "│ ● " + 1 more space to align under the "S"
-        let args_available_width = if !is_collapsed {
-            inner_width - title_indent - 2 // Account for borders
-        } else {
-            inner_width - title_indent // No borders
-        };
+        // Render command arguments exactly like content lines
+        let line_indent = "  "; // 2 spaces for compact style
 
-        let wrapped_args = wrap_text_simple_unicode(&command_args, args_available_width);
+        // Wrap the command arguments
+        let available_for_content = inner_width - line_indent.len();
+        let wrapped_args = wrap_ansi_text(&command_args, available_for_content);
 
-        for (i, arg_line) in wrapped_args.iter().enumerate() {
-            let mut arg_spans = vec![];
+        for (i, wrapped_line) in wrapped_args.iter().enumerate() {
+            let wrapped_ratatui = wrapped_line
+                .clone()
+                .into_text()
+                .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
 
-            if !is_collapsed {
-                arg_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
-                arg_spans.push(Span::from(" "));
+            if let Some(first_line) = wrapped_ratatui.lines.first() {
+                let wrapped_display_width: usize = first_line
+                    .spans
+                    .iter()
+                    .map(|span| calculate_display_width(&span.content))
+                    .sum();
+
+                let total_content_width = wrapped_display_width + line_indent.len();
+                let padding_needed = inner_width.saturating_sub(total_content_width);
+                let padding = " ".repeat(padding_needed);
+
+                let mut line_spans = vec![];
+
+                if !is_collapsed {
+                    line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                    line_spans.push(Span::from(format!(" {}", line_indent)));
+                } else {
+                    line_spans.push(Span::from(line_indent));
+                }
+
+                // Add the argument content with parentheses
+                if i == 0 {
+                    // First line - start with opening parenthesis
+                    if let Some(first_span) = first_line.spans.first() {
+                        line_spans.push(Span::styled(
+                            format!("{}", first_span.content),
+                            Style::default().fg(Color::Rgb(180, 180, 180)),
+                        ));
+                    }
+                } else {
+                    // Continuation lines - just the content
+                    line_spans.extend(first_line.spans.clone());
+                }
+
+                line_spans.push(Span::from(padding));
+
+                if !is_collapsed {
+                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                }
+
+                lines.push(Line::from(line_spans));
             }
-
-            if i == 0 {
-                // First line of arguments - start with opening parenthesis
-                arg_spans.push(Span::styled(
-                    format!("({}", arg_line),
-                    Style::default().fg(Color::Gray),
-                ));
-            } else {
-                // Continuation lines - align under the command name (not the opening parenthesis)
-                // The continuation should align under the "S" in "Str Replace"
-                // First line has: "● Str Replace (" - so we need to align under "S"
-                let continuation_prefix = " ".repeat(title_indent); // Align under the "S"
-                arg_spans.push(Span::from(continuation_prefix));
-                arg_spans.push(Span::styled(
-                    arg_line.clone(),
-                    Style::default().fg(Color::Gray),
-                ));
-            }
-
-            if i == 0 {
-                // First line - calculate padding normally
-                let arg_content_width = 1 + arg_line.len() + 1; // "(" + content
-                let arg_padding = inner_width.saturating_sub(arg_content_width);
-                arg_spans.push(Span::from(" ".repeat(arg_padding)));
-            } else {
-                // Continuation lines - no padding, just add the closing border
-                // The indentation is already handled by the prefix
-            }
-
-            if !is_collapsed {
-                arg_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
-            }
-
-            lines.push(Line::from(arg_spans));
         }
 
         // Close the parentheses on the last line
         if let Some(last_line) = lines.last_mut() {
-            // Find the last span that contains the argument content
             if let Some(last_content_span) = last_line
                 .spans
                 .iter_mut()
                 .rev()
-                .find(|span| span.style.fg == Some(Color::Gray) && !span.content.contains("│"))
+                .find(|span| span.style.fg == Some(Color::White) && !span.content.contains("│"))
             {
-                last_content_span.content = format!("{})", last_content_span.content).into();
+                last_content_span.content = format!("{}", last_content_span.content).into();
             }
         }
     }
@@ -786,7 +791,13 @@ pub fn render_result_block(
                 line_spans.push(Span::from(line_indent));
             }
 
-            line_spans.extend(text_line.spans.clone());
+            // Apply Rgb(180,180,180) color to result text
+            for span in &text_line.spans {
+                line_spans.push(Span::styled(
+                    span.content.clone(),
+                    Style::default().fg(Color::White),
+                ));
+            }
             line_spans.push(Span::from(padding));
 
             if !is_collapsed {
