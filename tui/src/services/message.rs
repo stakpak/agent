@@ -1,4 +1,4 @@
-use crate::services::markdown::render_markdown_to_lines;
+use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
@@ -20,6 +20,7 @@ pub struct BubbleColors {
 #[derive(Clone, Debug)]
 pub enum MessageContent {
     Plain(String, Style),
+    AssistantMD(String, Style),
     Styled(Line<'static>),
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
@@ -54,13 +55,20 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
-                text.into(),
+                format!("→ {}", text.into()),
                 style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
             ),
             is_collapsed: None,
         }
     }
     pub fn assistant(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
+        Message {
+            id: id.unwrap_or(Uuid::new_v4()),
+            content: MessageContent::AssistantMD(text.into(), style.unwrap_or_default()),
+            is_collapsed: None,
+        }
+    }
+    pub fn submitted_with(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
             id: id.unwrap_or(Uuid::new_v4()),
             content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
@@ -125,15 +133,11 @@ pub fn get_wrapped_plain_lines<'a>(
             current = rest;
         }
     }
-    lines.push((Line::from(""), *style));
     lines
 }
 
 pub fn get_wrapped_styled_lines<'a>(line: &Line<'a>, _width: usize) -> Vec<(Line<'a>, Style)> {
-    vec![
-        (line.clone(), Style::default()),
-        (Line::from(""), Style::default()),
-    ]
+    vec![(line.clone(), Style::default())]
 }
 
 pub fn get_wrapped_styled_block_lines<'a>(
@@ -146,13 +150,12 @@ pub fn get_wrapped_styled_block_lines<'a>(
         .collect()
 }
 
-pub fn get_wrapped_markdown_lines(markdown: &str, width: usize) -> Vec<(Line<'_>, Style)> {
+pub fn get_wrapped_markdown_lines(markdown: &str) -> Vec<(Line<'_>, Style)> {
     let mut result = Vec::new();
-    let rendered_lines = render_markdown_to_lines(markdown, width);
+    let rendered_lines = render_markdown_to_lines(markdown).unwrap_or_default();
     for line in rendered_lines {
         result.push((line, Style::default()));
     }
-    result.push((Line::from(""), Style::default()));
     result
 }
 
@@ -195,7 +198,6 @@ pub fn get_wrapped_bash_bubble_lines<'a>(
             ));
         }
     }
-    lines.push((Line::from(""), content_style));
     lines
 }
 
@@ -236,8 +238,6 @@ fn render_shell_bubble_with_unicode_border(
         format!("╰{}╯", horizontal),
         Style::default().fg(Color::Magenta),
     )]));
-    // Blank line after bubble
-    lines.push(Line::from(""));
     lines
 }
 
@@ -291,7 +291,7 @@ fn get_wrapped_message_lines_internal(
 
     for msg in filtered_messages {
         match &msg.content {
-            MessageContent::Plain(text, style) => {
+            MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
 
                 if !agent_mode_removed {
@@ -304,7 +304,19 @@ fn get_wrapped_message_lines_internal(
                 if !checkpoint_id_removed {
                     if let Some(start) = cleaned.find("<checkpoint_id>") {
                         if let Some(end) = cleaned.find("</checkpoint_id>") {
-                            cleaned.replace_range(start..end + "</checkpoint_id>".len(), "");
+                            // Remove the checkpoint_id tag and any preceding newline
+                            let before_checkpoint = &cleaned[..start];
+                            let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
+
+                            // If there's a newline before the checkpoint_id, remove it too
+                            let cleaned_before =
+                                if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
+                                    stripped
+                                } else {
+                                    before_checkpoint
+                                };
+
+                            cleaned = format!("{}{}", cleaned_before, after_checkpoint);
                         }
                     }
                 }
@@ -371,10 +383,18 @@ fn get_wrapped_message_lines_internal(
                         all_lines.extend(owned_lines);
                     }
                 } else {
-                    let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
-                    let owned_lines = convert_to_owned_lines(borrowed_lines);
-                    all_lines.extend(owned_lines);
+                    let borrowed_lines =
+                        render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
+                    // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
+                    for line in borrowed_lines {
+                        all_lines.push((convert_line_to_owned(line), *style));
+                    }
                 }
+            }
+            MessageContent::Plain(text, style) => {
+                let borrowed_lines = get_wrapped_plain_lines(text, style, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
             }
             MessageContent::Styled(line) => {
                 let borrowed_lines = get_wrapped_styled_lines(line, width);
@@ -387,7 +407,7 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::Markdown(markdown) => {
-                let borrowed_lines = get_wrapped_markdown_lines(markdown, width);
+                let borrowed_lines = get_wrapped_markdown_lines(markdown);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }
@@ -408,6 +428,10 @@ fn get_wrapped_message_lines_internal(
         };
         agent_mode_removed = false;
         checkpoint_id_removed = false;
+    }
+    if !all_lines.is_empty() {
+        all_lines.push((Line::from(""), Style::default()));
+        all_lines.push((Line::from(""), Style::default()));
     }
     all_lines
 }

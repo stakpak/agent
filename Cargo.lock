@@ -4794,6 +4794,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stakpak-shared",
+ "syntect",
  "tokio",
  "tui-markdown",
  "unicode-width 0.2.0",
