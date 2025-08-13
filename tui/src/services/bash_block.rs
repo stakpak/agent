@@ -576,6 +576,17 @@ pub fn render_result_block(
         return;
     }
 
+    if is_collapsed {
+        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
+        let colors = LinesColors {
+            dot: Color::LightGreen,
+            title: Color::White,
+            command: Color::Rgb(180, 180, 180),
+            message: Color::Rgb(180, 180, 180),
+        };
+        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
+    }
+
     if command_args.contains(".md") && is_collapsed_tool_call(&tool_call) {
         render_markdown_block(result, command_args, title, state);
         return;
