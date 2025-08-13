@@ -68,6 +68,13 @@ impl Message {
             is_collapsed: None,
         }
     }
+    pub fn submitted_with(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
+        Message {
+            id: id.unwrap_or(Uuid::new_v4()),
+            content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
+            is_collapsed: None,
+        }
+    }
     pub fn styled(line: Line<'static>) -> Self {
         Message {
             id: Uuid::new_v4(),

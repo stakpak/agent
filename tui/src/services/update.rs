@@ -1066,7 +1066,7 @@ fn handle_input_submitted_with(
     let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     let was_at_bottom = state.scroll == max_scroll;
-    state.messages.push(Message::assistant(
+    state.messages.push(Message::submitted_with(
         None,
         s.clone(),
         color.map(|c| Style::default().fg(c)),

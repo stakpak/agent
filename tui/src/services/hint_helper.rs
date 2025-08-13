@@ -70,7 +70,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             f.render_widget(hint, area);
         } else {
             let hint = Paragraph::new(Span::styled(
-                "? for shortcuts",
+                "? for shortcuts . @ for files . / for commands",
                 Style::default().fg(Color::Cyan),
             ));
             f.render_widget(hint, area);
