@@ -431,31 +431,26 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
-    const MAX_PARAMS: usize = 3;
     match arguments {
         Ok(Value::Object(obj)) => {
-            let mut values = obj
-                .into_iter()
-                .map(|(key, val)| (key, format_simple_value(&val)))
-                .collect::<Vec<_>>();
-            values.sort_by_key(|(_, val)| val.len());
-            let total_params = values.len();
-            let included_params = values
-                .into_iter()
-                .take(MAX_PARAMS)
-                .map(|(key, val)| {
-                    if val.len() > 10 {
-                        format!("{} = {:.20}...", key, val).replace("\n", " ")
-                    } else {
-                        format!("{} = {}", key, val)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            if total_params > MAX_PARAMS {
-                format!("{}, {} more", included_params, total_params - MAX_PARAMS)
+            // Look for a parameter with path/file/uri/url in the key name
+            for (key, val) in &obj {
+                let key_lower = key.to_lowercase();
+                if key_lower.contains("path")
+                    || key_lower.contains("file")
+                    || key_lower.contains("uri")
+                    || key_lower.contains("url")
+                {
+                    let formatted_val = format_simple_value(val);
+                    return format!("{} = {}", key, formatted_val);
+                }
+            }
+            // If no file path found, return the first parameter
+            if let Some((key, val)) = obj.into_iter().next() {
+                let formatted_val = format_simple_value(&val);
+                format!("{} = {}", key, formatted_val)
             } else {
-                included_params
+                "no arguments".to_string()
             }
         }
         _ => "unable to parse arguments".to_string(),

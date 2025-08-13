@@ -991,7 +991,6 @@ pub fn render_styled_lines(
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("...", Style::default().fg(colors.command)),
         ]));
 
         // Split command arguments into multiple lines
