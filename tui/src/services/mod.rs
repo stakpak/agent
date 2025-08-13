@@ -11,5 +11,5 @@ pub mod message_pattern;
 pub mod render_input;
 pub mod sessions_dialog;
 pub mod shell_mode;
-pub mod update;
 pub mod syntax_highlighter;
+pub mod update;

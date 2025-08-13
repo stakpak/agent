@@ -149,7 +149,7 @@ pub fn process_agent_mode_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static
     )
 }
 
-pub fn process_section_title_patterns(
+pub fn _process_section_title_patterns(
     lines: &[(Line, Style)],
     tag: &str,
 ) -> Vec<(Line<'static>, Style)> {

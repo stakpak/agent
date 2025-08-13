@@ -121,6 +121,15 @@ pub fn update(
         InputEvent::StreamToolResult(progress) => {
             handle_stream_tool_result(state, progress, terminal_size)
         }
+        InputEvent::AddUserMessage(s) => {
+            // Add spacing before user message if not the first message
+            if !state.messages.is_empty() {
+                state.messages.push(Message::plain_text(""));
+            }
+            state.messages.push(Message::user(s, None));
+            // Add spacing after user message
+            state.messages.push(Message::plain_text(""));
+        }
         InputEvent::Error(err) => {
             if err == "STREAM_CANCELLED" {
                 render_bash_block_rejected("Interrupted by user", "System", state, None);
@@ -987,9 +996,9 @@ fn handle_input_submitted(
             state.input.clone(),
             state.shell_tool_calls.clone(),
         ));
-        state
-            .messages
-            .push(Message::user(format!("> {}", state.input), None));
+
+        let _ = input_tx.try_send(InputEvent::AddUserMessage(state.input.clone()));
+
         state.input.clear();
         state.cursor_position = 0;
         let total_lines = state.messages.len() * 2;
@@ -1035,7 +1044,7 @@ fn handle_input_submitted_with(
 fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area_height: usize) {
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
         state.is_streaming = true;
-        if let MessageContent::Plain(text, _) = &mut message.content {
+        if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
         }
         // During streaming, only adjust scroll if we're staying at bottom
