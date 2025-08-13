@@ -226,13 +226,19 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
     });
 }
 
-pub fn push_error_message(state: &mut AppState, error: &str) {
+pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option<bool>) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
+    let mut flag = "[Error] ".to_string();
+    if let Some(remove_flag) = remove_flag {
+        if remove_flag {
+            flag = " ".repeat(flag.len());
+        }
+    }
     let lines = vec![
         Line::from(vec![
             Span::styled(
-                "[Error] ",
+                flag,
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::styled(error, Style::default().fg(Color::Red)),

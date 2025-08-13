@@ -131,6 +131,15 @@ pub fn update(
             state.messages.push(Message::plain_text(""));
         }
         InputEvent::Error(err) => {
+            if err.contains("FREE_PLAN") {
+                push_error_message(state, "Free plan limit reached.", None);
+                push_error_message(
+                    state,
+                    "Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.",
+                    Some(true),
+                );
+                return;
+            }
             if err == "STREAM_CANCELLED" {
                 render_bash_block_rejected("Interrupted by user", "System", state, None);
                 return;
@@ -152,7 +161,7 @@ pub fn update(
                 handle_retry_mechanism(state);
             }
 
-            push_error_message(state, &error_message);
+            push_error_message(state, &error_message, None);
         }
         InputEvent::ScrollUp => handle_scroll_up(state),
         InputEvent::ScrollDown => {
@@ -191,7 +200,11 @@ pub fn update(
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ToggleAutoApprove => {
             if let Err(e) = state.auto_approve_manager.toggle_enabled() {
-                push_error_message(state, &format!("Failed to toggle auto-approve: {}", e));
+                push_error_message(
+                    state,
+                    &format!("Failed to toggle auto-approve: {}", e),
+                    None,
+                );
             } else {
                 let status = if state.auto_approve_manager.is_enabled() {
                     "enabled"
@@ -299,7 +312,7 @@ pub fn update(
         InputEvent::ShellError(line) => {
             let line = preprocess_terminal_output(&line);
             let line = line.replace("\r\n", "\n").replace('\r', "\n");
-            push_error_message(state, &line);
+            push_error_message(state, &line, None);
         }
 
         InputEvent::ShellWaitingForInput => {
@@ -859,6 +872,7 @@ fn handle_input_submitted(
                 push_error_message(
                     state,
                     &format!("Failed to toggle auto-approve for {}: {}", tool_name, e),
+                    None,
                 );
             } else {
                 let status = if new_policy == AutoApprovePolicy::Auto {
@@ -875,7 +889,7 @@ fn handle_input_submitted(
                 );
             }
         } else {
-            push_error_message(state, "Usage: /toggle_auto_approve <tool_name>");
+            push_error_message(state, "Usage: /toggle_auto_approve <tool_name>", None);
         }
         state.input.clear();
         state.cursor_position = 0;

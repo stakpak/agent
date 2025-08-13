@@ -135,14 +135,17 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
             Vec::new()
         };
 
-        let response = match self
-            .get_client()
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    "Client not found",
-                    Some(json!({ "error": "Client not found" })),
-                )
-            })?
+        let client = match self.get_client() {
+            Some(client) => client,
+            None => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CLIENT_NOT_FOUND"),
+                    Content::text("Client not found"),
+                ]));
+            }
+        };
+
+        let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "generate_code".to_string(),
                 arguments: json!({
@@ -177,14 +180,16 @@ IMPORTANT: When breaking down large projects into multiple generation steps, alw
                 .collect::<Vec<_>>()
                 .join("");
 
-            let generation_result: GenerationResult = serde_json::from_str(&response_text)
-                .map_err(|e| {
+            let generation_result: GenerationResult = match serde_json::from_str(&response_text) {
+                Ok(result) => result,
+                Err(e) => {
                     error!("Failed to parse generation result: {}", e);
-                    McpError::internal_error(
-                        "Failed to parse generation result",
-                        Some(json!({ "error": e.to_string() })),
-                    )
-                })?;
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("GENERATION_PARSE_ERROR"),
+                        Content::text(format!("Failed to parse generation result: {}", e)),
+                    ]));
+                }
+            };
 
             let mut new_files: Vec<String> = Vec::new();
             let mut failed_edits = Vec::new();
@@ -380,14 +385,17 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         let exclude_keywords_array: Option<Vec<String>> =
             exclude_keywords.map(|s| s.split_whitespace().map(|word| word.to_string()).collect());
 
-        let response = match self
-            .get_client()
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    "Client not found",
-                    Some(json!({ "error": "Client not found" })),
-                )
-            })?
+        let client = match self.get_client() {
+            Some(client) => client,
+            None => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CLIENT_NOT_FOUND"),
+                    Content::text("Client not found"),
+                ]));
+            }
+        };
+
+        let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_docs".to_string(),
                 arguments: json!({
@@ -428,14 +436,17 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         let keywords_array: Vec<String> =
             keywords.split_whitespace().map(|s| s.to_string()).collect();
 
-        let response = match self
-            .get_client()
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    "Client not found",
-                    Some(json!({ "error": "Client not found" })),
-                )
-            })?
+        let client = match self.get_client() {
+            Some(client) => client,
+            None => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CLIENT_NOT_FOUND"),
+                    Content::text("Client not found"),
+                ]));
+            }
+        };
+
+        let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "search_memory".to_string(),
                 arguments: json!({
@@ -466,14 +477,17 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         &self,
         Parameters(ReadRulebookRequest { uri }): Parameters<ReadRulebookRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let response = match self
-            .get_client()
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    "Client not found",
-                    Some(json!({ "error": "Client not found" })),
-                )
-            })?
+        let client = match self.get_client() {
+            Some(client) => client,
+            None => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CLIENT_NOT_FOUND"),
+                    Content::text("Client not found"),
+                ]));
+            }
+        };
+
+        let response = match client
             .call_mcp_tool(&ToolsCallParams {
                 name: "read_rulebook".to_string(),
                 arguments: json!({
@@ -525,13 +539,19 @@ This tool searches through the locally indexed code blocks using text matching a
             Err(_) => {} // Continue with normal flow if no status file
         }
 
-        let index_str = LocalStore::read_session_data("code_index.json").map_err(|e| {
-            error!("Failed to read code index: {}", e);
-            McpError::internal_error(
-                "Failed to read code index - the project may not be indexed yet or indexing may have been skipped",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+        let index_str = match LocalStore::read_session_data("code_index.json") {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Failed to read code index: {}", e);
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CODE_INDEX_READ_ERROR"),
+                    Content::text(format!(
+                        "Failed to read code index - the project may not be indexed yet or indexing may have been skipped: {}",
+                        e
+                    )),
+                ]));
+            }
+        };
 
         if index_str.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
@@ -539,12 +559,15 @@ This tool searches through the locally indexed code blocks using text matching a
             )]));
         }
 
-        let index_store: CodeIndex = serde_json::from_str(&index_str).map_err(|e| {
-            McpError::internal_error(
-                "Failed to parse code index",
-                Some(json!({ "error": e.to_string() })),
-            )
-        })?;
+        let index_store: CodeIndex = match serde_json::from_str(&index_str) {
+            Ok(index) => index,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CODE_INDEX_PARSE_ERROR"),
+                    Content::text(format!("Failed to parse code index: {}", e)),
+                ]));
+            }
+        };
 
         let search_limit = limit.unwrap_or(10) as usize;
         let show_deps = show_dependencies.unwrap_or(false);
