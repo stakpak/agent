@@ -62,10 +62,20 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
 
     for message in &*checkpoint_messages {
         match message.role {
-            Role::Assistant | Role::User => {
+            Role::Assistant => {
                 if let Some(content) = &message.content {
                     let _ = input_tx
-                        .send(InputEvent::InputSubmittedWith(content.to_string()))
+                        .send(InputEvent::StreamAssistantMessage(
+                            Uuid::new_v4(),
+                            content.to_string(),
+                        ))
+                        .await;
+                }
+            }
+            Role::User => {
+                if let Some(content) = &message.content {
+                    let _ = input_tx
+                        .send(InputEvent::AddUserMessage(content.to_string()))
                         .await;
                 }
             }
