@@ -83,13 +83,18 @@ async fn render_and_save_api_key(api_key: &str, config: &mut AppConfig) {
     success_message();
 }
 
-async fn start_callback_server() -> (u16, mpsc::Receiver<String>, tokio::task::JoinHandle<()>) {
+async fn start_callback_server() -> (
+    u16,
+    mpsc::Receiver<String>,
+    tokio::task::JoinHandle<()>,
+    bool,
+) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-
-    // Try to bind to port 5269, fallback to other ports if needed
+    let mut port_error = false;
+    // Simulate port binding failure for testing
     let mut port = 5269;
-    let mut listener = None;
+    let mut listener: Option<tokio::net::TcpListener> = None;
 
     while port < 5270 {
         match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
@@ -106,7 +111,15 @@ async fn start_callback_server() -> (u16, mpsc::Receiver<String>, tokio::task::J
 
     let listener = match listener {
         Some(l) => l,
-        None => panic!("Failed to bind to any port between 5269-5270"),
+        None => {
+            port_error = true;
+            return (
+                0,
+                mpsc::channel::<String>(100).1,
+                tokio::spawn(async {}),
+                port_error,
+            );
+        }
     };
 
     // Create a channel for communication between server and terminal
@@ -170,7 +183,7 @@ async fn start_callback_server() -> (u16, mpsc::Receiver<String>, tokio::task::J
         // println!("🔄 Callback server shutting down...");
     });
 
-    (port, rx, server_handle)
+    (port, rx, server_handle, port_error)
 }
 
 fn extract_api_key_from_post_body(request: &str) -> Option<String> {
@@ -210,7 +223,7 @@ fn extract_api_key_from_post_body(request: &str) -> Option<String> {
 }
 
 pub async fn prompt_for_api_key(config: &mut AppConfig) {
-    let (port, mut api_key_receiver, server_handle) = start_callback_server().await;
+    let (port, mut api_key_receiver, server_handle, port_error) = start_callback_server().await;
 
     let redirect_uri = format!("http://localhost:{}", port);
     let base_url = format!(
@@ -237,7 +250,7 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
     println!();
 
     // Try to open browser first
-    let browser_opened = open_browser(&base_url);
+    let browser_opened = !port_error && open_browser(&base_url);
 
     if browser_opened {
         println!();
@@ -277,7 +290,7 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
         }
 
         // If we didn't get an API key from the channel, check if user wants to enter manually
-        println!("Press Enter to enter API key manually, or wait for server...");
+        println!("Press Enter to enter API key manually.");
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_ok() && input.trim().is_empty() {
             // User pressed Enter, show manual prompt
@@ -313,6 +326,7 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
         }
     } else {
         println!("❌ Browser could not be opened automatically");
+        println!();
         println!("Stopping server and switching to manual input...");
         println!();
         server_handle.abort(); // Stop the server
