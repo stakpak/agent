@@ -68,6 +68,15 @@ pub fn view(f: &mut Frame, state: &AppState) {
         .split(f.area());
 
     let message_area = chunks[0];
+
+    // Create padded message area for content rendering
+    let padded_message_area = Rect {
+        x: message_area.x + 1,
+        y: message_area.y,
+        width: message_area.width.saturating_sub(2),
+        height: message_area.height,
+    };
+
     let mut input_area = Rect {
         x: 0,
         y: 0,
@@ -87,13 +96,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
     }
 
-    let message_area_width = message_area.width as usize;
+    let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
     render_messages(
         f,
         state,
-        message_area,
+        padded_message_area,
         message_area_width,
         message_area_height,
     );
@@ -218,10 +227,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
 
         // Process the line and add all resulting lines
         if line_text.contains("<checkpoint_id>") {
-            let processed = process_checkpoint_patterns(
-                &[(line.clone(), Style::default())],
-                f.area().width as usize,
-            );
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
@@ -351,9 +357,9 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
 
     // Calculate content area (inside borders)
     let content_area = Rect {
-        x: popup_area.x + 1,
+        x: popup_area.x + 3,
         y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(2),
+        width: popup_area.width.saturating_sub(6),
         height: popup_area.height.saturating_sub(2),
     };
 

@@ -518,7 +518,9 @@ pub fn render_markdown_block(
     state: &mut AppState,
 ) {
     let processed_result = preprocess_terminal_output(&preprocessed_result);
-    let mut lines = render_styled_header_with_dot(
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    lines.extend(render_styled_header_with_dot(
         &title,
         &command_args,
         Some(LinesColors {
@@ -527,8 +529,8 @@ pub fn render_markdown_block(
             command: Color::Rgb(180, 180, 180),
             message: Color::LightGreen,
         }),
-    );
-
+    ));
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     let content_lines = render_markdown_to_lines(&processed_result.to_string()).unwrap_or_default();
 
     for line in content_lines {
@@ -536,7 +538,7 @@ pub fn render_markdown_block(
     }
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-
+    lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     state.messages.push(Message {
         id: Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),

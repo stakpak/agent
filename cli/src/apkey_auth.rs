@@ -11,9 +11,7 @@ fn open_browser(url: &str) -> bool {
             println!("🌐 Opening browser...");
             true
         }
-        Err(_) => {
-            false
-        }
+        Err(_) => false,
     }
 }
 
