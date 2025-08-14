@@ -8,7 +8,7 @@ use crate::services::message::{
 };
 
 use crate::services::message_pattern::{
-    _process_section_title_patterns, process_checkpoint_patterns, spans_to_string,
+    process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
 };
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
@@ -207,14 +207,13 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             for tag in &section_tags {
                 let closing_tag = format!("</{}>", tag);
                 if line_text.trim() == closing_tag {
-                    processed_lines.push(Line::from(""));
                     found = true;
                     break;
                 }
                 if line_text.contains(&format!("<{}>", tag)) {
                     processed_lines.push(Line::from(""));
                     let processed =
-                        _process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
                     for (processed_line, _) in processed {
                         processed_lines.push(processed_line);
                     }
