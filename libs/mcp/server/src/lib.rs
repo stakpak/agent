@@ -9,6 +9,7 @@ use stakpak_shared::task_manager::TaskManager;
 
 pub mod local_tools;
 pub mod remote_tools;
+pub mod subagent_tools;
 pub mod tool_container;
 
 use std::sync::Arc;
@@ -205,7 +206,9 @@ async fn start_server_internal(
             config.redact_secrets,
             config.privacy_mode,
             task_manager_handle.clone(),
-            ToolContainer::tool_router_local() + ToolContainer::tool_router_remote(),
+            ToolContainer::tool_router_local()
+                + ToolContainer::tool_router_remote()
+                + ToolContainer::tool_router_subagent(),
         ),
     }
     .map_err(|e| {
