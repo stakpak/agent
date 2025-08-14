@@ -246,6 +246,7 @@ impl Commands {
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         tool_mode,
+                        allowed_tools: None,
                         bind_address,
                         certificate_chain: Arc::new(certificate_chain),
                     },
