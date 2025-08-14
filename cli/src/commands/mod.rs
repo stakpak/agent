@@ -133,6 +133,10 @@ pub enum Commands {
         #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
         tool_mode: ToolMode,
 
+        /// Allow only the specified tool in the agent's context
+        #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
+        allowed_tools: Option<Vec<String>>,
+
         /// Allow indexing of large projects (more than 500 supported files)
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
@@ -179,6 +183,7 @@ impl Commands {
                 disable_secret_redaction,
                 privacy_mode,
                 tool_mode,
+                allowed_tools,
                 index_big_project,
                 disable_mcp_mtls,
             } => {
@@ -246,7 +251,7 @@ impl Commands {
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         tool_mode,
-                        allowed_tools: None,
+                        allowed_tools,
                         bind_address,
                         certificate_chain: Arc::new(certificate_chain),
                     },
