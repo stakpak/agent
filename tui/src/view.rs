@@ -7,7 +7,9 @@ use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines,
 };
 
-use crate::services::message_pattern::spans_to_string;
+use crate::services::message_pattern::{
+    process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
+};
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
@@ -188,7 +190,48 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     }
 
     // Use the processed lines directly from get_wrapped_message_lines
-    let processed_lines: Vec<Line> = all_lines.iter().map(|(line, _)| line.clone()).collect();
+    let mut processed_lines: Vec<Line> = Vec::new();
+
+    for (line, _style) in all_lines.iter() {
+        let line_text = spans_to_string(line);
+        if line_text.contains("<checkpoint_id>") {
+            processed_lines.push(Line::from(""));
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+        } else {
+            let section_tags = ["local_context", "rulebooks"];
+            let mut found = false;
+
+            for tag in &section_tags {
+                let closing_tag = format!("</{}>", tag);
+                if line_text.trim() == closing_tag {
+                    found = true;
+                    break;
+                }
+                if line_text.contains(&format!("<{}>", tag)) {
+                    processed_lines.push(Line::from(""));
+                    let processed =
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                    for (processed_line, _) in processed {
+                        processed_lines.push(processed_line);
+                    }
+                    processed_lines.push(Line::from(""));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                if line_text.trim() == "SPACING_MARKER" {
+                    processed_lines.push(Line::from(""));
+                } else {
+                    processed_lines.push(line.clone());
+                }
+            }
+        }
+    }
 
     let total_lines = processed_lines.len();
 
