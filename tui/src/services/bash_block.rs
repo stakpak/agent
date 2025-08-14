@@ -212,7 +212,7 @@ pub fn render_styled_block_ansi_to_tui(
 ) -> Uuid {
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
-        terminal_width - 4
+        terminal_width - 6
     } else {
         40
     };
@@ -589,14 +589,14 @@ pub fn render_result_block(
         render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
     }
 
-    if command_args.contains(".md") && is_collapsed_tool_call(&tool_call) {
+    if command_args.contains(".md") {
         render_markdown_block(result, command_args, title, state);
         return;
     }
 
     let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
-        terminal_width - 4
+        terminal_width - 6
     } else {
         40
     };
@@ -779,18 +779,6 @@ pub fn render_result_block(
     }
     if is_collapsed {
         lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-    }
-    // Preprocess result to handle terminal control sequences
-
-    if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
-        let colors = LinesColors {
-            dot: Color::LightGreen,
-            title: Color::White,
-            command: Color::Rgb(180, 180, 180),
-            message: Color::Rgb(180, 180, 180),
-        };
-        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
     }
 
     // Use compact indentation like bash blocks
