@@ -2,6 +2,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use regex::Regex;
 use std::time::Instant;
 
 use crate::services::syntax_highlighter;
@@ -99,10 +100,10 @@ impl Default for MarkdownStyle {
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
             h4_style: Style::default()
-                .fg(Color::Yellow)
+                .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
             h5_style: Style::default()
-                .fg(Color::Magenta)
+                .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             h6_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             bold_style: Style::default().add_modifier(Modifier::BOLD),
@@ -1003,11 +1004,75 @@ impl MarkdownRenderer {
 pub fn render_markdown_to_lines(
     markdown_content: &str,
 ) -> Result<Vec<Line<'static>>, Box<dyn std::error::Error>> {
+    let parsed_content = xml_tags_to_markdown_headers(markdown_content);
+
     let style = MarkdownStyle::default();
     let renderer = MarkdownRenderer::new(style);
-    let components = renderer.parse_markdown(markdown_content)?;
+    let components = renderer.parse_markdown(parsed_content.as_str())?;
     let lines = renderer.render_to_lines(components);
     Ok(lines)
+}
+
+fn xml_tags_to_markdown_headers(input: &str) -> String {
+    // Use match to handle regex compilation errors gracefully
+    let tag_regex = match Regex::new(r"<([a-zA-Z_][a-zA-Z0-9_-]*)[^>]*>") {
+        Ok(regex) => regex,
+        Err(_) => return input.to_string(), // Return original input if regex fails
+    };
+
+    let closing_tag_regex = match Regex::new(r"</([a-zA-Z_][a-zA-Z0-9_-]*)>") {
+        Ok(regex) => regex,
+        Err(_) => return input.to_string(), // Return original input if regex fails
+    };
+
+    let mut result = input.to_string();
+
+    // Replace opening tags with markdown headers (skip checkpoint tags)
+    result = tag_regex
+        .replace_all(&result, |caps: &regex::Captures| {
+            let tag_name = &caps[1];
+
+            // Skip checkpoint tags - leave them untouched
+            if tag_name == "checkpoint_id" {
+                caps[0].to_string() // Return the original tag unchanged
+            } else {
+                let formatted_name = format_header_name(tag_name);
+                format!("#### {}", formatted_name) // Makes it a level 3 markdown header
+            }
+        })
+        .to_string();
+
+    // Remove closing tags (except checkpoint)
+    result = closing_tag_regex
+        .replace_all(&result, |caps: &regex::Captures| {
+            let tag_name = &caps[1];
+            // Skip checkpoint closing tags - leave them untouched
+            if tag_name == "checkpoint_id" {
+                caps[0].to_string() // Return the original closing tag unchanged
+            } else {
+                "SPACING_MARKER".to_string() // Remove other closing tags
+            }
+        })
+        .to_string();
+
+    result
+}
+
+fn format_header_name(name: &str) -> String {
+    name.split('_') // Split on underscores
+        .filter(|s| !s.is_empty()) // Remove empty strings
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first
+                    .to_uppercase()
+                    .chain(chars.as_str().to_lowercase().chars())
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ") // Join with spaces instead of underscores
 }
 
 // Enhanced function with timeout protection
