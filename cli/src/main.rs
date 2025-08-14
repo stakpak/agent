@@ -86,8 +86,11 @@ struct Cli {
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
 
-    /// Prompt to run the agent with (required when using --print or --async)
-    #[clap(required_if_eq("print", "true"))]
+    /// Read prompt from file (runs in async mode only)
+    #[arg(long = "prompt-file")]
+    prompt_file: Option<String>,
+
+    /// Prompt to run the agent
     prompt: Option<String>,
 
     #[command(subcommand)]
@@ -215,7 +218,26 @@ async fn main() {
                         }
                     }
 
-                    // Determine if we should use async mode (either explicit --async or --print/--approve)
+                    // Read prompt from file if specified
+                    let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
+                        match std::fs::read_to_string(prompt_file_path) {
+                            Ok(content) => {
+                                println!("📖 Reading prompt from file: {}", prompt_file_path);
+                                content.trim().to_string()
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Failed to read prompt file '{}': {}",
+                                    prompt_file_path, e
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        cli.prompt.unwrap_or_default()
+                    };
+
+                    // When using --prompt-file, force async mode only
                     let use_async_mode = cli.r#async || cli.print;
 
                     // Determine max_steps: 1 for single-step mode (--print/--approve), user setting or default for --async
@@ -233,7 +255,7 @@ async fn main() {
                         true => match agent::run::run_async(
                             config,
                             RunAsyncConfig {
-                                prompt: cli.prompt.unwrap_or_default(),
+                                prompt,
                                 verbose: cli.verbose,
                                 checkpoint_id: cli.checkpoint_id,
                                 local_context,
