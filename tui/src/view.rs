@@ -6,9 +6,9 @@ use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines,
 };
+
 use crate::services::message_pattern::{
-    process_agent_mode_patterns, process_checkpoint_patterns, process_section_title_patterns,
-    spans_to_string,
+    process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
 };
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
@@ -69,6 +69,15 @@ pub fn view(f: &mut Frame, state: &AppState) {
         .split(f.area());
 
     let message_area = chunks[0];
+
+    // Create padded message area for content rendering
+    let padded_message_area = Rect {
+        x: message_area.x + 1,
+        y: message_area.y,
+        width: message_area.width.saturating_sub(2),
+        height: message_area.height,
+    };
+
     let mut input_area = Rect {
         x: 0,
         y: 0,
@@ -88,13 +97,13 @@ pub fn view(f: &mut Frame, state: &AppState) {
         dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
     }
 
-    let message_area_width = message_area.width as usize;
+    let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
     render_messages(
         f,
         state,
-        message_area,
+        padded_message_area,
         message_area_width,
         message_area_height,
     );
@@ -180,91 +189,35 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         all_lines.push((loading_line, Style::default()));
     }
 
-    // Pre-process ALL lines completely and consistently
+    // Use the processed lines directly from get_wrapped_message_lines
     let mut processed_lines: Vec<Line> = Vec::new();
 
-    for (i, (line, _style)) in all_lines.iter().enumerate() {
+    for (line, _style) in all_lines.iter() {
         let line_text = spans_to_string(line);
-        let mut should_add_spacing = false;
-
-        // Check if we need spacing before this line (but not for the first line)
-        if i > 0 {
-            if line_text.contains("<checkpoint_id>") || line_text.contains("<agent_mode>") {
-                should_add_spacing = true;
-            } else {
-                let section_tags = [
-                    "planning",
-                    "reasoning",
-                    "notes",
-                    "progress",
-                    "local_context",
-                    "todo",
-                    "application_analysis",
-                    "scratchpad",
-                    "report",
-                    "current_context",
-                    "rulebooks",
-                    "current_analysis",
-                ];
-
-                for tag in &section_tags {
-                    if line_text.contains(&format!("<{}>", tag)) {
-                        should_add_spacing = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Add spacing before the line if needed
-        if should_add_spacing {
-            processed_lines.push(Line::from(""));
-        }
-
-        // Process the line and add all resulting lines
         if line_text.contains("<checkpoint_id>") {
-            let processed = process_checkpoint_patterns(
-                &[(line.clone(), Style::default())],
-                f.area().width as usize,
-            );
-            for (processed_line, _) in processed {
-                processed_lines.push(processed_line);
-            }
-        } else if line_text.contains("<agent_mode>") {
-            let processed = process_agent_mode_patterns(&[(line.clone(), Style::default())]);
+            processed_lines.push(Line::from(""));
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
         } else {
-            let section_tags = [
-                "planning",
-                "reasoning",
-                "notes",
-                "progress",
-                "local_context",
-                "todo",
-                "application_analysis",
-                "scratchpad",
-                "report",
-                "current_context",
-                "rulebooks",
-                "current_analysis",
-            ];
+            let section_tags = ["local_context", "rulebooks"];
             let mut found = false;
 
             for tag in &section_tags {
                 let closing_tag = format!("</{}>", tag);
                 if line_text.trim() == closing_tag {
-                    processed_lines.push(Line::from(""));
                     found = true;
                     break;
                 }
                 if line_text.contains(&format!("<{}>", tag)) {
+                    processed_lines.push(Line::from(""));
                     let processed =
                         process_section_title_patterns(&[(line.clone(), Style::default())], tag);
                     for (processed_line, _) in processed {
                         processed_lines.push(processed_line);
                     }
+                    processed_lines.push(Line::from(""));
                     found = true;
                     break;
                 }
@@ -320,6 +273,8 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         }
     }
 
+    // Add a space after the last message if we have content
+
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
 }
@@ -358,9 +313,9 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
 
     // Calculate content area (inside borders)
     let content_area = Rect {
-        x: popup_area.x + 1,
+        x: popup_area.x + 3,
         y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(2),
+        width: popup_area.width.saturating_sub(6),
         height: popup_area.height.saturating_sub(2),
     };
 
@@ -394,42 +349,8 @@ fn render_collapsed_messages_content(
     // Pre-process lines (same as render_messages)
     let mut processed_lines: Vec<Line> = Vec::new();
 
-    for (i, (line, _style)) in all_lines.iter().enumerate() {
+    for (line, _style) in all_lines.iter() {
         let line_text = spans_to_string(line);
-        let mut should_add_spacing = false;
-
-        if i > 0 {
-            if line_text.contains("<checkpoint_id>") || line_text.contains("<agent_mode>") {
-                should_add_spacing = true;
-            } else {
-                let section_tags = [
-                    "planning",
-                    "reasoning",
-                    "notes",
-                    "progress",
-                    "local_context",
-                    "todo",
-                    "application_analysis",
-                    "scratchpad",
-                    "report",
-                    "current_context",
-                    "rulebooks",
-                    "current_analysis",
-                ];
-
-                for tag in &section_tags {
-                    if line_text.contains(&format!("<{}>", tag)) {
-                        should_add_spacing = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if should_add_spacing {
-            processed_lines.push(Line::from(""));
-        }
-
         // Process the line (simplified version)
         if line_text.trim() == "SPACING_MARKER" {
             processed_lines.push(Line::from(""));

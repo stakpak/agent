@@ -72,7 +72,7 @@ pub fn add_rulebooks(
     if let Some(rulebooks) = rulebooks {
         let rulebooks_text = if !rulebooks.is_empty() {
             format!(
-                "# My Rule Books:\n{}",
+                "SPACING_MARKER\n# My Rule Books:\nSPACING_MARKER\n{}",
                 rulebooks
                     .iter()
                     .map(|rulebook| {
