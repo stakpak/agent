@@ -333,7 +333,7 @@ impl AppState {
         };
 
         #[cfg(not(unix))]
-        run_background_shell_command(command.clone(), shell_tx);
+        let shell_cmd = run_background_shell_command(command.clone(), shell_tx);
 
         self.active_shell_command = Some(shell_cmd.clone());
         self.active_shell_command_output = Some(String::new());
