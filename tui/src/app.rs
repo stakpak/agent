@@ -318,6 +318,7 @@ impl AppState {
     }
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
+        self.messages.push(Message::plain_text("SPACING_MARKER"));
         push_styled_message(
             self,
             &command,
@@ -325,6 +326,7 @@ impl AppState {
             SHELL_PROMPT_PREFIX,
             Color::Rgb(160, 92, 158),
         );
+        self.messages.push(Message::plain_text("SPACING_MARKER"));
         #[cfg(unix)]
         let shell_cmd = match run_pty_command(command.clone(), shell_tx) {
             Ok(cmd) => cmd,
