@@ -492,6 +492,11 @@ pub fn render_bash_block(
     state: &mut AppState,
     terminal_size: Size,
 ) -> Uuid {
+    if tool_call.function.name == "str_replace" {
+        render_file_diff_block(tool_call, state, terminal_size);
+        return Uuid::new_v4();
+    }
+
     let (command, outside_title, mut bubble_title, colors) =
         extract_bash_block_info(tool_call, output);
 
@@ -512,21 +517,24 @@ pub fn render_bash_block(
     )
 }
 
-fn render_file_diff_block(tool_call_result: &ToolCallResult, state: &mut AppState, terminal_size: Size) {
-    
-    let args: serde_json::Value = serde_json::from_str(&tool_call_result.call.function.arguments)
+pub fn render_file_diff_block(tool_call: &ToolCall, state: &mut AppState, terminal_size: Size) {
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
-    
+
     let old_str = args["old_str"].as_str().unwrap_or("");
     let new_str = args["new_str"].as_str().unwrap_or("");
     let path = args["path"].as_str().unwrap_or("");
     let replace_all = args["replace_all"].as_bool().unwrap_or(false);
-    
-  
-    
+
+    eprintln!("old_str: {}", old_str);
+    eprintln!("new_str: {}", new_str);
+    eprintln!("path: {}", path);
+    eprintln!("replace_all: {}", replace_all);
+
     // Now you can use these variables with preview_str_replace_editor_style
-    let diff_lines = preview_str_replace_editor_style(path, old_str, new_str, replace_all)
-        .unwrap_or_else(|_| vec![Line::from("Failed to generate diff preview")]);
+    let diff_lines =
+        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
+            .unwrap_or_else(|_| vec![Line::from("Failed to generate diff preview")]);
 
     state.messages.push(Message {
         id: Uuid::new_v4(),
@@ -579,7 +587,7 @@ pub fn render_result_block(
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
     if tool_call.function.name == "str_replace" {
-        render_file_diff_block(tool_call_result, state, terminal_size);
+        render_file_diff_block(&tool_call, state, terminal_size);
         return;
     }
     let title: String = get_command_type_name(&tool_call);
