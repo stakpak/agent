@@ -1,6 +1,6 @@
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
-    get_checkpoint_messages, get_messages_from_checkpoint_output,
+    get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, convert_tools_map, tool_call_history_string, tool_result,
@@ -14,7 +14,6 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use crate::utils::session::{read_session_info, write_session_start_info};
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
@@ -130,6 +129,17 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
+        match list_sessions(&client).await {
+            Ok(sessions) => {
+                if let Some(session) = sessions.first() {
+                    current_session_id =
+                        Some(Uuid::parse_str(&session.id).map_err(|e| e.to_string())?);
+                }
+            }
+            Err(e) => {
+                send_input_event(&input_tx, InputEvent::Error(e)).await?;
+            }
+        }
         if let Some(checkpoint_id) = config.checkpoint_id {
             // Try to get session ID from checkpoint
             let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
@@ -300,82 +310,62 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
 
                 OutputEvent::ResumeSession => {
-                    let session_info = read_session_info()?;
+                    if let Some(session_id) = &current_session_id {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
 
-                    if let Some(session_info) = session_info {
-                        if let Some(checkpoint_id) = &session_info.checkpoint_id {
-                            let checkpoint_uuid =
-                                Uuid::parse_str(checkpoint_id).map_err(|e| e.to_string())?;
-                            let checkpoint = client.get_agent_checkpoint(checkpoint_uuid).await?;
+                        match resume_session_from_checkpoint(
+                            &client,
+                            &session_id.to_string(),
+                            &input_tx,
+                        )
+                        .await
+                        {
+                            Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                                // Track the current session ID
+                                current_session_id = Some(session_id_uuid);
 
-                            // Track the current session ID from the checkpoint
-                            current_session_id = Some(checkpoint.session.id);
+                                messages.extend(chat_messages);
+                                tools_queue.extend(tool_calls.clone());
 
-                            // Write session info when switching to checkpoint
-                            let _ = write_session_start_info(
-                                &current_session_id,
-                                &Some(checkpoint_uuid),
-                            );
-
-                            let (chat_messages, tool_calls) =
-                                extract_checkpoint_messages_and_tool_calls(
-                                    &checkpoint_uuid.to_string(),
-                                    &input_tx,
-                                    get_messages_from_checkpoint_output(&checkpoint.output),
-                                )
-                                .await?;
-
-                            messages.extend(chat_messages);
-                            tools_queue.extend(tool_calls.clone());
-
-                            if !tools_queue.is_empty() {
-                                let initial_tool_call = tools_queue.remove(0);
-                                send_tool_call(&input_tx, &initial_tool_call).await?;
+                                if !tools_queue.is_empty() {
+                                    let initial_tool_call = tools_queue.remove(0);
+                                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                                }
+                                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            }
+                            Err(_) => {
+                                // Error already handled in the function
+                                continue;
                             }
                         }
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                        continue;
                     } else {
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                        continue;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::Error("No active session to resume".to_string()),
+                        )
+                        .await?;
                     }
+                    continue;
                 }
                 OutputEvent::SwitchToSession(session_id) => {
                     send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                    let session_uuid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
-                    match client
-                        .get_agent_session_latest_checkpoint(session_uuid)
-                        .await
-                    {
-                        Ok(checkpoint) => {
+                    match resume_session_from_checkpoint(&client, &session_id, &input_tx).await {
+                        Ok((chat_messages, tool_calls, session_id_uuid)) => {
                             // Track the current session ID
-                            current_session_id = Some(checkpoint.session.id);
+                            current_session_id = Some(session_id_uuid);
 
-                            // Write session info when switching to session
-                            let _ = write_session_start_info(
-                                &current_session_id,
-                                &Some(checkpoint.checkpoint.id),
-                            );
-
-                            let (chat_messages, tool_calls) =
-                                extract_checkpoint_messages_and_tool_calls(
-                                    &checkpoint.checkpoint.id.to_string(),
-                                    &input_tx,
-                                    get_messages_from_checkpoint_output(&checkpoint.output),
-                                )
-                                .await?;
                             messages.extend(chat_messages);
-
                             tools_queue.extend(tool_calls.clone());
+
                             if !tools_queue.is_empty() {
                                 let initial_tool_call = tools_queue.remove(0);
                                 send_tool_call(&input_tx, &initial_tool_call).await?;
                             }
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         }
-                        Err(e) => {
+                        Err(_) => {
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                            send_input_event(&input_tx, InputEvent::Error(e)).await?;
+                            continue;
                         }
                     }
                     continue;
@@ -539,7 +529,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
 
     if let Some(latest_checkpoint) = latest_checkpoint {
-        let _ = write_session_start_info(&final_session_id, &Some(latest_checkpoint));
         println!(
             r#"To resume, run:
 stakpak -c {}
