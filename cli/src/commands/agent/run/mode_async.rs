@@ -27,6 +27,7 @@ pub struct RunAsyncConfig {
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
+    pub allowed_tools: Option<Vec<String>>,
     pub enable_mtls: bool,
 }
 
@@ -67,6 +68,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
+                allowed_tools: config.allowed_tools,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
