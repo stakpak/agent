@@ -1,6 +1,6 @@
 use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map, system_message, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -29,6 +29,7 @@ pub struct RunAsyncConfig {
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
     pub enable_mtls: bool,
+    pub system_prompt: Option<String>,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -125,6 +126,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             "{}",
             renderer.render_info(&format!("Resuming from checkpoint ({})", checkpoint_id))
         );
+    }
+
+    if let Some(system_prompt) = config.system_prompt {
+        chat_messages.insert(0, system_message(system_prompt));
+        print!("{}", renderer.render_info("System prompt loaded"));
     }
 
     // Add user prompt if provided

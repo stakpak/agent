@@ -3,8 +3,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_string, tool_result,
-    user_message,
+    add_local_context, add_rulebooks, convert_tools_map, system_message, tool_call_history_string,
+    tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -36,6 +36,7 @@ pub struct RunInteractiveConfig {
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
+    pub system_prompt: Option<String>,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -163,6 +164,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
 
             messages.extend(chat_messages);
+        }
+
+        if let Some(system_prompt) = config.system_prompt {
+            messages.insert(0, system_message(system_prompt));
         }
 
         let mut retry_attempts = 0;
