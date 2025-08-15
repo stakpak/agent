@@ -102,11 +102,14 @@ async fn main() {
     // Initialize rustls crypto provider
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 
-    if let Err(e) = auto_update().await {
-        eprintln!("Auto-update failed: {}", e);
-    }
-
     let cli = Cli::parse();
+
+    // Skip auto-update when running in async or print mode
+    if !cli.r#async && !cli.print {
+        if let Err(e) = auto_update().await {
+            eprintln!("Auto-update failed: {}", e);
+        }
+    }
 
     if let Some(workdir) = cli.workdir {
         let workdir = Path::new(&workdir);
