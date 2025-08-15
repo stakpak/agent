@@ -170,3 +170,33 @@ pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<S
 
     checkpoint_id
 }
+
+/// Resumes a session from a checkpoint, loading messages and tool calls
+pub async fn resume_session_from_checkpoint(
+    client: &Client,
+    session_id: &str,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) -> Result<(Vec<ChatMessage>, Vec<ToolCall>, Uuid), String> {
+    let session_uuid = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
+
+    match client
+        .get_agent_session_latest_checkpoint(session_uuid)
+        .await
+    {
+        Ok(checkpoint) => {
+            let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
+                &checkpoint.checkpoint.id.to_string(),
+                input_tx,
+                get_messages_from_checkpoint_output(&checkpoint.output),
+            )
+            .await?;
+
+            Ok((chat_messages, tool_calls, checkpoint.session.id))
+        }
+        Err(e) => {
+            send_input_event(input_tx, InputEvent::Loading(false)).await?;
+            send_input_event(input_tx, InputEvent::Error(e)).await?;
+            Err("Failed to get session checkpoint".to_string())
+        }
+    }
+}
