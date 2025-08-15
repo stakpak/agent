@@ -128,7 +128,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         );
     }
 
-    // Add system prompt if provided (should be first message if no checkpoint)
     if let Some(system_prompt) = config.system_prompt {
         chat_messages.insert(0, system_message(system_prompt));
         print!("{}", renderer.render_info("System prompt loaded"));
