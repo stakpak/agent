@@ -134,7 +134,7 @@ pub fn process_checkpoint_patterns(
     )
 }
 
-pub fn process_agent_mode_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
+pub fn _process_agent_mode_patterns(lines: &[(Line, Style)]) -> Vec<(Line<'static>, Style)> {
     let agent_mode_formatter = |content: &str| -> (String, Style) {
         let icon = "🤖";
         let static_text = "[Agent Mode]:";

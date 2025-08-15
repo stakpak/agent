@@ -25,7 +25,7 @@ pub fn get_multiline_input_lines(state: &AppState, _area_width: usize) -> (Vec<L
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
-                line_spans.push(Span::raw("> "));
+                line_spans.push(Span::raw("→ "));
             }
         }
         let line_start_pos = current_pos;
