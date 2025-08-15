@@ -1,0 +1,13 @@
+[ResearchAgent]
+max_steps = 10
+allowed_tools = [
+    # "generate_code",
+    "view",
+    # "str_replace",
+    # "create",
+    # "run_command",
+    "local_code_search",
+    "search_docs",
+    "search_memory",
+    "read_rulebook",
+]
