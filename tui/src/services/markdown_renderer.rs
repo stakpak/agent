@@ -1037,7 +1037,11 @@ fn xml_tags_to_markdown_headers(input: &str) -> String {
                 caps[0].to_string() // Return the original tag unchanged
             } else {
                 let formatted_name = format_header_name(tag_name);
-                format!("#### {}", formatted_name) // Makes it a level 3 markdown header
+                if formatted_name == "Scratchpad" {
+                    format!("## {}\n", formatted_name) // Makes it a level 3 markdown header
+                } else {
+                    format!("#### {}\n", formatted_name) // Makes it a level 3 markdown header
+                }
             }
         })
         .to_string();
