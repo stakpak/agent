@@ -1,5 +1,3 @@
-use std::{fs, path::Path};
-
 use crate::app::AppState;
 use crate::services::message::get_wrapped_message_lines;
 use ratatui::{
@@ -9,7 +7,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
-use uuid::Uuid;
 
 pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
     let screen = f.area();
@@ -72,7 +69,7 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
     let list = List::new(items)
         .highlight_style(
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )
@@ -92,25 +89,4 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Left);
     f.render_widget(help_widget, help_area);
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct SessionInfo {
-    pub session_id: Uuid,
-    pub checkpoint_id: Option<String>,
-}
-
-pub fn read_session_info() -> Result<Option<SessionInfo>, String> {
-    let session_dir = Path::new(".stakpak/session");
-    let session_file = session_dir.join("session_details.json");
-
-    if !session_file.exists() {
-        return Ok(None);
-    }
-
-    let session_info = fs::read_to_string(session_file)
-        .map_err(|e| format!("Failed to read session info: {}", e))?;
-    let session_info: SessionInfo = serde_json::from_str(&session_info)
-        .map_err(|e| format!("Failed to deserialize session info: {}", e))?;
-    Ok(Some(session_info))
 }

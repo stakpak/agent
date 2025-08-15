@@ -200,6 +200,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }
+            processed_lines.push(Line::from(""));
         } else {
             let section_tags = ["local_context", "rulebooks"];
             let mut found = false;

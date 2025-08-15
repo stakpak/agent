@@ -293,7 +293,6 @@ fn get_wrapped_message_lines_internal(
         match &msg.content {
             MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
-
                 if !agent_mode_removed {
                     if let Some(start) = cleaned.find("<agent_mode>") {
                         if let Some(end) = cleaned.find("</agent_mode>") {
@@ -321,6 +320,16 @@ fn get_wrapped_message_lines_internal(
                     }
                 }
 
+                let borrowed_lines =
+                    render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
+                // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
+                for line in borrowed_lines {
+                    all_lines.push((convert_line_to_owned(line), *style));
+                }
+            }
+            MessageContent::Plain(text, style) => {
+                let cleaned = text.to_string();
+
                 if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
                     let mut remaining = cleaned.as_str();
                     while let Some(start) = remaining.find("```shell") {
@@ -330,6 +339,10 @@ fn get_wrapped_message_lines_internal(
                             let borrowed_lines = get_wrapped_plain_lines(before, style, width);
                             let owned_lines = convert_to_owned_lines(borrowed_lines);
                             all_lines.extend(owned_lines);
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
                         }
                         let after_start = &remaining[start + "```shell".len()..];
                         if let Some(end) = after_start.find("```") {
@@ -367,6 +380,11 @@ fn get_wrapped_message_lines_internal(
                                 }
                             }
                             remaining = &after_start[end + "```".len()..];
+
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
                         } else {
                             if !after_start.trim().is_empty() {
                                 let borrowed_lines =
@@ -383,18 +401,10 @@ fn get_wrapped_message_lines_internal(
                         all_lines.extend(owned_lines);
                     }
                 } else {
-                    let borrowed_lines =
-                        render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
-                    // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
-                    for line in borrowed_lines {
-                        all_lines.push((convert_line_to_owned(line), *style));
-                    }
+                    let borrowed_lines = get_wrapped_plain_lines(text, style, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
                 }
-            }
-            MessageContent::Plain(text, style) => {
-                let borrowed_lines = get_wrapped_plain_lines(text, style, width);
-                let owned_lines = convert_to_owned_lines(borrowed_lines);
-                all_lines.extend(owned_lines);
             }
             MessageContent::Styled(line) => {
                 let borrowed_lines = get_wrapped_styled_lines(line, width);
