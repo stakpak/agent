@@ -89,6 +89,7 @@ impl ShellCommand {
     }
 }
 
+#[allow(dead_code)]
 /// Run a shell command in the background while keeping the TUI active
 pub fn run_background_shell_command(
     command: String,

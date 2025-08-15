@@ -73,6 +73,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
+                allowed_tools: None,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
