@@ -72,7 +72,7 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
     let list = List::new(items)
         .highlight_style(
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )
