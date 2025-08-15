@@ -1,11 +1,8 @@
-[ResearchAgent]
+[subagents.ResearchAgent]
+description = "A general purpose research agent focused on research and analysis tasks"
 max_steps = 10
 allowed_tools = [
-    # "generate_code",
     "view",
-    # "str_replace",
-    # "create",
-    # "run_command",
     "local_code_search",
     "search_docs",
     "search_memory",

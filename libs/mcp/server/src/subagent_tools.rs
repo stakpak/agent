@@ -5,8 +5,6 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stakpak_shared::local_store::LocalStore;
-use std::collections::HashMap;
-use std::sync::OnceLock;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
@@ -17,16 +15,6 @@ impl std::fmt::Display for SubagentType {
         write!(f, "{}", self.0)
     }
 }
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SubagentConfig {
-    pub max_steps: usize,
-    pub allowed_tools: Vec<String>,
-}
-
-// Global cache for subagent configurations loaded at compile time
-static SUBAGENT_CONFIGS: &str = include_str!("../subagents.toml");
-static PARSED_CONFIGS: OnceLock<HashMap<String, SubagentConfig>> = OnceLock::new();
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubagentResult {
@@ -63,17 +51,7 @@ PARAMETERS:
 USAGE:
 Use this tool when you need to delegate a specific task to a specialized agent that can handle the requirements better than general-purpose processing. The subagent will execute the task according to the provided prompt and return the results.
 
-The subagent runs asynchronously in the background. This tool returns immediately with a task ID that you can use to monitor progress and get results using the get_task_details and get_all_tasks tools.
-
-AVAILABLE SUBAGENT TYPES:
-- ResearchAgent: General purpose research agent focused on research and analysis tasks
-  - Max steps: 10
-  - Available tools: view, local_code_search, search_docs, search_memory, read_rulebook
-
-EXAMPLES:
-- description: 'Generate API documentation', prompt: 'Create comprehensive API docs for the user service endpoints', subagent_type: 'ResearchAgent'
-- description: 'Code review analysis', prompt: 'Review the authentication module for security vulnerabilities', subagent_type: 'ResearchAgent'
-- description: 'Database optimization', prompt: 'Analyze and optimize the user queries for better performance', subagent_type: 'ResearchAgent'"
+The subagent runs asynchronously in the background. This tool returns immediately with a task ID that you can use to monitor progress and get results using the get_task_details and get_all_tasks tools."
     )]
     pub async fn subagent_task(
         &self,
@@ -83,8 +61,6 @@ EXAMPLES:
             subagent_type,
         }): Parameters<TaskRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Build the subagent execution command that will run in the background
-        let subagent_type = SubagentType(subagent_type);
         let subagent_command = match self.build_subagent_command(&prompt, &subagent_type) {
             Ok(command) => command,
             Err(e) => {
@@ -119,10 +95,19 @@ EXAMPLES:
     fn build_subagent_command(
         &self,
         prompt: &str,
-        subagent_type: &SubagentType,
+        subagent_type: &str,
     ) -> Result<String, McpError> {
-        // Get specialized configuration for this subagent type
-        let subagent_config = self.get_subagent_config(subagent_type)?;
+        let subagent_config = if let Some(subagent_configs) = self.get_subagent_configs() {
+            subagent_configs.get_config(subagent_type)
+        } else {
+            None
+        }
+        .ok_or_else(|| {
+            McpError::internal_error(
+                "Unknown subagent type",
+                Some(json!({"subagent_type": subagent_type})),
+            )
+        })?;
 
         // Write prompt to a temporary file
         let prompt_filename = format!("subagent_prompt_{}.txt", Uuid::new_v4());
@@ -136,7 +121,7 @@ EXAMPLES:
 
         let mut command = format!(
             r#"stakpak -a --prompt-file {} --max-steps {}"#,
-            subagent_config.max_steps, prompt_file_path
+            prompt_file_path, subagent_config.max_steps
         );
 
         for tool in &subagent_config.allowed_tools {
@@ -145,40 +130,4 @@ EXAMPLES:
 
         Ok(command)
     }
-
-    fn get_subagent_config(
-        &self,
-        subagent_type: &SubagentType,
-    ) -> Result<SubagentConfig, McpError> {
-        let configs = get_subagent_configs();
-        configs.get(&subagent_type.0).cloned().ok_or_else(|| {
-            McpError::internal_error(
-                "Unknown subagent type",
-                Some(json!({
-                    "subagent_type": subagent_type.0,
-                    "available_types": configs.keys().collect::<Vec<_>>()
-                })),
-            )
-        })
-    }
-}
-
-/// Parse subagent configurations from the embedded TOML content
-fn parse_subagent_configs() -> Result<HashMap<String, SubagentConfig>, McpError> {
-    toml::from_str(SUBAGENT_CONFIGS).map_err(|e| {
-        McpError::internal_error(
-            "Failed to parse embedded subagent config TOML",
-            Some(json!({"error": e.to_string()})),
-        )
-    })
-}
-
-/// Get the cached subagent configurations
-fn get_subagent_configs() -> &'static HashMap<String, SubagentConfig> {
-    PARSED_CONFIGS.get_or_init(|| parse_subagent_configs().unwrap_or_default())
-}
-
-/// Get the list of available subagent types
-pub fn get_available_subagent_types() -> Vec<String> {
-    get_subagent_configs().keys().cloned().collect()
 }

@@ -6,6 +6,7 @@ use std::{collections::HashSet, hash::Hash};
 
 use stakpak_api::ClientConfig;
 use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::TaskManager;
 
 pub mod local_tools;
@@ -77,6 +78,7 @@ pub struct MCPServerConfig {
     pub privacy_mode: bool,
     pub tool_mode: ToolMode,
     pub allowed_tools: Option<Vec<String>>,
+    pub subagent_configs: Option<SubagentConfigs>,
     pub certificate_chain: Arc<Option<CertificateChain>>,
 }
 
@@ -194,6 +196,7 @@ async fn start_server_internal(
             config.redact_secrets,
             config.privacy_mode,
             task_manager_handle.clone(),
+            config.subagent_configs.clone(),
             ToolContainer::tool_router_local(),
         ),
         ToolMode::RemoteOnly => ToolContainer::new(
@@ -201,17 +204,26 @@ async fn start_server_internal(
             config.redact_secrets,
             config.privacy_mode,
             task_manager_handle.clone(),
+            config.subagent_configs.clone(),
             ToolContainer::tool_router_remote(),
         ),
-        ToolMode::Combined => ToolContainer::new(
-            Some(config.api),
-            config.redact_secrets,
-            config.privacy_mode,
-            task_manager_handle.clone(),
-            ToolContainer::tool_router_local()
-                + ToolContainer::tool_router_remote()
-                + ToolContainer::tool_router_subagent(),
-        ),
+        ToolMode::Combined => {
+            let mut tool_router =
+                ToolContainer::tool_router_local() + ToolContainer::tool_router_remote();
+
+            if config.subagent_configs.is_some() {
+                tool_router += ToolContainer::tool_router_subagent();
+            }
+
+            ToolContainer::new(
+                Some(config.api),
+                config.redact_secrets,
+                config.privacy_mode,
+                task_manager_handle.clone(),
+                config.subagent_configs.clone(),
+                tool_router,
+            )
+        }
     }
     .map_err(|e| {
         error!("Failed to create tool container: {}", e);
@@ -277,81 +289,4 @@ pub async fn start_server(
         TcpListener::bind(config.bind_address.clone()).await?
     };
     start_server_internal(config, tcp_listener, shutdown_rx).await
-}
-
-/// Start server with local tools only (no API key required)
-pub async fn start_local_server(
-    bind_address: String,
-    redact_secrets: bool,
-    privacy_mode: bool,
-    shutdown_rx: Option<Receiver<()>>,
-    certificate_chain: Option<CertificateChain>,
-) -> Result<()> {
-    start_server(
-        MCPServerConfig {
-            api: ClientConfig {
-                api_key: None,
-                api_endpoint: "".to_string(),
-            },
-            bind_address,
-            redact_secrets,
-            privacy_mode,
-            tool_mode: ToolMode::LocalOnly,
-            allowed_tools: None,
-            certificate_chain: Arc::new(certificate_chain),
-        },
-        None,
-        shutdown_rx,
-    )
-    .await
-}
-
-/// Start server with remote tools only (requires API key)
-pub async fn start_remote_server(
-    api_config: ClientConfig,
-    bind_address: String,
-    redact_secrets: bool,
-    privacy_mode: bool,
-    shutdown_rx: Option<Receiver<()>>,
-    certificate_chain: Option<CertificateChain>,
-) -> Result<()> {
-    start_server(
-        MCPServerConfig {
-            api: api_config,
-            bind_address,
-            redact_secrets,
-            privacy_mode,
-            tool_mode: ToolMode::RemoteOnly,
-            allowed_tools: None,
-            certificate_chain: Arc::new(certificate_chain),
-        },
-        None,
-        shutdown_rx,
-    )
-    .await
-}
-
-/// Start server with combined tools (requires API key)
-pub async fn start_combined_server(
-    api_config: ClientConfig,
-    bind_address: String,
-    redact_secrets: bool,
-    privacy_mode: bool,
-    shutdown_rx: Option<Receiver<()>>,
-    certificate_chain: Option<CertificateChain>,
-) -> Result<()> {
-    start_server(
-        MCPServerConfig {
-            api: api_config,
-            bind_address,
-            redact_secrets,
-            privacy_mode,
-            tool_mode: ToolMode::Combined,
-            allowed_tools: None,
-            certificate_chain: Arc::new(certificate_chain),
-        },
-        None,
-        shutdown_rx,
-    )
-    .await
 }

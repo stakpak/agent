@@ -3,6 +3,7 @@ use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
+use stakpak_shared::models::subagent::SubagentConfigs;
 
 pub fn convert_tools_map(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
@@ -101,6 +102,28 @@ pub fn add_rulebooks(
                 user_input, rulebooks_text
             );
             (formatted_input, Some(rulebooks_text))
+        } else {
+            (user_input.to_string(), None)
+        }
+    } else {
+        (user_input.to_string(), None)
+    }
+}
+
+pub fn add_subagents(
+    messages: &[ChatMessage],
+    user_input: &str,
+    subagent_configs: &Option<SubagentConfigs>,
+) -> (String, Option<String>) {
+    if let Some(subagent_configs) = subagent_configs {
+        let subagents_text = subagent_configs.format_for_context();
+
+        if messages.is_empty() {
+            let formatted_input = format!(
+                "{}\n\n<subagents>\n{}\n</subagents>",
+                user_input, subagents_text
+            );
+            (formatted_input, Some(subagents_text))
         } else {
             (user_input.to_string(), None)
         }
