@@ -3,8 +3,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, get_messages_from_checkpoint_output,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_string, tool_result,
-    user_message,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map, tool_call_history_string,
+    tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -22,6 +22,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
+use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{Color, InputEvent, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -34,6 +35,7 @@ pub struct RunInteractiveConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
+    pub subagent_configs: Option<SubagentConfigs>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
 }
@@ -64,6 +66,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
     let certificate_chain_for_server = certificate_chain.clone();
+    let subagent_configs = config.subagent_configs.clone();
     let mcp_handle = tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -75,6 +78,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
                 allowed_tools: None,
+                subagent_configs,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -209,6 +213,15 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         .await?;
                     }
 
+                    let (user_input, subagents_text) =
+                        add_subagents(&messages, &user_input, &config.subagent_configs);
+                    if let Some(subagents_text) = subagents_text {
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::InputSubmittedWithColor(subagents_text, Color::DarkGray),
+                        )
+                        .await?;
+                    }
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {

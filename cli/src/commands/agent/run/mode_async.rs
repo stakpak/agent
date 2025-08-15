@@ -1,6 +1,6 @@
 use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -14,6 +14,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
+use stakpak_shared::models::subagent::SubagentConfigs;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,6 +26,7 @@ pub struct RunAsyncConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub rulebooks: Option<Vec<ListRuleBook>>,
+    pub subagent_configs: Option<SubagentConfigs>,
     pub max_steps: Option<usize>,
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
@@ -58,6 +60,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
     let certificate_chain_for_server = certificate_chain.clone();
+    let subagent_configs = config.subagent_configs.clone();
     tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -69,6 +72,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
                 allowed_tools: config.allowed_tools,
+                subagent_configs,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -135,6 +139,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 .map_err(|e| e.to_string())?;
         let (user_input, _rulebooks_text) =
             add_rulebooks(&chat_messages, &user_input, &config.rulebooks);
+        let (user_input, _subagents_text) =
+            add_subagents(&chat_messages, &user_input, &config.subagent_configs);
         chat_messages.push(user_message(user_input));
     }
 

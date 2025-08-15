@@ -43,14 +43,16 @@ impl Default for AutoApproveConfig {
         tools.insert("local_code_search".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_all_tasks".to_string(), AutoApprovePolicy::Auto);
         tools.insert("get_task_details".to_string(), AutoApprovePolicy::Auto);
+        tools.insert("wait_for_tasks".to_string(), AutoApprovePolicy::Auto);
 
         // Prompt tools (always require confirmation):
         tools.insert("create".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("str_replace".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("generate_code".to_string(), AutoApprovePolicy::Prompt);
         tools.insert("run_command".to_string(), AutoApprovePolicy::Prompt);
-        tools.insert("run_command_async".to_string(), AutoApprovePolicy::Prompt);
-        tools.insert("cancel_async_task".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("run_command_task".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("subagent_task".to_string(), AutoApprovePolicy::Prompt);
+        tools.insert("cancel_task".to_string(), AutoApprovePolicy::Prompt);
 
         AutoApproveConfig {
             enabled: true,
