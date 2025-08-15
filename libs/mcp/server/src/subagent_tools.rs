@@ -71,9 +71,9 @@ AVAILABLE SUBAGENT TYPES:
   - Available tools: view, local_code_search, search_docs, search_memory, read_rulebook
 
 EXAMPLES:
-- description: 'Generate API documentation', prompt: 'Create comprehensive API docs for the user service endpoints', subagent_type: 'GeneralPurpose'
-- description: 'Code review analysis', prompt: 'Review the authentication module for security vulnerabilities', subagent_type: 'GeneralPurpose'
-- description: 'Database optimization', prompt: 'Analyze and optimize the user queries for better performance', subagent_type: 'GeneralPurpose'"
+- description: 'Generate API documentation', prompt: 'Create comprehensive API docs for the user service endpoints', subagent_type: 'ResearchAgent'
+- description: 'Code review analysis', prompt: 'Review the authentication module for security vulnerabilities', subagent_type: 'ResearchAgent'
+- description: 'Database optimization', prompt: 'Analyze and optimize the user queries for better performance', subagent_type: 'ResearchAgent'"
     )]
     pub async fn task(
         &self,
@@ -123,11 +123,14 @@ EXAMPLES:
                 )
             })?;
 
-        // Build the command using --prompt-file
-        let command = format!(
+        let mut command = format!(
             r#"stakpak --async --output text --max-steps {} --prompt-file {}"#,
             subagent_config.max_steps, prompt_file_path
         );
+
+        for tool in &subagent_config.allowed_tools {
+            command.push_str(&format!(" -t {}", tool));
+        }
 
         Ok(command)
     }
