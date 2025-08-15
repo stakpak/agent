@@ -82,6 +82,10 @@ struct Cli {
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
     disable_mcp_mtls: bool,
 
+    /// Allow only the specified tool in the agent's context
+    #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
+    allowed_tools: Option<Vec<String>>,
+
     /// Read prompt from file (runs in async mode only)
     #[arg(long = "prompt-file")]
     prompt_file: Option<String>,
@@ -261,6 +265,7 @@ async fn main() {
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
+                                allowed_tools: cli.allowed_tools,
                             },
                         )
                         .await
