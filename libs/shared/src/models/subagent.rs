@@ -3,10 +3,19 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WardenConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub volumes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubagentConfig {
     pub description: String,
     pub max_steps: usize,
     pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub warden: Option<WardenConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
