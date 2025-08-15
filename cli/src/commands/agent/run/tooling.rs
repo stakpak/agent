@@ -11,17 +11,38 @@ use stakpak_tui::SessionInfo;
 
 pub async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
     let sessions: Vec<AgentSession> = client.list_agent_sessions().await?;
-    let session_infos: Vec<SessionInfo> = sessions
+
+    let mut session_infos: Vec<(SessionInfo, chrono::DateTime<chrono::Utc>)> = sessions
         .into_iter()
         .map(|s| {
             let mut checkpoints = s.checkpoints.clone();
-            checkpoints.sort_by_key(|c| c.created_at);
-            SessionInfo {
+            checkpoints.sort_by_key(|c| c.updated_at);
+
+            // Get the last checkpoint's updated_at for sorting
+            let last_checkpoint_timestamp = checkpoints
+                .last()
+                .map(|c| c.updated_at)
+                .unwrap_or(s.updated_at);
+
+            let session_info = SessionInfo {
                 id: s.id.to_string(),
                 title: s.title,
                 updated_at: s.updated_at.to_string(),
                 checkpoints: checkpoints.iter().map(|c| c.id.to_string()).collect(),
-            }
+            };
+
+            (session_info, last_checkpoint_timestamp)
+        })
+        .collect();
+
+    session_infos.sort_by_key(|(_, timestamp)| *timestamp);
+    session_infos.reverse(); // Reverse to get most recent sessions at the top
+
+    let session_infos: Vec<SessionInfo> = session_infos
+        .into_iter()
+        .map(|(mut session_info, last_checkpoint_timestamp)| {
+            session_info.updated_at = last_checkpoint_timestamp.to_string();
+            session_info
         })
         .collect();
     Ok(session_infos)
