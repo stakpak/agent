@@ -75,7 +75,7 @@ EXAMPLES:
 - description: 'Code review analysis', prompt: 'Review the authentication module for security vulnerabilities', subagent_type: 'ResearchAgent'
 - description: 'Database optimization', prompt: 'Analyze and optimize the user queries for better performance', subagent_type: 'ResearchAgent'"
     )]
-    pub async fn task(
+    pub async fn subagent_task(
         &self,
         Parameters(TaskRequest {
             description,
@@ -85,19 +85,30 @@ EXAMPLES:
     ) -> Result<CallToolResult, McpError> {
         // Build the subagent execution command that will run in the background
         let subagent_type = SubagentType(subagent_type);
-        let subagent_command = self.build_subagent_command(&prompt, &subagent_type)?;
+        let subagent_command = match self.build_subagent_command(&prompt, &subagent_type) {
+            Ok(command) => command,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "COMMAND_BUILD_FAILED: Failed to build subagent command: {}",
+                    e
+                ))]));
+            }
+        };
 
         // Start the subagent as a background task using existing task manager
-        let task_info = self
+        let task_info = match self
             .get_task_manager()
             .start_task(subagent_command, None, None) // No timeout, no remote
             .await
-            .map_err(|e| {
-                McpError::internal_error(
-                    "Failed to start subagent task",
-                    Some(json!({"error": e.to_string()})),
-                )
-            })?;
+        {
+            Ok(task_info) => task_info,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "TASK_START_FAILED: Failed to start subagent task: {}",
+                    e
+                ))]));
+            }
+        };
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "🤖 Subagent Task Started\n\nTask ID: {}\nDescription: {}\nAgent Type: {}\nStatus: {:?}\n\nThe subagent is now running in the background. Use get_task_details to monitor progress and get results.",
@@ -124,7 +135,7 @@ EXAMPLES:
             })?;
 
         let mut command = format!(
-            r#"stakpak --async --output text --max-steps {} --prompt-file {}"#,
+            r#"stakpak -a --prompt-file {} --max-steps {}"#,
             subagent_config.max_steps, prompt_file_path
         );
 
