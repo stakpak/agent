@@ -131,17 +131,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
-        match list_sessions(&client).await {
-            Ok(sessions) => {
-                if let Some(session) = sessions.first() {
-                    current_session_id =
-                        Some(Uuid::parse_str(&session.id).map_err(|e| e.to_string())?);
-                }
-            }
-            Err(e) => {
-                send_input_event(&input_tx, InputEvent::Error(e)).await?;
-            }
-        }
         if let Some(checkpoint_id) = config.checkpoint_id {
             // Try to get session ID from checkpoint
             let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
@@ -316,15 +305,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
 
                 OutputEvent::ResumeSession => {
-                    if let Some(session_id) = &current_session_id {
-                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                    let session_id = if let Some(session_id) = &current_session_id {
+                        Some(session_id.to_string())
+                    } else {
+                        list_sessions(&client)
+                            .await
+                            .ok()
+                            .and_then(|sessions| sessions.first().map(|session| session.id.clone()))
+                    };
 
-                        match resume_session_from_checkpoint(
-                            &client,
-                            &session_id.to_string(),
-                            &input_tx,
-                        )
-                        .await
+                    if let Some(session_id) = &session_id {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                        match resume_session_from_checkpoint(&client, &session_id, &input_tx).await
                         {
                             Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                 // Track the current session ID
@@ -475,6 +467,19 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     messages.push(response.choices[0].message.clone());
 
                     send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+
+                    if current_session_id.is_none() {
+                        if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
+                        {
+                            if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
+                                if let Ok(checkpoint_with_session) =
+                                    client.get_agent_checkpoint(checkpoint_uuid).await
+                                {
+                                    current_session_id = Some(checkpoint_with_session.session.id);
+                                }
+                            }
+                        }
+                    }
 
                     // Send tool calls to TUI if present
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
