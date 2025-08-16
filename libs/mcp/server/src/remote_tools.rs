@@ -5,15 +5,11 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use stakpak_api::models::{CodeIndex, SimpleDocument};
-use stakpak_api::{GenerationResult, ToolsCallParams};
+use stakpak_api::ToolsCallParams;
+use stakpak_api::models::CodeIndex;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::indexing::IndexingStatus;
-
-use std::fs::{self};
-use std::io::Write;
-use std::path::Path;
-use tracing::{error, warn};
+use tracing::error;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GenerateCodeRequest {
@@ -85,271 +81,271 @@ pub struct LocalCodeSearchRequest {
 
 #[tool_router(router = tool_router_remote, vis = "pub")]
 impl ToolContainer {
-    #[tool(
-        description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
-IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files."
-    )]
-    pub async fn generate_code(
-        &self,
-        Parameters(GenerateCodeRequest {
-            prompt,
-            save_files,
-            context,
-        }): Parameters<GenerateCodeRequest>,
-    ) -> Result<CallToolResult, McpError> {
-        let output_format = if save_files.unwrap_or(false) {
-            "json"
-        } else {
-            "markdown"
-        };
+    //     #[tool(
+    //         description = "Advanced Generate/Edit devops configurations and infrastructure as code with suggested file names using a given prompt. If save_files is true, the generated files will be saved to the filesystem. The printed shell output will redact any secrets, will be replaced with a placeholder [REDACTED_SECRET:rule-id:short-hash]
+    // IMPORTANT: When breaking down large projects into multiple generation steps, always include previously generated files in the 'context' parameter to maintain coherent references and consistent structure across all generated files."
+    //     )]
+    //     pub async fn generate_code(
+    //         &self,
+    //         Parameters(GenerateCodeRequest {
+    //             prompt,
+    //             save_files,
+    //             context,
+    //         }): Parameters<GenerateCodeRequest>,
+    //     ) -> Result<CallToolResult, McpError> {
+    //         let output_format = if save_files.unwrap_or(false) {
+    //             "json"
+    //         } else {
+    //             "markdown"
+    //         };
 
-        // Convert context paths to Vec<Document>
-        let context_documents = if let Some(context_paths) = context {
-            context_paths
-                .into_iter()
-                .map(|path| {
-                    let uri = format!("file://{}", path);
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => {
-                            // Redact secrets in the file content
-                            let redacted_content = self
-                                .get_secret_manager()
-                                .redact_and_store_secrets(&content, Some(&path));
-                            SimpleDocument {
-                                uri,
-                                content: redacted_content,
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to read context file {}: {}", path, e);
-                            // Add empty document with error message
-                            SimpleDocument {
-                                uri,
-                                content: format!("Error reading file: {}", e),
-                            }
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+    //         // Convert context paths to Vec<Document>
+    //         let context_documents = if let Some(context_paths) = context {
+    //             context_paths
+    //                 .into_iter()
+    //                 .map(|path| {
+    //                     let uri = format!("file://{}", path);
+    //                     match std::fs::read_to_string(&path) {
+    //                         Ok(content) => {
+    //                             // Redact secrets in the file content
+    //                             let redacted_content = self
+    //                                 .get_secret_manager()
+    //                                 .redact_and_store_secrets(&content, Some(&path));
+    //                             SimpleDocument {
+    //                                 uri,
+    //                                 content: redacted_content,
+    //                             }
+    //                         }
+    //                         Err(e) => {
+    //                             warn!("Failed to read context file {}: {}", path, e);
+    //                             // Add empty document with error message
+    //                             SimpleDocument {
+    //                                 uri,
+    //                                 content: format!("Error reading file: {}", e),
+    //                             }
+    //                         }
+    //                     }
+    //                 })
+    //                 .collect::<Vec<_>>()
+    //         } else {
+    //             Vec::new()
+    //         };
 
-        let client = match self.get_client() {
-            Some(client) => client,
-            None => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("CLIENT_NOT_FOUND"),
-                    Content::text("Client not found"),
-                ]));
-            }
-        };
+    //         let client = match self.get_client() {
+    //             Some(client) => client,
+    //             None => {
+    //                 return Ok(CallToolResult::error(vec![
+    //                     Content::text("CLIENT_NOT_FOUND"),
+    //                     Content::text("Client not found"),
+    //                 ]));
+    //             }
+    //         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "generate_code".to_string(),
-                arguments: json!({
-                    "prompt": prompt,
-                    "context": context_documents,
-                    "output_format": output_format,
-                }),
-            })
-            .await
-        {
-            Ok(response) => response,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![
-                    Content::text("GENERATE_CODE_ERROR"),
-                    Content::text(format!("Failed to generate code: {}", e)),
-                ]));
-            }
-        };
+    //         let response = match client
+    //             .call_mcp_tool(&ToolsCallParams {
+    //                 name: "generate_code".to_string(),
+    //                 arguments: json!({
+    //                     "prompt": prompt,
+    //                     "context": context_documents,
+    //                     "output_format": output_format,
+    //                 }),
+    //             })
+    //             .await
+    //         {
+    //             Ok(response) => response,
+    //             Err(e) => {
+    //                 return Ok(CallToolResult::error(vec![
+    //                     Content::text("GENERATE_CODE_ERROR"),
+    //                     Content::text(format!("Failed to generate code: {}", e)),
+    //                 ]));
+    //             }
+    //         };
 
-        if save_files.unwrap_or(false) {
-            let mut result_report = String::new();
+    //         if save_files.unwrap_or(false) {
+    //             let mut result_report = String::new();
 
-            let response_text = response
-                .iter()
-                .map(|r| {
-                    if let Some(RawTextContent { text }) = r.as_text() {
-                        text.clone()
-                    } else {
-                        "".to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("");
+    //             let response_text = response
+    //                 .iter()
+    //                 .map(|r| {
+    //                     if let Some(RawTextContent { text }) = r.as_text() {
+    //                         text.clone()
+    //                     } else {
+    //                         "".to_string()
+    //                     }
+    //                 })
+    //                 .collect::<Vec<_>>()
+    //                 .join("");
 
-            let generation_result: GenerationResult = match serde_json::from_str(&response_text) {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Failed to parse generation result: {}", e);
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("GENERATION_PARSE_ERROR"),
-                        Content::text(format!("Failed to parse generation result: {}", e)),
-                    ]));
-                }
-            };
+    //             let generation_result: GenerationResult = match serde_json::from_str(&response_text) {
+    //                 Ok(result) => result,
+    //                 Err(e) => {
+    //                     error!("Failed to parse generation result: {}", e);
+    //                     return Ok(CallToolResult::error(vec![
+    //                         Content::text("GENERATION_PARSE_ERROR"),
+    //                         Content::text(format!("Failed to parse generation result: {}", e)),
+    //                     ]));
+    //                 }
+    //             };
 
-            let mut new_files: Vec<String> = Vec::new();
-            let mut failed_edits = Vec::new();
+    //             let mut new_files: Vec<String> = Vec::new();
+    //             let mut failed_edits = Vec::new();
 
-            for edit in generation_result.edits.unwrap_or_default() {
-                let file_path = Path::new(
-                    edit.document_uri
-                        .strip_prefix("file:///")
-                        .or_else(|| edit.document_uri.strip_prefix("file://"))
-                        .unwrap_or(&edit.document_uri),
-                );
+    //             for edit in generation_result.edits.unwrap_or_default() {
+    //                 let file_path = Path::new(
+    //                     edit.document_uri
+    //                         .strip_prefix("file:///")
+    //                         .or_else(|| edit.document_uri.strip_prefix("file://"))
+    //                         .unwrap_or(&edit.document_uri),
+    //                 );
 
-                // Create parent directories if they don't exist
-                if let Some(parent) = file_path.parent() {
-                    if !parent.exists() {
-                        if let Err(e) = fs::create_dir_all(parent) {
-                            error!("Failed to create directory {}: {}", parent.display(), e);
-                            failed_edits.push(format!(
-                                "Failed to create directory {} for file {}: {}\nEdit content:\n{}",
-                                parent.display(),
-                                file_path.display(),
-                                e,
-                                edit
-                            ));
-                            continue;
-                        }
-                    }
-                }
+    //                 // Create parent directories if they don't exist
+    //                 if let Some(parent) = file_path.parent() {
+    //                     if !parent.exists() {
+    //                         if let Err(e) = fs::create_dir_all(parent) {
+    //                             error!("Failed to create directory {}: {}", parent.display(), e);
+    //                             failed_edits.push(format!(
+    //                                 "Failed to create directory {} for file {}: {}\nEdit content:\n{}",
+    //                                 parent.display(),
+    //                                 file_path.display(),
+    //                                 e,
+    //                                 edit
+    //                             ));
+    //                             continue;
+    //                         }
+    //                     }
+    //                 }
 
-                // Check if file exists, if not create it
-                if !file_path.exists() {
-                    match fs::File::create(file_path) {
-                        Ok(_) => {
-                            new_files.push(file_path.to_str().unwrap_or_default().to_string());
-                        }
-                        Err(e) => {
-                            error!("Failed to create file {}: {}", file_path.display(), e);
-                            failed_edits.push(format!(
-                                "Failed to create file {}: {}\nEdit content:\n{}",
-                                file_path.display(),
-                                e,
-                                edit
-                            ));
-                            continue;
-                        }
-                    }
-                }
+    //                 // Check if file exists, if not create it
+    //                 if !file_path.exists() {
+    //                     match fs::File::create(file_path) {
+    //                         Ok(_) => {
+    //                             new_files.push(file_path.to_str().unwrap_or_default().to_string());
+    //                         }
+    //                         Err(e) => {
+    //                             error!("Failed to create file {}: {}", file_path.display(), e);
+    //                             failed_edits.push(format!(
+    //                                 "Failed to create file {}: {}\nEdit content:\n{}",
+    //                                 file_path.display(),
+    //                                 e,
+    //                                 edit
+    //                             ));
+    //                             continue;
+    //                         }
+    //                     }
+    //                 }
 
-                let redacted_edit = self
-                    .get_secret_manager()
-                    .redact_and_store_secrets(&edit.to_string(), file_path.to_str());
+    //                 let redacted_edit = self
+    //                     .get_secret_manager()
+    //                     .redact_and_store_secrets(&edit.to_string(), file_path.to_str());
 
-                if edit.old_str.is_empty() {
-                    // This is an addition to a file (appending content)
-                    match fs::OpenOptions::new().append(true).open(file_path) {
-                        Ok(mut file) => {
-                            if let Err(e) = file.write_all(edit.new_str.as_bytes()) {
-                                error!("Failed to append to file {}: {}", file_path.display(), e);
-                                failed_edits.push(format!(
-                                    "Failed to append content to file {}: {}\nEdit content:\n{}",
-                                    file_path.display(),
-                                    e,
-                                    redacted_edit
-                                ));
-                                continue;
-                            }
-                            result_report.push_str(&format!("{}\n\n", redacted_edit));
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to open file for appending {}: {}",
-                                file_path.display(),
-                                e
-                            );
-                            failed_edits.push(format!(
-                                "Failed to open file {} for appending: {}\nEdit content:\n{}",
-                                file_path.display(),
-                                e,
-                                redacted_edit
-                            ));
-                            continue;
-                        }
-                    }
-                } else {
-                    // This is a modification to a file (replacing content)
-                    // Read the current file content
-                    let current_content = match fs::read_to_string(file_path) {
-                        Ok(content) => content,
-                        Err(e) => {
-                            error!("Failed to read file {}: {}", file_path.display(), e);
-                            failed_edits.push(format!(
-                                "Failed to read file {} for content replacement: {}\nEdit content:\n{}",
-                                file_path.display(),
-                                e,
-                                edit
-                            ));
-                            continue;
-                        }
-                    };
+    //                 if edit.old_str.is_empty() {
+    //                     // This is an addition to a file (appending content)
+    //                     match fs::OpenOptions::new().append(true).open(file_path) {
+    //                         Ok(mut file) => {
+    //                             if let Err(e) = file.write_all(edit.new_str.as_bytes()) {
+    //                                 error!("Failed to append to file {}: {}", file_path.display(), e);
+    //                                 failed_edits.push(format!(
+    //                                     "Failed to append content to file {}: {}\nEdit content:\n{}",
+    //                                     file_path.display(),
+    //                                     e,
+    //                                     redacted_edit
+    //                                 ));
+    //                                 continue;
+    //                             }
+    //                             result_report.push_str(&format!("{}\n\n", redacted_edit));
+    //                         }
+    //                         Err(e) => {
+    //                             error!(
+    //                                 "Failed to open file for appending {}: {}",
+    //                                 file_path.display(),
+    //                                 e
+    //                             );
+    //                             failed_edits.push(format!(
+    //                                 "Failed to open file {} for appending: {}\nEdit content:\n{}",
+    //                                 file_path.display(),
+    //                                 e,
+    //                                 redacted_edit
+    //                             ));
+    //                             continue;
+    //                         }
+    //                     }
+    //                 } else {
+    //                     // This is a modification to a file (replacing content)
+    //                     // Read the current file content
+    //                     let current_content = match fs::read_to_string(file_path) {
+    //                         Ok(content) => content,
+    //                         Err(e) => {
+    //                             error!("Failed to read file {}: {}", file_path.display(), e);
+    //                             failed_edits.push(format!(
+    //                                 "Failed to read file {} for content replacement: {}\nEdit content:\n{}",
+    //                                 file_path.display(),
+    //                                 e,
+    //                                 edit
+    //                             ));
+    //                             continue;
+    //                         }
+    //                     };
 
-                    // Verify that the file contains the old string
-                    if !current_content.contains(&edit.old_str) {
-                        error!(
-                            "Search string not found in file {}, skipping edit: \n{}",
-                            file_path.display(),
-                            edit
-                        );
-                        failed_edits.push(format!(
-                            "Search string not found in file {} - the file content may have changed or the search string is incorrect.\nEdit content:\n{}",
-                            file_path.display(),
-                            edit
-                        ));
-                        continue;
-                    }
+    //                     // Verify that the file contains the old string
+    //                     if !current_content.contains(&edit.old_str) {
+    //                         error!(
+    //                             "Search string not found in file {}, skipping edit: \n{}",
+    //                             file_path.display(),
+    //                             edit
+    //                         );
+    //                         failed_edits.push(format!(
+    //                             "Search string not found in file {} - the file content may have changed or the search string is incorrect.\nEdit content:\n{}",
+    //                             file_path.display(),
+    //                             edit
+    //                         ));
+    //                         continue;
+    //                     }
 
-                    // Replace old content with new content
-                    let updated_content = current_content.replace(&edit.old_str, &edit.new_str);
-                    match fs::write(file_path, updated_content) {
-                        Ok(_) => {
-                            result_report.push_str(&format!("{}\n\n", redacted_edit));
-                        }
-                        Err(e) => {
-                            error!("Failed to write to file {}: {}", file_path.display(), e);
-                            failed_edits.push(format!(
-                                "Failed to write updated content to file {}: {}\nEdit content:\n{}",
-                                file_path.display(),
-                                e,
-                                redacted_edit
-                            ));
-                            continue;
-                        }
-                    }
-                }
-            }
+    //                     // Replace old content with new content
+    //                     let updated_content = current_content.replace(&edit.old_str, &edit.new_str);
+    //                     match fs::write(file_path, updated_content) {
+    //                         Ok(_) => {
+    //                             result_report.push_str(&format!("{}\n\n", redacted_edit));
+    //                         }
+    //                         Err(e) => {
+    //                             error!("Failed to write to file {}: {}", file_path.display(), e);
+    //                             failed_edits.push(format!(
+    //                                 "Failed to write updated content to file {}: {}\nEdit content:\n{}",
+    //                                 file_path.display(),
+    //                                 e,
+    //                                 redacted_edit
+    //                             ));
+    //                             continue;
+    //                         }
+    //                     }
+    //                 }
+    //             }
 
-            // Build the final result report
-            let mut final_report = String::new();
+    //             // Build the final result report
+    //             let mut final_report = String::new();
 
-            if !new_files.is_empty() {
-                final_report.push_str(&format!("Created files: {}\n\n", new_files.join(", ")));
-            }
+    //             if !new_files.is_empty() {
+    //                 final_report.push_str(&format!("Created files: {}\n\n", new_files.join(", ")));
+    //             }
 
-            if !result_report.is_empty() {
-                final_report.push_str("Successfully applied edits:\n");
-                final_report.push_str(&result_report);
-            }
+    //             if !result_report.is_empty() {
+    //                 final_report.push_str("Successfully applied edits:\n");
+    //                 final_report.push_str(&result_report);
+    //             }
 
-            if !failed_edits.is_empty() {
-                final_report.push_str("\n❌ Failed Edits:\n");
-                for (i, failed_edit) in failed_edits.iter().enumerate() {
-                    final_report.push_str(&format!("{}. {}\n", i + 1, failed_edit));
-                }
-                final_report.push_str("\nPlease review the failed edits above and take appropriate action to resolve the issues.\n");
-            }
+    //             if !failed_edits.is_empty() {
+    //                 final_report.push_str("\n❌ Failed Edits:\n");
+    //                 for (i, failed_edit) in failed_edits.iter().enumerate() {
+    //                     final_report.push_str(&format!("{}. {}\n", i + 1, failed_edit));
+    //                 }
+    //                 final_report.push_str("\nPlease review the failed edits above and take appropriate action to resolve the issues.\n");
+    //             }
 
-            Ok(CallToolResult::success(vec![Content::text(final_report)]))
-        } else {
-            Ok(CallToolResult::success(response))
-        }
-    }
+    //             Ok(CallToolResult::success(vec![Content::text(final_report)]))
+    //         } else {
+    //             Ok(CallToolResult::success(response))
+    //         }
+    //     }
 
     #[tool(
         description = "Web search for technical documentation. This includes documentation for tools, cloud providers, development frameworks, release notes, and other technical resources. searches against the url, title, description, and content of documentation chunks.
