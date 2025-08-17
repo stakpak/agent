@@ -381,8 +381,10 @@ pub fn render_styled_block_ansi_to_tui(
 
     let message_id = message_id.unwrap_or_else(Uuid::new_v4);
 
+    let mut owned_lines: Vec<Line<'static>> = Vec::new();
+    owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     // Convert to owned lines for storage
-    let mut owned_lines: Vec<Line<'static>> = formatted_lines
+    let final_lines: Vec<Line<'static>> = formatted_lines
         .into_iter()
         .map(|line| {
             let owned_spans: Vec<Span<'static>> = line
@@ -393,6 +395,8 @@ pub fn render_styled_block_ansi_to_tui(
             Line::from(owned_spans)
         })
         .collect();
+
+    owned_lines.extend(final_lines);
 
     // add spaceing marker
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));

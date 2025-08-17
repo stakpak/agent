@@ -71,6 +71,10 @@ struct Cli {
     #[arg(long = "privacy-mode", default_value_t = false)]
     privacy_mode: bool,
 
+    /// Enable study mode to use the agent as a study assistant
+    #[arg(long = "study-mode", default_value_t = false)]
+    study_mode: bool,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
@@ -94,6 +98,10 @@ struct Cli {
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
+
+    /// Read system prompt from file
+    #[arg(long = "system-prompt-file")]
+    system_prompt_file: Option<String>,
 
     /// Read prompt from file (runs in async mode only)
     #[arg(long = "prompt-file")]
@@ -252,7 +260,28 @@ async fn main() {
                         }
                     }
 
-                    // Read prompt from file if specified
+                    let system_prompt =
+                        if let Some(system_prompt_file_path) = &cli.system_prompt_file {
+                            match std::fs::read_to_string(system_prompt_file_path) {
+                                Ok(content) => {
+                                    println!(
+                                        "📖 Reading system prompt from file: {}",
+                                        system_prompt_file_path
+                                    );
+                                    Some(content.trim().to_string())
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Failed to read system prompt file '{}': {}",
+                                        system_prompt_file_path, e
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
                     let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                         match std::fs::read_to_string(prompt_file_path) {
                             Ok(content) => {
@@ -301,6 +330,7 @@ async fn main() {
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 allowed_tools: cli.allowed_tools,
+                                system_prompt,
                             },
                         )
                         .await
@@ -324,6 +354,8 @@ async fn main() {
                                 subagent_configs,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
+                                study_mode: cli.study_mode,
+                                system_prompt,
                             },
                         )
                         .await

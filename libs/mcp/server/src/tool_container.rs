@@ -65,6 +65,12 @@ impl ToolContainer {
     pub fn get_subagent_configs(&self) -> &Option<SubagentConfigs> {
         &self.subagent_configs
     }
+
+    pub fn get_session_id(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
+        ctx.meta
+            .get("session_id")
+            .and_then(|s| s.as_str().map(|s| s.to_string()))
+    }
 }
 
 #[tool_handler]
