@@ -70,6 +70,10 @@ struct Cli {
     #[arg(long = "privacy-mode", default_value_t = false)]
     privacy_mode: bool,
 
+    /// Enable study mode to use the agent as a study assistant
+    #[arg(long = "study-mode", default_value_t = false)]
+    study_mode: bool,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
@@ -314,6 +318,7 @@ async fn main() {
                                 rulebooks,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
+                                study_mode: cli.study_mode,
                                 system_prompt,
                             },
                         )

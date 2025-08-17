@@ -14,6 +14,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
+use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
@@ -35,6 +36,7 @@ pub struct RunInteractiveConfig {
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
+    pub study_mode: bool,
     pub system_prompt: Option<String>,
 }
 
@@ -397,9 +399,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
             }
 
+            let headers = if config.study_mode {
+                let mut headers = HeaderMap::new();
+                headers.insert("x-system-prompt-key", "agent_study_mode".parse().unwrap());
+                Some(headers)
+            } else {
+                None
+            };
             let response_result = loop {
                 let stream_result = client
-                    .chat_completion_stream(messages.clone(), Some(tools.clone()))
+                    .chat_completion_stream(messages.clone(), Some(tools.clone()), headers.clone())
                     .await;
 
                 let (mut stream, current_request_id) = match stream_result {
