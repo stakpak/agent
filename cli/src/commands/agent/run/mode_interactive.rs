@@ -415,6 +415,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
             let headers = if config.study_mode {
                 let mut headers = HeaderMap::new();
+                #[allow(clippy::unwrap_used)]
                 headers.insert("x-system-prompt-key", "agent_study_mode".parse().unwrap());
                 Some(headers)
             } else {
