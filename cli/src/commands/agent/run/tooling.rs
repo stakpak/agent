@@ -8,6 +8,7 @@ use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_tui::SessionInfo;
+use uuid::Uuid;
 
 pub async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
     let sessions: Vec<AgentSession> = client.list_agent_sessions().await?;
@@ -53,6 +54,7 @@ pub async fn run_tool_call(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
     tool_call: &ToolCall,
     cancel_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    session_id: Option<Uuid>,
 ) -> Result<Option<CallToolResult>, String> {
     let tool_name = &tool_call.function.name;
     let client_name = tools_map
@@ -71,6 +73,7 @@ pub async fn run_tool_call(
                             .map_err(|e| e.to_string())?,
                     ),
                 },
+                session_id,
             )
             .await?;
 

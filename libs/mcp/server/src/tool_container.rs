@@ -57,6 +57,12 @@ impl ToolContainer {
     pub fn get_remote_connection_manager(&self) -> &Arc<RemoteConnectionManager> {
         &self.remote_connection_manager
     }
+
+    pub fn get_session_id(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
+        ctx.meta
+            .get("session_id")
+            .and_then(|s| s.as_str().map(|s| s.to_string()))
+    }
 }
 
 #[tool_handler]

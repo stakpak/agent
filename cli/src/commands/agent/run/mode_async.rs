@@ -1,4 +1,6 @@
-use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
+use crate::commands::agent::run::checkpoint::{
+    extract_checkpoint_id_from_messages, get_checkpoint_messages,
+};
 use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, convert_tools_map, system_message, tool_result, user_message,
 };
@@ -16,6 +18,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use std::sync::Arc;
 use std::time::Instant;
+use uuid::Uuid;
 
 pub struct RunAsyncConfig {
     pub prompt: String,
@@ -150,6 +153,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
 
+    let mut current_session_id: Option<Uuid> = None;
+
     loop {
         step += 1;
         if step > max_steps {
@@ -172,6 +177,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         llm_response_time += llm_start.elapsed();
 
         chat_messages.push(response.choices[0].message.clone());
+
+        if current_session_id.is_none() {
+            if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages) {
+                if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
+                    if let Ok(checkpoint_with_session) =
+                        client.get_agent_checkpoint(checkpoint_uuid).await
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
+                    }
+                }
+            }
+        }
 
         let tool_calls = response.choices[0].message.tool_calls.as_ref();
         let tool_count = tool_calls.map(|t| t.len()).unwrap_or(0);
@@ -222,8 +239,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 );
 
                 // Add timeout for tool execution
-                let tool_execution =
-                    async { run_tool_call(&clients, &tools_map, tool_call, None).await };
+                let tool_execution = async {
+                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                };
 
                 let result = match tokio::time::timeout(
                     std::time::Duration::from_secs(60 * 60), // 60 minute timeout
