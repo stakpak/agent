@@ -1,3 +1,4 @@
+use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
@@ -9,7 +10,6 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};

@@ -1,3 +1,4 @@
+use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
     get_checkpoint_messages, resume_session_from_checkpoint,
