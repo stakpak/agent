@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use eventsource_stream::Eventsource;
+use reqwest::header::HeaderMap;
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, Response, header};
 use rmcp::model::Content;
 use rmcp::model::JsonRpcResponse;
@@ -651,6 +652,7 @@ impl Client {
         &self,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
+        headers: Option<HeaderMap>,
     ) -> Result<
         (
             impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
@@ -665,6 +667,7 @@ impl Client {
         let response = self
             .client
             .post(&url)
+            .headers(headers.unwrap_or_default())
             .json(&input)
             .send()
             .await
