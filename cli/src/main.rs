@@ -98,6 +98,10 @@ struct Cli {
     #[arg(long = "prompt-file")]
     prompt_file: Option<String>,
 
+    /// Configuration profile to use (can also be set with STAKPAK_PROFILE env var)
+    #[arg(long = "profile")]
+    profile: Option<String>,
+
     /// Prompt to run the agent
     prompt: Option<String>,
 
@@ -134,7 +138,13 @@ async fn main() {
             .init();
     }
 
-    match AppConfig::load() {
+    // Determine which profile to use: CLI arg > STAKPAK_PROFILE env var > "default"
+    let profile_name = cli
+        .profile
+        .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
+        .unwrap_or_else(|| "default".to_string());
+
+    match AppConfig::load(&profile_name) {
         Ok(mut config) => {
             if config.machine_name.is_none() {
                 // Generate a random machine name
