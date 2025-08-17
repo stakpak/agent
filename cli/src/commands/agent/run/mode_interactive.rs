@@ -222,6 +222,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         &tools_map,
                         &tool_call,
                         Some(cancel_rx.resubscribe()),
+                        current_session_id,
                     )
                     .await?;
 
@@ -316,8 +317,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     if let Some(session_id) = &session_id {
                         send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                        match resume_session_from_checkpoint(&client, &session_id, &input_tx).await
-                        {
+                        match resume_session_from_checkpoint(&client, session_id, &input_tx).await {
                             Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
