@@ -1033,11 +1033,15 @@ fn xml_tags_to_markdown_headers(input: &str) -> String {
             let tag_name = &caps[1];
 
             // Skip checkpoint tags - leave them untouched
-            if tag_name == "checkpoint_id" {
+            if tag_name == "checkpoint_id" || tag_name == "img" {
                 caps[0].to_string() // Return the original tag unchanged
             } else {
                 let formatted_name = format_header_name(tag_name);
-                format!("#### {}", formatted_name) // Makes it a level 3 markdown header
+                if formatted_name == "Scratchpad" {
+                    format!("## {}\n", formatted_name) // Makes it a level 3 markdown header
+                } else {
+                    format!("#### {}\n", formatted_name) // Makes it a level 3 markdown header
+                }
             }
         })
         .to_string();

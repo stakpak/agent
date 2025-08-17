@@ -1,4 +1,6 @@
-use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
+use crate::commands::agent::run::checkpoint::{
+    extract_checkpoint_id_from_messages, get_checkpoint_messages,
+};
 use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, add_subagents, convert_tools_map, tool_result, user_message,
 };
@@ -17,6 +19,7 @@ use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::sync::Arc;
 use std::time::Instant;
+use uuid::Uuid;
 
 pub struct RunAsyncConfig {
     pub prompt: String,
@@ -31,6 +34,7 @@ pub struct RunAsyncConfig {
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
     pub enable_mtls: bool,
+    pub system_prompt: Option<String>,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -131,6 +135,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         );
     }
 
+    if let Some(system_prompt) = config.system_prompt {
+        chat_messages.insert(0, system_message(system_prompt));
+        print!("{}", renderer.render_info("System prompt loaded"));
+    }
+
     // Add user prompt if provided
     if !config.prompt.is_empty() {
         let (user_input, _local_context) =
@@ -149,6 +158,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
+
+    let mut current_session_id: Option<Uuid> = None;
 
     loop {
         step += 1;
@@ -172,6 +183,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         llm_response_time += llm_start.elapsed();
 
         chat_messages.push(response.choices[0].message.clone());
+
+        if current_session_id.is_none() {
+            if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages) {
+                if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
+                    if let Ok(checkpoint_with_session) =
+                        client.get_agent_checkpoint(checkpoint_uuid).await
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
+                    }
+                }
+            }
+        }
 
         let tool_calls = response.choices[0].message.tool_calls.as_ref();
         let tool_count = tool_calls.map(|t| t.len()).unwrap_or(0);
@@ -222,8 +245,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 );
 
                 // Add timeout for tool execution
-                let tool_execution =
-                    async { run_tool_call(&clients, &tools_map, tool_call, None).await };
+                let tool_execution = async {
+                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                };
 
                 let result = match tokio::time::timeout(
                     std::time::Duration::from_secs(60 * 60), // 60 minute timeout
