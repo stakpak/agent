@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::tool_container::ToolContainer;
 use rmcp::{
     Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool, tool_router,
@@ -109,15 +111,20 @@ The subagent runs asynchronously in the background. This tool returns immediatel
             )
         })?;
 
-        // Write prompt to a temporary file
-        let prompt_filename = format!("subagent_prompt_{}.txt", Uuid::new_v4());
-        let prompt_file_path =
-            LocalStore::write_session_data(&prompt_filename, prompt).map_err(|e| {
-                McpError::internal_error(
-                    "Failed to create prompt file",
-                    Some(json!({"error": e.to_string()})),
-                )
-            })?;
+        let prompt_filename = format!("prompt_{}.txt", Uuid::new_v4());
+        let prompt_file_path = LocalStore::write_session_data(
+            Path::new("subagents")
+                .join(&prompt_filename)
+                .to_string_lossy()
+                .as_ref(),
+            prompt,
+        )
+        .map_err(|e| {
+            McpError::internal_error(
+                "Failed to create prompt file",
+                Some(json!({"error": e.to_string()})),
+            )
+        })?;
 
         let mut command = format!(
             r#"stakpak -a --prompt-file {} --max-steps {}"#,
