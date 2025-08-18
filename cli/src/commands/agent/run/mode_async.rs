@@ -2,7 +2,8 @@ use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, system_message, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map_with_filter, system_message, tool_result,
+    user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -49,6 +50,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         renderer.render_info("Initializing MCP server and client connections...")
     );
     let ctx_clone = ctx.clone();
+    let allowed_tools_for_filter = config.allowed_tools.clone(); // Clone before moving config
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
     // Generate certificates if mTLS is enabled
@@ -72,7 +74,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                allowed_tools: config.allowed_tools,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -91,7 +92,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     .await
     .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map(&tools_map);
+    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
 
     let client = Client::new(&ClientConfig {
         api_key: ctx.api_key.clone(),
