@@ -1404,7 +1404,7 @@ fn list_auto_approved_tools(state: &mut AppState) {
         let message = if state
             .allowed_tools
             .as_ref()
-            .map_or(false, |tools| !tools.is_empty())
+            .is_some_and(|tools| !tools.is_empty())
         {
             "💡 No allowed tools are currently set to auto-approve."
         } else {
