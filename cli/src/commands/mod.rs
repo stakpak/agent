@@ -22,6 +22,14 @@ pub mod flow;
 pub mod warden;
 
 #[derive(Subcommand, PartialEq)]
+pub enum ConfigCommands {
+    /// Show current configuration
+    Show,
+    /// Print a complete sample configuration file
+    Sample,
+}
+
+#[derive(Subcommand, PartialEq)]
 pub enum Commands {
     /// Get CLI Version
     Version,
@@ -45,8 +53,9 @@ pub enum Commands {
         auto_append_gitignore: Option<bool>,
     },
 
-    /// Show current configuration
-    Config,
+    /// Configuration management commands
+    #[command(subcommand)]
+    Config(ConfigCommands),
 
     /// Get current account
     Account,
@@ -168,7 +177,7 @@ impl Commands {
             Commands::Login { .. }
                 | Commands::Logout
                 | Commands::Set { .. }
-                | Commands::Config
+                | Commands::Config(_)
                 | Commands::Version
                 | Commands::Update
         )
@@ -304,24 +313,29 @@ impl Commands {
                     );
                 }
             }
-            Commands::Config => {
-                println!("Current configuration:");
-                println!("  Profile: {}", config.profile_name);
-                println!(
-                    "  Machine name: {}",
-                    config.machine_name.as_deref().unwrap_or("(not set)")
-                );
-                println!(
-                    "  Auto-append .stakpak to .gitignore: {}",
-                    config.auto_append_gitignore.unwrap_or(true)
-                );
-                println!("  API endpoint: {}", config.api_endpoint);
-                let api_key_display = match &config.api_key {
-                    Some(key) if !key.is_empty() => "***".to_string(),
-                    _ => "(not set)".to_string(),
-                };
-                println!("  API key: {}", api_key_display);
-            }
+            Commands::Config(config_command) => match config_command {
+                ConfigCommands::Show => {
+                    println!("Current configuration:");
+                    println!("  Profile: {}", config.profile_name);
+                    println!(
+                        "  Machine name: {}",
+                        config.machine_name.as_deref().unwrap_or("(not set)")
+                    );
+                    println!(
+                        "  Auto-append .stakpak to .gitignore: {}",
+                        config.auto_append_gitignore.unwrap_or(true)
+                    );
+                    println!("  API endpoint: {}", config.api_endpoint);
+                    let api_key_display = match &config.api_key {
+                        Some(key) if !key.is_empty() => "***".to_string(),
+                        _ => "(not set)".to_string(),
+                    };
+                    println!("  API key: {}", api_key_display);
+                }
+                ConfigCommands::Sample => {
+                    print_sample_config();
+                }
+            },
             Commands::Account => {
                 let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
                 let data = client.get_my_account().await?;
@@ -535,4 +549,99 @@ impl Commands {
         }
         Ok(())
     }
+}
+
+fn print_sample_config() {
+    println!(
+        r#"# Stakpak Configuration File
+
+# Profile-based configuration allows different settings for different environments
+[profiles]
+
+# Special 'all' profile - settings that apply to ALL profiles as defaults
+# Individual profiles can override these settings
+[profiles.all]
+api_endpoint = "https://apiv2.stakpak.dev"
+# Common tools that should be available across all profiles
+allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search"]
+# Conservative auto-approve list that works for all environments
+auto_approve = ["view", "search_docs", "read_rulebook"]
+
+[profiles.all.rulebooks]
+# Common rulebook patterns for all profiles
+include = ["stakpak://yourdomain.com/common/**"]
+exclude = ["stakpak://yourdomain.com/archive/**"]
+include_tags = ["common", "shared"]
+exclude_tags = ["archived", "obsolete"]
+
+# Default profile - used when no specific profile is selected
+# Inherits from 'all' profile and can override specific settings
+[profiles.default]
+api_key = "your_api_key_here"
+
+# Extends the 'all' profile's allowed_tools with additional development tools
+allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+
+# Inherits auto_approve from 'all' profile (view, search_docs, read_rulebook)
+# No need to redefine unless you want to override
+
+# Rulebook filtering configuration
+[profiles.default.rulebooks]
+# URI patterns to include (supports glob patterns like * and **)
+include = ["stakpak://yourdomain.com/*", "stakpak://**/*.md"]
+
+# URI patterns to exclude (supports glob patterns)
+exclude = ["stakpak://restricted.domain.com/**"]
+
+# Tags to include - only rulebooks with these tags will be loaded
+include_tags = ["terraform", "kubernetes", "security"]
+
+# Tags to exclude - rulebooks with these tags will be filtered out
+exclude_tags = ["deprecated", "experimental"]
+
+# Production profile - stricter settings for production environments
+# Inherits from 'all' profile but restricts tools for safety
+[profiles.production]
+api_key = "prod_api_key_here"
+
+# Restricts allowed_tools to only read-only operations (overrides 'all' profile)
+allowed_tools = ["view", "search_docs", "read_rulebook"]
+
+# Uses the same conservative auto_approve list from 'all' profile
+# No need to redefine since 'all' profile already has safe defaults
+
+[profiles.production.rulebooks]
+# Only include production-ready rulebooks
+include = ["stakpak://yourdomain.com/prod/**"]
+exclude = ["stakpak://yourdomain.com/dev/**", "stakpak://yourdomain.com/test/**"]
+include_tags = ["production", "stable"]
+exclude_tags = ["dev", "test", "experimental"]
+
+# Development profile - more permissive settings for development
+# Inherits from 'all' profile and extends with development-specific tools
+[profiles.development]
+api_key = "dev_api_key_here"
+
+# Extends 'all' profile's allowed_tools with write operations for development
+allowed_tools = ["view", "search_docs", "read_rulebook", "local_code_search", "create", "str_replace", "run_command"]
+
+# Extends 'all' profile's auto_approve with additional development tools
+auto_approve = ["view", "search_docs", "read_rulebook", "create"]
+
+[profiles.development.rulebooks]
+# Include development and test rulebooks
+include = ["stakpak://yourdomain.com/dev/**", "stakpak://yourdomain.com/test/**"]
+exclude = []
+include_tags = ["dev", "test", "experimental"]
+exclude_tags = []
+
+# Global settings that apply to all profiles
+[settings]
+# Machine name for device identification
+machine_name = "my-development-machine"
+
+# Automatically append .stakpak to .gitignore files
+auto_append_gitignore = true
+"#
+    );
 }
