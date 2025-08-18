@@ -42,4 +42,5 @@ volumes = [
     "~/.config/gcloud:/home/agent/.config/gcloud:ro",
     "~/.digitalocean:/home/agent/.digitalocean:ro",
     "~/.azure:/home/agent/.azure:ro",
+    "~/.kube:/home/agent/.kube:ro",
 ]
