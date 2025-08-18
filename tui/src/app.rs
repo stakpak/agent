@@ -303,7 +303,7 @@ impl AppState {
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
-            allowed_tools: allowed_tools.map(|tools| tools.clone()),
+            allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
             retry_attempts: 0,
