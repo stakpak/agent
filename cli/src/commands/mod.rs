@@ -312,6 +312,7 @@ impl Commands {
             }
             Commands::Config => {
                 println!("Current configuration:");
+                println!("  Profile: {}", config.profile_name);
                 println!(
                     "  Machine name: {}",
                     config.machine_name.as_deref().unwrap_or("(not set)")
