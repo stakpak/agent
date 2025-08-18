@@ -4553,7 +4553,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stakpak"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "chrono",
  "clap 4.5.41",
@@ -4589,7 +4589,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-api"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "chrono",
  "eventsource-stream",
@@ -4605,7 +4605,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "anyhow",
  "futures",
@@ -4620,7 +4620,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "anyhow",
  "axum",
@@ -4643,7 +4643,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.2.27"
+version = "0.2.28"
 dependencies = [
  "ansi-to-tui",
  "chrono",
