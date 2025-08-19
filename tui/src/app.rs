@@ -102,7 +102,8 @@ pub struct AppState {
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
     pub auto_approve_manager: AutoApproveManager,
-    pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
+    pub allowed_tools: Option<Vec<String>>,
+    pub dialog_focused: bool,
     pub latest_tool_call: Option<ToolCall>,
     // Retry mechanism state
     pub retry_attempts: usize,
@@ -236,6 +237,8 @@ impl AppState {
         redact_secrets: bool,
         privacy_mode: bool,
         is_git_repo: bool,
+        auto_approve_tools: Option<&Vec<String>>,
+        allowed_tools: Option<&Vec<String>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
         let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
@@ -299,7 +302,8 @@ impl AppState {
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            auto_approve_manager: AutoApproveManager::new(),
+            auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
+            allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
             retry_attempts: 0,

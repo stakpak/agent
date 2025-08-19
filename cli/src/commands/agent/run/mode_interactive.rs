@@ -4,8 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map, tool_call_history_string,
-    tool_result, user_message,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -41,6 +41,8 @@ pub struct RunInteractiveConfig {
     pub is_git_repo: bool,
     pub study_mode: bool,
     pub system_prompt: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub auto_approve: Option<Vec<String>>,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -80,7 +82,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                allowed_tools: None,
                 subagent_configs,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
@@ -100,7 +101,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     .await
     .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map(&tools_map);
+    let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
 
     // Spawn TUI task
     let tui_handle = tokio::spawn(async move {
@@ -114,6 +115,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             config.redact_secrets,
             config.privacy_mode,
             config.is_git_repo,
+            config.auto_approve.as_ref(),
+            config.allowed_tools.as_ref(),
         )
         .await
         .map_err(|e| e.to_string());

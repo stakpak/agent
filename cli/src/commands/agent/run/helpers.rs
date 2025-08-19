@@ -5,19 +5,31 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::subagent::SubagentConfigs;
 
-pub fn convert_tools_map(
+pub fn convert_tools_map_with_filter(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
+    allowed_tools: Option<&Vec<String>>,
 ) -> Vec<Tool> {
     tools_map
         .iter()
         .flat_map(|(_name, tools)| {
-            tools.iter().map(|tool| Tool {
-                r#type: "function".to_string(),
-                function: FunctionDefinition {
-                    name: tool.name.clone().into_owned(),
-                    description: tool.description.clone().map(|d| d.to_string()),
-                    parameters: serde_json::Value::Object((*tool.input_schema).clone()),
-                },
+            tools.iter().filter_map(|tool| {
+                let tool_name = tool.name.as_ref();
+
+                // Filter tools based on allowed_tools if specified
+                if let Some(allowed) = allowed_tools {
+                    if !allowed.is_empty() && !allowed.contains(&tool_name.to_string()) {
+                        return None;
+                    }
+                }
+
+                Some(Tool {
+                    r#type: "function".to_string(),
+                    function: FunctionDefinition {
+                        name: tool_name.to_owned(),
+                        description: tool.description.clone().map(|d| d.to_string()),
+                        parameters: serde_json::Value::Object((*tool.input_schema).clone()),
+                    },
+                })
             })
         })
         .collect()

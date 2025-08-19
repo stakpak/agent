@@ -1387,20 +1387,30 @@ fn handle_retry_tool_call(
 fn list_auto_approved_tools(state: &mut AppState) {
     // No dialog open - show current auto-approve settings and allow disabling
     let config = state.auto_approve_manager.get_config();
-    let auto_approved_tools: Vec<_> = config
+    let mut auto_approved_tools: Vec<_> = config
         .tools
         .iter()
         .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
         .collect();
 
+    // Filter by allowed_tools if configured
+    if let Some(allowed_tools) = &state.allowed_tools {
+        if !allowed_tools.is_empty() {
+            auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
+        }
+    }
+
     if auto_approved_tools.is_empty() {
-        push_styled_message(
-            state,
-            "💡 No tools are currently set to auto-approve.",
-            Color::Cyan,
-            "",
-            Color::Cyan,
-        );
+        let message = if state
+            .allowed_tools
+            .as_ref()
+            .is_some_and(|tools| !tools.is_empty())
+        {
+            "💡 No allowed tools are currently set to auto-approve."
+        } else {
+            "💡 No tools are currently set to auto-approve."
+        };
+        push_styled_message(state, message, Color::Cyan, "", Color::Cyan);
     } else {
         let tool_list = auto_approved_tools
             .iter()

@@ -33,6 +33,7 @@ rand = { workspace = true }
 rustls = { workspace = true }
 crossterm = { workspace = true }
 open = "5.3.2"
+glob = "0.3"
 
 [lints.clippy]
 unwrap_used = "deny"
