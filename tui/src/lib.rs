@@ -28,6 +28,8 @@ pub async fn run_tui(
     redact_secrets: bool,
     privacy_mode: bool,
     is_git_repo: bool,
+    auto_approve_tools: Option<&Vec<String>>,
+    allowed_tools: Option<&Vec<String>>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -38,7 +40,14 @@ pub async fn run_tui(
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let mut state = AppState::new(latest_version, redact_secrets, privacy_mode, is_git_repo);
+    let mut state = AppState::new(
+        latest_version,
+        redact_secrets,
+        privacy_mode,
+        is_git_repo,
+        auto_approve_tools,
+        allowed_tools,
+    );
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);

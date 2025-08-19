@@ -2,7 +2,11 @@ use anyhow::Result;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpService, session::local::LocalSessionManager,
 };
-use std::{collections::HashSet, hash::Hash};
+use std::hash::Hash;
+use std::sync::Arc;
+use tokio::{net::TcpListener, sync::broadcast::Receiver};
+pub use tool_container::ToolContainer;
+use tracing::error;
 
 use stakpak_api::ClientConfig;
 use stakpak_shared::cert_utils::CertificateChain;
@@ -13,11 +17,6 @@ pub mod local_tools;
 pub mod remote_tools;
 pub mod subagent_tools;
 pub mod tool_container;
-
-use std::sync::Arc;
-use tokio::{net::TcpListener, sync::broadcast::Receiver};
-pub use tool_container::ToolContainer;
-use tracing::error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
@@ -77,7 +76,6 @@ pub struct MCPServerConfig {
     pub redact_secrets: bool,
     pub privacy_mode: bool,
     pub tool_mode: ToolMode,
-    pub allowed_tools: Option<Vec<String>>,
     pub subagent_configs: Option<SubagentConfigs>,
     pub certificate_chain: Arc<Option<CertificateChain>>,
 }
@@ -190,7 +188,7 @@ async fn start_server_internal(
         task_manager.run().await;
     });
 
-    let mut tool_container = match config.tool_mode {
+    let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => ToolContainer::new(
             None,
             config.redact_secrets,
@@ -229,17 +227,6 @@ async fn start_server_internal(
         error!("Failed to create tool container: {}", e);
         anyhow::anyhow!("Failed to create tool container: {}", e)
     })?;
-
-    if let Some(allowed_tools) = config.allowed_tools {
-        let allowed_tools: HashSet<String> = allowed_tools.clone().into_iter().collect();
-        for tool in tool_container.tool_router.list_all().iter() {
-            if !allowed_tools.contains(&tool.name.to_string()) {
-                tool_container
-                    .tool_router
-                    .remove_route::<String, String>(&tool.name);
-            }
-        }
-    }
 
     let service = StreamableHttpService::new(
         move || Ok(tool_container.to_owned()),

@@ -77,13 +77,12 @@ pub struct AutoApproveManager {
 }
 
 impl AutoApproveManager {
-    pub fn new() -> Self {
-        match Self::try_new() {
+    pub fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
+        match Self::try_new(auto_approve_tools) {
             Ok(manager) => manager,
             Err(e) => {
-                // Fallback to default config if loading fails
                 let config_path = PathBuf::from(AUTO_APPROVE_CONFIG_PATH);
-                let config = AutoApproveConfig::default();
+                let config = Self::merge_profile_and_session_config(auto_approve_tools, None);
                 eprintln!("Failed to load auto-approve config: {}", e);
                 // Try to save the default config even if loading failed
                 if let Err(e) = config.save(&config_path) {
@@ -101,14 +100,23 @@ impl AutoApproveManager {
 
 impl Default for AutoApproveManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl AutoApproveManager {
-    pub fn try_new() -> Result<Self, String> {
+    pub fn try_new(auto_approve_tools: Option<&Vec<String>>) -> Result<Self, String> {
         let config_path = Self::get_config_path()?;
-        let config = Self::load_config(&config_path)?;
+        let session_config = if config_path.exists() {
+            // Load existing session config
+            Some(Self::load_config(&config_path)?)
+        } else {
+            None
+        };
+
+        // Create merged config: profile defaults + session overrides
+        let config =
+            Self::merge_profile_and_session_config(auto_approve_tools, session_config.as_ref());
 
         Ok(AutoApproveManager {
             config,
@@ -450,6 +458,48 @@ impl AutoApproveManager {
         fs::write(&self.config_path, json)
             .map_err(|e| format!("Failed to write config file: {}", e))
     }
+
+    /// Merge profile auto-approve settings with existing session config.
+    /// Session settings take precedence over profile defaults.
+    fn merge_profile_and_session_config(
+        auto_approve_tools: Option<&Vec<String>>,
+        session_config: Option<&AutoApproveConfig>,
+    ) -> AutoApproveConfig {
+        // Start with default config
+        let mut config = AutoApproveConfig::default();
+
+        // Apply profile auto-approve tools (these override default config)
+        if let Some(profile_tools) = auto_approve_tools {
+            for tool_name in profile_tools {
+                config
+                    .tools
+                    .insert(tool_name.clone(), AutoApprovePolicy::Auto);
+            }
+        }
+
+        // If we have existing session config, merge it in (session takes precedence over profile)
+        if let Some(session) = session_config {
+            // Preserve session-level settings
+            config.enabled = session.enabled;
+            config.default_policy = session.default_policy.clone();
+            config.command_patterns = session.command_patterns.clone();
+
+            // Session tool policies override both default and profile settings
+            for (tool_name, policy) in &session.tools {
+                // Only override if this tool is NOT in the profile auto_approve list
+                // This ensures profile settings take precedence over session for profile-specified tools
+                if let Some(profile_tools) = auto_approve_tools {
+                    if !profile_tools.contains(tool_name) {
+                        config.tools.insert(tool_name.clone(), policy.clone());
+                    }
+                } else {
+                    config.tools.insert(tool_name.clone(), policy.clone());
+                }
+            }
+        }
+
+        config
+    }
 }
 
 impl AutoApproveConfig {
@@ -464,5 +514,78 @@ impl AutoApproveConfig {
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
         fs::write(path, json).map_err(|e| format!("Failed to write config file: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_profile_and_session_config_profile_only() {
+        let profile_tools = vec!["read".to_string(), "search".to_string()];
+        let config =
+            AutoApproveManager::merge_profile_and_session_config(Some(&profile_tools), None);
+
+        // Profile tools should be set to Auto
+        assert_eq!(config.tools.get("read"), Some(&AutoApprovePolicy::Auto));
+        assert_eq!(config.tools.get("search"), Some(&AutoApprovePolicy::Auto));
+
+        // Default config should still have its built-in tools
+        assert_eq!(config.tools.get("view"), Some(&AutoApprovePolicy::Auto));
+        assert_eq!(config.tools.get("create"), Some(&AutoApprovePolicy::Prompt));
+    }
+
+    #[test]
+    fn test_merge_profile_and_session_config_session_precedence() {
+        let profile_tools = vec!["read".to_string(), "write".to_string()];
+
+        // Create session config that overrides profile settings
+        let mut session_config = AutoApproveConfig::default();
+        session_config
+            .tools
+            .insert("read".to_string(), AutoApprovePolicy::Prompt); // Try to override profile (should NOT work)
+        session_config
+            .tools
+            .insert("delete".to_string(), AutoApprovePolicy::Auto); // Session-only
+        session_config.enabled = false; // Override default
+
+        let config = AutoApproveManager::merge_profile_and_session_config(
+            Some(&profile_tools),
+            Some(&session_config),
+        );
+
+        // Profile settings should take precedence for profile tools
+        assert_eq!(config.tools.get("read"), Some(&AutoApprovePolicy::Auto)); // Profile wins
+        assert_eq!(config.tools.get("write"), Some(&AutoApprovePolicy::Auto)); // Profile default
+        assert_eq!(config.tools.get("delete"), Some(&AutoApprovePolicy::Auto)); // Session-only
+        assert_eq!(config.enabled, false); // Session override
+    }
+
+    #[test]
+    fn test_merge_profile_and_session_config_no_profile() {
+        let mut session_config = AutoApproveConfig::default();
+        session_config
+            .tools
+            .insert("custom".to_string(), AutoApprovePolicy::Never);
+
+        let config =
+            AutoApproveManager::merge_profile_and_session_config(None, Some(&session_config));
+
+        // Should preserve session config without profile additions
+        assert_eq!(config.tools.get("custom"), Some(&AutoApprovePolicy::Never));
+        // Default tools should still be present
+        assert_eq!(config.tools.get("view"), Some(&AutoApprovePolicy::Auto));
+    }
+
+    #[test]
+    fn test_merge_profile_and_session_config_empty_profile() {
+        let profile_tools = vec![];
+        let config =
+            AutoApproveManager::merge_profile_and_session_config(Some(&profile_tools), None);
+
+        // Should just have default config
+        assert_eq!(config.tools.get("view"), Some(&AutoApprovePolicy::Auto));
+        assert_eq!(config.tools.get("create"), Some(&AutoApprovePolicy::Prompt));
     }
 }
