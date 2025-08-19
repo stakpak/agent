@@ -351,24 +351,51 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the process by PID
+                // Kill the process by PID only if it still exists
                 #[cfg(unix)]
                 {
                     use std::process::Command;
-                    let _ = Command::new("kill")
-                        .arg("-9")
+                    // First check if the process exists
+                    let check_result = Command::new("kill")
+                        .arg("-0") // Signal 0 just checks if process exists
                         .arg(process_id.to_string())
-                        .spawn();
+                        .output();
+
+                    // Only kill if the process actually exists
+                    if check_result
+                        .map(|output| output.status.success())
+                        .unwrap_or(false)
+                    {
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(process_id.to_string())
+                            .output(); // Use output() to capture stderr and avoid printing
+                    }
                 }
 
                 #[cfg(windows)]
                 {
                     use std::process::Command;
-                    let _ = Command::new("taskkill")
-                        .arg("/F")
-                        .arg("/PID")
-                        .arg(process_id.to_string())
-                        .spawn();
+                    // On Windows, tasklist can check if process exists
+                    let check_result = Command::new("tasklist")
+                        .arg("/FI")
+                        .arg(format!("PID eq {}", process_id))
+                        .arg("/FO")
+                        .arg("CSV")
+                        .output();
+
+                    // Only kill if the process actually exists
+                    if let Ok(output) = check_result {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        if output_str.lines().count() > 1 {
+                            // More than just header line
+                            let _ = Command::new("taskkill")
+                                .arg("/F")
+                                .arg("/PID")
+                                .arg(process_id.to_string())
+                                .output(); // Use output() to capture stderr and avoid printing
+                        }
+                    }
                 }
             }
 
@@ -650,24 +677,51 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the process by PID
+                // Kill the process by PID only if it still exists
                 #[cfg(unix)]
                 {
                     use std::process::Command;
-                    let _ = Command::new("kill")
-                        .arg("-9")
+                    // First check if the process exists
+                    let check_result = Command::new("kill")
+                        .arg("-0") // Signal 0 just checks if process exists
                         .arg(process_id.to_string())
-                        .spawn();
+                        .output();
+
+                    // Only kill if the process actually exists
+                    if check_result
+                        .map(|output| output.status.success())
+                        .unwrap_or(false)
+                    {
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(process_id.to_string())
+                            .output(); // Use output() to capture stderr and avoid printing
+                    }
                 }
 
                 #[cfg(windows)]
                 {
                     use std::process::Command;
-                    let _ = Command::new("taskkill")
-                        .arg("/F")
-                        .arg("/PID")
-                        .arg(process_id.to_string())
-                        .spawn();
+                    // On Windows, tasklist can check if process exists
+                    let check_result = Command::new("tasklist")
+                        .arg("/FI")
+                        .arg(format!("PID eq {}", process_id))
+                        .arg("/FO")
+                        .arg("CSV")
+                        .output();
+
+                    // Only kill if the process actually exists
+                    if let Ok(output) = check_result {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        if output_str.lines().count() > 1 {
+                            // More than just header line
+                            let _ = Command::new("taskkill")
+                                .arg("/F")
+                                .arg("/PID")
+                                .arg(process_id.to_string())
+                                .output(); // Use output() to capture stderr and avoid printing
+                        }
+                    }
                 }
             }
 
