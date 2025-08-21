@@ -7,7 +7,7 @@
 ## 🔒 Security Hardened
 
 - **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
-- **Dynamic Secret Redaction** - AI can work with secrets without seeing actual values
+- **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
 
