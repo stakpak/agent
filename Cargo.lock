@@ -4636,6 +4636,7 @@ dependencies = [
  "stakpak-shared",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "url",
  "uuid",
