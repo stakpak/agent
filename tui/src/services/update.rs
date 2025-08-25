@@ -12,7 +12,7 @@ use crate::services::helper_block::{
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
-    get_wrapped_message_lines,
+    get_wrapped_message_lines_cached,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::layout::Size;
@@ -130,6 +130,9 @@ pub fn update(
             state.messages.push(Message::user(s, None));
             // Add spacing after user message
             state.messages.push(Message::plain_text(""));
+
+            // Invalidate cache since messages changed
+            crate::services::message::invalidate_message_lines_cache(state);
         }
         InputEvent::Error(err) => {
             if err.contains("FREE_PLAN") {
@@ -1078,6 +1081,8 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
         if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
         }
+        crate::services::message::invalidate_message_lines_cache(state);
+
         // During streaming, only adjust scroll if we're staying at bottom
         if state.stay_at_bottom {
             let input_height = 3;
@@ -1150,6 +1155,7 @@ fn handle_stream_tool_result(
         "Streaming",
         Some(tool_call_id),
     );
+    crate::services::message::invalidate_message_lines_cache(state);
 }
 
 fn handle_scroll_up(state: &mut AppState) {
@@ -1187,8 +1193,15 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
             state.collapsed_messages_scroll = max_scroll;
         }
     } else {
-        let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
-        let total_lines = all_lines.len();
+        // Use cached line count instead of recalculating every scroll
+        let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+            cached_lines.len()
+        } else {
+            // Fallback: calculate once and cache
+            let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
+            all_lines.len()
+        };
+
         let max_scroll = total_lines.saturating_sub(message_area_height);
         if state.scroll + SCROLL_LINES < max_scroll {
             state.scroll += SCROLL_LINES;
@@ -1211,8 +1224,15 @@ fn handle_page_up(state: &mut AppState, message_area_height: usize) {
 }
 
 fn handle_page_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
-    let total_lines = all_lines.len();
+    // Use cached line count instead of recalculating every page operation
+    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+        cached_lines.len()
+    } else {
+        // Fallback: calculate once and cache
+        let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
+        all_lines.len()
+    };
+
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
     if state.scroll < max_scroll {
@@ -1226,8 +1246,15 @@ fn handle_page_down(state: &mut AppState, message_area_height: usize, message_ar
 }
 
 fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    let all_lines = get_wrapped_message_lines(&state.messages, message_area_width);
-    let total_lines = all_lines.len();
+    // Use cached line count instead of recalculating every adjustment
+    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+        cached_lines.len()
+    } else {
+        // Fallback: calculate once and cache
+        let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
+        all_lines.len()
+    };
+
     let max_scroll = total_lines.saturating_sub(message_area_height);
     if state.stay_at_bottom {
         state.scroll = max_scroll;
