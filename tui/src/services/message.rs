@@ -1,3 +1,4 @@
+use crate::AppState;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -263,6 +264,98 @@ pub fn get_wrapped_message_lines(
     width: usize,
 ) -> Vec<(Line<'static>, Style)> {
     get_wrapped_message_lines_internal(messages, width, false)
+}
+
+pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
+    let messages = state.messages.clone();
+    // Check if cache is valid
+    let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
+        cached_messages.len() == messages.len()
+            && *cached_width == width
+            && cached_messages
+                .iter()
+                .zip(messages.iter())
+                .all(|(a, b)| a.id == b.id)
+    } else {
+        false
+    };
+
+    if !cache_valid {
+        // Calculate and cache the processed lines directly
+        let processed_lines = get_processed_message_lines(&messages, width);
+        state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
+        processed_lines
+    } else {
+        // Return cached processed lines immediately - no more processing needed!
+        if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+            cached_lines.clone()
+        } else {
+            // Fallback if cache is somehow invalid
+            get_processed_message_lines(&messages, width)
+        }
+    }
+}
+
+// New function that does all the heavy processing once and caches the result
+pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
+    use crate::services::message_pattern::{
+        process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
+    };
+
+    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
+
+    // Pre-allocate with estimated capacity to reduce reallocations
+    let estimated_capacity = all_lines.len() + (all_lines.len() / 10); // +10% for processing overhead
+    let mut processed_lines: Vec<Line> = Vec::with_capacity(estimated_capacity);
+
+    for (line, _style) in all_lines.iter() {
+        let line_text = spans_to_string(line);
+        if line_text.contains("<checkpoint_id>") {
+            processed_lines.push(Line::from(""));
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+            processed_lines.push(Line::from(""));
+        } else {
+            let section_tags = ["local_context", "rulebooks"];
+            let mut found = false;
+
+            for tag in &section_tags {
+                let closing_tag = format!("</{}>", tag);
+                if line_text.trim() == closing_tag {
+                    found = true;
+                    break;
+                }
+                if line_text.contains(&format!("<{}>", tag)) {
+                    processed_lines.push(Line::from(""));
+                    let processed =
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                    for (processed_line, _) in processed {
+                        processed_lines.push(processed_line);
+                    }
+                    processed_lines.push(Line::from(""));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                if line_text.trim() == "SPACING_MARKER" {
+                    processed_lines.push(Line::from(""));
+                } else {
+                    processed_lines.push(line.clone());
+                }
+            }
+        }
+    }
+
+    processed_lines
+}
+
+/// Invalidate the message lines cache when messages change
+pub fn invalidate_message_lines_cache(state: &mut AppState) {
+    state.message_lines_cache = None;
 }
 
 pub fn get_wrapped_collapsed_message_lines(

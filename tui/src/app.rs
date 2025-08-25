@@ -3,6 +3,7 @@ use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
 use crate::services::render_input::get_multiline_input_lines;
+use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -13,13 +14,14 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
-
 use crate::services::helper_block::push_error_message;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
+
+// Type alias to reduce complexity - now stores processed lines for better performance
+type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
 
 const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
@@ -115,6 +117,8 @@ pub struct AppState {
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
     pub is_git_repo: bool,
+    pub message_lines_cache: Option<MessageLinesCache>,
+    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
 }
 
 #[derive(Debug)]
@@ -314,6 +318,8 @@ impl AppState {
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
             is_git_repo,
+            message_lines_cache: None,
+            processed_lines_cache: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
