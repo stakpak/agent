@@ -163,8 +163,9 @@ impl MarkdownRenderer {
             return Ok(vec![]);
         }
 
-        if input.len() > 1_000_000 {
-            return Err("Markdown content too large (max 1MB)".into());
+        // Reduce max size for better performance
+        if input.len() > 100_000 {
+            return Err("Markdown content too large (max 100KB)".into());
         }
 
         // Pre-process problematic patterns
@@ -174,7 +175,7 @@ impl MarkdownRenderer {
         let lines: Vec<&str> = cleaned_input.lines().collect();
 
         // Limit number of lines to prevent infinite processing
-        let max_lines = 2000;
+        let max_lines = 500; // Reduced from 2000 for better performance
         let process_lines = if lines.len() > max_lines {
             &lines[..max_lines]
         } else {
@@ -203,12 +204,12 @@ impl MarkdownRenderer {
 
             i += 1;
 
-            // Yield control every 50 lines to keep UI responsive
-            if i % 50 == 0 {
+            // Yield control every 25 lines to keep UI responsive
+            if i % 25 == 0 {
                 std::thread::yield_now();
 
-                // Timeout protection
-                if start.elapsed().as_secs() > 5 {
+                // Timeout protection - reduced from 5s to 2s
+                if start.elapsed().as_secs() > 2 {
                     components.push(MarkdownComponent::Paragraph(
                         "... (content truncated due to timeout)".to_string(),
                     ));

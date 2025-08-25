@@ -1,5 +1,4 @@
-use crate::app::AppState;
-use crate::services::message::get_wrapped_message_lines;
+use crate::{app::AppState, services::message::get_wrapped_message_lines_cached};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
@@ -8,11 +7,11 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
-pub fn render_sessions_dialog(f: &mut Frame, state: &AppState) {
+pub fn render_sessions_dialog(f: &mut Frame, state: &mut AppState) {
     let screen = f.area();
     let dialog_height = 12;
 
-    let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let message_lines = get_wrapped_message_lines_cached(state, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
     if last_message_y + dialog_height > screen.height {
         last_message_y = screen.height.saturating_sub(dialog_height + 3);
