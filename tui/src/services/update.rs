@@ -944,13 +944,15 @@ fn handle_input_submitted(
                 "/resume" => {
                     state.loading_type = LoadingType::Sessions;
                     state.loading = true;
-                    let _ = output_tx.try_send(OutputEvent::ResumeSession);
                     state.messages.clear();
                     state
                         .messages
                         .extend(welcome_messages(state.latest_version.clone()));
                     render_system_message(state, "Resuming last session.");
 
+                    let _ = output_tx.try_send(OutputEvent::ResumeSession);
+
+                    state.loading_type = LoadingType::Llm;
                     state.input.clear();
                     state.cursor_position = 0;
                     state.show_helper_dropdown = false;
@@ -1125,6 +1127,7 @@ fn handle_stream_tool_result(
         return;
     }
 
+    state.loading = true;
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
