@@ -102,6 +102,7 @@ pub async fn run_tui(
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
+                       state.loading = false;
                        services::update::clear_streaming_tool_results(&mut state);
                        services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
                    }
@@ -163,13 +164,6 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                    //    if let InputEvent::InputSubmitted = event {
-                    //     if (state.show_helper_dropdown && state.autocomplete.is_active()) || (state.show_shell_mode && !state.waiting_for_shell_input) {
-                    //         // Do nothing for these cases
-                    //     } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') && state.input.trim() != "clear" {
-                    //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
-                    //     }
-                    //    }
                     if let InputEvent::EmergencyClearTerminal = event {
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
