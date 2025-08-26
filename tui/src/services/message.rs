@@ -541,32 +541,27 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
-    match arguments {
-        Ok(Value::Object(obj)) => {
-            // Look for a parameter with path/file/uri/url in the key name
-            for (key, val) in &obj {
-                let key_lower = key.to_lowercase();
-                if key_lower.contains("path")
-                    || key_lower.contains("file")
-                    || key_lower.contains("uri")
-                    || key_lower.contains("url")
-                    || key_lower.contains("command")
-                    || key_lower.contains("keywords")
-                {
-                    let formatted_val = format_simple_value(val);
-                    return format!("{} = {}", key, formatted_val);
-                }
-            }
-            // If no file path found, return the first parameter
-            if let Some((key, val)) = obj.into_iter().next() {
-                let formatted_val = format_simple_value(&val);
-                format!("{} = {}", key, formatted_val)
-            } else {
-                "no arguments".to_string()
+    const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
+
+    if let Ok(arguments) = arguments {
+        // Check each keyword in order of priority
+        for &keyword in &KEYWORDS {
+            if let Some(value) = arguments.get(keyword) {
+                let formatted_val = format_simple_value(value);
+                return format!("{} = {}", keyword, formatted_val);
             }
         }
-        _ => "unable to parse arguments".to_string(),
+
+        // If no keywords found, return the first parameter
+        if let Value::Object(obj) = arguments {
+            if let Some((key, val)) = obj.into_iter().next() {
+                let formatted_val = format_simple_value(&val);
+                return format!("{} = {}", key, formatted_val);
+            }
+        }
     }
+
+    "no arguments".to_string()
 }
 
 pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {
