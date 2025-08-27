@@ -593,8 +593,8 @@ pub fn render_result_block(
         render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
     }
 
-    if command_args.contains(".md") {
-        render_markdown_block(result, command_args, title, state);
+    if command_args.contains(".md") && is_collapsed {
+        render_markdown_block(result.clone(), command_args.clone(), title.clone(), state);
         return;
     }
 
