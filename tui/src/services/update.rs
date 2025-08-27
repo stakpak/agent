@@ -817,6 +817,7 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
+    state.loading = true;
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let input = state.input.clone();
@@ -1066,6 +1067,7 @@ fn handle_input_submitted_with(
         s.clone(),
         color.map(|c| Style::default().fg(c)),
     ));
+    state.loading = true;
     state.input.clear();
     state.cursor_position = 0;
     let total_lines = state.messages.len() * 2;
