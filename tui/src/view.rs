@@ -4,12 +4,9 @@ use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_autocomplete_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
-    Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines,
+    Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines_cached,
 };
-
-use crate::services::message_pattern::{
-    process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
-};
+use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
@@ -21,7 +18,7 @@ use ratatui::{
 
 const DROPDOWN_MAX_HEIGHT: usize = 8;
 
-pub fn view(f: &mut Frame, state: &AppState) {
+pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
@@ -181,56 +178,14 @@ fn calculate_input_lines(input: &str, width: usize) -> usize {
     total_lines
 }
 
-fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, height: usize) {
+fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
-    let mut all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(&state.messages, width);
+
+    let mut processed_lines = get_wrapped_message_lines_cached(state, width);
+
     if state.loading {
         let loading_line = render_loading_spinner(state);
-        all_lines.push((loading_line, Style::default()));
-    }
-
-    // Use the processed lines directly from get_wrapped_message_lines
-    let mut processed_lines: Vec<Line> = Vec::new();
-
-    for (line, _style) in all_lines.iter() {
-        let line_text = spans_to_string(line);
-        if line_text.contains("<checkpoint_id>") {
-            processed_lines.push(Line::from(""));
-            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
-            for (processed_line, _) in processed {
-                processed_lines.push(processed_line);
-            }
-        } else {
-            let section_tags = ["local_context", "rulebooks"];
-            let mut found = false;
-
-            for tag in &section_tags {
-                let closing_tag = format!("</{}>", tag);
-                if line_text.trim() == closing_tag {
-                    found = true;
-                    break;
-                }
-                if line_text.contains(&format!("<{}>", tag)) {
-                    processed_lines.push(Line::from(""));
-                    let processed =
-                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
-                    for (processed_line, _) in processed {
-                        processed_lines.push(processed_line);
-                    }
-                    processed_lines.push(Line::from(""));
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                if line_text.trim() == "SPACING_MARKER" {
-                    processed_lines.push(Line::from(""));
-                } else {
-                    processed_lines.push(line.clone());
-                }
-            }
-        }
+        processed_lines.push(loading_line);
     }
 
     let total_lines = processed_lines.len();
@@ -246,7 +201,7 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
     let max_scroll = total_lines.saturating_sub(height);
 
     // Prevent snapping by adjusting scroll relative to the processed content
-    let original_total = all_lines.len();
+    let original_total: usize = processed_lines.len();
     let processed_total = total_lines;
 
     let scroll = if state.stay_at_bottom {
@@ -261,8 +216,8 @@ fn render_messages(f: &mut Frame, state: &AppState, area: Rect, width: usize, he
         adjusted_scroll.min(max_scroll)
     };
 
-    // Create visible lines with simple, consistent indexing
-    let mut visible_lines = Vec::new();
+    // Create visible lines with pre-allocated capacity for better performance
+    let mut visible_lines = Vec::with_capacity(height);
 
     for i in 0..height {
         let line_index = scroll + i;

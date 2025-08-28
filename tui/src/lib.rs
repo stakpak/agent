@@ -28,6 +28,8 @@ pub async fn run_tui(
     redact_secrets: bool,
     privacy_mode: bool,
     is_git_repo: bool,
+    auto_approve_tools: Option<&Vec<String>>,
+    allowed_tools: Option<&Vec<String>>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
@@ -38,7 +40,14 @@ pub async fn run_tui(
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
-    let mut state = AppState::new(latest_version, redact_secrets, privacy_mode, is_git_repo);
+    let mut state = AppState::new(
+        latest_version,
+        redact_secrets,
+        privacy_mode,
+        is_git_repo,
+        auto_approve_tools,
+        allowed_tools,
+    );
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
@@ -61,7 +70,7 @@ pub async fn run_tui(
     // get terminal width
     let terminal_size = terminal.size()?;
     // Main async update/view loop
-    terminal.draw(|f| view::view(f, &state))?;
+    terminal.draw(|f| view::view(f, &mut state))?;
     let mut should_quit = false;
     loop {
         // Check if double Ctrl+C timer expired
@@ -83,18 +92,19 @@ pub async fn run_tui(
             continue;
         }
                    if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
                        services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
                        state.poll_autocomplete_results();
-                       terminal.draw(|f| view::view(f, &state))?;
+                       terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        services::update::clear_streaming_tool_results(&mut state);
                        services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
+                       state.loading = false;
                    }
 
                    if let InputEvent::Quit = event { should_quit = true; }
@@ -154,15 +164,8 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                    //    if let InputEvent::InputSubmitted = event {
-                    //     if (state.show_helper_dropdown && state.autocomplete.is_active()) || (state.show_shell_mode && !state.waiting_for_shell_input) {
-                    //         // Do nothing for these cases
-                    //     } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') && state.input.trim() != "clear" {
-                    //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
-                    //     }
-                    //    }
                     if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
@@ -181,14 +184,14 @@ pub async fn run_tui(
                    }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
                    state.poll_autocomplete_results();
-                   terminal.draw(|f| view::view(f, &state))?;
+                   terminal.draw(|f| view::view(f, &mut state))?;
                }
            }
         if should_quit {
             break;
         }
         state.poll_autocomplete_results();
-        terminal.draw(|f| view::view(f, &state))?;
+        terminal.draw(|f| view::view(f, &mut state))?;
     }
 
     println!("Quitting...");
@@ -204,7 +207,7 @@ pub async fn run_tui(
 
 pub fn emergency_clear_and_redraw<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    state: &AppState,
+    state: &mut AppState,
 ) -> io::Result<()> {
     use crossterm::{
         cursor::MoveTo,

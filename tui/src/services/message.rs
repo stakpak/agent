@@ -1,3 +1,4 @@
+use crate::AppState;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -265,6 +266,98 @@ pub fn get_wrapped_message_lines(
     get_wrapped_message_lines_internal(messages, width, false)
 }
 
+pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
+    let messages = state.messages.clone();
+    // Check if cache is valid
+    let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
+        cached_messages.len() == messages.len()
+            && *cached_width == width
+            && cached_messages
+                .iter()
+                .zip(messages.iter())
+                .all(|(a, b)| a.id == b.id)
+    } else {
+        false
+    };
+
+    if !cache_valid {
+        // Calculate and cache the processed lines directly
+        let processed_lines = get_processed_message_lines(&messages, width);
+        state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
+        processed_lines
+    } else {
+        // Return cached processed lines immediately - no more processing needed!
+        if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+            cached_lines.clone()
+        } else {
+            // Fallback if cache is somehow invalid
+            get_processed_message_lines(&messages, width)
+        }
+    }
+}
+
+// New function that does all the heavy processing once and caches the result
+pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
+    use crate::services::message_pattern::{
+        process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
+    };
+
+    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
+
+    // Pre-allocate with estimated capacity to reduce reallocations
+    let estimated_capacity = all_lines.len() + (all_lines.len() / 10); // +10% for processing overhead
+    let mut processed_lines: Vec<Line> = Vec::with_capacity(estimated_capacity);
+
+    for (line, _style) in all_lines.iter() {
+        let line_text = spans_to_string(line);
+        if line_text.contains("<checkpoint_id>") {
+            processed_lines.push(Line::from(""));
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+            processed_lines.push(Line::from(""));
+        } else {
+            let section_tags = ["local_context", "rulebooks"];
+            let mut found = false;
+
+            for tag in &section_tags {
+                let closing_tag = format!("</{}>", tag);
+                if line_text.trim() == closing_tag {
+                    found = true;
+                    break;
+                }
+                if line_text.contains(&format!("<{}>", tag)) {
+                    processed_lines.push(Line::from(""));
+                    let processed =
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                    for (processed_line, _) in processed {
+                        processed_lines.push(processed_line);
+                    }
+                    processed_lines.push(Line::from(""));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                if line_text.trim() == "SPACING_MARKER" {
+                    processed_lines.push(Line::from(""));
+                } else {
+                    processed_lines.push(line.clone());
+                }
+            }
+        }
+    }
+
+    processed_lines
+}
+
+/// Invalidate the message lines cache when messages change
+pub fn invalidate_message_lines_cache(state: &mut AppState) {
+    state.message_lines_cache = None;
+}
+
 pub fn get_wrapped_collapsed_message_lines(
     messages: &[Message],
     width: usize,
@@ -293,7 +386,6 @@ fn get_wrapped_message_lines_internal(
         match &msg.content {
             MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
-
                 if !agent_mode_removed {
                     if let Some(start) = cleaned.find("<agent_mode>") {
                         if let Some(end) = cleaned.find("</agent_mode>") {
@@ -321,6 +413,16 @@ fn get_wrapped_message_lines_internal(
                     }
                 }
 
+                let borrowed_lines =
+                    render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
+                // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
+                for line in borrowed_lines {
+                    all_lines.push((convert_line_to_owned(line), *style));
+                }
+            }
+            MessageContent::Plain(text, style) => {
+                let cleaned = text.to_string();
+
                 if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
                     let mut remaining = cleaned.as_str();
                     while let Some(start) = remaining.find("```shell") {
@@ -330,6 +432,10 @@ fn get_wrapped_message_lines_internal(
                             let borrowed_lines = get_wrapped_plain_lines(before, style, width);
                             let owned_lines = convert_to_owned_lines(borrowed_lines);
                             all_lines.extend(owned_lines);
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
                         }
                         let after_start = &remaining[start + "```shell".len()..];
                         if let Some(end) = after_start.find("```") {
@@ -367,6 +473,11 @@ fn get_wrapped_message_lines_internal(
                                 }
                             }
                             remaining = &after_start[end + "```".len()..];
+
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
                         } else {
                             if !after_start.trim().is_empty() {
                                 let borrowed_lines =
@@ -383,18 +494,10 @@ fn get_wrapped_message_lines_internal(
                         all_lines.extend(owned_lines);
                     }
                 } else {
-                    let borrowed_lines =
-                        render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
-                    // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
-                    for line in borrowed_lines {
-                        all_lines.push((convert_line_to_owned(line), *style));
-                    }
+                    let borrowed_lines = get_wrapped_plain_lines(text, style, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
                 }
-            }
-            MessageContent::Plain(text, style) => {
-                let borrowed_lines = get_wrapped_plain_lines(text, style, width);
-                let owned_lines = convert_to_owned_lines(borrowed_lines);
-                all_lines.extend(owned_lines);
             }
             MessageContent::Styled(line) => {
                 let borrowed_lines = get_wrapped_styled_lines(line, width);
@@ -438,32 +541,27 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
-    match arguments {
-        Ok(Value::Object(obj)) => {
-            // Look for a parameter with path/file/uri/url in the key name
-            for (key, val) in &obj {
-                let key_lower = key.to_lowercase();
-                if key_lower.contains("path")
-                    || key_lower.contains("file")
-                    || key_lower.contains("uri")
-                    || key_lower.contains("url")
-                    || key_lower.contains("command")
-                    || key_lower.contains("keywords")
-                {
-                    let formatted_val = format_simple_value(val);
-                    return format!("{} = {}", key, formatted_val);
-                }
-            }
-            // If no file path found, return the first parameter
-            if let Some((key, val)) = obj.into_iter().next() {
-                let formatted_val = format_simple_value(&val);
-                format!("{} = {}", key, formatted_val)
-            } else {
-                "no arguments".to_string()
+    const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
+
+    if let Ok(arguments) = arguments {
+        // Check each keyword in order of priority
+        for &keyword in &KEYWORDS {
+            if let Some(value) = arguments.get(keyword) {
+                let formatted_val = format_simple_value(value);
+                return format!("{} = {}", keyword, formatted_val);
             }
         }
-        _ => "unable to parse arguments".to_string(),
+
+        // If no keywords found, return the first parameter
+        if let Value::Object(obj) = arguments {
+            if let Some((key, val)) = obj.into_iter().next() {
+                let formatted_val = format_simple_value(&val);
+                return format!("{} = {}", key, formatted_val);
+            }
+        }
     }
+
+    "no arguments".to_string()
 }
 
 pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {

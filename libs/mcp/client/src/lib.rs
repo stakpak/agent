@@ -4,12 +4,13 @@ use anyhow::Result;
 use local::{LocalClientHandler, local_client};
 use rmcp::{
     RoleClient,
-    model::{CallToolRequestParam, ClientRequest, Request, Tool},
+    model::{CallToolRequestParam, ClientRequest, Meta, Request, Tool},
     service::{PeerRequestOptions, RequestHandle, RunningService},
 };
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 
 pub mod local;
 
@@ -63,13 +64,22 @@ impl ClientManager {
         &self,
         client_name: &str,
         params: CallToolRequestParam,
+        session_id: Option<Uuid>,
     ) -> Result<RequestHandle<RoleClient>, String> {
         #[allow(clippy::unwrap_used)]
         let client = self.clients.get(client_name).unwrap();
+        let mut meta_map = serde_json::Map::new();
+        if let Some(session_id) = session_id {
+            meta_map.insert("session_id".to_string(), serde_json::json!(session_id));
+        }
+        let options = PeerRequestOptions {
+            meta: Some(Meta(meta_map)),
+            ..Default::default()
+        };
         client
             .send_cancellable_request(
                 ClientRequest::CallToolRequest(Request::new(params)),
-                PeerRequestOptions::no_options(),
+                options,
             )
             .await
             .map_err(|e| e.to_string())

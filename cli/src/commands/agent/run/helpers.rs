@@ -4,19 +4,31 @@ use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };
 
-pub fn convert_tools_map(
+pub fn convert_tools_map_with_filter(
     tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
+    allowed_tools: Option<&Vec<String>>,
 ) -> Vec<Tool> {
     tools_map
         .iter()
         .flat_map(|(_name, tools)| {
-            tools.iter().map(|tool| Tool {
-                r#type: "function".to_string(),
-                function: FunctionDefinition {
-                    name: tool.name.clone().into_owned(),
-                    description: tool.description.clone().map(|d| d.to_string()),
-                    parameters: serde_json::Value::Object((*tool.input_schema).clone()),
-                },
+            tools.iter().filter_map(|tool| {
+                let tool_name = tool.name.as_ref();
+
+                // Filter tools based on allowed_tools if specified
+                if let Some(allowed) = allowed_tools {
+                    if !allowed.is_empty() && !allowed.contains(&tool_name.to_string()) {
+                        return None;
+                    }
+                }
+
+                Some(Tool {
+                    r#type: "function".to_string(),
+                    function: FunctionDefinition {
+                        name: tool_name.to_owned(),
+                        description: tool.description.clone().map(|d| d.to_string()),
+                        parameters: serde_json::Value::Object((*tool.input_schema).clone()),
+                    },
+                })
             })
         })
         .collect()
@@ -26,6 +38,16 @@ pub fn user_message(user_input: String) -> ChatMessage {
     ChatMessage {
         role: Role::User,
         content: Some(MessageContent::String(user_input)),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    }
+}
+
+pub fn system_message(system_prompt: String) -> ChatMessage {
+    ChatMessage {
+        role: Role::System,
+        content: Some(MessageContent::String(system_prompt)),
         name: None,
         tool_calls: None,
         tool_call_id: None,
@@ -49,7 +71,12 @@ pub async fn add_local_context<'a>(
 ) -> Result<(String, Option<&'a LocalContext>), Box<dyn std::error::Error>> {
     if let Some(local_context) = local_context {
         // only add local context if this is the first message
-        if messages.is_empty() {
+        if messages
+            .iter()
+            .filter(|m: &&ChatMessage| m.role != Role::System)
+            .count()
+            == 0
+        {
             let context_display = local_context.format_display().await?;
             let formatted_input = format!(
                 "{}\n\n<local_context>\n{}\n</local_context>",

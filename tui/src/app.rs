@@ -3,6 +3,7 @@ use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
 use crate::services::render_input::get_multiline_input_lines;
+use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -13,13 +14,14 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
-
 use crate::services::helper_block::push_error_message;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
+
+// Type alias to reduce complexity - now stores processed lines for better performance
+type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
 
 const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
@@ -102,7 +104,8 @@ pub struct AppState {
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
     pub auto_approve_manager: AutoApproveManager,
-    pub dialog_focused: bool, // NEW: tracks which area has focus when dialog is open
+    pub allowed_tools: Option<Vec<String>>,
+    pub dialog_focused: bool,
     pub latest_tool_call: Option<ToolCall>,
     // Retry mechanism state
     pub retry_attempts: usize,
@@ -114,6 +117,8 @@ pub struct AppState {
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
     pub is_git_repo: bool,
+    pub message_lines_cache: Option<MessageLinesCache>,
+    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
 }
 
 #[derive(Debug)]
@@ -236,6 +241,8 @@ impl AppState {
         redact_secrets: bool,
         privacy_mode: bool,
         is_git_repo: bool,
+        auto_approve_tools: Option<&Vec<String>>,
+        allowed_tools: Option<&Vec<String>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
         let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
@@ -299,7 +306,8 @@ impl AppState {
             autocomplete_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            auto_approve_manager: AutoApproveManager::new(),
+            auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
+            allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
             retry_attempts: 0,
@@ -310,6 +318,8 @@ impl AppState {
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
             is_git_repo,
+            message_lines_cache: None,
+            processed_lines_cache: None,
         }
     }
     pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
@@ -318,6 +328,7 @@ impl AppState {
     }
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
+        self.messages.push(Message::plain_text("SPACING_MARKER"));
         push_styled_message(
             self,
             &command,
@@ -325,6 +336,7 @@ impl AppState {
             SHELL_PROMPT_PREFIX,
             Color::Rgb(160, 92, 158),
         );
+        self.messages.push(Message::plain_text("SPACING_MARKER"));
         #[cfg(unix)]
         let shell_cmd = match run_pty_command(command.clone(), shell_tx) {
             Ok(cmd) => cmd,
