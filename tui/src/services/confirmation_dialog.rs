@@ -1,5 +1,4 @@
-use crate::app::AppState;
-use crate::services::message::get_wrapped_message_lines;
+use crate::{app::AppState, services::message::get_wrapped_message_lines_cached};
 use ratatui::{
     Frame,
     layout::Alignment,
@@ -8,9 +7,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
+pub fn render_confirmation_dialog(f: &mut Frame, state: &mut AppState) {
     let screen = f.area();
-    let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let message_lines = get_wrapped_message_lines_cached(state, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
 
     // Fixed dialog height: just 3 lines (border, message, border)

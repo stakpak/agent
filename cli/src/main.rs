@@ -70,13 +70,13 @@ struct Cli {
     #[arg(long = "privacy-mode", default_value_t = false)]
     privacy_mode: bool,
 
+    /// Enable study mode to use the agent as a study assistant
+    #[arg(long = "study-mode", default_value_t = false)]
+    study_mode: bool,
+
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
-
-    /// Disable official rulebooks in the agent's context
-    #[arg(long = "disable-official-rulebooks", default_value_t = false)]
-    disable_official_rulebooks: bool,
 
     /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
@@ -86,9 +86,21 @@ struct Cli {
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
 
+    /// Read system prompt from file
+    #[arg(long = "system-prompt-file")]
+    system_prompt_file: Option<String>,
+
     /// Read prompt from file (runs in async mode only)
     #[arg(long = "prompt-file")]
     prompt_file: Option<String>,
+
+    /// Configuration profile to use (can also be set with STAKPAK_PROFILE env var)
+    #[arg(long = "profile")]
+    profile: Option<String>,
+
+    /// Custom path to config file (overrides default ~/.stakpak/config.toml)
+    #[arg(long = "config")]
+    config_path: Option<String>,
 
     /// Prompt to run the agent
     prompt: Option<String>,
@@ -126,7 +138,13 @@ async fn main() {
             .init();
     }
 
-    match AppConfig::load() {
+    // Determine which profile to use: CLI arg > STAKPAK_PROFILE env var > "default"
+    let profile_name = cli
+        .profile
+        .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
+        .unwrap_or_else(|| "default".to_string());
+
+    match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
             if config.machine_name.is_none() {
                 // Generate a random machine name
@@ -185,13 +203,11 @@ async fn main() {
                         }
                     }
                     let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
-                        rulebooks
-                            .into_iter()
-                            .filter(|rulebook| {
-                                !cli.disable_official_rulebooks
-                                    || !rulebook.uri.starts_with("stakpak://stakpak.dev/")
-                            })
-                            .collect()
+                        if let Some(rulebook_config) = &config.rulebooks {
+                            rulebook_config.filter_rulebooks(rulebooks)
+                        } else {
+                            rulebooks
+                        }
                     });
 
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
@@ -218,7 +234,28 @@ async fn main() {
                         }
                     }
 
-                    // Read prompt from file if specified
+                    let system_prompt =
+                        if let Some(system_prompt_file_path) = &cli.system_prompt_file {
+                            match std::fs::read_to_string(system_prompt_file_path) {
+                                Ok(content) => {
+                                    println!(
+                                        "📖 Reading system prompt from file: {}",
+                                        system_prompt_file_path
+                                    );
+                                    Some(content.trim().to_string())
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Failed to read system prompt file '{}': {}",
+                                        system_prompt_file_path, e
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
                     let prompt = if let Some(prompt_file_path) = &cli.prompt_file {
                         match std::fs::read_to_string(prompt_file_path) {
                             Ok(content) => {
@@ -250,6 +287,9 @@ async fn main() {
                     // Ensure .stakpak is in .gitignore before running agent
                     let _ = gitignore::ensure_stakpak_in_gitignore(&config);
 
+                    let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
+                    let auto_approve = config.auto_approve.clone();
+
                     match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
                         true => match agent::run::run_async(
@@ -265,7 +305,8 @@ async fn main() {
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
-                                allowed_tools: cli.allowed_tools,
+                                allowed_tools,
+                                system_prompt,
                             },
                         )
                         .await
@@ -288,6 +329,10 @@ async fn main() {
                                 rulebooks,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
+                                study_mode: cli.study_mode,
+                                system_prompt,
+                                allowed_tools,
+                                auto_approve,
                             },
                         )
                         .await

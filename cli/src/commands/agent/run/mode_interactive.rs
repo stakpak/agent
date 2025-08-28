@@ -1,10 +1,10 @@
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
-    get_checkpoint_messages, get_messages_from_checkpoint_output,
+    get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_call_history_string, tool_result,
-    user_message,
+    add_local_context, add_rulebooks, convert_tools_map_with_filter, system_message,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -14,7 +14,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use crate::utils::session::{read_session_info, write_session_start_info};
+use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
@@ -36,6 +36,10 @@ pub struct RunInteractiveConfig {
     pub rulebooks: Option<Vec<ListRuleBook>>,
     pub enable_mtls: bool,
     pub is_git_repo: bool,
+    pub study_mode: bool,
+    pub system_prompt: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub auto_approve: Option<Vec<String>>,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -74,7 +78,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                allowed_tools: None,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -93,7 +96,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     .await
     .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map(&tools_map);
+    let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
 
     // Spawn TUI task
     let tui_handle = tokio::spawn(async move {
@@ -107,6 +110,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             config.redact_secrets,
             config.privacy_mode,
             config.is_git_repo,
+            config.auto_approve.as_ref(),
+            config.allowed_tools.as_ref(),
         )
         .await
         .map_err(|e| e.to_string());
@@ -165,6 +170,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             messages.extend(chat_messages);
         }
 
+        if let Some(system_prompt) = config.system_prompt {
+            messages.insert(0, system_message(system_prompt));
+        }
+
         let mut retry_attempts = 0;
         const MAX_RETRY_ATTEMPTS: u32 = 2;
 
@@ -218,6 +227,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         &tools_map,
                         &tool_call,
                         Some(cancel_rx.resubscribe()),
+                        current_session_id,
                     )
                     .await?;
 
@@ -301,82 +311,64 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
 
                 OutputEvent::ResumeSession => {
-                    let session_info = read_session_info()?;
+                    let session_id = if let Some(session_id) = &current_session_id {
+                        Some(session_id.to_string())
+                    } else {
+                        list_sessions(&client)
+                            .await
+                            .ok()
+                            .and_then(|sessions| sessions.first().map(|session| session.id.clone()))
+                    };
 
-                    if let Some(session_info) = session_info {
-                        if let Some(checkpoint_id) = &session_info.checkpoint_id {
-                            let checkpoint_uuid =
-                                Uuid::parse_str(checkpoint_id).map_err(|e| e.to_string())?;
-                            let checkpoint = client.get_agent_checkpoint(checkpoint_uuid).await?;
+                    if let Some(session_id) = &session_id {
+                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                        match resume_session_from_checkpoint(&client, session_id, &input_tx).await {
+                            Ok((chat_messages, tool_calls, session_id_uuid)) => {
+                                // Track the current session ID
+                                current_session_id = Some(session_id_uuid);
 
-                            // Track the current session ID from the checkpoint
-                            current_session_id = Some(checkpoint.session.id);
+                                messages.extend(chat_messages);
+                                tools_queue.extend(tool_calls.clone());
 
-                            // Write session info when switching to checkpoint
-                            let _ = write_session_start_info(
-                                &current_session_id,
-                                &Some(checkpoint_uuid),
-                            );
-
-                            let (chat_messages, tool_calls) =
-                                extract_checkpoint_messages_and_tool_calls(
-                                    &checkpoint_uuid.to_string(),
-                                    &input_tx,
-                                    get_messages_from_checkpoint_output(&checkpoint.output),
-                                )
-                                .await?;
-
-                            messages.extend(chat_messages);
-                            tools_queue.extend(tool_calls.clone());
-
-                            if !tools_queue.is_empty() {
-                                let initial_tool_call = tools_queue.remove(0);
-                                send_tool_call(&input_tx, &initial_tool_call).await?;
+                                if !tools_queue.is_empty() {
+                                    let initial_tool_call = tools_queue.remove(0);
+                                    send_tool_call(&input_tx, &initial_tool_call).await?;
+                                }
+                                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            }
+                            Err(_) => {
+                                // Error already handled in the function
+                                continue;
                             }
                         }
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                        continue;
                     } else {
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                        continue;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::Error("No active session to resume".to_string()),
+                        )
+                        .await?;
                     }
+                    continue;
                 }
                 OutputEvent::SwitchToSession(session_id) => {
                     send_input_event(&input_tx, InputEvent::Loading(true)).await?;
-                    let session_uuid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
-                    match client
-                        .get_agent_session_latest_checkpoint(session_uuid)
-                        .await
-                    {
-                        Ok(checkpoint) => {
+                    match resume_session_from_checkpoint(&client, &session_id, &input_tx).await {
+                        Ok((chat_messages, tool_calls, session_id_uuid)) => {
                             // Track the current session ID
-                            current_session_id = Some(checkpoint.session.id);
+                            current_session_id = Some(session_id_uuid);
 
-                            // Write session info when switching to session
-                            let _ = write_session_start_info(
-                                &current_session_id,
-                                &Some(checkpoint.checkpoint.id),
-                            );
-
-                            let (chat_messages, tool_calls) =
-                                extract_checkpoint_messages_and_tool_calls(
-                                    &checkpoint.checkpoint.id.to_string(),
-                                    &input_tx,
-                                    get_messages_from_checkpoint_output(&checkpoint.output),
-                                )
-                                .await?;
                             messages.extend(chat_messages);
-
                             tools_queue.extend(tool_calls.clone());
+
                             if !tools_queue.is_empty() {
                                 let initial_tool_call = tools_queue.remove(0);
                                 send_tool_call(&input_tx, &initial_tool_call).await?;
                             }
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         }
-                        Err(e) => {
+                        Err(_) => {
                             send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-                            send_input_event(&input_tx, InputEvent::Error(e)).await?;
+                            continue;
                         }
                     }
                     continue;
@@ -410,9 +402,17 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 }
             }
 
+            let headers = if config.study_mode {
+                let mut headers = HeaderMap::new();
+                #[allow(clippy::unwrap_used)]
+                headers.insert("x-system-prompt-key", "agent_study_mode".parse().unwrap());
+                Some(headers)
+            } else {
+                None
+            };
             let response_result = loop {
                 let stream_result = client
-                    .chat_completion_stream(messages.clone(), Some(tools.clone()))
+                    .chat_completion_stream(messages.clone(), Some(tools.clone()), headers.clone())
                     .await;
 
                 let (mut stream, current_request_id) = match stream_result {
@@ -481,6 +481,19 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     send_input_event(&input_tx, InputEvent::Loading(false)).await?;
 
+                    if current_session_id.is_none() {
+                        if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
+                        {
+                            if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
+                                if let Ok(checkpoint_with_session) =
+                                    client.get_agent_checkpoint(checkpoint_uuid).await
+                                {
+                                    current_session_id = Some(checkpoint_with_session.session.id);
+                                }
+                            }
+                        }
+                    }
+
                     // Send tool calls to TUI if present
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                         tools_queue.extend(tool_calls.clone());
@@ -540,7 +553,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         .and_then(|m| m.content.as_ref().and_then(|c| c.extract_checkpoint_id()));
 
     if let Some(latest_checkpoint) = latest_checkpoint {
-        let _ = write_session_start_info(&final_session_id, &Some(latest_checkpoint));
         println!(
             r#"To resume, run:
 stakpak -c {}

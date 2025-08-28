@@ -1,6 +1,9 @@
-use crate::commands::agent::run::checkpoint::get_checkpoint_messages;
+use crate::commands::agent::run::checkpoint::{
+    extract_checkpoint_id_from_messages, get_checkpoint_messages,
+};
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, convert_tools_map, tool_result, user_message,
+    add_local_context, add_rulebooks, convert_tools_map_with_filter, system_message, tool_result,
+    user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
@@ -16,6 +19,7 @@ use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
 use std::sync::Arc;
 use std::time::Instant;
+use uuid::Uuid;
 
 pub struct RunAsyncConfig {
     pub prompt: String,
@@ -29,6 +33,7 @@ pub struct RunAsyncConfig {
     pub output_format: OutputFormat,
     pub allowed_tools: Option<Vec<String>>,
     pub enable_mtls: bool,
+    pub system_prompt: Option<String>,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -45,6 +50,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         renderer.render_info("Initializing MCP server and client connections...")
     );
     let ctx_clone = ctx.clone();
+    let allowed_tools_for_filter = config.allowed_tools.clone(); // Clone before moving config
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
     // Generate certificates if mTLS is enabled
@@ -68,7 +74,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 tool_mode: ToolMode::Combined,
-                allowed_tools: config.allowed_tools,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -87,7 +92,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     .await
     .map_err(|e| e.to_string())?;
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map(&tools_map);
+    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
 
     let client = Client::new(&ClientConfig {
         api_key: ctx.api_key.clone(),
@@ -127,6 +132,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         );
     }
 
+    if let Some(system_prompt) = config.system_prompt {
+        chat_messages.insert(0, system_message(system_prompt));
+        print!("{}", renderer.render_info("System prompt loaded"));
+    }
+
     // Add user prompt if provided
     if !config.prompt.is_empty() {
         let (user_input, _local_context) =
@@ -143,6 +153,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
     print!("{}", renderer.render_info("Starting execution..."));
     print!("{}", renderer.render_section_break());
+
+    let mut current_session_id: Option<Uuid> = None;
 
     loop {
         step += 1;
@@ -166,6 +178,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         llm_response_time += llm_start.elapsed();
 
         chat_messages.push(response.choices[0].message.clone());
+
+        if current_session_id.is_none() {
+            if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages) {
+                if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
+                    if let Ok(checkpoint_with_session) =
+                        client.get_agent_checkpoint(checkpoint_uuid).await
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
+                    }
+                }
+            }
+        }
 
         let tool_calls = response.choices[0].message.tool_calls.as_ref();
         let tool_count = tool_calls.map(|t| t.len()).unwrap_or(0);
@@ -216,8 +240,9 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 );
 
                 // Add timeout for tool execution
-                let tool_execution =
-                    async { run_tool_call(&clients, &tools_map, tool_call, None).await };
+                let tool_execution = async {
+                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                };
 
                 let result = match tokio::time::timeout(
                     std::time::Duration::from_secs(60 * 60), // 60 minute timeout
