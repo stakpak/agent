@@ -1,6 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
-use crate::services::file_diff::preview_str_replace_editor_style;
+use crate::services::file_diff::render_file_diff_block;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
@@ -489,6 +489,88 @@ pub fn render_styled_block(
     )
 }
 
+pub fn render_styled_header_and_borders(
+    title: &str,
+    content_lines: Vec<Line<'static>>,
+    colors: Option<BubbleColors>,
+    terminal_size: Size,
+) -> Vec<Line<'static>> {
+    let terminal_width = terminal_size.width as usize;
+    let content_width = if terminal_width > 4 {
+        terminal_width - 6
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    let border_color = colors.map(|c| c.border_color).unwrap_or(Color::Cyan);
+
+    // Create title border
+    let stripped_title = strip_ansi_codes(title);
+    let title_border = {
+        let title_width = calculate_display_width(&stripped_title);
+        if title_width <= inner_width {
+            let remaining_dashes = inner_width + 2 - title_width;
+            Line::from(vec![Span::styled(
+                format!("╭{}{}╮", title, "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            )])
+        } else {
+            let mut truncated_chars = String::new();
+            let mut current_width = 0;
+            for ch in stripped_title.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if current_width + char_width <= inner_width {
+                    truncated_chars.push(ch);
+                    current_width += char_width;
+                } else {
+                    break;
+                }
+            }
+            Line::from(vec![Span::styled(
+                format!("╭{}─╮", truncated_chars),
+                Style::default().fg(border_color),
+            )])
+        }
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut result = Vec::new();
+    result.push(title_border);
+    // Add side borders to each content line
+    for line in content_lines {
+        let mut bordered_line = Vec::new();
+        bordered_line.push(Span::styled("│", Style::default().fg(border_color)));
+        bordered_line.push(Span::from(" "));
+
+        // Calculate content width BEFORE moving spans
+        let content_width: usize = line
+            .spans
+            .iter()
+            .map(|span| calculate_display_width(&span.content))
+            .sum();
+
+        // Add the content spans
+        bordered_line.extend(line.spans);
+
+        // Add padding to fill the width
+        let padding_needed = inner_width.saturating_sub(content_width);
+        if padding_needed > 0 {
+            bordered_line.push(Span::from(" ".repeat(padding_needed)));
+        }
+
+        bordered_line.push(Span::styled(" │", Style::default().fg(border_color)));
+        result.push(Line::from(bordered_line));
+    }
+    result.push(bottom_border);
+    result
+}
+
 pub fn render_bash_block(
     tool_call: &ToolCall,
     output: &str,
@@ -496,16 +578,69 @@ pub fn render_bash_block(
     state: &mut AppState,
     terminal_size: Size,
 ) -> Uuid {
-    if tool_call.function.name == "str_replace" {
-        render_file_diff_block(tool_call, state, terminal_size);
-        return Uuid::new_v4();
-    }
-
     let (command, outside_title, mut bubble_title, colors) =
         extract_bash_block_info(tool_call, output);
 
     if state.auto_approve_manager.should_auto_approve(tool_call) {
         bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
+    }
+    if tool_call.function.name == "str_replace" {
+        let (mut diff_lines, mut full_diff_lines) =
+            render_file_diff_block(tool_call, terminal_size);
+        let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args["path"].as_str().unwrap_or("");
+        // render header dot
+        let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+
+        full_diff_lines = [
+            vec![spacing_marker.clone()],
+            render_styled_header_with_dot(
+                "Str Replace",
+                path,
+                Some(LinesColors {
+                    dot: Color::Magenta,
+                    title: Color::Yellow,
+                    command: Color::Rgb(180, 180, 180),
+                    message: Color::LightGreen,
+                }),
+            ),
+            vec![spacing_marker.clone()],
+            full_diff_lines,
+        ]
+        .concat();
+
+        diff_lines = [
+            vec![Line::from(vec![Span::from(" ")])],
+            diff_lines,
+            vec![Line::from(vec![Span::from(" ")])],
+        ]
+        .concat();
+
+        if !diff_lines.is_empty() {
+            let message_id = Uuid::new_v4();
+
+            let result =
+                render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_size);
+
+            let adjusted_result = [
+                vec![spacing_marker.clone()],
+                result,
+                vec![spacing_marker.clone()],
+            ]
+            .concat();
+            state.messages.push(Message {
+                id: message_id,
+                content: MessageContent::StyledBlock(adjusted_result),
+                is_collapsed: None,
+            });
+            state.messages.push(Message {
+                id: Uuid::new_v4(),
+                content: MessageContent::StyledBlock(full_diff_lines),
+                is_collapsed: Some(true),
+            });
+            return message_id;
+        }
     }
 
     render_styled_block_ansi_to_tui(
@@ -519,32 +654,6 @@ pub fn render_bash_block(
         None,
         None,
     )
-}
-
-pub fn render_file_diff_block(tool_call: &ToolCall, state: &mut AppState, terminal_size: Size) {
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .unwrap_or_else(|_| serde_json::json!({}));
-
-    let old_str = args["old_str"].as_str().unwrap_or("");
-    let new_str = args["new_str"].as_str().unwrap_or("");
-    let path = args["path"].as_str().unwrap_or("");
-    let replace_all = args["replace_all"].as_bool().unwrap_or(false);
-
-    eprintln!("old_str: {}", old_str);
-    eprintln!("new_str: {}", new_str);
-    eprintln!("path: {}", path);
-    eprintln!("replace_all: {}", replace_all);
-
-    // Now you can use these variables with preview_str_replace_editor_style
-    let diff_lines =
-        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
-            .unwrap_or_else(|_| vec![Line::from("Failed to generate diff preview")]);
-
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(diff_lines),
-        is_collapsed: None,
-    });
 }
 
 pub fn render_markdown_block(
@@ -590,10 +699,18 @@ pub fn render_result_block(
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
-    if tool_call.function.name == "str_replace" {
-        render_file_diff_block(&tool_call, state, terminal_size);
-        return;
-    }
+    // if tool_call.function.name == "str_replace" {
+    //     let diff_lines = render_file_diff_block(&tool_call, terminal_size);
+    //     if diff_lines.len() > 0 {
+    //         let message_id = Uuid::new_v4();
+    //         state.messages.push(Message {
+    //             id: message_id,
+    //             content: MessageContent::StyledBlock(diff_lines),
+    //             is_collapsed: None,
+    //         });
+    //         return;
+    //     }
+    // }
     let title: String = get_command_type_name(&tool_call);
     let command_args = extract_truncated_command_arguments(&tool_call);
 
