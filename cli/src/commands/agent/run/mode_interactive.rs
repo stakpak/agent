@@ -479,8 +479,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 Ok(response) => {
                     messages.push(response.choices[0].message.clone());
 
-                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
-
                     if current_session_id.is_none() {
                         if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
                         {
@@ -509,6 +507,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     continue;
                 }
             }
+            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
         }
 
         Ok((messages, current_session_id))
