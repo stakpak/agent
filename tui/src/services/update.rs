@@ -817,7 +817,6 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
-    state.loading = true;
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let input = state.input.clone();
@@ -1082,6 +1081,9 @@ fn handle_input_submitted_with(
 fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area_height: usize) {
     if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
         state.is_streaming = true;
+        if !state.loading {
+            state.loading = true;
+        }
         if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
         }
@@ -1129,7 +1131,11 @@ fn handle_stream_tool_result(
         return;
     }
 
-    state.loading = true;
+    // Ensure loading state is true during streaming tool results
+    // Only set it if it's not already true to avoid unnecessary state changes
+    if !state.loading {
+        state.loading = true;
+    }
     state.is_streaming = true;
     state.streaming_tool_result_id = Some(tool_call_id);
     // 1. Update the buffer for this tool_call_id
