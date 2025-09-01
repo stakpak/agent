@@ -1,10 +1,8 @@
-use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
+use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
-use crate::services::bash_block::{
-    preprocess_terminal_output, render_bash_block, render_bash_block_rejected, render_styled_block,
-};
+use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message,
     push_memorize_message, push_status_message, push_styled_message, render_system_message,
@@ -15,7 +13,6 @@ use crate::services::message::{
     get_wrapped_message_lines_cached,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
-use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
@@ -37,7 +34,6 @@ pub fn update(
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
-    terminal_size: Size,
     shell_tx: &Sender<InputEvent>,
 ) {
     state.scroll = state.scroll.max(0);
@@ -119,9 +115,7 @@ pub fn update(
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
         }
-        InputEvent::StreamToolResult(progress) => {
-            handle_stream_tool_result(state, progress, terminal_size)
-        }
+        InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
             // Add spacing before user message if not the first message
             if !state.messages.is_empty() {
@@ -145,7 +139,7 @@ pub fn update(
                 return;
             }
             if err == "STREAM_CANCELLED" {
-                render_bash_block_rejected("Interrupted by user", "System", state, None);
+                render_bash_block_rejected("Interrupted by user", "System", None);
                 return;
             }
             let mut error_message = handle_errors(err);
@@ -258,10 +252,21 @@ pub fn update(
                 state.latest_tool_call = Some(tool_call.clone());
             }
             state.dialog_command = Some(tool_call.clone());
-            let full_command = extract_full_command_arguments(&tool_call);
-            let message_id =
-                render_bash_block(&tool_call, &full_command, false, state, terminal_size);
-            state.pending_bash_message_id = Some(message_id);
+            let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
+
+            if tool_call.function.name == "str_replace" {
+                state
+                    .messages
+                    .push(Message::render_collapsed_message(tool_call.clone()));
+            }
+            state.messages.push(Message::render_pending_border_block(
+                tool_call.clone(),
+                is_auto_approved,
+            ));
+            // let full_command = extract_full_command_arguments(&tool_call);
+            // let message_id =
+            //     render_bash_block(&tool_call, &full_command, false, state, terminal_size);
+            // state.pending_bash_message_id = Some(message_id);
 
             // Check if auto-approve should be used
             if state.auto_approve_manager.should_auto_approve(&tool_call) {
@@ -787,7 +792,12 @@ fn handle_esc(
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_truncated_command_arguments(tool_call);
             let title = get_command_type_name(tool_call);
-            render_bash_block_rejected(&truncated_command, &title, state, None);
+            let rendered_lines = render_bash_block_rejected(&truncated_command, &title, None);
+            state.messages.push(Message {
+                id: Uuid::new_v4(),
+                content: MessageContent::StyledBlock(rendered_lines),
+                is_collapsed: None,
+            });
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -1120,11 +1130,7 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
     }
 }
 
-fn handle_stream_tool_result(
-    state: &mut AppState,
-    progress: ToolCallResultProgress,
-    terminal_size: Size,
-) {
+fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress) {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
@@ -1155,17 +1161,14 @@ fn handle_stream_tool_result(
         .cloned()
         .unwrap_or_default();
 
-    // 4. Re-render the styled block with the full buffer
-    render_styled_block(
+    state.messages.push(Message::render_streaming_border_block(
         &buffer_content,
         "Tool Streaming",
         "Result",
         None,
-        state,
-        terminal_size,
         "Streaming",
         Some(tool_call_id),
-    );
+    ));
     crate::services::message::invalidate_message_lines_cache(state);
 }
 
