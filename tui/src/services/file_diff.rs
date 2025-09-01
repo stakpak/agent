@@ -18,7 +18,7 @@ pub fn preview_str_replace_editor_style(
     new_str: &str,
     replace_all: bool,
     terminal_size: Size,
-) -> Result<(Vec<Line<'static>>, usize), std::io::Error> {
+) -> Result<(Vec<Line<'static>>, usize, usize), std::io::Error> {
     // Read the current file content
     let original_content = fs::read_to_string(file_path)?;
 
@@ -29,18 +29,12 @@ pub fn preview_str_replace_editor_style(
         original_content.replacen(old_str, new_str, 1)
     };
 
-    // Count changes
-    let changes_count = original_content.matches(old_str).count();
-    let replacements = if replace_all {
-        changes_count
-    } else {
-        1.min(changes_count)
-    };
-
     // Create a line-by-line diff
     let diff = TextDiff::from_lines(&original_content, &new_content);
 
     let mut lines = Vec::new();
+    let mut deletions = 0;
+    let mut insertions = 0;
 
     let mut old_line_num = 0;
     let mut new_line_num = 0;
@@ -76,6 +70,7 @@ pub fn preview_str_replace_editor_style(
                 // Show deleted lines
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
+                    deletions += 1;
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
@@ -122,6 +117,7 @@ pub fn preview_str_replace_editor_style(
                 // Show inserted lines
                 for idx in 0..new_range.len() {
                     new_line_num += 1;
+                    insertions += 1;
 
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
 
@@ -168,6 +164,7 @@ pub fn preview_str_replace_editor_style(
                 // First show deletes
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
+                    deletions += 1;
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
                     let mut line_spans = vec![
@@ -211,6 +208,7 @@ pub fn preview_str_replace_editor_style(
                 // Then show inserts
                 for idx in 0..new_range.len() {
                     new_line_num += 1;
+                    insertions += 1;
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
 
                     let mut line_spans = vec![
@@ -254,7 +252,7 @@ pub fn preview_str_replace_editor_style(
         }
     }
 
-    Ok((lines, replacements))
+    Ok((lines, deletions, insertions))
 }
 
 pub fn render_file_diff_block(
@@ -270,14 +268,22 @@ pub fn render_file_diff_block(
     let replace_all = args["replace_all"].as_bool().unwrap_or(false);
 
     // Now you can use these variables with preview_str_replace_editor_style
-    let (diff_lines, replacements) =
+    let (diff_lines, deletions, insertions) =
         preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
-            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0));
+            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0));
 
     let mut lines = Vec::new();
     // Add header
     lines.push(Line::from(vec![Span::styled(
-        format!("Editing {} file", if replacements > 0 { "1" } else { "0" }).to_string(),
+        format!(
+            "Editing {} file",
+            if deletions > 0 || insertions > 0 {
+                "1"
+            } else {
+                "0"
+            }
+        )
+        .to_string(),
         Style::default().fg(TEXT_COLOR),
     )]));
 
@@ -289,11 +295,11 @@ pub fn render_file_diff_block(
             Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" +{}", replacements).to_string(),
+            format!(" +{}", insertions).to_string(),
             Style::default().fg(Color::Green),
         ),
         Span::styled(
-            format!(" -{}", replacements).to_string(),
+            format!(" -{}", deletions).to_string(),
             Style::default().fg(Color::Red),
         ),
     ]));
@@ -348,7 +354,7 @@ pub fn render_file_diff_block(
     truncated_diff_lines.push(Line::from(vec![Span::styled(
         format!(
             "Total changes: {} additions, {} deletions",
-            replacements, replacements
+            insertions, deletions
         ),
         Style::default().fg(Color::Cyan),
     )]));
@@ -357,7 +363,7 @@ pub fn render_file_diff_block(
     full_diff_lines.push(Line::from(vec![Span::styled(
         format!(
             "Total changes: {} additions, {} deletions",
-            replacements, replacements
+            insertions, deletions
         ),
         Style::default().fg(Color::Cyan),
     )]));
