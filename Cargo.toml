@@ -61,7 +61,6 @@ time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 
-
 # Required nightly
 [workspace.lints.clippy]
 unwrap_used = "deny"
