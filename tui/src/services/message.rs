@@ -1,4 +1,8 @@
 use crate::AppState;
+use crate::services::bash_block::{
+    is_collapsed_tool_call, render_bash_block, render_file_diff, render_file_diff_full,
+    render_result_block, render_styled_block,
+};
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -8,7 +12,7 @@ use regex::Regex;
 use serde_json::Value;
 #[cfg(test)]
 use stakpak_shared::models::integrations::openai::FunctionCall;
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BubbleColors {
@@ -26,6 +30,10 @@ pub enum MessageContent {
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
     PlainText(String),
+    RenderPendingBorderBlock(ToolCall, bool),
+    RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
+    RenderResultBorderBlock(ToolCallResult),
+    RenderCollapsedMessage(ToolCall),
     BashBubble {
         title: String,
         content: Vec<String>,
@@ -96,6 +104,52 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::PlainText(text.into()),
             is_collapsed: None,
+        }
+    }
+
+    pub fn render_collapsed_message(tool_call: ToolCall) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderCollapsedMessage(tool_call),
+            is_collapsed: Some(true),
+        }
+    }
+
+    pub fn render_pending_border_block(tool_call: ToolCall, is_auto_approved: bool) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved),
+            is_collapsed: None,
+        }
+    }
+
+    pub fn render_streaming_border_block(
+        content: &str,
+        outside_title: &str,
+        bubble_title: &str,
+        colors: Option<BubbleColors>,
+        tool_type: &str,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderStreamingBorderBlock(
+                content.to_string(),
+                outside_title.to_string(),
+                bubble_title.to_string(),
+                colors,
+                tool_type.to_string(),
+            ),
+            is_collapsed: None,
+        }
+    }
+    pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
+        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
+            && tool_call_result.result.lines().count() > 3;
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderResultBorderBlock(tool_call_result),
+            is_collapsed: if is_collapsed { Some(true) } else { None },
         }
     }
 }
@@ -506,6 +560,51 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::StyledBlock(lines) => {
                 let borrowed_lines = get_wrapped_styled_block_lines(lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
+                let full_command = extract_full_command_arguments(tool_call);
+                let rendered_lines = if tool_call.function.name == "str_replace" {
+                    render_file_diff(tool_call, width)
+                } else {
+                    render_bash_block(tool_call, &full_command, false, width, *is_auto_approved)
+                };
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+
+            MessageContent::RenderCollapsedMessage(tool_call) => {
+                if tool_call.function.name == "str_replace" {
+                    let rendered_lines = render_file_diff_full(tool_call, width);
+                    let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
+                }
+            }
+            MessageContent::RenderStreamingBorderBlock(
+                content,
+                outside_title,
+                bubble_title,
+                colors,
+                tool_type,
+            ) => {
+                let rendered_lines = render_styled_block(
+                    content,
+                    outside_title,
+                    bubble_title,
+                    colors.clone(),
+                    width,
+                    tool_type,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderResultBorderBlock(tool_call_result) => {
+                let rendered_lines = render_result_block(tool_call_result, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }

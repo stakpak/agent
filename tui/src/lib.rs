@@ -12,11 +12,15 @@ use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
 pub use terminal::TerminalGuard;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
+
+use crate::services::bash_block::render_collapsed_result_block;
+use crate::services::message::Message;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
@@ -67,8 +71,7 @@ pub async fn run_tui(
     let shell_event_tx = internal_tx.clone();
 
     let mut spinner_interval = interval(Duration::from_millis(100));
-    // get terminal width
-    let terminal_size = terminal.size()?;
+
     // Main async update/view loop
     terminal.draw(|f| view::view(f, &mut state))?;
     let mut should_quit = false;
@@ -96,15 +99,22 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
                        state.poll_autocomplete_results();
                        terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        services::update::clear_streaming_tool_results(&mut state);
-                       services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
+                       if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_call_result.call.function.name == "run_command" {
 
+                            state.latest_tool_call = Some(tool_call_result.call.clone());
+
+                       }
+                       render_collapsed_result_block(tool_call_result, &mut state);
+
+                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
 
                    if let InputEvent::Quit = event { should_quit = true; }
@@ -133,7 +143,7 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
                        state.poll_autocomplete_results();
                    }
                }
@@ -168,7 +178,7 @@ pub async fn run_tui(
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
                        state.poll_autocomplete_results();
                    }
                }

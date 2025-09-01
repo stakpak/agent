@@ -1,4 +1,3 @@
-use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use similar::TextDiff;
@@ -17,7 +16,7 @@ pub fn preview_str_replace_editor_style(
     old_str: &str,
     new_str: &str,
     replace_all: bool,
-    terminal_size: Size,
+    terminal_width: usize,
 ) -> Result<(Vec<Line<'static>>, usize, usize, usize), std::io::Error> {
     // Read the current file content
     let original_content = fs::read_to_string(file_path)?;
@@ -107,7 +106,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -158,7 +157,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -210,7 +209,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -254,7 +253,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -279,7 +278,7 @@ pub fn preview_str_replace_editor_style(
 
 pub fn render_file_diff_block(
     tool_call: &ToolCall,
-    terminal_size: Size,
+    terminal_width: usize,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -291,7 +290,7 @@ pub fn render_file_diff_block(
 
     // Now you can use these variables with preview_str_replace_editor_style
     let (diff_lines, deletions, insertions, first_change_index) =
-        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
+        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_width)
             .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
     let mut lines = Vec::new();
