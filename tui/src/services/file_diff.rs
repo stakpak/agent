@@ -18,7 +18,7 @@ pub fn preview_str_replace_editor_style(
     new_str: &str,
     replace_all: bool,
     terminal_size: Size,
-) -> Result<(Vec<Line<'static>>, usize, usize), std::io::Error> {
+) -> Result<(Vec<Line<'static>>, usize, usize, usize), std::io::Error> {
     // Read the current file content
     let original_content = fs::read_to_string(file_path)?;
 
@@ -35,6 +35,7 @@ pub fn preview_str_replace_editor_style(
     let mut lines = Vec::new();
     let mut deletions = 0;
     let mut insertions = 0;
+    let mut first_change_index = None;
 
     let mut old_line_num = 0;
     let mut new_line_num = 0;
@@ -71,6 +72,11 @@ pub fn preview_str_replace_editor_style(
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
                     deletions += 1;
+
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
@@ -119,6 +125,11 @@ pub fn preview_str_replace_editor_style(
                     new_line_num += 1;
                     insertions += 1;
 
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
+
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
 
                     let mut line_spans = vec![
@@ -165,6 +176,12 @@ pub fn preview_str_replace_editor_style(
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
                     deletions += 1;
+
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
+
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
                     let mut line_spans = vec![
@@ -252,7 +269,12 @@ pub fn preview_str_replace_editor_style(
         }
     }
 
-    Ok((lines, deletions, insertions))
+    Ok((
+        lines,
+        deletions,
+        insertions,
+        first_change_index.unwrap_or(0),
+    ))
 }
 
 pub fn render_file_diff_block(
@@ -268,9 +290,9 @@ pub fn render_file_diff_block(
     let replace_all = args["replace_all"].as_bool().unwrap_or(false);
 
     // Now you can use these variables with preview_str_replace_editor_style
-    let (diff_lines, deletions, insertions) =
+    let (diff_lines, deletions, insertions, first_change_index) =
         preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
-            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0));
+            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
     let mut lines = Vec::new();
     // Add header
@@ -308,16 +330,6 @@ pub fn render_file_diff_block(
 
     let mut truncated_diff_lines;
     let mut full_diff_lines = diff_lines.clone();
-
-    // Find the first line that actually contains changes
-    let mut first_change_index = 0; // Start from the beginning
-    for (i, line) in diff_lines.iter().enumerate() {
-        let line_str = line.to_string();
-        if line_str.contains(" + ") || line_str.contains(" - ") {
-            first_change_index = i;
-            break;
-        }
-    }
 
     // Count how many lines we have from the first change to the end
     let change_lines_count = diff_lines.len() - first_change_index;
