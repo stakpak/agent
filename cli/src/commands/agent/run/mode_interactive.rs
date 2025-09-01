@@ -572,5 +572,11 @@ https://stakpak.dev/{}/agent-sessions/{}",
         );
     }
 
+    println!();
+    println!(
+        "\x1b[35mFeedback or bug report?\x1b[0m \x1b[38;5;214mJoin our Discord:\x1b[0m \x1b[38;5;214mhttps://discord.gg/c4HUkDD45d\x1b[0m"
+    );
+    println!();
+
     Ok(())
 }
