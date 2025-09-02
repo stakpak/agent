@@ -259,14 +259,14 @@ pub fn update(
                     .messages
                     .push(Message::render_collapsed_message(tool_call.clone()));
             }
+
+            let message_id = Uuid::new_v4();
             state.messages.push(Message::render_pending_border_block(
                 tool_call.clone(),
                 is_auto_approved,
+                Some(message_id),
             ));
-            // let full_command = extract_full_command_arguments(&tool_call);
-            // let message_id =
-            //     render_bash_block(&tool_call, &full_command, false, state, terminal_size);
-            // state.pending_bash_message_id = Some(message_id);
+            state.pending_bash_message_id = Some(message_id);
 
             // Check if auto-approve should be used
             if state.auto_approve_manager.should_auto_approve(&tool_call) {
@@ -276,6 +276,7 @@ pub fn update(
                 // Show confirmation dialog as usual
                 state.dialog_command = Some(tool_call.clone());
                 state.is_dialog_open = true;
+                state.loading = false;
                 state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
             }
         }

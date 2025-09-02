@@ -115,9 +115,13 @@ impl Message {
         }
     }
 
-    pub fn render_pending_border_block(tool_call: ToolCall, is_auto_approved: bool) -> Self {
+    pub fn render_pending_border_block(
+        tool_call: ToolCall,
+        is_auto_approved: bool,
+        message_id: Option<Uuid>,
+    ) -> Self {
         Message {
-            id: Uuid::new_v4(),
+            id: message_id.unwrap_or_else(Uuid::new_v4),
             content: MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved),
             is_collapsed: None,
         }
