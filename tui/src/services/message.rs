@@ -481,6 +481,7 @@ fn get_wrapped_message_lines_internal(
             MessageContent::Plain(text, style) => {
                 let cleaned = text.to_string();
 
+                // Check for shell history first (before newline processing)
                 if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
                     let mut remaining = cleaned.as_str();
                     while let Some(start) = remaining.find("```shell") {
@@ -551,6 +552,26 @@ fn get_wrapped_message_lines_internal(
                         let owned_lines = convert_to_owned_lines(borrowed_lines);
                         all_lines.extend(owned_lines);
                     }
+                } else if cleaned.contains("\n\n") {
+                    // Handle double newlines: split sections and add spacing
+                    for (i, section) in cleaned.split("\n\n").enumerate() {
+                        if i > 0 {
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
+                        }
+                        for line in section.split('\n') {
+                            let borrowed_lines = get_wrapped_plain_lines(line, style, width);
+                            all_lines.extend(convert_to_owned_lines(borrowed_lines));
+                        }
+                    }
+                } else if cleaned.contains('\n') {
+                    // Handle single newlines: split into lines
+                    for line in cleaned.split('\n') {
+                        let borrowed_lines = get_wrapped_plain_lines(line, style, width);
+                        all_lines.extend(convert_to_owned_lines(borrowed_lines));
+                    }
                 } else {
                     let borrowed_lines = get_wrapped_plain_lines(text, style, width);
                     let owned_lines = convert_to_owned_lines(borrowed_lines);
@@ -569,7 +590,9 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
-                let rendered_lines = if tool_call.function.name == "str_replace" {
+                let rendered_lines = if tool_call.function.name == "str_replace"
+                    && !render_file_diff(tool_call, width).is_empty()
+                {
                     render_file_diff(tool_call, width)
                 } else {
                     render_bash_block(tool_call, &full_command, false, width, *is_auto_approved)
@@ -582,9 +605,11 @@ fn get_wrapped_message_lines_internal(
             MessageContent::RenderCollapsedMessage(tool_call) => {
                 if tool_call.function.name == "str_replace" {
                     let rendered_lines = render_file_diff_full(tool_call, width);
-                    let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
-                    let owned_lines = convert_to_owned_lines(borrowed_lines);
-                    all_lines.extend(owned_lines);
+                    if !rendered_lines.is_empty() {
+                        let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                        let owned_lines = convert_to_owned_lines(borrowed_lines);
+                        all_lines.extend(owned_lines);
+                    }
                 }
             }
             MessageContent::RenderStreamingBorderBlock(

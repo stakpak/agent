@@ -558,6 +558,10 @@ pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
     let path = args["path"].as_str().unwrap_or("");
+
+    if full_diff_lines.is_empty() {
+        return Vec::new();
+    }
     // render header dot
     let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
 
@@ -586,7 +590,9 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
         let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
-
+        if diff_lines.is_empty() {
+            return Vec::new();
+        }
         diff_lines = [
             vec![Line::from(vec![Span::from(" ")])],
             diff_lines,
@@ -594,20 +600,19 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
         ]
         .concat();
 
-        if !diff_lines.is_empty() {
-            let result =
-                render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
+        let result =
+            render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
 
-            let adjusted_result = [
-                vec![spacing_marker.clone()],
-                result,
-                vec![spacing_marker.clone()],
-            ]
-            .concat();
+        let adjusted_result = [
+            vec![spacing_marker.clone()],
+            result,
+            vec![spacing_marker.clone()],
+        ]
+        .concat();
 
-            return adjusted_result;
-        }
+        return adjusted_result;
     }
+
     Vec::new()
 }
 
