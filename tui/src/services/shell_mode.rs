@@ -117,9 +117,17 @@ pub fn run_background_shell_command(
 
     // Spawn command in a separate thread
     std::thread::spawn(move || {
+        // Get the current working directory
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+        });
+
         let child = if cfg!(target_os = "windows") {
             Command::new("cmd")
                 .args(["/C", &command])
+                .current_dir(&current_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -127,6 +135,7 @@ pub fn run_background_shell_command(
         } else {
             Command::new("sh")
                 .args(["-c", &command])
+                .current_dir(&current_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -298,8 +307,16 @@ pub fn run_pty_command(
             }
         };
 
+        // Get the current working directory
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+        });
+
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", &command]);
+        cmd.cwd(&current_dir);
 
         let mut child = match pair.slave.spawn_command(cmd) {
             Ok(c) => c,

@@ -294,6 +294,10 @@ pub fn render_file_diff_block(
             .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
     let mut lines = Vec::new();
+
+    if deletions == 0 && insertions == 0 {
+        return (vec![], vec![]);
+    }
     // Add header
     lines.push(Line::from(vec![Span::styled(
         format!(
