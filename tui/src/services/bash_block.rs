@@ -7,7 +7,6 @@ use crate::services::message::{
 };
 use ansi_to_tui::IntoText;
 use console::strip_ansi_codes;
-use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
@@ -205,13 +204,10 @@ pub fn render_styled_block_ansi_to_tui(
     _outside_title: &str,
     bubble_title: &str,
     colors: Option<BubbleColors>,
-    state: &mut AppState,
-    terminal_size: Size,
+    terminal_width: usize,
     _tool_type: &str,
-    message_id: Option<Uuid>,
     content_alignment: Option<ContentAlignment>,
-) -> Uuid {
-    let terminal_width = terminal_size.width as usize;
+) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
         terminal_width - 6
     } else {
@@ -380,8 +376,6 @@ pub fn render_styled_block_ansi_to_tui(
 
     formatted_lines.push(bottom_border);
 
-    let message_id = message_id.unwrap_or_else(Uuid::new_v4);
-
     let mut owned_lines: Vec<Line<'static>> = Vec::new();
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     // Convert to owned lines for storage
@@ -401,14 +395,7 @@ pub fn render_styled_block_ansi_to_tui(
 
     // add spaceing marker
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-
-    // Store as StyledBlock (same as result block) instead of BashBubble
-    state.messages.push(Message {
-        id: message_id,
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: None,
-    });
-    message_id
+    owned_lines
 }
 
 pub fn extract_bash_block_info(
@@ -470,21 +457,17 @@ pub fn render_styled_block(
     outside_title: &str,
     bubble_title: &str,
     colors: Option<BubbleColors>,
-    state: &mut AppState,
-    terminal_size: Size,
+    terminal_width: usize,
     tool_type: &str,
-    message_id: Option<Uuid>,
-) -> Uuid {
+) -> Vec<Line<'static>> {
     // Just delegate to the ANSI-aware version
     render_styled_block_ansi_to_tui(
         content,
         outside_title,
         bubble_title,
         colors,
-        state,
-        terminal_size,
+        terminal_width,
         tool_type,
-        message_id,
         None,
     )
 }
@@ -493,9 +476,8 @@ pub fn render_styled_header_and_borders(
     title: &str,
     content_lines: Vec<Line<'static>>,
     colors: Option<BubbleColors>,
-    terminal_size: Size,
+    terminal_width: usize,
 ) -> Vec<Line<'static>> {
-    let terminal_width = terminal_size.width as usize;
     let content_width = if terminal_width > 4 {
         terminal_width - 6
     } else {
@@ -571,44 +553,39 @@ pub fn render_styled_header_and_borders(
     result
 }
 
-pub fn render_bash_block(
-    tool_call: &ToolCall,
-    output: &str,
-    _accepted: bool,
-    state: &mut AppState,
-    terminal_size: Size,
-) -> Uuid {
-    let (command, outside_title, mut bubble_title, colors) =
-        extract_bash_block_info(tool_call, output);
+pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
+    let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let path = args["path"].as_str().unwrap_or("");
+    // render header dot
+    let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
 
-    if state.auto_approve_manager.should_auto_approve(tool_call) {
-        bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
-    }
+    full_diff_lines = [
+        vec![spacing_marker.clone()],
+        render_styled_header_with_dot(
+            "Str Replace",
+            path,
+            Some(LinesColors {
+                dot: Color::Magenta,
+                title: Color::Yellow,
+                command: Color::Rgb(180, 180, 180),
+                message: Color::LightGreen,
+            }),
+        ),
+        vec![spacing_marker.clone()],
+        full_diff_lines,
+    ]
+    .concat();
+
+    full_diff_lines
+}
+
+pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
     if tool_call.function.name == "str_replace" {
-        let (mut diff_lines, mut full_diff_lines) =
-            render_file_diff_block(tool_call, terminal_size);
-        let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-            .unwrap_or_else(|_| serde_json::json!({}));
-        let path = args["path"].as_str().unwrap_or("");
+        let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
-
-        full_diff_lines = [
-            vec![spacing_marker.clone()],
-            render_styled_header_with_dot(
-                "Str Replace",
-                path,
-                Some(LinesColors {
-                    dot: Color::Magenta,
-                    title: Color::Yellow,
-                    command: Color::Rgb(180, 180, 180),
-                    message: Color::LightGreen,
-                }),
-            ),
-            vec![spacing_marker.clone()],
-            full_diff_lines,
-        ]
-        .concat();
 
         diff_lines = [
             vec![Line::from(vec![Span::from(" ")])],
@@ -618,10 +595,8 @@ pub fn render_bash_block(
         .concat();
 
         if !diff_lines.is_empty() {
-            let message_id = Uuid::new_v4();
-
             let result =
-                render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_size);
+                render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
 
             let adjusted_result = [
                 vec![spacing_marker.clone()],
@@ -629,18 +604,25 @@ pub fn render_bash_block(
                 vec![spacing_marker.clone()],
             ]
             .concat();
-            state.messages.push(Message {
-                id: message_id,
-                content: MessageContent::StyledBlock(adjusted_result),
-                is_collapsed: None,
-            });
-            state.messages.push(Message {
-                id: Uuid::new_v4(),
-                content: MessageContent::StyledBlock(full_diff_lines),
-                is_collapsed: Some(true),
-            });
-            return message_id;
+
+            return adjusted_result;
         }
+    }
+    Vec::new()
+}
+
+pub fn render_bash_block(
+    tool_call: &ToolCall,
+    output: &str,
+    _accepted: bool,
+    terminal_width: usize,
+    is_auto_approved: bool,
+) -> Vec<Line<'static>> {
+    let (command, outside_title, mut bubble_title, colors) =
+        extract_bash_block_info(tool_call, output);
+
+    if is_auto_approved {
+        bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
     }
 
     render_styled_block_ansi_to_tui(
@@ -648,10 +630,8 @@ pub fn render_bash_block(
         &outside_title,
         &bubble_title,
         Some(colors.clone()),
-        state,
-        terminal_size,
+        terminal_width,
         &tool_call.function.name,
-        None,
         None,
     )
 }
@@ -660,8 +640,7 @@ pub fn render_markdown_block(
     preprocessed_result: String,
     command_args: String,
     title: String,
-    state: &mut AppState,
-) {
+) -> Vec<Line<'static>> {
     let processed_result = preprocess_terminal_output(&preprocessed_result);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
@@ -684,74 +663,35 @@ pub fn render_markdown_block(
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-        is_collapsed: Some(true),
-    });
+    lines
 }
 
-pub fn render_result_block(
-    tool_call_result: &ToolCallResult,
-    state: &mut AppState,
-    terminal_size: Size,
-) {
+pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
-    // if tool_call.function.name == "str_replace" {
-    //     let diff_lines = render_file_diff_block(&tool_call, terminal_size);
-    //     if diff_lines.len() > 0 {
-    //         let message_id = Uuid::new_v4();
-    //         state.messages.push(Message {
-    //             id: message_id,
-    //             content: MessageContent::StyledBlock(diff_lines),
-    //             is_collapsed: None,
-    //         });
-    //         return;
-    //     }
-    // }
+
     let title: String = get_command_type_name(&tool_call);
     let command_args = extract_truncated_command_arguments(&tool_call);
 
     let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
     if tool_call_status == ToolCallResultStatus::Error {
-        render_bash_block_rejected(&command_args, &title, state, Some(result.to_string()));
-        return;
+        return render_bash_block_rejected(&command_args, &title, Some(result.to_string()));
     }
     if tool_call_status == ToolCallResultStatus::Cancelled {
-        // Store the latest tool call for potential retry (only for run_command)
-        if tool_call.function.name == "run_command" {
-            state.latest_tool_call = Some(tool_call.clone());
-        }
-
-        render_bash_block_rejected(
+        return render_bash_block_rejected(
             &command_args,
             &title,
-            state,
             Some("Interrupted by user".to_string()),
         );
-        return;
-    }
-
-    if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
-        let colors = LinesColors {
-            dot: Color::LightGreen,
-            title: Color::White,
-            command: Color::Rgb(180, 180, 180),
-            message: Color::Rgb(180, 180, 180),
-        };
-        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
     }
 
     if command_args.contains(".md") && is_collapsed {
-        render_markdown_block(result.clone(), command_args.clone(), title.clone(), state);
-        return;
+        return render_markdown_block(result.clone(), command_args.clone(), title.clone());
     }
 
-    let terminal_width = terminal_size.width as usize;
+    let terminal_width = width;
     let content_width = if terminal_width > 4 {
         terminal_width - 6
     } else {
@@ -1062,21 +1002,16 @@ pub fn render_result_block(
         })
         .collect();
 
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: if is_collapsed { Some(true) } else { None },
-    });
+    owned_lines
 }
 
 // Function to render a rejected bash command (when user selects "No")
 pub fn render_bash_block_rejected(
     command_name: &str,
     title: &str,
-    state: &mut AppState,
     message: Option<String>,
-) {
-    render_styled_lines(command_name, title, state, message, None);
+) -> Vec<Line<'static>> {
+    render_styled_lines(command_name, title, message, None)
 }
 
 #[derive(Clone)]
@@ -1120,10 +1055,9 @@ fn render_styled_header_with_dot(
 pub fn render_styled_lines(
     command_name: &str,
     title: &str,
-    state: &mut AppState,
     message: Option<String>,
     colors: Option<LinesColors>,
-) {
+) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
         title: Color::White,
@@ -1222,18 +1156,38 @@ pub fn render_styled_lines(
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: None,
-    });
+
+    owned_lines
 }
 
-fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
+pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_call_name = tool_call.function.name.clone();
     let tool_calls = ["view", "search_memory", "search_docs", "local_code_search"];
     if tool_calls.contains(&tool_call_name.as_str()) {
         return true;
     }
     false
+}
+
+pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &mut AppState) {
+    let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
+        && tool_call_result.result.lines().count() > 3;
+    let result = tool_call_result.result.clone();
+    let command_args = extract_truncated_command_arguments(&tool_call_result.call);
+    let title = get_command_type_name(&tool_call_result.call);
+    if is_collapsed {
+        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
+        let colors = LinesColors {
+            dot: Color::LightGreen,
+            title: Color::White,
+            command: Color::Rgb(180, 180, 180),
+            message: Color::Rgb(180, 180, 180),
+        };
+        let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
+        state.messages.push(Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::StyledBlock(lines),
+            is_collapsed: None,
+        });
+    }
 }

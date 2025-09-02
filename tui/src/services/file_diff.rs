@@ -1,4 +1,3 @@
-use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use similar::TextDiff;
@@ -17,8 +16,8 @@ pub fn preview_str_replace_editor_style(
     old_str: &str,
     new_str: &str,
     replace_all: bool,
-    terminal_size: Size,
-) -> Result<(Vec<Line<'static>>, usize, usize), std::io::Error> {
+    terminal_width: usize,
+) -> Result<(Vec<Line<'static>>, usize, usize, usize), std::io::Error> {
     // Read the current file content
     let original_content = fs::read_to_string(file_path)?;
 
@@ -35,6 +34,7 @@ pub fn preview_str_replace_editor_style(
     let mut lines = Vec::new();
     let mut deletions = 0;
     let mut insertions = 0;
+    let mut first_change_index = None;
 
     let mut old_line_num = 0;
     let mut new_line_num = 0;
@@ -72,6 +72,11 @@ pub fn preview_str_replace_editor_style(
                     old_line_num += 1;
                     deletions += 1;
 
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
+
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
                     // Check if this line contains the old string to highlight it
@@ -101,7 +106,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -118,6 +123,11 @@ pub fn preview_str_replace_editor_style(
                 for idx in 0..new_range.len() {
                     new_line_num += 1;
                     insertions += 1;
+
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
 
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
 
@@ -147,7 +157,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -165,6 +175,12 @@ pub fn preview_str_replace_editor_style(
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
                     deletions += 1;
+
+                    // Track the first change index
+                    if first_change_index.is_none() {
+                        first_change_index = Some(lines.len());
+                    }
+
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
 
                     let mut line_spans = vec![
@@ -193,7 +209,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -237,7 +253,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_size.width as usize - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 8; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -252,12 +268,17 @@ pub fn preview_str_replace_editor_style(
         }
     }
 
-    Ok((lines, deletions, insertions))
+    Ok((
+        lines,
+        deletions,
+        insertions,
+        first_change_index.unwrap_or(0),
+    ))
 }
 
 pub fn render_file_diff_block(
     tool_call: &ToolCall,
-    terminal_size: Size,
+    terminal_width: usize,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -268,9 +289,9 @@ pub fn render_file_diff_block(
     let replace_all = args["replace_all"].as_bool().unwrap_or(false);
 
     // Now you can use these variables with preview_str_replace_editor_style
-    let (diff_lines, deletions, insertions) =
-        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_size)
-            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0));
+    let (diff_lines, deletions, insertions, first_change_index) =
+        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_width)
+            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
     let mut lines = Vec::new();
     // Add header
@@ -308,16 +329,6 @@ pub fn render_file_diff_block(
 
     let mut truncated_diff_lines;
     let mut full_diff_lines = diff_lines.clone();
-
-    // Find the first line that actually contains changes
-    let mut first_change_index = 0; // Start from the beginning
-    for (i, line) in diff_lines.iter().enumerate() {
-        let line_str = line.to_string();
-        if line_str.contains(" + ") || line_str.contains(" - ") {
-            first_change_index = i;
-            break;
-        }
-    }
 
     // Count how many lines we have from the first change to the end
     let change_lines_count = diff_lines.len() - first_change_index;
