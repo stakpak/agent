@@ -1045,7 +1045,7 @@ fn handle_input_submitted(
         ));
 
         let _ = input_tx.try_send(InputEvent::AddUserMessage(state.input.clone()));
-
+        state.shell_tool_calls = None;
         state.input.clear();
         state.cursor_position = 0;
         let total_lines = state.messages.len() * 2;
