@@ -4,7 +4,7 @@ use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_autocomplete_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
-    Message, get_wrapped_collapsed_message_lines, get_wrapped_message_lines_cached,
+    get_wrapped_collapsed_message_lines_cached, get_wrapped_message_lines_cached,
 };
 use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
@@ -234,15 +234,8 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
     f.render_widget(message_widget, area);
 }
 
-fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
+fn render_collapsed_messages_popup(f: &mut Frame, state: &mut AppState) {
     let screen = f.area();
-
-    // Get only collapsed messages
-    let collapsed_messages: Vec<&Message> = state
-        .messages
-        .iter()
-        .filter(|m| m.is_collapsed == Some(true))
-        .collect();
     // Create a full-screen popup
     let popup_area = Rect {
         x: 0,
@@ -278,21 +271,15 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &AppState) {
     f.render_widget(block, popup_area);
 
     // Render collapsed messages using the same logic as render_messages
-    render_collapsed_messages_content(f, state, &collapsed_messages, content_area);
+    render_collapsed_messages_content(f, state, content_area);
 }
 
-fn render_collapsed_messages_content(
-    f: &mut Frame,
-    state: &AppState,
-    messages: &[&Message],
-    area: Rect,
-) {
+fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: Rect) {
     let width = area.width as usize;
     let height = area.height as usize;
 
-    // Convert references to owned messages for get_wrapped_message_lines
-    let owned_messages: Vec<Message> = messages.iter().map(|m| (*m).clone()).collect();
-    let all_lines: Vec<(Line, Style)> = get_wrapped_collapsed_message_lines(&owned_messages, width);
+    // Messages are already owned, no need to clone
+    let all_lines: Vec<Line> = get_wrapped_collapsed_message_lines_cached(state, width);
 
     if all_lines.is_empty() {
         let empty_widget = Paragraph::new("No collapsed messages found")
@@ -304,7 +291,7 @@ fn render_collapsed_messages_content(
     // Pre-process lines (same as render_messages)
     let mut processed_lines: Vec<Line> = Vec::new();
 
-    for (line, _style) in all_lines.iter() {
+    for line in all_lines.iter() {
         let line_text = spans_to_string(line);
         // Process the line (simplified version)
         if line_text.trim() == "SPACING_MARKER" {

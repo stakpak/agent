@@ -118,6 +118,7 @@ pub struct AppState {
 
     pub is_git_repo: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
+    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
     pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
 }
 
@@ -319,6 +320,7 @@ impl AppState {
             collapsed_messages_selected: 0,
             is_git_repo,
             message_lines_cache: None,
+            collapsed_message_lines_cache: None,
             processed_lines_cache: None,
         }
     }

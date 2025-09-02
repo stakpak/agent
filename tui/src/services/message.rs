@@ -414,13 +414,60 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
 /// Invalidate the message lines cache when messages change
 pub fn invalidate_message_lines_cache(state: &mut AppState) {
     state.message_lines_cache = None;
+    state.collapsed_message_lines_cache = None;
 }
 
-pub fn get_wrapped_collapsed_message_lines(
-    messages: &[Message],
+pub fn get_wrapped_collapsed_message_lines_cached(
+    state: &mut AppState,
     width: usize,
-) -> Vec<(Line<'static>, Style)> {
-    get_wrapped_message_lines_internal(messages, width, true)
+) -> Vec<Line<'static>> {
+    // Get only collapsed messages
+    let collapsed_messages: Vec<Message> = state
+        .messages
+        .iter()
+        .filter(|m| m.is_collapsed == Some(true))
+        .cloned()
+        .collect();
+
+    // Check if cache is valid
+    let cache_valid =
+        if let Some((cached_messages, cached_width, _)) = &state.collapsed_message_lines_cache {
+            cached_messages.len() == collapsed_messages.len()
+                && *cached_width == width
+                && (collapsed_messages.is_empty()
+                    || cached_messages
+                        .iter()
+                        .zip(collapsed_messages.iter())
+                        .all(|(a, b)| a.id == b.id))
+        } else {
+            false
+        };
+
+    if !cache_valid {
+        // Calculate and cache the processed lines directly
+
+        let processed_lines: Vec<Line<'static>> =
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+                .into_iter()
+                .map(|(line, _style)| line)
+                .collect();
+
+        state.collapsed_message_lines_cache =
+            Some((collapsed_messages.to_vec(), width, processed_lines.clone()));
+        processed_lines
+    } else {
+        // Return cached processed lines immediately
+        if let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache {
+            cached_lines.clone()
+        } else {
+            // Fallback if cache is somehow invalid
+
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+                .into_iter()
+                .map(|(line, _style)| line)
+                .collect()
+        }
+    }
 }
 
 fn get_wrapped_message_lines_internal(

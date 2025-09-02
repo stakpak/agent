@@ -9,7 +9,7 @@ use crate::services::helper_block::{
     welcome_messages,
 };
 use crate::services::message::{
-    Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines,
+    Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
     get_wrapped_message_lines_cached,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
@@ -22,8 +22,7 @@ use stakpak_shared::models::integrations::openai::{
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-// Reduced from 7 to 5 for smoother, less disorienting scrolling
-const SCROLL_LINES: usize = 5;
+const SCROLL_LINES: usize = 2;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -501,10 +500,11 @@ pub fn update(
             state.show_collapsed_messages = !state.show_collapsed_messages;
             if state.show_collapsed_messages {
                 // Calculate scroll position to show the top of the last message
-                let collapsed_messages: Vec<&Message> = state
+                let collapsed_messages: Vec<Message> = state
                     .messages
                     .iter()
                     .filter(|m| m.is_collapsed == Some(true))
+                    .cloned()
                     .collect();
 
                 if !collapsed_messages.is_empty() {
@@ -513,7 +513,7 @@ pub fn update(
 
                     // Calculate scroll to show the top of the last message
                     let mut line_count = 0;
-                    for (i, message) in collapsed_messages.iter().enumerate() {
+                    for (i, _message) in collapsed_messages.iter().enumerate() {
                         if i == state.collapsed_messages_selected {
                             // This is the last message, set scroll to show its top
                             state.collapsed_messages_scroll = line_count;
@@ -521,10 +521,8 @@ pub fn update(
                         }
 
                         // Count lines for this message
-                        let message_lines = get_wrapped_collapsed_message_lines(
-                            &[(*message).clone()],
-                            message_area_width,
-                        );
+                        let message_lines =
+                            get_wrapped_collapsed_message_lines_cached(state, message_area_width);
                         line_count += message_lines.len();
                     }
                 } else {
@@ -1192,15 +1190,14 @@ fn handle_scroll_up(state: &mut AppState) {
 fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
     if state.show_collapsed_messages {
         // For collapsed messages popup, we need to calculate scroll based on collapsed messages only
-        let collapsed_messages: Vec<&Message> = state
-            .messages
-            .iter()
-            .filter(|m| m.is_collapsed == Some(true))
-            .collect();
-        let owned_messages: Vec<Message> =
-            collapsed_messages.iter().map(|m| (*m).clone()).collect();
-        let all_lines = get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
-        let total_lines = all_lines.len();
+        let total_lines = if let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache {
+            cached_lines.len()
+        } else {
+            // Fallback: calculate once and cache
+            let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
+            all_lines.len()
+        };
+
         let max_scroll = total_lines.saturating_sub(message_area_height);
         if state.collapsed_messages_scroll + SCROLL_LINES < max_scroll {
             state.collapsed_messages_scroll += SCROLL_LINES;
@@ -1286,10 +1283,11 @@ fn handle_collapsed_messages_tab(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    let collapsed_messages: Vec<&Message> = state
+    let collapsed_messages: Vec<Message> = state
         .messages
         .iter()
         .filter(|m| m.is_collapsed == Some(true))
+        .cloned()
         .collect();
 
     if collapsed_messages.is_empty() {
@@ -1303,7 +1301,7 @@ fn handle_collapsed_messages_tab(
     // Calculate scroll position to show the top of the selected message
     let mut line_count = 0;
 
-    for (i, message) in collapsed_messages.iter().enumerate() {
+    for (i, _message) in collapsed_messages.iter().enumerate() {
         if i == state.collapsed_messages_selected {
             // This is our target message, set scroll to show its top
             state.collapsed_messages_scroll = line_count;
@@ -1311,14 +1309,12 @@ fn handle_collapsed_messages_tab(
         }
 
         // Count lines for this message
-        let message_lines =
-            get_wrapped_collapsed_message_lines(&[(*message).clone()], message_area_width);
+        let message_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
         line_count += message_lines.len();
     }
 
     // Ensure scroll doesn't exceed bounds
-    let owned_messages: Vec<Message> = collapsed_messages.iter().map(|m| (*m).clone()).collect();
-    let all_lines = get_wrapped_collapsed_message_lines(&owned_messages, message_area_width);
+    let all_lines = get_wrapped_collapsed_message_lines_cached(state, message_area_width);
     let total_lines = all_lines.len();
     let max_scroll = total_lines.saturating_sub(message_area_height);
     state.collapsed_messages_scroll = state.collapsed_messages_scroll.min(max_scroll);
