@@ -106,7 +106,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_width - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 4; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -157,7 +157,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_width - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 4; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -209,7 +209,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_width - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 4; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(
@@ -253,7 +253,7 @@ pub fn preview_str_replace_editor_style(
 
                     // Add padding to extend background across full width
                     let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_width - 8; // Subtract 6 for margin
+                    let target_width = terminal_width - 4; // Subtract 6 for margin
                     let padding_needed = target_width.saturating_sub(current_width);
                     if padding_needed > 0 {
                         line_spans.push(Span::styled(

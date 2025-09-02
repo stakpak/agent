@@ -209,7 +209,7 @@ pub fn render_styled_block_ansi_to_tui(
     content_alignment: Option<ContentAlignment>,
 ) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
-        terminal_width - 6
+        terminal_width - 4
     } else {
         40
     };
@@ -479,7 +479,7 @@ pub fn render_styled_header_and_borders(
     terminal_width: usize,
 ) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
-        terminal_width - 6
+        terminal_width - 4
     } else {
         40
     };
@@ -698,7 +698,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
 
     let terminal_width = width;
     let content_width = if terminal_width > 4 {
-        terminal_width - 6
+        terminal_width - 4
     } else {
         40
     };
