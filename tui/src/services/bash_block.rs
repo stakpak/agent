@@ -850,7 +850,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                     if let Some(first_span) = first_line.spans.first() {
                         line_spans.push(Span::styled(
                             format!("{}", first_span.content),
-                            Style::default().fg(Color::Rgb(180, 180, 180)),
+                            Style::default().fg(AdaptiveColors::text()),
                         ));
                     }
                 } else {
