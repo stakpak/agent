@@ -74,7 +74,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 format!("→ {}", text.into()),
-                style.unwrap_or(Style::default().fg(term_color(Color::Rgb(180, 180, 180)))),
+                style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
             ),
             is_collapsed: None,
         }

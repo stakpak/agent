@@ -1229,7 +1229,7 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
         let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
         let colors = LinesColors {
             dot: Color::LightGreen,
-            title: AdaptiveColors::text(),
+            title: Color::White,
             command: AdaptiveColors::text(),
             message: AdaptiveColors::text(),
         };
