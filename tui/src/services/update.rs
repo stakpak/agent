@@ -412,6 +412,7 @@ pub fn update(
             state.waiting_for_shell_input = false;
         }
         InputEvent::HandlePaste(text) => {
+            // TODO:: REDACT SECRETS IN PASTED TEXT
             let text = preprocess_terminal_output(&text);
             let text = text.replace("\r\n", "\n").replace('\r', "\n");
             let line_count = text.lines().count();
