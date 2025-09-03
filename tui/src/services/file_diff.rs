@@ -39,35 +39,89 @@ pub fn preview_str_replace_editor_style(
     let mut old_line_num = 0;
     let mut new_line_num = 0;
 
+    // Helper function to wrap content while maintaining proper indentation
+    fn wrap_content(content: &str, terminal_width: usize, prefix_width: usize) -> Vec<String> {
+        let available_width = terminal_width.saturating_sub(prefix_width + 4); // 4 for margins
+
+        if content.len() <= available_width {
+            return vec![content.to_string()];
+        }
+
+        let mut wrapped_lines = Vec::new();
+        let mut remaining = content;
+
+        while !remaining.is_empty() {
+            if remaining.len() <= available_width {
+                wrapped_lines.push(remaining.to_string());
+                break;
+            }
+
+            // Find the best break point (prefer word boundaries)
+            let mut break_point = available_width;
+
+            // Look for a space within the last 20% of the available width
+            let search_start = (available_width as f32 * 0.8) as usize;
+            if let Some(space_pos) = remaining[search_start..available_width.min(remaining.len())]
+                .rfind(char::is_whitespace)
+            {
+                break_point = search_start + space_pos;
+            }
+
+            let chunk = &remaining[..break_point];
+            wrapped_lines.push(chunk.to_string());
+
+            remaining = &remaining[break_point..];
+            // Skip leading whitespace on continuation lines
+            remaining = remaining.trim_start();
+        }
+
+        wrapped_lines
+    }
+
     for op in diff.ops() {
         let old_range = op.old_range();
         let new_range = op.new_range();
 
         match op.tag() {
             similar::DiffTag::Equal => {
-                // Show equal lines
+                // Show equal lines with wrapping
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
                     new_line_num += 1;
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
+                    let prefix_width = 4 + 1 + 4 + 1 + 2; // old_num + space + new_num + space + marker
+                    let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{:>4} ", old_line_num).to_string(),
-                            Style::default().fg(DARK_GRAY_COLOR),
-                        ),
-                        Span::styled(
-                            format!("{:>4}  ", new_line_num).to_string(),
-                            Style::default().fg(DARK_GRAY_COLOR),
-                        ),
-                        Span::styled("  ".to_string(), Style::default()),
-                        Span::styled(line_content.to_string(), Style::default().fg(TEXT_COLOR)),
-                    ]));
+                    for (i, content_line) in wrapped_content.iter().enumerate() {
+                        if i == 0 {
+                            // First line with line numbers
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{:>4} ", old_line_num),
+                                    Style::default().fg(DARK_GRAY_COLOR),
+                                ),
+                                Span::styled(
+                                    format!("{:>4}  ", new_line_num),
+                                    Style::default().fg(DARK_GRAY_COLOR),
+                                ),
+                                Span::styled("  ", Style::default()),
+                                Span::styled(content_line.clone(), Style::default().fg(TEXT_COLOR)),
+                            ]));
+                        } else {
+                            // Continuation lines with proper spacing
+                            lines.push(Line::from(vec![
+                                Span::styled("     ", Style::default().fg(DARK_GRAY_COLOR)), // 5 spaces for old line num
+                                Span::styled("      ", Style::default().fg(DARK_GRAY_COLOR)), // 6 spaces for new line num
+                                Span::styled("  ", Style::default()),
+                                Span::styled(content_line.clone(), Style::default().fg(TEXT_COLOR)),
+                            ]));
+                        }
+                    }
                 }
             }
             similar::DiffTag::Delete => {
-                // Show deleted lines
+                // Show deleted lines with wrapping
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
                     deletions += 1;
@@ -78,48 +132,65 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
+                    let prefix_width = 4 + 1 + 5 + 3; // old_num + space + empty + marker
+                    let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
-                    // Check if this line contains the old string to highlight it
-                    let mut line_spans = vec![
-                        Span::styled(
-                            format!("{:>4} ", old_line_num).to_string(),
-                            Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
-                        ),
-                        Span::styled(
-                            "     ".to_string(), // Empty space for new line number (since this line was deleted)
-                            Style::default().bg(DARK_RED_COLOR),
-                        ),
-                        Span::styled(
-                            " - ".to_string(),
-                            Style::default()
-                                .fg(RED_COLOR)
-                                .add_modifier(Modifier::BOLD)
-                                .bg(DARK_RED_COLOR),
-                        ),
-                    ];
+                    for (i, content_line) in wrapped_content.iter().enumerate() {
+                        let mut line_spans = vec![];
 
-                    // Highlight the entire line with red background
-                    line_spans.push(Span::styled(
-                        line_content.to_string(),
-                        Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
-                    ));
+                        if i == 0 {
+                            // First line with line numbers
+                            line_spans.push(Span::styled(
+                                format!("{:>4} ", old_line_num),
+                                Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
+                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans.push(Span::styled(
+                                " - ",
+                                Style::default()
+                                    .fg(RED_COLOR)
+                                    .add_modifier(Modifier::BOLD)
+                                    .bg(DARK_RED_COLOR),
+                            ));
+                        } else {
+                            // Continuation lines with proper spacing
+                            line_spans.push(Span::styled(
+                                "     ", // 5 spaces for old line num
+                                Style::default().bg(DARK_RED_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                "     ", // 5 spaces for new line num area
+                                Style::default().bg(DARK_RED_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                "   ", // 3 spaces for marker area
+                                Style::default().bg(DARK_RED_COLOR),
+                            ));
+                        }
 
-                    // Add padding to extend background across full width
-                    let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_width - 4; // Subtract 6 for margin
-                    let padding_needed = target_width.saturating_sub(current_width);
-                    if padding_needed > 0 {
                         line_spans.push(Span::styled(
-                            " ".repeat(padding_needed),
-                            Style::default().bg(DARK_RED_COLOR),
+                            content_line.clone(),
+                            Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
                         ));
-                    }
 
-                    lines.push(Line::from(line_spans));
+                        // Add padding to extend background across full width
+                        let current_width = prefix_width + content_line.len();
+                        let target_width = terminal_width - 4;
+                        let padding_needed = target_width.saturating_sub(current_width);
+                        if padding_needed > 0 {
+                            line_spans.push(Span::styled(
+                                " ".repeat(padding_needed),
+                                Style::default().bg(DARK_RED_COLOR),
+                            ));
+                        }
+
+                        lines.push(Line::from(line_spans));
+                    }
                 }
             }
             similar::DiffTag::Insert => {
-                // Show inserted lines
+                // Show inserted lines with wrapping
                 for idx in 0..new_range.len() {
                     new_line_num += 1;
                     insertions += 1;
@@ -130,47 +201,65 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
+                    let prefix_width = 5 + 4 + 1 + 3; // empty + line_num + space + marker
+                    let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
-                    let mut line_spans = vec![
-                        Span::styled(
-                            "     ".to_string(), // Empty space for old line number (like delete lines)
-                            Style::default().bg(DARK_GREEN_COLOR),
-                        ),
-                        Span::styled(
-                            format!("{:>4} ", new_line_num).to_string(),
-                            Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
-                        ),
-                        Span::styled(
-                            " + ".to_string(),
-                            Style::default()
-                                .fg(GREEN_COLOR)
-                                .add_modifier(Modifier::BOLD)
-                                .bg(DARK_GREEN_COLOR),
-                        ),
-                    ];
+                    for (i, content_line) in wrapped_content.iter().enumerate() {
+                        let mut line_spans = vec![];
 
-                    // Highlight the entire line with green background
-                    line_spans.push(Span::styled(
-                        line_content.to_string(),
-                        Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
-                    ));
+                        if i == 0 {
+                            // First line with line numbers
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans.push(Span::styled(
+                                format!("{:>4} ", new_line_num),
+                                Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                " + ",
+                                Style::default()
+                                    .fg(GREEN_COLOR)
+                                    .add_modifier(Modifier::BOLD)
+                                    .bg(DARK_GREEN_COLOR),
+                            ));
+                        } else {
+                            // Continuation lines with proper spacing
+                            line_spans.push(Span::styled(
+                                "     ", // 5 spaces for old line num area
+                                Style::default().bg(DARK_GREEN_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                "     ", // 5 spaces for new line num
+                                Style::default().bg(DARK_GREEN_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                "   ", // 3 spaces for marker area
+                                Style::default().bg(DARK_GREEN_COLOR),
+                            ));
+                        }
 
-                    // Add padding to extend background across full width
-                    let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_width - 4; // Subtract 6 for margin
-                    let padding_needed = target_width.saturating_sub(current_width);
-                    if padding_needed > 0 {
                         line_spans.push(Span::styled(
-                            " ".repeat(padding_needed),
-                            Style::default().bg(DARK_GREEN_COLOR),
+                            content_line.clone(),
+                            Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
                         ));
-                    }
 
-                    lines.push(Line::from(line_spans));
+                        // Add padding to extend background across full width
+                        let current_width = prefix_width + content_line.len();
+                        let target_width = terminal_width - 4;
+                        let padding_needed = target_width.saturating_sub(current_width);
+                        if padding_needed > 0 {
+                            line_spans.push(Span::styled(
+                                " ".repeat(padding_needed),
+                                Style::default().bg(DARK_GREEN_COLOR),
+                            ));
+                        }
+
+                        lines.push(Line::from(line_spans));
+                    }
                 }
             }
             similar::DiffTag::Replace => {
-                // Handle replacements (show both delete and insert)
+                // Handle replacements (show both delete and insert) with wrapping
                 // First show deletes
                 for idx in 0..old_range.len() {
                     old_line_num += 1;
@@ -182,43 +271,52 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
+                    let prefix_width = 4 + 1 + 5 + 3; // old_num + space + empty + marker
+                    let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
-                    let mut line_spans = vec![
-                        Span::styled(
-                            format!("{:>4} ", old_line_num).to_string(),
-                            Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
-                        ),
-                        Span::styled(
-                            "     ".to_string(), // Empty space for new line number (since this line was deleted)
-                            Style::default().bg(DARK_RED_COLOR),
-                        ),
-                        Span::styled(
-                            " - ".to_string(),
-                            Style::default()
-                                .fg(RED_COLOR)
-                                .add_modifier(Modifier::BOLD)
-                                .bg(DARK_RED_COLOR),
-                        ),
-                    ];
+                    for (i, content_line) in wrapped_content.iter().enumerate() {
+                        let mut line_spans = vec![];
 
-                    // Highlight the entire line with red background
-                    line_spans.push(Span::styled(
-                        line_content.to_string(),
-                        Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
-                    ));
+                        if i == 0 {
+                            line_spans.push(Span::styled(
+                                format!("{:>4} ", old_line_num),
+                                Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
+                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans.push(Span::styled(
+                                " - ",
+                                Style::default()
+                                    .fg(RED_COLOR)
+                                    .add_modifier(Modifier::BOLD)
+                                    .bg(DARK_RED_COLOR),
+                            ));
+                        } else {
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans
+                                .push(Span::styled("   ", Style::default().bg(DARK_RED_COLOR)));
+                        }
 
-                    // Add padding to extend background across full width
-                    let current_width = 4 + 1 + 5 + 3 + line_content.len(); // line_num + space + empty + marker + content
-                    let target_width = terminal_width - 4; // Subtract 6 for margin
-                    let padding_needed = target_width.saturating_sub(current_width);
-                    if padding_needed > 0 {
                         line_spans.push(Span::styled(
-                            " ".repeat(padding_needed),
-                            Style::default().bg(DARK_RED_COLOR),
+                            content_line.clone(),
+                            Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
                         ));
-                    }
 
-                    lines.push(Line::from(line_spans));
+                        let current_width = prefix_width + content_line.len();
+                        let target_width = terminal_width - 4;
+                        let padding_needed = target_width.saturating_sub(current_width);
+                        if padding_needed > 0 {
+                            line_spans.push(Span::styled(
+                                " ".repeat(padding_needed),
+                                Style::default().bg(DARK_RED_COLOR),
+                            ));
+                        }
+
+                        lines.push(Line::from(line_spans));
+                    }
                 }
 
                 // Then show inserts
@@ -226,43 +324,52 @@ pub fn preview_str_replace_editor_style(
                     new_line_num += 1;
                     insertions += 1;
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
+                    let prefix_width = 5 + 4 + 1 + 3; // empty + line_num + space + marker
+                    let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
-                    let mut line_spans = vec![
-                        Span::styled(
-                            "     ".to_string(), // Empty space for old line number (like delete lines)
-                            Style::default().bg(DARK_GREEN_COLOR),
-                        ),
-                        Span::styled(
-                            format!("{:>4} ", new_line_num).to_string(),
-                            Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
-                        ),
-                        Span::styled(
-                            " + ".to_string(),
-                            Style::default()
-                                .fg(GREEN_COLOR)
-                                .add_modifier(Modifier::BOLD)
-                                .bg(DARK_GREEN_COLOR),
-                        ),
-                    ];
+                    for (i, content_line) in wrapped_content.iter().enumerate() {
+                        let mut line_spans = vec![];
 
-                    // Highlight the entire line with green background
-                    line_spans.push(Span::styled(
-                        line_content.to_string(),
-                        Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
-                    ));
+                        if i == 0 {
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans.push(Span::styled(
+                                format!("{:>4} ", new_line_num),
+                                Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
+                            ));
+                            line_spans.push(Span::styled(
+                                " + ",
+                                Style::default()
+                                    .fg(GREEN_COLOR)
+                                    .add_modifier(Modifier::BOLD)
+                                    .bg(DARK_GREEN_COLOR),
+                            ));
+                        } else {
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans
+                                .push(Span::styled("   ", Style::default().bg(DARK_GREEN_COLOR)));
+                        }
 
-                    // Add padding to extend background across full width
-                    let current_width = 5 + 4 + 1 + 3 + line_content.len(); // empty + line_num + space + marker + content
-                    let target_width = terminal_width - 4; // Subtract 6 for margin
-                    let padding_needed = target_width.saturating_sub(current_width);
-                    if padding_needed > 0 {
                         line_spans.push(Span::styled(
-                            " ".repeat(padding_needed),
-                            Style::default().bg(DARK_GREEN_COLOR),
+                            content_line.clone(),
+                            Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
                         ));
-                    }
 
-                    lines.push(Line::from(line_spans));
+                        let current_width = prefix_width + content_line.len();
+                        let target_width = terminal_width - 4;
+                        let padding_needed = target_width.saturating_sub(current_width);
+                        if padding_needed > 0 {
+                            line_spans.push(Span::styled(
+                                " ".repeat(padding_needed),
+                                Style::default().bg(DARK_GREEN_COLOR),
+                            ));
+                        }
+
+                        lines.push(Line::from(line_spans));
+                    }
                 }
             }
         }
