@@ -5,6 +5,8 @@ use syntect::highlighting::{Color, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
+use crate::services::detect_term::AdaptiveColors;
+
 fn syntect_color_to_ratatui_color(syntect_color: Color) -> ratatui::style::Color {
     ratatui::style::Color::Rgb(syntect_color.r, syntect_color.g, syntect_color.b)
 }
@@ -39,7 +41,7 @@ pub fn apply_syntax_highlighting(text: &str, extension: Option<&str>) -> Vec<Lin
                 text.to_string(),
                 Style::default()
                     .fg(color)
-                    .bg(ratatui::style::Color::Rgb(30, 30, 30)), // Dark background
+                    .bg(AdaptiveColors::code_block_bg()), // Dark background
             );
             spans.push(styled_span);
         }

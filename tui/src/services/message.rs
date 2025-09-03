@@ -3,6 +3,7 @@ use crate::services::bash_block::{
     is_collapsed_tool_call, render_bash_block, render_file_diff, render_file_diff_full,
     render_result_block, render_styled_block,
 };
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -55,7 +56,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 text.into(),
-                style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+                style.unwrap_or(Style::default().fg(Color::DarkGray)),
             ),
             is_collapsed: None,
         }
@@ -65,7 +66,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 format!("→ {}", text.into()),
-                style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+                style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
             ),
             is_collapsed: None,
         }
@@ -288,7 +289,7 @@ fn render_shell_bubble_with_unicode_border(
         let padded = format!("{:<width$}", out, width = border_width - 4);
         lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(Color::Magenta)),
-            Span::styled(padded, Style::default().fg(Color::Rgb(180, 180, 180))),
+            Span::styled(padded, Style::default().fg(AdaptiveColors::text())),
             Span::styled(" │", Style::default().fg(Color::Magenta)),
         ]));
     }

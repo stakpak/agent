@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -41,11 +41,9 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 };
 
                 let description_style = if is_selected {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Rgb(180, 180, 180))
+                    Style::default().fg(Color::Black).bg(AdaptiveColors::text())
                 } else {
-                    Style::default().fg(Color::Rgb(180, 180, 180))
+                    Style::default().fg(AdaptiveColors::text())
                 };
 
                 ListItem::new(Line::from(vec![
@@ -99,7 +97,7 @@ fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(160, 160, 160))
+                Style::default().fg(AdaptiveColors::text())
             };
 
             let display_text = format!("{} {}", get_file_icon(item), item);
