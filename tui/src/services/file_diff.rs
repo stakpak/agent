@@ -43,37 +43,39 @@ pub fn preview_str_replace_editor_style(
     // Helper function to wrap content while maintaining proper indentation
     fn wrap_content(content: &str, terminal_width: usize, prefix_width: usize) -> Vec<String> {
         let available_width = terminal_width.saturating_sub(prefix_width + 4); // 4 for margins
-        
+
         if content.len() <= available_width {
             return vec![content.to_string()];
         }
-        
+
         let mut wrapped_lines = Vec::new();
         let mut remaining = content;
-        
+
         while !remaining.is_empty() {
             if remaining.len() <= available_width {
                 wrapped_lines.push(remaining.to_string());
                 break;
             }
-            
+
             // Find the best break point (prefer word boundaries)
             let mut break_point = available_width;
-            
+
             // Look for a space within the last 20% of the available width
             let search_start = (available_width as f32 * 0.8) as usize;
-            if let Some(space_pos) = remaining[search_start..available_width.min(remaining.len())].rfind(char::is_whitespace) {
+            if let Some(space_pos) = remaining[search_start..available_width.min(remaining.len())]
+                .rfind(char::is_whitespace)
+            {
                 break_point = search_start + space_pos;
             }
-            
+
             let chunk = &remaining[..break_point];
             wrapped_lines.push(chunk.to_string());
-            
+
             remaining = &remaining[break_point..];
             // Skip leading whitespace on continuation lines
             remaining = remaining.trim_start();
         }
-        
+
         wrapped_lines
     }
 
@@ -91,7 +93,7 @@ pub fn preview_str_replace_editor_style(
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
                     let prefix_width = 4 + 1 + 4 + 1 + 2; // old_num + space + new_num + space + marker
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
-                    
+
                     for (i, content_line) in wrapped_content.iter().enumerate() {
                         if i == 0 {
                             // First line with line numbers
@@ -136,17 +138,15 @@ pub fn preview_str_replace_editor_style(
 
                     for (i, content_line) in wrapped_content.iter().enumerate() {
                         let mut line_spans = vec![];
-                        
+
                         if i == 0 {
                             // First line with line numbers
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", old_line_num),
                                 Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
                             ));
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_RED_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
                             line_spans.push(Span::styled(
                                 " - ",
                                 Style::default()
@@ -207,13 +207,11 @@ pub fn preview_str_replace_editor_style(
 
                     for (i, content_line) in wrapped_content.iter().enumerate() {
                         let mut line_spans = vec![];
-                        
+
                         if i == 0 {
                             // First line with line numbers
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_GREEN_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", new_line_num),
                                 Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
@@ -279,16 +277,14 @@ pub fn preview_str_replace_editor_style(
 
                     for (i, content_line) in wrapped_content.iter().enumerate() {
                         let mut line_spans = vec![];
-                        
+
                         if i == 0 {
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", old_line_num),
                                 Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
                             ));
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_RED_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
                             line_spans.push(Span::styled(
                                 " - ",
                                 Style::default()
@@ -297,18 +293,12 @@ pub fn preview_str_replace_editor_style(
                                     .bg(DARK_RED_COLOR),
                             ));
                         } else {
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_RED_COLOR),
-                            ));
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_RED_COLOR),
-                            ));
-                            line_spans.push(Span::styled(
-                                "   ",
-                                Style::default().bg(DARK_RED_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans
+                                .push(Span::styled("   ", Style::default().bg(DARK_RED_COLOR)));
                         }
 
                         line_spans.push(Span::styled(
@@ -340,12 +330,10 @@ pub fn preview_str_replace_editor_style(
 
                     for (i, content_line) in wrapped_content.iter().enumerate() {
                         let mut line_spans = vec![];
-                        
+
                         if i == 0 {
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_GREEN_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", new_line_num),
                                 Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
@@ -358,18 +346,12 @@ pub fn preview_str_replace_editor_style(
                                     .bg(DARK_GREEN_COLOR),
                             ));
                         } else {
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_GREEN_COLOR),
-                            ));
-                            line_spans.push(Span::styled(
-                                "     ",
-                                Style::default().bg(DARK_GREEN_COLOR),
-                            ));
-                            line_spans.push(Span::styled(
-                                "   ",
-                                Style::default().bg(DARK_GREEN_COLOR),
-                            ));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans
+                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans
+                                .push(Span::styled("   ", Style::default().bg(DARK_GREEN_COLOR)));
                         }
 
                         line_spans.push(Span::styled(
