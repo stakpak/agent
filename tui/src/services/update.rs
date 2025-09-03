@@ -511,20 +511,15 @@ pub fn update(
                     // Set selected to the last message
                     state.collapsed_messages_selected = collapsed_messages.len() - 1;
 
-                    // Calculate scroll to show the top of the last message
-                    let mut line_count = 0;
-                    for (i, _message) in collapsed_messages.iter().enumerate() {
-                        if i == state.collapsed_messages_selected {
-                            // This is the last message, set scroll to show its top
-                            state.collapsed_messages_scroll = line_count;
-                            break;
-                        }
+                    // Get all collapsed message lines once
+                    let all_lines =
+                        get_wrapped_collapsed_message_lines_cached(state, message_area_width);
 
-                        // Count lines for this message
-                        let message_lines =
-                            get_wrapped_collapsed_message_lines_cached(state, message_area_width);
-                        line_count += message_lines.len();
-                    }
+                    // Calculate scroll to show the top of the last message
+                    // For now, just scroll to the bottom to show the last message
+                    let total_lines = all_lines.len();
+                    let max_scroll = total_lines.saturating_sub(message_area_height);
+                    state.collapsed_messages_scroll = max_scroll;
                 } else {
                     state.collapsed_messages_scroll = 0;
                     state.collapsed_messages_selected = 0;
