@@ -1,5 +1,5 @@
-use crate::app::AppState;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -29,7 +29,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",
-            Style::default().fg(Color::Rgb(160, 92, 158)),
+            Style::default().fg(AdaptiveColors::dark_magenta()),
         ));
         f.render_widget(hint, area);
         return;

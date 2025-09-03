@@ -1,5 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_diff::render_file_diff_block;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
@@ -573,7 +574,7 @@ pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec
             Some(LinesColors {
                 dot: Color::Magenta,
                 title: Color::Yellow,
-                command: Color::Rgb(180, 180, 180),
+                command: AdaptiveColors::text(),
                 message: Color::LightGreen,
             }),
         ),
@@ -655,7 +656,7 @@ pub fn render_markdown_block(
         Some(LinesColors {
             dot: Color::Magenta,
             title: Color::Yellow,
-            command: Color::Rgb(180, 180, 180),
+            command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
     ));
@@ -1035,7 +1036,7 @@ fn render_styled_header_with_dot(
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
         title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
     vec![Line::from(vec![
@@ -1066,7 +1067,7 @@ pub fn render_styled_lines(
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
         title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
 
@@ -1185,8 +1186,8 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
         let colors = LinesColors {
             dot: Color::LightGreen,
             title: Color::White,
-            command: Color::Rgb(180, 180, 180),
-            message: Color::Rgb(180, 180, 180),
+            command: AdaptiveColors::text(),
+            message: AdaptiveColors::text(),
         };
         let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
         state.messages.push(Message {

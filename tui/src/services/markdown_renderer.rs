@@ -5,6 +5,7 @@ use ratatui::{
 use regex::Regex;
 use std::time::Instant;
 
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::syntax_highlighter;
 
 // Simplified component enum with all the variants you mentioned
@@ -112,13 +113,13 @@ impl Default for MarkdownStyle {
             strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
             code_style: Style::default()
                 .fg(Color::LightRed)
-                .bg(Color::Rgb(48, 48, 48)),
+                .bg(AdaptiveColors::code_bg()),
             code_block_style: Style::default().fg(Color::Green),
             link_style: Style::default()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::UNDERLINED),
             quote_style: Style::default().fg(Color::Gray),
-            list_bullet_style: Style::default().fg(Color::Rgb(180, 180, 180)),
+            list_bullet_style: Style::default().fg(AdaptiveColors::list_bullet()),
             task_open_style: Style::default().fg(Color::Yellow),
             task_complete_style: Style::default().fg(Color::Green),
             important_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
@@ -826,7 +827,9 @@ impl MarkdownRenderer {
                     for line in lines {
                         code_lines.push(Line::from(vec![Span::styled(
                             line.to_string(),
-                            self.style.code_block_style.bg(Color::Rgb(30, 30, 30)),
+                            self.style
+                                .code_block_style
+                                .bg(AdaptiveColors::code_block_bg()),
                         )]));
                     }
                 }
