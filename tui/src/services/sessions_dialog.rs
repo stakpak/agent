@@ -68,11 +68,11 @@ pub fn render_sessions_dialog(f: &mut Frame, state: &mut AppState) {
     let list = List::new(items)
         .highlight_style(
             Style::default()
-                .fg(Color::Black)
+                .fg(Color::White)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().fg(Color::Gray))
+        .style(Style::default().fg(Color::DarkGray))
         .block(Block::default());
     f.render_stateful_widget(list, list_area, &mut list_state);
 

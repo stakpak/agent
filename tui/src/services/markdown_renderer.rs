@@ -5,6 +5,7 @@ use ratatui::{
 use regex::Regex;
 use std::time::Instant;
 
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::syntax_highlighter;
 
 // Simplified component enum with all the variants you mentioned
@@ -89,6 +90,88 @@ pub struct MarkdownStyle {
 
 impl Default for MarkdownStyle {
     fn default() -> Self {
+        Self::adaptive()
+    }
+}
+
+impl MarkdownStyle {
+    /// Create an adaptive style that works well on both dark and light backgrounds
+    pub fn adaptive() -> Self {
+        let is_rgb_supported = crate::services::detect_term::should_use_rgb_colors();
+
+        if is_rgb_supported {
+            // Use RGB colors for supported terminals (dark theme optimized)
+            Self::dark_theme()
+        } else {
+            // Use high-contrast colors for unsupported terminals (works on both light and dark)
+            Self::high_contrast_theme()
+        }
+    }
+
+    /// Dark theme optimized for RGB-capable terminals
+    fn dark_theme() -> Self {
+        Self {
+            h1_style: Style::default()
+                .fg(Color::Rgb(100, 150, 255)) // Bright blue
+                .add_modifier(Modifier::BOLD),
+            h2_style: Style::default()
+                .fg(Color::Rgb(100, 255, 255)) // Bright cyan
+                .add_modifier(Modifier::BOLD),
+            h3_style: Style::default()
+                .fg(Color::Rgb(100, 255, 100)) // Bright green
+                .add_modifier(Modifier::BOLD),
+            h4_style: Style::default()
+                .fg(Color::Rgb(255, 100, 255)) // Bright magenta
+                .add_modifier(Modifier::BOLD),
+            h5_style: Style::default()
+                .fg(Color::Rgb(255, 255, 100)) // Bright yellow
+                .add_modifier(Modifier::BOLD),
+            h6_style: Style::default()
+                .fg(Color::Rgb(255, 100, 100)) // Bright red
+                .add_modifier(Modifier::BOLD),
+            bold_style: Style::default().add_modifier(Modifier::BOLD),
+            italic_style: Style::default().add_modifier(Modifier::ITALIC),
+            bold_italic_style: Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
+            strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
+            code_style: Style::default()
+                .fg(Color::Rgb(255, 150, 150)) // Light red
+                .bg(AdaptiveColors::code_bg()),
+            code_block_style: Style::default()
+                .fg(Color::Rgb(150, 255, 150)) // Light green
+                .bg(AdaptiveColors::code_block_bg()),
+            link_style: Style::default()
+                .fg(Color::Rgb(100, 150, 255)) // Bright blue
+                .add_modifier(Modifier::UNDERLINED),
+            quote_style: Style::default().fg(Color::Rgb(180, 180, 180)), // Light gray
+            list_bullet_style: Style::default().fg(AdaptiveColors::list_bullet()),
+            task_open_style: Style::default().fg(Color::Rgb(255, 255, 100)), // Bright yellow
+            task_complete_style: Style::default().fg(Color::Rgb(100, 255, 100)), // Bright green
+            important_style: Style::default()
+                .fg(Color::Rgb(255, 100, 100)) // Bright red
+                .add_modifier(Modifier::BOLD),
+            note_style: Style::default()
+                .fg(Color::Rgb(100, 150, 255)) // Bright blue
+                .add_modifier(Modifier::BOLD),
+            tip_style: Style::default()
+                .fg(Color::Rgb(100, 255, 100)) // Bright green
+                .add_modifier(Modifier::BOLD),
+            warning_style: Style::default()
+                .fg(Color::Rgb(255, 255, 100)) // Bright yellow
+                .add_modifier(Modifier::BOLD),
+            caution_style: Style::default()
+                .fg(Color::Rgb(255, 100, 100)) // Bright red
+                .add_modifier(Modifier::BOLD),
+            text_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Light gray
+            separator_style: Style::default().fg(Color::Rgb(120, 120, 120)), // Medium gray
+            table_header_style: Style::default()
+                .fg(Color::Rgb(100, 255, 255)) // Bright cyan
+                .add_modifier(Modifier::BOLD),
+            table_cell_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Light gray
+        }
+    }
+
+    /// High contrast theme that works well on both light and dark backgrounds
+    fn high_contrast_theme() -> Self {
         Self {
             h1_style: Style::default()
                 .fg(Color::Blue)
@@ -110,15 +193,13 @@ impl Default for MarkdownStyle {
             italic_style: Style::default().add_modifier(Modifier::ITALIC),
             bold_italic_style: Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
             strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
-            code_style: Style::default()
-                .fg(Color::LightRed)
-                .bg(Color::Rgb(48, 48, 48)),
-            code_block_style: Style::default().fg(Color::Green),
+            code_style: Style::default().fg(Color::Red), // Red text only - no background for better compatibility
+            code_block_style: Style::default().fg(Color::Cyan), // Cyan text only - no background for better compatibility
             link_style: Style::default()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::UNDERLINED),
-            quote_style: Style::default().fg(Color::Gray),
-            list_bullet_style: Style::default().fg(Color::Rgb(180, 180, 180)),
+            quote_style: Style::default().fg(Color::DarkGray), // Dark gray for better contrast
+            list_bullet_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
             task_open_style: Style::default().fg(Color::Yellow),
             task_complete_style: Style::default().fg(Color::Green),
             important_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
@@ -132,12 +213,12 @@ impl Default for MarkdownStyle {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             caution_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            text_style: Style::default().fg(Color::White),
-            separator_style: Style::default().fg(Color::Gray),
+            text_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
+            separator_style: Style::default().fg(Color::DarkGray), // Dark gray separators
             table_header_style: Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-            table_cell_style: Style::default().fg(Color::White),
+            table_cell_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
         }
     }
 }
@@ -826,7 +907,7 @@ impl MarkdownRenderer {
                     for line in lines {
                         code_lines.push(Line::from(vec![Span::styled(
                             line.to_string(),
-                            self.style.code_block_style.bg(Color::Rgb(30, 30, 30)),
+                            self.style.code_block_style, // Use only the style, no additional background
                         )]));
                     }
                 }
@@ -1007,7 +1088,7 @@ pub fn render_markdown_to_lines(
 ) -> Result<Vec<Line<'static>>, Box<dyn std::error::Error>> {
     let parsed_content = xml_tags_to_markdown_headers(markdown_content);
 
-    let style = MarkdownStyle::default();
+    let style = MarkdownStyle::adaptive(); // Use adaptive styling
     let renderer = MarkdownRenderer::new(style);
     let components = renderer.parse_markdown(parsed_content.as_str())?;
     let lines = renderer.render_to_lines(components);
@@ -1135,5 +1216,79 @@ fn render_with_timeout(
                 )]),
             ])
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_adaptive_style_creation() {
+        // Test that adaptive style can be created without panicking
+        let style = MarkdownStyle::adaptive();
+
+        // Verify that the style has proper colors set
+        assert!(matches!(style.text_style.fg, Some(_)));
+        assert!(matches!(style.h1_style.fg, Some(_)));
+        assert!(matches!(style.code_style.fg, Some(_)));
+    }
+
+    #[test]
+    fn test_dark_theme_creation() {
+        // Test that dark theme can be created
+        let style = MarkdownStyle::dark_theme();
+
+        // Verify RGB colors are used
+        match style.h1_style.fg {
+            Some(Color::Rgb(_, _, _)) => {
+                // Expected for RGB theme
+            }
+            _ => panic!("Dark theme should use RGB colors"),
+        }
+    }
+
+    #[test]
+    fn test_high_contrast_theme_creation() {
+        // Test that high contrast theme can be created
+        let style = MarkdownStyle::high_contrast_theme();
+
+        // Verify reset colors are used for better compatibility
+        match style.text_style.fg {
+            Some(Color::Reset) => {
+                // Expected for high contrast theme
+            }
+            _ => panic!("High contrast theme should use reset colors"),
+        }
+
+        // Verify no backgrounds are used for code blocks
+        assert!(
+            style.code_style.bg.is_none(),
+            "Code style should not have background"
+        );
+        assert!(
+            style.code_block_style.bg.is_none(),
+            "Code block style should not have background"
+        );
+
+        // Verify cyan color is used for code blocks
+        match style.code_block_style.fg {
+            Some(Color::Cyan) => {
+                // Expected for high contrast theme
+            }
+            _ => panic!("Code block style should use cyan color"),
+        }
+    }
+
+    #[test]
+    fn test_markdown_rendering_with_adaptive_style() {
+        // Test that markdown rendering works with adaptive styling
+        let markdown = "# Test Header\n\nThis is **bold** text with `code`.";
+
+        let result = render_markdown_to_lines(markdown);
+        assert!(result.is_ok());
+
+        let lines = result.unwrap();
+        assert!(!lines.is_empty());
     }
 }

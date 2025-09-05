@@ -1,5 +1,6 @@
 use crate::app::AppState;
 use crate::services::confirmation_dialog::render_confirmation_dialog;
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_autocomplete_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -251,7 +252,7 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &mut AppState) {
     let block = Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightMagenta))
-        .style(ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(31, 32, 44)))
+        .style(ratatui::style::Style::default())
         .title(ratatui::text::Span::styled(
             "Expanded Messages (Ctrl+T to close, Tab to previous message, ↑/↓ to scroll)",
             ratatui::style::Style::default()
@@ -332,7 +333,7 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
-            Style::default().fg(Color::Rgb(160, 92, 158))
+            Style::default().fg(AdaptiveColors::dark_magenta())
         } else {
             Style::default().fg(Color::DarkGray)
         });
