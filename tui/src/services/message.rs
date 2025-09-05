@@ -43,6 +43,14 @@ pub enum MessageContent {
     },
 }
 
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Message {
     pub id: Uuid,
@@ -66,7 +74,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 format!("→ {}", text.into()),
-                style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
+                style.unwrap_or(Style::default().fg(term_color(Color::Rgb(180, 180, 180)))),
             ),
             is_collapsed: None,
         }
@@ -280,7 +288,10 @@ fn render_shell_bubble_with_unicode_border(
     let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
     lines.push(Line::from(vec![
         Span::styled("│ ", Style::default().fg(Color::Magenta)),
-        Span::styled(cmd_line, Style::default().fg(Color::LightYellow)),
+        Span::styled(
+            cmd_line,
+            Style::default().fg(term_color(Color::LightYellow)),
+        ),
         Span::from(" ".repeat(cmd_padding)),
         Span::styled(" │", Style::default().fg(Color::Magenta)),
     ]));

@@ -7,6 +7,14 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
+}
+
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
     let input = state.input.trim();
     let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
@@ -41,7 +49,9 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 };
 
                 let description_style = if is_selected {
-                    Style::default().fg(Color::Black).bg(AdaptiveColors::text())
+                    Style::default()
+                        .fg(term_color(Color::Black))
+                        .bg(AdaptiveColors::text())
                 } else {
                     Style::default().fg(AdaptiveColors::text())
                 };

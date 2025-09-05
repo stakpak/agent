@@ -247,7 +247,7 @@ impl AdaptiveColors {
         if should_use_rgb_colors() {
             Color::Rgb(180, 180, 180) // Original RGB text
         } else {
-            Color::Gray
+            Color::Reset
         }
     }
 
@@ -292,7 +292,7 @@ impl AdaptiveColors {
         if should_use_rgb_colors() {
             Color::Rgb(30, 30, 30) // Original RGB code block background
         } else {
-            Color::Black
+            Color::Reset
         }
     }
 
