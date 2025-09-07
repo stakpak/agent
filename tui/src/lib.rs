@@ -125,7 +125,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -156,7 +156,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {

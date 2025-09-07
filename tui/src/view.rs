@@ -22,11 +22,11 @@ const DROPDOWN_MAX_HEIGHT: usize = 8;
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
-    let input_lines = calculate_input_lines(&state.input, input_area_width); // -4 for borders and padding
+    let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
     let dropdown_showing = state.show_helper_dropdown
-        && ((!state.filtered_helpers.is_empty() && state.input.starts_with('/'))
+        && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
             || !state.filtered_files.is_empty());
     let dropdown_height = if dropdown_showing {
         if !state.filtered_files.is_empty() {
@@ -124,59 +124,15 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 }
 
 // Calculate how many lines the input will take up when wrapped
-fn calculate_input_lines(input: &str, width: usize) -> usize {
-    if input.is_empty() {
-        return 1; // At least one line
-    }
+fn calculate_input_lines(state: &AppState, width: usize) -> usize {
     let prompt_width = 2; // "> " prefix
-    let first_line_width = width.saturating_sub(prompt_width);
-    let available_width = width;
+    let available_width = width.saturating_sub(prompt_width);
     if available_width <= 1 {
-        return input.len(); // Fallback if width is too small
+        return 1; // Fallback if width is too small
     }
 
-    // Split by explicit newlines first
-    let mut total_lines = 0;
-    for line in input.split('\n') {
-        // For each line segment after splitting by newlines
-        let mut words = line.split_whitespace().peekable();
-        let mut current_width = 0;
-        let mut is_first_line_in_segment = true;
-
-        while words.peek().is_some() {
-            let word = words.next().unwrap_or_default();
-            let word_width = word
-                .chars()
-                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
-                .sum::<usize>();
-
-            // Determine available width for this line
-            let line_width_limit = if is_first_line_in_segment && total_lines == 0 {
-                first_line_width
-            } else {
-                available_width
-            };
-
-            // Add space before word (except at start of line)
-            if current_width > 0 {
-                current_width += 1; // Space width
-            }
-
-            // Check if word fits on current line
-            if current_width + word_width <= line_width_limit {
-                current_width += word_width;
-            } else {
-                // Word doesn't fit, start new line
-                total_lines += 1;
-                current_width = word_width;
-                is_first_line_in_segment = false;
-            }
-        }
-
-        total_lines += 1;
-    }
-
-    total_lines
+    // Use TextArea's desired_height method for accurate line calculation
+    state.text_area.desired_height(available_width as u16) as usize
 }
 
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
@@ -327,9 +283,8 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     f.render_widget(message_widget, area);
 }
 
-fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
-    let area_width = area.width as usize;
-    let (lines, _cursor_rendered) = state.render_input(area_width);
+fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
+    // Create a block for the input area
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
@@ -337,9 +292,27 @@ fn render_multiline_input(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             Style::default().fg(Color::DarkGray)
         });
-    let input_widget = Paragraph::new(lines)
-        .style(Style::default())
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    f.render_widget(input_widget, area);
+
+    // Create content area inside the block
+    let content_area = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    // Render the block
+    f.render_widget(block, area);
+
+    // Render the TextArea with state, handling password masking if needed
+    if state.show_shell_mode && state.waiting_for_shell_input {
+        state.text_area.render_with_state(
+            content_area,
+            f.buffer_mut(),
+            &mut state.text_area_state,
+            state.waiting_for_shell_input,
+        );
+    } else {
+        f.render_stateful_widget_ref(&state.text_area, content_area, &mut state.text_area_state);
+    }
 }

@@ -34,7 +34,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(vec![Span::styled(
             format!("Stakpak Code Status v{}", version),
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -75,7 +75,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         Line::from(""),
         Line::from(vec![Span::styled(
             "We're extracting important information from your conversation in the background.",
-            Style::default().fg(Color::White),
+            Style::default().fg(Color::Reset),
         )]),
         Line::from(vec![Span::styled(
             "Feel free to continue talking to the agent while this happens!",
@@ -98,16 +98,16 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Usage Mode",
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Reset)
             .add_modifier(Modifier::BOLD),
     )]));
 
     let usage_modes = vec![
-        ("REPL", "stakpak (interactive session)", Color::White),
+        ("REPL", "stakpak (interactive session)", Color::Reset),
         (
             "Non-interactive",
             "stakpak -p  \"prompt\" -c <checkpoint_id>",
-            Color::White,
+            Color::Reset,
         ),
     ];
     for (mode, desc, color) in usage_modes {
@@ -132,7 +132,7 @@ pub fn push_help_message(state: &mut AppState) {
         Span::styled(
             " stakpak --help ",
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("to see all commands", Style::default().fg(Color::Gray)),
@@ -142,7 +142,7 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Available commands",
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Reset)
             .add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(""));
@@ -377,8 +377,7 @@ pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
 
 pub fn push_clear_message(state: &mut AppState) {
     state.messages.clear();
-    state.input.clear();
-    state.cursor_position = 0;
+    state.text_area.set_text("");
     state.show_helper_dropdown = false;
     let welcome_msg = welcome_messages(state.latest_version.clone());
     state.messages.extend(welcome_msg);
