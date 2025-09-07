@@ -8,7 +8,15 @@ stakpak-shared = { path = "../libs/shared" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ratatui = "0.29"
+ratatui = { version = "0.29.0", features = [
+    "scrolling-regions",
+    "unstable-rendered-line-info",
+    "unstable-widget-ref",
+] }
+tempfile = { workspace = true }
+rand = "0.9"
+textwrap = "0.16.2"
+unicode-segmentation = "1.12.0"
 crossterm = { workspace = true }
 tokio = { version = "1.39", features = ["full"] }
 unicode-width = "0.2.0"
@@ -19,6 +27,8 @@ ansi-to-tui = "7.0.0"
 similar = { version = "2.7.0", features = ["inline"] }
 syntect = "5.2.0"
 
+
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
@@ -26,3 +36,4 @@ expect_used = "deny"
 
 [target.'cfg(unix)'.dependencies]
 portable-pty = "0.8"
+
