@@ -435,7 +435,7 @@ pub fn extract_bash_block_info(
         "run_command" => BubbleColors {
             border_color: Color::Cyan,
             title_color: Color::Yellow,
-            content_color: Color::Gray,
+            content_color: term_color(Color::Gray),
             tool_type: "Run Command".to_string(),
         },
         "read_file" => BubbleColors {
@@ -453,7 +453,7 @@ pub fn extract_bash_block_info(
         _ => BubbleColors {
             border_color: Color::Cyan,
             title_color: Color::White,
-            content_color: Color::Gray,
+            content_color: term_color(Color::Gray),
             tool_type: "unknown".to_string(),
         },
     };
