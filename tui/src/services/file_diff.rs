@@ -4,12 +4,7 @@ use similar::TextDiff;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use std::fs;
 
-const RED_COLOR: Color = Color::Rgb(239, 100, 97);
-const GREEN_COLOR: Color = Color::Rgb(35, 218, 111);
-const TEXT_COLOR: Color = Color::Rgb(180, 180, 180);
-const DARK_GRAY_COLOR: Color = Color::Rgb(80, 80, 80);
-const DARK_GREEN_COLOR: Color = Color::Rgb(44, 51, 35);
-const DARK_RED_COLOR: Color = Color::Rgb(51, 36, 35);
+use crate::services::detect_term::AdaptiveColors;
 
 pub fn preview_str_replace_editor_style(
     file_path: &str,
@@ -100,22 +95,34 @@ pub fn preview_str_replace_editor_style(
                             lines.push(Line::from(vec![
                                 Span::styled(
                                     format!("{:>4} ", old_line_num),
-                                    Style::default().fg(DARK_GRAY_COLOR),
+                                    Style::default().fg(AdaptiveColors::dark_gray()),
                                 ),
                                 Span::styled(
                                     format!("{:>4}  ", new_line_num),
-                                    Style::default().fg(DARK_GRAY_COLOR),
+                                    Style::default().fg(AdaptiveColors::dark_gray()),
                                 ),
                                 Span::styled("  ", Style::default()),
-                                Span::styled(content_line.clone(), Style::default().fg(TEXT_COLOR)),
+                                Span::styled(
+                                    content_line.clone(),
+                                    Style::default().fg(AdaptiveColors::text()),
+                                ),
                             ]));
                         } else {
                             // Continuation lines with proper spacing
                             lines.push(Line::from(vec![
-                                Span::styled("     ", Style::default().fg(DARK_GRAY_COLOR)), // 5 spaces for old line num
-                                Span::styled("      ", Style::default().fg(DARK_GRAY_COLOR)), // 6 spaces for new line num
+                                Span::styled(
+                                    "     ",
+                                    Style::default().fg(AdaptiveColors::dark_gray()),
+                                ), // 5 spaces for old line num
+                                Span::styled(
+                                    "      ",
+                                    Style::default().fg(AdaptiveColors::dark_gray()),
+                                ), // 6 spaces for new line num
                                 Span::styled("  ", Style::default()),
-                                Span::styled(content_line.clone(), Style::default().fg(TEXT_COLOR)),
+                                Span::styled(
+                                    content_line.clone(),
+                                    Style::default().fg(AdaptiveColors::text()),
+                                ),
                             ]));
                         }
                     }
@@ -143,36 +150,42 @@ pub fn preview_str_replace_editor_style(
                             // First line with line numbers
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", old_line_num),
-                                Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
+                                Style::default()
+                                    .fg(AdaptiveColors::red())
+                                    .bg(AdaptiveColors::dark_red()),
                             ));
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_red()),
+                            ));
                             line_spans.push(Span::styled(
                                 " - ",
                                 Style::default()
-                                    .fg(RED_COLOR)
+                                    .fg(AdaptiveColors::red())
                                     .add_modifier(Modifier::BOLD)
-                                    .bg(DARK_RED_COLOR),
+                                    .bg(AdaptiveColors::dark_red()),
                             ));
                         } else {
                             // Continuation lines with proper spacing
                             line_spans.push(Span::styled(
                                 "     ", // 5 spaces for old line num
-                                Style::default().bg(DARK_RED_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_red()),
                             ));
                             line_spans.push(Span::styled(
                                 "     ", // 5 spaces for new line num area
-                                Style::default().bg(DARK_RED_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_red()),
                             ));
                             line_spans.push(Span::styled(
                                 "   ", // 3 spaces for marker area
-                                Style::default().bg(DARK_RED_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_red()),
                             ));
                         }
 
                         line_spans.push(Span::styled(
                             content_line.clone(),
-                            Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
+                            Style::default()
+                                .fg(AdaptiveColors::text())
+                                .bg(AdaptiveColors::dark_red()),
                         ));
 
                         // Add padding to extend background across full width
@@ -182,7 +195,7 @@ pub fn preview_str_replace_editor_style(
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
                                 " ".repeat(padding_needed),
-                                Style::default().bg(DARK_RED_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_red()),
                             ));
                         }
 
@@ -210,38 +223,44 @@ pub fn preview_str_replace_editor_style(
 
                         if i == 0 {
                             // First line with line numbers
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_green()),
+                            ));
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", new_line_num),
-                                Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
+                                Style::default()
+                                    .fg(AdaptiveColors::green())
+                                    .bg(AdaptiveColors::dark_green()),
                             ));
                             line_spans.push(Span::styled(
                                 " + ",
                                 Style::default()
-                                    .fg(GREEN_COLOR)
+                                    .fg(AdaptiveColors::green())
                                     .add_modifier(Modifier::BOLD)
-                                    .bg(DARK_GREEN_COLOR),
+                                    .bg(AdaptiveColors::dark_green()),
                             ));
                         } else {
                             // Continuation lines with proper spacing
                             line_spans.push(Span::styled(
                                 "     ", // 5 spaces for old line num area
-                                Style::default().bg(DARK_GREEN_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_green()),
                             ));
                             line_spans.push(Span::styled(
                                 "     ", // 5 spaces for new line num
-                                Style::default().bg(DARK_GREEN_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_green()),
                             ));
                             line_spans.push(Span::styled(
                                 "   ", // 3 spaces for marker area
-                                Style::default().bg(DARK_GREEN_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_green()),
                             ));
                         }
 
                         line_spans.push(Span::styled(
                             content_line.clone(),
-                            Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
+                            Style::default()
+                                .fg(AdaptiveColors::text())
+                                .bg(AdaptiveColors::dark_green()),
                         ));
 
                         // Add padding to extend background across full width
@@ -251,7 +270,7 @@ pub fn preview_str_replace_editor_style(
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
                                 " ".repeat(padding_needed),
-                                Style::default().bg(DARK_GREEN_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_green()),
                             ));
                         }
 
@@ -281,29 +300,41 @@ pub fn preview_str_replace_editor_style(
                         if i == 0 {
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", old_line_num),
-                                Style::default().fg(RED_COLOR).bg(DARK_RED_COLOR),
+                                Style::default()
+                                    .fg(AdaptiveColors::red())
+                                    .bg(AdaptiveColors::dark_red()),
                             ));
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_red()),
+                            ));
                             line_spans.push(Span::styled(
                                 " - ",
                                 Style::default()
-                                    .fg(RED_COLOR)
+                                    .fg(AdaptiveColors::red())
                                     .add_modifier(Modifier::BOLD)
-                                    .bg(DARK_RED_COLOR),
+                                    .bg(AdaptiveColors::dark_red()),
                             ));
                         } else {
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_RED_COLOR)));
-                            line_spans
-                                .push(Span::styled("   ", Style::default().bg(DARK_RED_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_red()),
+                            ));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_red()),
+                            ));
+                            line_spans.push(Span::styled(
+                                "   ",
+                                Style::default().bg(AdaptiveColors::dark_red()),
+                            ));
                         }
 
                         line_spans.push(Span::styled(
                             content_line.clone(),
-                            Style::default().fg(TEXT_COLOR).bg(DARK_RED_COLOR),
+                            Style::default()
+                                .fg(AdaptiveColors::text())
+                                .bg(AdaptiveColors::dark_red()),
                         ));
 
                         let current_width = prefix_width + content_line.len();
@@ -312,7 +343,7 @@ pub fn preview_str_replace_editor_style(
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
                                 " ".repeat(padding_needed),
-                                Style::default().bg(DARK_RED_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_red()),
                             ));
                         }
 
@@ -332,31 +363,43 @@ pub fn preview_str_replace_editor_style(
                         let mut line_spans = vec![];
 
                         if i == 0 {
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_green()),
+                            ));
                             line_spans.push(Span::styled(
                                 format!("{:>4} ", new_line_num),
-                                Style::default().fg(GREEN_COLOR).bg(DARK_GREEN_COLOR),
+                                Style::default()
+                                    .fg(AdaptiveColors::green())
+                                    .bg(AdaptiveColors::dark_green()),
                             ));
                             line_spans.push(Span::styled(
                                 " + ",
                                 Style::default()
-                                    .fg(GREEN_COLOR)
+                                    .fg(AdaptiveColors::green())
                                     .add_modifier(Modifier::BOLD)
-                                    .bg(DARK_GREEN_COLOR),
+                                    .bg(AdaptiveColors::dark_green()),
                             ));
                         } else {
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
-                            line_spans
-                                .push(Span::styled("     ", Style::default().bg(DARK_GREEN_COLOR)));
-                            line_spans
-                                .push(Span::styled("   ", Style::default().bg(DARK_GREEN_COLOR)));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_green()),
+                            ));
+                            line_spans.push(Span::styled(
+                                "     ",
+                                Style::default().bg(AdaptiveColors::dark_green()),
+                            ));
+                            line_spans.push(Span::styled(
+                                "   ",
+                                Style::default().bg(AdaptiveColors::dark_green()),
+                            ));
                         }
 
                         line_spans.push(Span::styled(
                             content_line.clone(),
-                            Style::default().fg(TEXT_COLOR).bg(DARK_GREEN_COLOR),
+                            Style::default()
+                                .fg(AdaptiveColors::text())
+                                .bg(AdaptiveColors::dark_green()),
                         ));
 
                         let current_width = prefix_width + content_line.len();
@@ -365,7 +408,7 @@ pub fn preview_str_replace_editor_style(
                         if padding_needed > 0 {
                             line_spans.push(Span::styled(
                                 " ".repeat(padding_needed),
-                                Style::default().bg(DARK_GREEN_COLOR),
+                                Style::default().bg(AdaptiveColors::dark_green()),
                             ));
                         }
 
@@ -417,15 +460,20 @@ pub fn render_file_diff_block(
             }
         )
         .to_string(),
-        Style::default().fg(TEXT_COLOR),
+        Style::default().fg(AdaptiveColors::text()),
     )]));
 
     // Add file path with changes summary
     lines.push(Line::from(vec![
-        Span::styled("1/1 ".to_string(), Style::default().fg(TEXT_COLOR)),
+        Span::styled(
+            "1/1 ".to_string(),
+            Style::default().fg(AdaptiveColors::text()),
+        ),
         Span::styled(
             path.to_string(),
-            Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(AdaptiveColors::text())
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!(" +{}", insertions).to_string(),
