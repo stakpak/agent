@@ -1,4 +1,5 @@
 use crate::app::{AppState, LoadingType};
+use crate::services::detect_term::detect_terminal;
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -6,6 +7,51 @@ use uuid::Uuid;
 
 pub fn get_stakpak_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Generate a mouse capture hint message based on the terminal type
+pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
+    let terminal_info = detect_terminal();
+    let emulator = &terminal_info.emulator;
+
+    let hint_text = match emulator.as_str() {
+        "iTerm2" | "Alacritty" | "Kitty" | "WezTerm" => "Hold Option + Click to select text",
+        "Terminal.app" => "Hold Fn/Option + Click to select text",
+        "tmux" | "GNU Screen" => "Hold Shift + Click to select text",
+        "xterm" | "X11 Terminal" | "Wayland Terminal" => "Hold Shift + Click to select text",
+        "VS Code Terminal" => "Hold Option + Click to select text",
+        _ => "Hold Option + Click to select text", // Default fallback
+    };
+
+    let status = if state.mouse_capture_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    let status_color = if state.mouse_capture_enabled {
+        Color::LightGreen
+    } else {
+        Color::LightRed
+    };
+
+    let styled_line = Line::from(vec![
+        Span::styled(
+            "█",
+            Style::default()
+                .fg(Color::LightMagenta)
+                .bg(Color::LightMagenta),
+        ),
+        Span::raw("  Mouse capture "),
+        Span::styled(status, Style::default().fg(status_color)),
+        Span::raw(" • "),
+        Span::raw(hint_text),
+        Span::styled(
+            " • Ctrl+L to toggle",
+            Style::default().fg(Color::LightMagenta),
+        ),
+    ]);
+
+    Message::styled(styled_line)
 }
 
 pub fn push_status_message(state: &mut AppState) {
@@ -173,11 +219,12 @@ pub fn push_help_message(state: &mut AppState) {
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     )]));
+
     // Shortcuts list
     let shortcuts = vec![
         ("Enter", "send message", Color::Yellow),
         ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
-        ("Up/Down", "scroll prompt history", Color::Yellow),
+        // ("Up/Down", "scroll prompt history", Color::Yellow),
         ("Ctrl+C", "quit Stakpak", Color::Yellow),
     ];
     for (key, desc, color) in shortcuts {
@@ -348,8 +395,11 @@ pub fn version_message(latest_version: Option<String>) -> Message {
 //     ]
 // }
 
-pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
-    vec![
+pub fn welcome_messages(
+    latest_version: Option<String>,
+    state: &crate::app::AppState,
+) -> Vec<Message> {
+    let mut messages = vec![
         Message::info(
             r"
    ██████╗████████╗ █████╗ ██╗  ██╗██████╗  █████╗ ██╗  ██╗ 
@@ -372,14 +422,24 @@ pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
             ),
             None,
         ),
-    ]
+        Message::info("SPACING_MARKER", None),
+    ];
+
+    // Only show mouse capture hint for non-supported terminals
+    let terminal_info = crate::services::detect_term::detect_terminal();
+    if crate::services::detect_term::is_unsupported_terminal(&terminal_info.emulator) {
+        messages.push(mouse_capture_hint_message(state));
+        messages.push(Message::info("SPACING_MARKER", None));
+    }
+
+    messages
 }
 
 pub fn push_clear_message(state: &mut AppState) {
     state.messages.clear();
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
-    let welcome_msg = welcome_messages(state.latest_version.clone());
+    let welcome_msg = welcome_messages(state.latest_version.clone(), state);
     state.messages.extend(welcome_msg);
 }
 
