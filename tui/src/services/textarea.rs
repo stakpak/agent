@@ -157,9 +157,7 @@ impl TextArea {
             .saturating_sub(effective_scroll as usize)
             .try_into()
             .unwrap_or(0);
-        // Add prefix width to cursor position
-        let prefix_width = self.get_prefix_width() as u16;
-        Some((area.x + prefix_width + col, area.y + screen_row))
+        Some((area.x + col, area.y + screen_row))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -883,13 +881,11 @@ impl TextArea {
                 None => true,
             };
             if needs_recalc {
-                // Account for prefix width in wrapping
-                let prefix_width = self.get_prefix_width();
-                let available_width = (width as usize).saturating_sub(prefix_width);
-                let lines = if available_width > 0 {
+                // Wrap text at full width - prefix is handled in rendering
+                let lines = if width > 0 {
                     crate::services::wrapping::wrap_ranges(
                         &self.text,
-                        Options::new(available_width)
+                        Options::new(width as usize)
                             .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
                     )
                 } else {
