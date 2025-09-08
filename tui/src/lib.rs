@@ -13,6 +13,7 @@ use crossterm::event::{
 };
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
+use ratatui::style::Style;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
@@ -23,6 +24,44 @@ pub use view::view;
 
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::message::Message;
+
+pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
+    state.mouse_capture_enabled = !state.mouse_capture_enabled;
+    if state.mouse_capture_enabled {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
+
+    let status = if state.mouse_capture_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+
+    let color = if state.mouse_capture_enabled {
+        Color::LightGreen
+    } else {
+        Color::LightRed
+    };
+    state.messages.push(Message::info("SPACING_MARKER", None));
+    state.messages.push(Message::info(
+        format!("Mouse capture {}", status),
+        Some(Style::default().fg(color)),
+    ));
+    state.messages.push(Message::info("SPACING_MARKER", None));
+
+    Ok(())
+}
+
+fn toggle_mouse_capture_with_redraw<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut AppState,
+) -> io::Result<()> {
+    toggle_mouse_capture(state)?;
+    emergency_clear_and_redraw(terminal, state)?;
+    Ok(())
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
@@ -39,12 +78,23 @@ pub async fn run_tui(
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
+
+    // Detect terminal and set mouse capture accordingly
+    let terminal_info = crate::services::detect_term::detect_terminal();
+    let should_enable_mouse_capture =
+        crate::services::detect_term::is_unsupported_terminal(&terminal_info.emulator);
+
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture
     )?;
+
+    if should_enable_mouse_capture {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let mut state = AppState::new(
@@ -55,6 +105,14 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
     );
+
+    // Set initial mouse capture state based on terminal
+    state.mouse_capture_enabled = should_enable_mouse_capture;
+
+    // Add welcome messages after state is created
+    let welcome_msg =
+        crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
+    state.messages.extend(welcome_msg);
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
@@ -119,6 +177,10 @@ pub async fn run_tui(
 
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
+                   if let InputEvent::ToggleMouseCapture = event {
+                       toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                       continue;
+                   }
 
                    if let InputEvent::Quit = event { should_quit = true; }
                    else {
@@ -151,6 +213,10 @@ pub async fn run_tui(
                    }
                }
                Some(event) = internal_rx.recv() => {
+                if let InputEvent::ToggleMouseCapture = event {
+                    toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                    continue;
+                }
                 if let InputEvent::Quit = event { should_quit = true; }
                    else {
                        let term_size = terminal.size()?;
