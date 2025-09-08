@@ -322,8 +322,6 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             // Command completed, reset active command state
             state.waiting_for_shell_input = false;
-            // Reset textarea shell mode
-            state.text_area.set_shell_mode(false);
 
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
@@ -753,9 +751,6 @@ fn handle_input_submitted(
                 });
             }
             state.waiting_for_shell_input = false;
-            // Reset textarea shell mode
-            state.text_area.set_shell_mode(false);
-
             return;
         }
 
