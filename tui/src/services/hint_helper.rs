@@ -1,3 +1,4 @@
+use crate::services::detect_term::should_use_rgb_colors;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
