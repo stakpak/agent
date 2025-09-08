@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -6,6 +6,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState},
 };
+
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
+}
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
     let input = state.input.trim();
@@ -42,10 +50,10 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
 
                 let description_style = if is_selected {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Rgb(180, 180, 180))
+                        .fg(term_color(Color::Black))
+                        .bg(AdaptiveColors::text())
                 } else {
-                    Style::default().fg(Color::Rgb(180, 180, 180))
+                    Style::default().fg(AdaptiveColors::text())
                 };
 
                 ListItem::new(Line::from(vec![
@@ -99,7 +107,7 @@ fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(160, 160, 160))
+                Style::default().fg(AdaptiveColors::text())
             };
 
             let display_text = format!("{} {}", get_file_icon(item), item);

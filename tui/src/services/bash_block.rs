@@ -1,5 +1,6 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_diff::render_file_diff_block;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
@@ -21,6 +22,14 @@ use uuid::Uuid;
 pub enum ContentAlignment {
     Left,
     Center,
+}
+
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
 }
 
 pub fn strip_all_ansi(text: &str) -> String {
@@ -413,38 +422,38 @@ pub fn extract_bash_block_info(
     let colors = match tool_call.function.name.as_str() {
         "create_file" => BubbleColors {
             border_color: Color::Green,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightGreen,
             tool_type: "Create File".to_string(),
         },
         "edit_file" => BubbleColors {
             border_color: Color::Yellow,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightYellow,
             tool_type: "Edit File".to_string(),
         },
         "run_command" => BubbleColors {
             border_color: Color::Cyan,
             title_color: Color::Yellow,
-            content_color: Color::Gray,
+            content_color: term_color(Color::Gray),
             tool_type: "Run Command".to_string(),
         },
         "read_file" => BubbleColors {
             border_color: Color::Magenta,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightMagenta,
             tool_type: "Read File".to_string(),
         },
         "delete_file" => BubbleColors {
             border_color: Color::Red,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightRed,
             tool_type: "Delete File".to_string(),
         },
         _ => BubbleColors {
             border_color: Color::Cyan,
-            title_color: Color::White,
-            content_color: Color::Gray,
+            title_color: term_color(Color::White),
+            content_color: term_color(Color::Gray),
             tool_type: "unknown".to_string(),
         },
     };
@@ -573,7 +582,7 @@ pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec
             Some(LinesColors {
                 dot: Color::Magenta,
                 title: Color::Yellow,
-                command: Color::Rgb(180, 180, 180),
+                command: AdaptiveColors::text(),
                 message: Color::LightGreen,
             }),
         ),
@@ -655,7 +664,7 @@ pub fn render_markdown_block(
         Some(LinesColors {
             dot: Color::Magenta,
             title: Color::Yellow,
-            command: Color::Rgb(180, 180, 180),
+            command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
     ));
@@ -715,7 +724,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let top_border = if !is_collapsed {
         Line::from(vec![Span::styled(
             format!("╭{}╮", horizontal_line),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         )])
     } else {
         Line::from(vec![Span::from("")])
@@ -723,7 +732,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let bottom_border = if !is_collapsed {
         Line::from(vec![Span::styled(
             format!("╰{}╯", horizontal_line),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         )])
     } else {
         Line::from(vec![Span::from("")])
@@ -746,7 +755,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let title_color = if is_collapsed {
         Color::Yellow
     } else {
-        Color::White
+        term_color(Color::White)
     };
     // Check if the title with arguments fits on one line
     if title_with_args.len() <= available_width {
@@ -754,7 +763,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         let mut header_spans = vec![];
 
         if !is_collapsed {
-            header_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                "│",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
             header_spans.push(Span::from(" "));
         }
 
@@ -770,14 +782,17 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         ));
         header_spans.push(Span::styled(
             format!(" ({})", command_args),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         ));
 
         if !is_collapsed {
             let header_content_width = 2 + title_with_args.len();
             let header_padding = inner_width.saturating_sub(header_content_width);
             header_spans.push(Span::from(" ".repeat(header_padding)));
-            header_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                " │",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
         }
 
         lines.push(Line::from(header_spans));
@@ -786,7 +801,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         let mut header_spans = vec![];
 
         if !is_collapsed {
-            header_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                "│",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
             header_spans.push(Span::from(" "));
         }
 
@@ -805,7 +823,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             let title_content_width = 2 + title.len();
             let title_padding = inner_width.saturating_sub(title_content_width);
             header_spans.push(Span::from(" ".repeat(title_padding)));
-            header_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                " │",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
         }
 
         lines.push(Line::from(header_spans));
@@ -837,7 +858,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                 let mut line_spans = vec![];
 
                 if !is_collapsed {
-                    line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                    line_spans.push(Span::styled(
+                        "│",
+                        Style::default().fg(term_color(Color::Gray)),
+                    ));
                     line_spans.push(Span::from(format!(" {}", line_indent)));
                 } else {
                     line_spans.push(Span::from(line_indent));
@@ -849,7 +873,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                     if let Some(first_span) = first_line.spans.first() {
                         line_spans.push(Span::styled(
                             format!("{}", first_span.content),
-                            Style::default().fg(Color::Rgb(180, 180, 180)),
+                            Style::default().fg(term_color(Color::Gray)),
                         ));
                     }
                 } else {
@@ -860,7 +884,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                 line_spans.push(Span::from(padding));
 
                 if !is_collapsed {
-                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                    line_spans.push(Span::styled(
+                        " │",
+                        Style::default().fg(term_color(Color::Gray)),
+                    ));
                 }
 
                 lines.push(Line::from(line_spans));
@@ -894,9 +921,15 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             // Empty line with border
             let mut line_spans = vec![];
             if !is_collapsed {
-                line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    "│",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
                 line_spans.push(Span::from(format!(" {}", " ".repeat(inner_width))));
-                line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    " │",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
             }
             lines.push(Line::from(line_spans));
             continue;
@@ -919,7 +952,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             let mut line_spans = vec![];
 
             if !is_collapsed {
-                line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    "│",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
                 line_spans.push(Span::from(format!(" {}", line_indent)));
             } else {
                 line_spans.push(Span::from(line_indent));
@@ -929,13 +965,16 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             for span in &text_line.spans {
                 line_spans.push(Span::styled(
                     span.content.clone(),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(term_color(Color::White)),
                 ));
             }
             line_spans.push(Span::from(padding));
 
             if !is_collapsed {
-                line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    " │",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
             }
 
             lines.push(Line::from(line_spans));
@@ -970,7 +1009,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                     let mut line_spans = vec![];
 
                     if !is_collapsed {
-                        line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                        line_spans.push(Span::styled(
+                            "│",
+                            Style::default().fg(term_color(Color::Gray)),
+                        ));
                         line_spans.push(Span::from(format!(" {}", line_indent)));
                     } else {
                         line_spans.push(Span::from(line_indent));
@@ -980,7 +1022,10 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
                     line_spans.push(Span::from(padding));
 
                     if !is_collapsed {
-                        line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                        line_spans.push(Span::styled(
+                            " │",
+                            Style::default().fg(term_color(Color::Gray)),
+                        ));
                     }
 
                     lines.push(Line::from(line_spans));
@@ -1034,8 +1079,8 @@ fn render_styled_header_with_dot(
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
     vec![Line::from(vec![
@@ -1065,8 +1110,8 @@ pub fn render_styled_lines(
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
 
@@ -1095,7 +1140,7 @@ pub fn render_styled_lines(
             Span::styled(
                 title,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(term_color(Color::White))
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -1184,9 +1229,9 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
         let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
         let colors = LinesColors {
             dot: Color::LightGreen,
-            title: Color::White,
-            command: Color::Rgb(180, 180, 180),
-            message: Color::Rgb(180, 180, 180),
+            title: term_color(Color::White),
+            command: AdaptiveColors::text(),
+            message: AdaptiveColors::text(),
         };
         let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
         state.messages.push(Message {

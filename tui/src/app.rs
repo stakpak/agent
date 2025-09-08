@@ -1,8 +1,14 @@
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
+use crate::services::detect_term::AdaptiveColors;
+use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
 use crate::services::render_input::get_multiline_input_lines;
+#[cfg(not(unix))]
+use crate::services::shell_mode::run_background_shell_command;
+#[cfg(unix)]
+use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use ratatui::style::Color;
 use ratatui::text::Line;
@@ -13,12 +19,6 @@ use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-
-use crate::services::helper_block::push_error_message;
-#[cfg(not(unix))]
-use crate::services::shell_mode::run_background_shell_command;
-#[cfg(unix)]
-use crate::services::shell_mode::run_pty_command;
 
 // Type alias to reduce complexity - now stores processed lines for better performance
 type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
@@ -334,9 +334,9 @@ impl AppState {
         push_styled_message(
             self,
             &command,
-            Color::Rgb(180, 180, 180),
+            AdaptiveColors::text(),
             SHELL_PROMPT_PREFIX,
-            Color::Rgb(160, 92, 158),
+            AdaptiveColors::dark_magenta(),
         );
         self.messages.push(Message::plain_text("SPACING_MARKER"));
         #[cfg(unix)]
