@@ -49,7 +49,9 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                 };
 
                 let description_style = if is_selected {
-                    Style::default().fg(Color::Black).bg(AdaptiveColors::text())
+                    Style::default()
+                        .fg(term_color(Color::Black))
+                        .bg(AdaptiveColors::text())
                 } else {
                     Style::default().fg(AdaptiveColors::text())
                 };

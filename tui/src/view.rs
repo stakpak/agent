@@ -283,8 +283,8 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     let all_lines: Vec<Line> = get_wrapped_collapsed_message_lines_cached(state, width);
 
     if all_lines.is_empty() {
-        let empty_widget = Paragraph::new("No collapsed messages found")
-            .style(ratatui::style::Style::default().fg(ratatui::style::Color::Gray));
+        let empty_widget =
+            Paragraph::new("No collapsed messages found").style(ratatui::style::Style::default());
         f.render_widget(empty_widget, area);
         return;
     }

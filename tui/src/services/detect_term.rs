@@ -283,7 +283,7 @@ impl AdaptiveColors {
         if should_use_rgb_colors() {
             Color::Rgb(48, 48, 48) // Original RGB code background
         } else {
-            Color::DarkGray
+            Color::Reset
         }
     }
 

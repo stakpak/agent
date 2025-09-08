@@ -193,15 +193,13 @@ impl MarkdownStyle {
             italic_style: Style::default().add_modifier(Modifier::ITALIC),
             bold_italic_style: Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
             strikethrough_style: Style::default().add_modifier(Modifier::CROSSED_OUT),
-            code_style: Style::default()
-                .fg(Color::LightRed)
-                .bg(AdaptiveColors::code_bg()),
-            code_block_style: Style::default().fg(Color::Green),
+            code_style: Style::default().fg(Color::Red), // Red text only - no background for better compatibility
+            code_block_style: Style::default().fg(Color::Cyan), // Cyan text only - no background for better compatibility
             link_style: Style::default()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::UNDERLINED),
-            quote_style: Style::default().fg(Color::Gray),
-            list_bullet_style: Style::default().fg(AdaptiveColors::list_bullet()),
+            quote_style: Style::default().fg(Color::DarkGray), // Dark gray for better contrast
+            list_bullet_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
             task_open_style: Style::default().fg(Color::Yellow),
             task_complete_style: Style::default().fg(Color::Green),
             important_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
@@ -909,9 +907,7 @@ impl MarkdownRenderer {
                     for line in lines {
                         code_lines.push(Line::from(vec![Span::styled(
                             line.to_string(),
-                            self.style
-                                .code_block_style
-                                .bg(AdaptiveColors::code_block_bg()),
+                            self.style.code_block_style, // Use only the style, no additional background
                         )]));
                     }
                 }

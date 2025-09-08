@@ -422,13 +422,13 @@ pub fn extract_bash_block_info(
     let colors = match tool_call.function.name.as_str() {
         "create_file" => BubbleColors {
             border_color: Color::Green,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightGreen,
             tool_type: "Create File".to_string(),
         },
         "edit_file" => BubbleColors {
             border_color: Color::Yellow,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightYellow,
             tool_type: "Edit File".to_string(),
         },
@@ -440,19 +440,19 @@ pub fn extract_bash_block_info(
         },
         "read_file" => BubbleColors {
             border_color: Color::Magenta,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightMagenta,
             tool_type: "Read File".to_string(),
         },
         "delete_file" => BubbleColors {
             border_color: Color::Red,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightRed,
             tool_type: "Delete File".to_string(),
         },
         _ => BubbleColors {
             border_color: Color::Cyan,
-            title_color: Color::White,
+            title_color: term_color(Color::White),
             content_color: term_color(Color::Gray),
             tool_type: "unknown".to_string(),
         },
@@ -1079,7 +1079,7 @@ fn render_styled_header_with_dot(
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
+        title: term_color(Color::White),
         command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
@@ -1110,7 +1110,7 @@ pub fn render_styled_lines(
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
+        title: term_color(Color::White),
         command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
@@ -1140,7 +1140,7 @@ pub fn render_styled_lines(
             Span::styled(
                 title,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(term_color(Color::White))
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -1229,7 +1229,7 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
         let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
         let colors = LinesColors {
             dot: Color::LightGreen,
-            title: Color::White,
+            title: term_color(Color::White),
             command: AdaptiveColors::text(),
             message: AdaptiveColors::text(),
         };
