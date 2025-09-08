@@ -8,7 +8,9 @@ pub use ratatui::style::Color;
 
 mod services;
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -40,7 +42,8 @@ pub async fn run_tui(
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        EnableMouseCapture
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
@@ -210,7 +213,8 @@ pub async fn run_tui(
     execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        DisableMouseCapture
     )?;
     Ok(())
 }
