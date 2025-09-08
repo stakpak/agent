@@ -7,7 +7,7 @@ const STAKPAK_PROMPTS: &[&str] = &[
     "Create a deployment and service for an app",
     "Dockerize my app and deploy it to a kubernetes cluster",
     "Set up a CI/CD pipeline for this Node.js application with automated testing",
-    "Help me deploy my python app with github actions on aws lambd",
+    "Help me deploy my python app with github actions on aws lambda",
 ];
 
 /// Example shell commands for shell mode
