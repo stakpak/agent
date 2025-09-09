@@ -17,6 +17,7 @@ use termimad::MadSkin;
 use walkdir::WalkDir;
 
 pub mod agent;
+pub mod acp;
 pub mod auto_update;
 pub mod flow;
 pub mod warden;
