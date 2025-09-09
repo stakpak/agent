@@ -167,7 +167,7 @@ To use Stakpak as an ACP agent in Zed, you need to configure it in Zed's setting
 ```json
 {
   "agent_servers": {
-    "stakpak": {
+    "Stakpak": {
       "command": "stakpak",
       "args": ["acp"],
       "env": {}
