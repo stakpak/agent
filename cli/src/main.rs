@@ -102,6 +102,10 @@ struct Cli {
     #[arg(long = "config")]
     config_path: Option<String>,
 
+    /// Enable Agent Client Protocol mode (for editor integration)
+    #[arg(long = "acp")]
+    acp: bool,
+
     /// Prompt to run the agent
     prompt: Option<String>,
 
@@ -143,6 +147,32 @@ async fn main() {
         .profile
         .or_else(|| std::env::var("STAKPAK_PROFILE").ok())
         .unwrap_or_else(|| "default".to_string());
+
+    // Check for ACP mode first
+    if cli.acp {
+        let config = match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to load config: {}", e);
+                std::process::exit(1);
+            }
+        };
+        
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let agent = match crate::commands::acp::StakpakAcpAgent::new(config, tx).await {
+            Ok(agent) => agent,
+            Err(e) => {
+                eprintln!("Failed to create ACP agent: {}", e);
+                std::process::exit(1);
+            }
+        };
+        
+        if let Err(e) = agent.run_stdio().await {
+            eprintln!("ACP agent failed: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
 
     match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
