@@ -125,11 +125,6 @@ impl StakpakAcpAgent {
         // Create permission options as shown in the image
         let options = vec![
             acp::PermissionOption {
-                id: acp::PermissionOptionId("allow_always".into()),
-                name: "Always Allow".to_string(),
-                kind: acp::PermissionOptionKind::AllowAlways,
-            },
-            acp::PermissionOption {
                 id: acp::PermissionOptionId("allow".into()),
                 name: "Allow".to_string(),
                 kind: acp::PermissionOptionKind::AllowOnce,
