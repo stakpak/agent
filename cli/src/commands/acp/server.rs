@@ -43,6 +43,11 @@ pub struct StakpakAcpAgent {
             oneshot::Sender<acp::RequestPermissionResponse>,
         )>,
     >,
+    // Add cancellation channels for streaming and tool calls
+    stream_cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    tool_cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    // Track active tool calls for cancellation
+    active_tool_calls: Arc<tokio::sync::Mutex<Vec<stakpak_shared::models::integrations::openai::ToolCall>>>,
 }
 
 impl StakpakAcpAgent {
@@ -358,6 +363,256 @@ impl StakpakAcpAgent {
         )
     }
 
+    // Process tool calls with cancellation support
+    async fn process_tool_calls_with_cancellation(
+        &self,
+        tool_calls: Vec<stakpak_shared::models::integrations::openai::ToolCall>,
+        session_id: &acp::SessionId,
+        tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
+    ) -> Result<Vec<stakpak_shared::models::integrations::openai::ChatMessage>, acp::Error> {
+        let mut tool_calls_queue = tool_calls;
+        let mut results = Vec::new();
+
+        // Create cancellation receiver for tool calls
+        let mut cancel_rx = if let Some(tx) = &self.tool_cancel_tx {
+            Some(tx.subscribe())
+        } else {
+            None
+        };
+
+        while !tool_calls_queue.is_empty() {
+            // Check for cancellation before processing each tool call
+            if let Some(ref mut cancel_rx) = cancel_rx {
+                tokio::select! {
+                    _ = cancel_rx.recv() => {
+                        log::info!("Tool call processing cancelled");
+                        return Err(acp::Error::internal_error());
+                    }
+                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {
+                        // Continue with tool call processing
+                    }
+                }
+            }
+
+            let tool_call = tool_calls_queue.remove(0);
+            let tool_call_id = self.generate_tool_call_id();
+
+            // Track active tool call for cancellation
+            {
+                let mut active_tool_calls = self.active_tool_calls.lock().await;
+                active_tool_calls.push(tool_call.clone());
+            }
+            let raw_input = serde_json::from_str(&tool_call.function.arguments)
+                .unwrap_or(serde_json::Value::Null);
+            let tool_title = self.generate_tool_title(&tool_call.function.name, &raw_input);
+            let tool_kind = self.get_tool_kind(&tool_call.function.name);
+
+            // Prepare content and locations for diff tools
+            let file_path = raw_input
+                .get("path")
+                .and_then(|p| p.as_str())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
+
+            // Extract old_str and new_str for editing tools
+            let old_string = raw_input
+                .get("old_str")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            let new_string = raw_input
+                .get("new_str")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
+            // Extract abs_path for rawInput
+            let abs_path = raw_input
+                .get("abs_path")
+                .and_then(|p| p.as_str())
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| file_path.to_string_lossy().to_string());
+
+            let (content, locations) = if self.should_use_diff_content(&tool_call.function.name) {
+                if self.is_file_creation_tool(&tool_call.function.name) {
+                    // For file creation: old_text = None, new_text = result_content
+                    let diff_content = vec![acp::ToolCallContent::Diff {
+                        diff: acp::Diff {
+                            path: file_path.clone(),
+                            old_text: None,
+                            new_text: "".to_string(), // Will be updated after execution
+                        },
+                    }];
+                    let tool_locations = vec![acp::ToolCallLocation {
+                        path: file_path.clone(),
+                        line: Some(0),
+                    }];
+                    (Some(diff_content), Some(tool_locations))
+                } else {
+                    // For file editing: use extracted old_string and new_string
+                    let diff_content = vec![acp::ToolCallContent::Diff {
+                        diff: acp::Diff {
+                            path: file_path.clone(),
+                            old_text: old_string,
+                            new_text: new_string.unwrap_or_default(),
+                        },
+                    }];
+                    let tool_locations = vec![acp::ToolCallLocation {
+                        path: file_path.clone(),
+                        line: Some(0),
+                    }];
+                    (Some(diff_content), Some(tool_locations))
+                }
+            } else {
+                (None, None)
+            };
+
+            // Send tool call notification
+            let proper_raw_input = self.create_raw_input(&raw_input, &abs_path);
+            self.send_tool_call_notification(
+                session_id,
+                tool_call_id.clone(),
+                tool_title.clone(),
+                &tool_kind,
+                proper_raw_input,
+                content,
+                locations,
+            ).await?;
+
+            // Check permissions
+            let permission_granted = if self.is_auto_approved_tool(&tool_call.function.name) {
+                true
+            } else {
+                self.send_permission_request(session_id, tool_call_id.clone(), &tool_call, &tool_title).await?
+            };
+
+            if !permission_granted {
+                // Send rejection notification
+                self.send_tool_call_update(
+                    session_id,
+                    tool_call_id.clone(),
+                    acp::ToolCallStatus::Failed,
+                    Some(vec![acp::ToolCallContent::Content {
+                        content: acp::ContentBlock::Text(acp::TextContent {
+                            text: "Tool execution rejected by user".to_string(),
+                            annotations: None,
+                        }),
+                    }]),
+                    None,
+                ).await?;
+
+                // Add rejection message to conversation history (like interactive mode)
+                results.push(crate::commands::agent::run::helpers::tool_result(
+                    tool_call.id.clone(),
+                    "TOOL_CALL_REJECTED".to_string(),
+                ));
+
+                // Continue to next tool call (the rejected one is already removed from queue)
+                continue;
+            }
+
+            // Update status to in progress
+            self.send_tool_call_update(
+                session_id,
+                tool_call_id.clone(),
+                acp::ToolCallStatus::InProgress,
+                None,
+                None,
+            ).await?;
+
+            // Execute tool call
+            if let Some(ref clients) = self.clients {
+                let result = crate::commands::agent::run::tooling::run_tool_call(
+                    clients,
+                    tools_map,
+                    &tool_call,
+                    None,
+                    self.current_session_id.get(),
+                ).await.map_err(|_| acp::Error::internal_error())?;
+
+                if let Some(tool_result) = result {
+                    let result_content: String = tool_result
+                        .content
+                        .iter()
+                        .map(|c| match c.raw.as_text() {
+                            Some(text) => text.text.clone(),
+                            None => String::new(),
+                        })
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    // Send completion notification
+                    let completion_content = if self.should_use_diff_content(&tool_call.function.name) {
+                        // For diff tools, we already sent the diff in the initial notification
+                        // Just send a simple completion without additional content
+                        None
+                    } else {
+                        // For non-diff tools, send the result content
+                        Some(vec![acp::ToolCallContent::Content {
+                            content: acp::ContentBlock::Text(acp::TextContent {
+                                text: result_content.clone(),
+                                annotations: None,
+                            }),
+                        }])
+                    };
+
+                    self.send_tool_call_update(
+                        session_id,
+                        tool_call_id.clone(),
+                        acp::ToolCallStatus::Completed,
+                        completion_content,
+                        Some(serde_json::json!({
+                            "result": result_content,
+                            "success": true
+                        })),
+                    ).await?;
+
+                    // Add tool result to conversation history
+                    results.push(crate::commands::agent::run::helpers::tool_result(
+                        tool_call.id.clone(),
+                        result_content,
+                    ));
+                }
+
+                // Remove completed tool call from active list
+                {
+                    let mut active_tool_calls = self.active_tool_calls.lock().await;
+                    active_tool_calls.retain(|tc| tc.id != tool_call.id);
+                }
+            } else {
+                // Tool execution failed - send failure notification
+                self.send_tool_call_update(
+                    session_id,
+                    tool_call_id.clone(),
+                    acp::ToolCallStatus::Failed,
+                    Some(vec![acp::ToolCallContent::Content {
+                        content: acp::ContentBlock::Text(acp::TextContent {
+                            text: "Tool execution failed - no result returned".to_string(),
+                            annotations: None,
+                        }),
+                    }]),
+                    Some(serde_json::json!({
+                        "success": false,
+                        "error": "No result returned"
+                    })),
+                ).await?;
+
+                // Add failure message to conversation history
+                results.push(crate::commands::agent::run::helpers::tool_result(
+                    tool_call.id.clone(),
+                    "Tool execution failed - no result returned".to_string(),
+                ));
+
+                // Remove failed tool call from active list
+                {
+                    let mut active_tool_calls = self.active_tool_calls.lock().await;
+                    active_tool_calls.retain(|tc| tc.id != tool_call.id);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
         progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
@@ -425,7 +680,7 @@ impl StakpakAcpAgent {
         Ok((local_mcp_server_host, clients, tools))
     }
 
-    async fn process_acp_streaming_response(
+    async fn process_acp_streaming_response_with_cancellation(
         &self,
         stream: impl futures_util::Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
         session_id: &acp::SessionId,
@@ -457,7 +712,32 @@ impl StakpakAcpAgent {
         // Compile regex once outside the loop
         let checkpoint_regex = regex::Regex::new(r"<checkpoint_id>.*?</checkpoint_id>").ok();
 
-        while let Some(response) = stream.next().await {
+        // Create cancellation receiver
+        let mut cancel_rx = if let Some(tx) = &self.stream_cancel_tx {
+            Some(tx.subscribe())
+        } else {
+            None
+        };
+
+        loop {
+            // Race between stream processing and cancellation
+            let result = if let Some(ref mut cancel_rx) = cancel_rx {
+                tokio::select! {
+                    response = stream.next() => response,
+                    _ = cancel_rx.recv() => {
+                        log::info!("Stream processing cancelled");
+                        return Err("Stream processing cancelled".to_string());
+                    }
+                }
+            } else {
+                stream.next().await
+            };
+
+            let response = match result {
+                Some(response) => response,
+                None => break, // Stream ended
+            };
+
             match &response {
                 Ok(response) => {
                     if response.choices.is_empty() {
@@ -620,42 +900,7 @@ impl StakpakAcpAgent {
         Ok(chat_completion_response)
     }
 
-    fn validate_tool_permissions(&self, tool_name: &str) -> bool {
-        // Check if tool is allowed based on config
-        if let Some(ref allowed_tools) = self.config.allowed_tools {
-            if !allowed_tools.is_empty() && !allowed_tools.contains(&tool_name.to_string()) {
-                log::warn!("Tool '{}' is not in allowed tools list", tool_name);
-                return false;
-            }
-        }
-
-        // Additional security checks for specific tools
-        match tool_name {
-            "run_command" => {
-                // Check if command execution is allowed
-                log::info!("Validating run_command permissions");
-                true
-            }
-            "create" | "str_replace" => {
-                // Check if file operations are allowed
-                log::info!("Validating file operation permissions for {}", tool_name);
-                true
-            }
-            "view" | "local_code_search" => {
-                // Read-only operations are generally safe
-                log::info!(
-                    "Validating read-only operation permissions for {}",
-                    tool_name
-                );
-                true
-            }
-            _ => {
-                // Default allow for other tools
-                log::info!("Allowing tool '{}' by default", tool_name);
-                true
-            }
-        }
-    }
+  
 
     pub async fn new(
         config: AppConfig,
@@ -681,6 +926,10 @@ impl StakpakAcpAgent {
                 }
             };
 
+        // Create cancellation channels
+        let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
+        let (tool_cancel_tx, _) = tokio::sync::broadcast::channel(1);
+
         Ok(Self {
             config,
             client,
@@ -697,6 +946,9 @@ impl StakpakAcpAgent {
             progress_tx: None,
             messages: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             permission_request_tx: None,
+            stream_cancel_tx: Some(stream_cancel_tx),
+            tool_cancel_tx: Some(tool_cancel_tx),
+            active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         })
     }
 
@@ -757,6 +1009,9 @@ impl StakpakAcpAgent {
                     progress_tx: Some(progress_tx),
                     messages: self.messages.clone(),
                     permission_request_tx: Some(permission_tx),
+                    stream_cancel_tx: self.stream_cancel_tx.clone(),
+                    tool_cancel_tx: self.tool_cancel_tx.clone(),
+                    active_tool_calls: self.active_tool_calls.clone(),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -863,6 +1118,9 @@ impl Clone for StakpakAcpAgent {
             progress_tx: self.progress_tx.clone(),
             messages: self.messages.clone(),
             permission_request_tx: self.permission_request_tx.clone(),
+            stream_cancel_tx: self.stream_cancel_tx.clone(),
+            tool_cancel_tx: self.tool_cancel_tx.clone(),
+            active_tool_calls: self.active_tool_calls.clone(),
         }
     }
 }
@@ -1014,7 +1272,7 @@ impl acp::Agent for StakpakAcpAgent {
             })?;
 
         let response = self
-            .process_acp_streaming_response(stream, &arguments.session_id)
+            .process_acp_streaming_response_with_cancellation(stream, &arguments.session_id)
             .await
             .map_err(|e| {
                 log::error!("Stream processing failed: {}", e);
@@ -1036,7 +1294,7 @@ impl acp::Agent for StakpakAcpAgent {
             messages.push(response.choices[0].message.clone());
         }
 
-        let mut content = if let Some(content) = &response.choices[0].message.content {
+        let content = if let Some(content) = &response.choices[0].message.content {
             match content {
                 stakpak_shared::models::integrations::openai::MessageContent::String(s) => {
                     log::info!("Content from chat completion: '{}'", s);
@@ -1066,400 +1324,109 @@ impl acp::Agent for StakpakAcpAgent {
 
         // If content is empty, provide a fallback response
         if content.is_empty() {
-            content = "I apologize, but I'm having trouble generating a response right now. Please try again.".to_string();
             log::warn!("Content was empty, using fallback response");
+            // Note: Fallback content would be sent during streaming if needed
         }
 
-        // Process tool calls sequentially and continue conversation
+        // Process tool calls in a loop like interactive mode
         let mut current_messages = {
             let messages = self.messages.lock().await;
             messages.clone()
         };
 
         // Check if the initial response has tool calls
-        let initial_has_tool_calls = response.choices[0]
+        let mut has_tool_calls = response.choices[0]
             .message
             .tool_calls
             .as_ref()
             .map(|tc| !tc.is_empty())
             .unwrap_or(false);
 
-        if initial_has_tool_calls {
-            // Loop until no more tool calls are generated
-            loop {
-                // Get the latest message from the conversation
-                let latest_message = match current_messages.last() {
-                    Some(message) => message,
-                    None => {
-                        log::error!("No messages in conversation history");
-                        break;
-                    }
-                };
-
-                if let Some(tool_calls) = latest_message.tool_calls.as_ref() {
-                    if tool_calls.is_empty() {
-                        break; // No more tool calls, exit loop
-                    }
-
-                    log::info!("Executing {} tool calls sequentially", tool_calls.len());
-
-                    // Execute each tool call one by one (sequential execution)
-                    for (i, tool_call) in tool_calls.iter().enumerate() {
-                        log::info!(
-                            "Starting tool call {}/{}: {}",
-                            i + 1,
-                            tool_calls.len(),
-                            tool_call.function.name
-                        );
-
-                        // Generate unique tool call ID
-                        let tool_call_id = self.generate_tool_call_id();
-
-                        let raw_input = serde_json::from_str(&tool_call.function.arguments)
-                            .unwrap_or(serde_json::Value::Null);
-                        let tool_title =
-                            self.generate_tool_title(&tool_call.function.name, &raw_input);
-                        let tool_title_clone = tool_title.clone();
-                        let tool_kind = self.get_tool_kind(&tool_call.function.name);
-
-                        // Extract path and diff content for diff content if needed
-                        let file_path = raw_input
-                            .get("path")
-                            .and_then(|p| p.as_str())
-                            .map(std::path::PathBuf::from)
-                            .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
-
-                        // Extract old_str and new_str for editing tools (from tool arguments)
-                        let old_string = raw_input
-                            .get("old_str")
-                            .and_then(|s| s.as_str())
-                            .map(|s| s.to_string());
-                        let new_string = raw_input
-                            .get("new_str")
-                            .and_then(|s| s.as_str())
-                            .map(|s| s.to_string());
-
-                        // Extract abs_path for rawInput
-                        let abs_path = raw_input
-                            .get("abs_path")
-                            .and_then(|p| p.as_str())
-                            .map(|p| p.to_string())
-                            .unwrap_or_else(|| file_path.to_string_lossy().to_string());
-
-                        // Validate tool permissions
-                        if !self.validate_tool_permissions(&tool_call.function.name) {
-                            log::warn!(
-                                "Tool '{}' is not permitted, skipping execution",
-                                tool_call.function.name
-                            );
-
-                            // Send permission denied notification using proper ACP format
-                            let proper_raw_input = self.create_raw_input(&raw_input, &abs_path);
-
-                            self.send_tool_call_notification(
-                                &arguments.session_id,
-                                tool_call_id.clone(),
-                                format!("❌ Permission Denied: {}", tool_title_clone),
-                                &tool_kind,
-                                proper_raw_input,
-                                None,
-                                None,
-                            )
-                            .await?;
-                            continue;
-                        }
-
-                        // Prepare content and locations for diff tools
-                        let (content, locations) =
-                            if self.should_use_diff_content(&tool_call.function.name) {
-                                if self.is_file_creation_tool(&tool_call.function.name) {
-                                    // For file creation: old_text = None, new_text = result_content
-                                    let diff_content = vec![acp::ToolCallContent::Diff {
-                                        diff: acp::Diff {
-                                            path: file_path.clone(),
-                                            old_text: None,
-                                            new_text: "".to_string(), // Will be updated after execution
-                                        },
-                                    }];
-                                    let tool_locations = vec![acp::ToolCallLocation {
-                                        path: file_path.clone(),
-                                        line: Some(0),
-                                    }];
-                                    (Some(diff_content), Some(tool_locations))
-                                } else {
-                                    // For file editing: use extracted old_string and new_string
-                                    let diff_content = vec![acp::ToolCallContent::Diff {
-                                        diff: acp::Diff {
-                                            path: file_path.clone(),
-                                            old_text: old_string,
-                                            new_text: new_string.unwrap_or_default(),
-                                        },
-                                    }];
-                                    let tool_locations = vec![acp::ToolCallLocation {
-                                        path: file_path.clone(),
-                                        line: Some(0),
-                                    }];
-                                    (Some(diff_content), Some(tool_locations))
-                                }
-                            } else {
-                                (None, None)
-                            };
-
-                        // Send initial tool call notification (PENDING status) - this matches the first image
-                        let proper_raw_input = self.create_raw_input(&raw_input, &abs_path);
-                        self.send_tool_call_notification(
-                            &arguments.session_id,
-                            tool_call_id.clone(),
-                            tool_title,
-                            &tool_kind,
-                            proper_raw_input,
-                            content,
-                            locations,
-                        )
-                        .await?;
-
-                        // Check if tool should be auto-approved
-                        let permission_granted =
-                            if self.is_auto_approved_tool(&tool_call.function.name) {
-                                log::info!("Auto-approving tool: {}", tool_call.function.name);
-                                true
-                            } else {
-                                // Request permission for tool execution - this matches the second image
-                                self.send_permission_request(
-                                    &arguments.session_id,
-                                    tool_call_id.clone(),
-                                    tool_call,
-                                    &tool_title_clone,
-                                )
-                                .await?
-                            };
-
-                        if !permission_granted {
-                            // Send rejection notification
-                            self.send_tool_call_update(
-                                &arguments.session_id,
-                                tool_call_id.clone(),
-                                acp::ToolCallStatus::Failed,
-                                Some(vec![acp::ToolCallContent::Content {
-                                    content: acp::ContentBlock::Text(acp::TextContent {
-                                        text: "Tool execution rejected by user".to_string(),
-                                        annotations: None,
-                                    }),
-                                }]),
-                                None,
-                            )
-                            .await?;
-                            continue;
-                        }
-
-                        // Update tool call status to IN_PROGRESS
-                        self.send_tool_call_update(
-                            &arguments.session_id,
-                            tool_call_id.clone(),
-                            acp::ToolCallStatus::InProgress,
-                            None,
-                            None,
-                        )
-                        .await?;
-
-                        // Execute the tool call
-                        if let Some(ref clients) = self.clients {
-                            let result = crate::commands::agent::run::tooling::run_tool_call(
-                                clients,
-                                &tools_map,
-                                tool_call,
-                                None,                          // No cancel receiver for ACP
-                                self.current_session_id.get(), // Use current session ID
-                            )
-                            .await
-                            .map_err(|e| {
-                                log::error!("Tool execution failed: {}", e);
-                                acp::Error::internal_error()
-                            })?;
-
-                            if let Some(tool_result) = result {
-                                // Extract result content
-                                let result_content: String = tool_result
-                                    .content
-                                    .iter()
-                                    .map(|c| match c.raw.as_text() {
-                                        Some(text) => text.text.clone(),
-                                        None => String::new(),
-                                    })
-                                    .filter(|s| !s.is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-
-                                // Send completion notification
-                                let content =
-                                    if self.should_use_diff_content(&tool_call.function.name) {
-                                        // For diff tools, we already sent the diff in the initial notification
-                                        // Just send a simple completion without additional content
-                                        None
-                                    } else {
-                                        // For non-diff tools, send the result content
-                                        Some(vec![acp::ToolCallContent::Content {
-                                            content: acp::ContentBlock::Text(acp::TextContent {
-                                                text: result_content.to_string(),
-                                                annotations: None,
-                                            }),
-                                        }])
-                                    };
-
-                                self.send_tool_call_update(
-                                    &arguments.session_id,
-                                    tool_call_id.clone(),
-                                    acp::ToolCallStatus::Completed,
-                                    content,
-                                    Some(serde_json::json!({
-                                        "result": result_content,
-                                        "success": true
-                                    })),
-                                )
-                                .await?;
-
-                                // Add tool result to conversation history
-                                {
-                                    let mut messages = self.messages.lock().await;
-                                    messages.push(
-                                        crate::commands::agent::run::helpers::tool_result(
-                                            tool_call.id.clone(),
-                                            result_content.clone(),
-                                        ),
-                                    );
-                                }
-                            } else {
-                                // Tool execution failed
-                                self.send_tool_call_update(
-                                    &arguments.session_id,
-                                    tool_call_id.clone(),
-                                    acp::ToolCallStatus::Failed,
-                                    Some(vec![acp::ToolCallContent::Content {
-                                        content: acp::ContentBlock::Text(acp::TextContent {
-                                            text: "Tool execution failed - no result returned"
-                                                .to_string(),
-                                            annotations: None,
-                                        }),
-                                    }]),
-                                    Some(serde_json::json!({
-                                        "success": false,
-                                        "error": "No result returned"
-                                    })),
-                                )
-                                .await?;
-                            }
-                        } else {
-                            // No MCP clients available
-                            self.send_tool_call_update(
-                                &arguments.session_id,
-                                tool_call_id.clone(),
-                                acp::ToolCallStatus::Failed,
-                                Some(vec![acp::ToolCallContent::Content {
-                                    content: acp::ContentBlock::Text(acp::TextContent {
-                                        text: "Tool execution failed - no MCP clients available"
-                                            .to_string(),
-                                        annotations: None,
-                                    }),
-                                }]),
-                                Some(serde_json::json!({
-                                    "success": false,
-                                    "error": "No MCP clients available"
-                                })),
-                            )
-                            .await?;
-                        }
-
-                        log::info!(
-                            "Completed tool call {}/{}: {} - waiting before next tool call",
-                            i + 1,
-                            tool_calls.len(),
-                            tool_call.function.name
-                        );
-
-                        // Small delay to ensure sequential processing
-                        if i < tool_calls.len() - 1 {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        }
-                    }
-
-                    // After all tool calls are executed, make a follow-up chat completion request
-                    log::info!(
-                        "All tool calls completed, making follow-up chat completion request"
-                    );
-
-                    // Get updated conversation history (including tool results)
-                    current_messages = {
-                        let messages = self.messages.lock().await;
-                        messages.clone()
-                    };
-
-                    // Make follow-up chat completion request
-                    let (follow_up_stream, _request_id) = self
-                        .client
-                        .chat_completion_stream(
-                            current_messages.clone(),
-                            tools_option.clone(),
-                            None,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Follow-up chat completion stream failed: {}", e);
-                            acp::Error::internal_error()
-                        })?;
-
-                    let follow_up_response = self
-                        .process_acp_streaming_response(follow_up_stream, &arguments.session_id)
-                        .await
-                        .map_err(|e| {
-                            log::error!("Follow-up stream processing failed: {}", e);
-                            acp::Error::internal_error()
-                        })?;
-
-                    // Add follow-up response to conversation history
-                    {
-                        let mut messages = self.messages.lock().await;
-                        messages.push(follow_up_response.choices[0].message.clone());
-                    }
-
-                    // Update current_messages for the next iteration
-                    current_messages.push(follow_up_response.choices[0].message.clone());
-
-                    // Continue the loop to check for more tool calls
-                    continue;
-                } else {
-                    // No tool calls in the latest message, exit the loop
+        while has_tool_calls {
+            // Get the latest message from the conversation
+            let latest_message = match current_messages.last() {
+                Some(message) => message,
+                None => {
+                    log::error!("No messages in conversation history");
                     break;
                 }
+            };
+
+            if let Some(tool_calls) = latest_message.tool_calls.as_ref() {
+                if tool_calls.is_empty() {
+                    break; // No more tool calls, exit loop
+                }
+
+                log::info!("Processing {} tool calls", tool_calls.len());
+                
+                // Process tool calls with cancellation support
+                let tool_results = self
+                    .process_tool_calls_with_cancellation(
+                        tool_calls.clone(),
+                        &arguments.session_id,
+                        &tools_map,
+                    )
+                    .await?;
+
+                // Add tool results to conversation history
+                {
+                    let mut messages = self.messages.lock().await;
+                    messages.extend(tool_results);
+                }
+
+                // Make follow-up chat completion request after tool calls
+                current_messages = {
+                    let messages = self.messages.lock().await;
+                    messages.clone()
+                };
+
+                let (follow_up_stream, _request_id) = self
+                    .client
+                    .chat_completion_stream(
+                        current_messages.clone(),
+                        tools_option.clone(),
+                        None,
+                    )
+                    .await
+                    .map_err(|e| {
+                        log::error!("Follow-up chat completion stream failed: {}", e);
+                        acp::Error::internal_error()
+                    })?;
+
+                let follow_up_response = self
+                    .process_acp_streaming_response_with_cancellation(follow_up_stream, &arguments.session_id)
+                    .await
+                    .map_err(|e| {
+                        log::error!("Follow-up stream processing failed: {}", e);
+                        acp::Error::internal_error()
+                    })?;
+
+                // Add follow-up response to conversation history
+                {
+                    let mut messages = self.messages.lock().await;
+                    messages.push(follow_up_response.choices[0].message.clone());
+                }
+
+                // Update current_messages for the next iteration
+                current_messages.push(follow_up_response.choices[0].message.clone());
+
+                // Check if the follow-up response has more tool calls
+                has_tool_calls = follow_up_response.choices[0]
+                    .message
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| !tc.is_empty())
+                    .unwrap_or(false);
+
+                log::info!("Follow-up response has tool calls: {}", has_tool_calls);
+            } else {
+                // No tool calls in the latest message, exit the loop
+                break;
             }
         }
 
-        // Process checkpoint IDs for non-tool-call responses
-        content = self.process_checkpoint_ids(content);
-
-        // Send final content if there's content and no tool calls were executed
-        if !content.trim().is_empty() && response.choices[0].message.tool_calls.is_none() {
-            log::info!(
-                "Sending final session notification with content: {}",
-                content
-            );
-            let (tx, rx) = oneshot::channel();
-            self.session_update_tx
-                .send((
-                    SessionNotification {
-                        session_id: arguments.session_id.clone(),
-                        update: acp::SessionUpdate::AgentMessageChunk {
-                            content: acp::ContentBlock::Text(acp::TextContent {
-                                text: content,
-                                annotations: None,
-                            }),
-                        },
-                    },
-                    tx,
-                ))
-                .map_err(|_| acp::Error::internal_error())?;
-            rx.await.map_err(|_| acp::Error::internal_error())?;
-            log::info!("Final session notification sent successfully");
-        }
+        // Note: Content is already sent during streaming, no need to send again
+        // This eliminates the redundant message sending issue
 
         Ok(acp::PromptResponse {
             stop_reason: acp::StopReason::EndTurn,
@@ -1467,46 +1434,54 @@ impl acp::Agent for StakpakAcpAgent {
     }
 
     async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
-        // TODO:: ASSISTANT MESSAGE STREAM CANCELLATION
-        // TODO:: TOOL CALL STREAM CANCELLATION
         log::info!("Received cancel request {args:?}");
-        Ok(())
-    }
-}
-
-impl StakpakAcpAgent {
-    fn process_checkpoint_ids(&self, content: String) -> String {
-        use regex::Regex;
-
-        // Remove the first checkpoint_id wrapper
-        let checkpoint_regex = match Regex::new(r"<checkpoint_id>([^<]+)</checkpoint_id>") {
-            Ok(regex) => regex,
-            Err(e) => {
-                log::error!("Failed to compile checkpoint regex: {}", e);
-                return content; // Return original content if regex compilation fails
+        
+        // Cancel streaming if channel is available
+        if let Some(tx) = &self.stream_cancel_tx {
+            if let Err(e) = tx.send(()) {
+                log::warn!("Failed to send stream cancellation signal: {}", e);
+            } else {
+                log::info!("Stream cancellation signal sent");
             }
-        };
-        let mut processed_content = content;
-
-        // Find all checkpoint IDs
-        let checkpoint_ids: Vec<String> = checkpoint_regex
-            .captures_iter(&processed_content)
-            .map(|cap| cap[1].to_string())
-            .collect();
-
-        // Remove all checkpoint_id wrappers
-        processed_content = checkpoint_regex
-            .replace_all(&processed_content, "")
-            .to_string();
-
-        // If we have checkpoint IDs, format the last one as a markdown code block
-        if let Some(last_checkpoint_id) = checkpoint_ids.last() {
-            processed_content.push_str(&format!(
-                "\n\n```\nCheckpoint Id - {}\n```",
-                last_checkpoint_id
-            ));
+        }
+        
+        // Cancel tool execution if channel is available
+        if let Some(tx) = &self.tool_cancel_tx {
+            if let Err(e) = tx.send(()) {
+                log::warn!("Failed to send tool cancellation signal: {}", e);
+            } else {
+                log::info!("Tool cancellation signal sent");
+            }
         }
 
-        processed_content
+        // Cancel all active tool calls and add cancellation messages
+        let active_tool_calls = {
+            let mut active_tool_calls = self.active_tool_calls.lock().await;
+            let tool_calls = active_tool_calls.clone();
+            active_tool_calls.clear(); // Clear the active list
+            tool_calls
+        };
+
+        let tool_calls_count = active_tool_calls.len();
+
+        // Add cancellation messages for each active tool call
+        for tool_call in active_tool_calls {
+            log::info!("Cancelling tool call: {}", tool_call.function.name);
+            
+            // Add cancellation message to conversation history (like rejection logic)
+            {
+                let mut messages = self.messages.lock().await;
+                messages.push(crate::commands::agent::run::helpers::tool_result(
+                    tool_call.id.clone(),
+                    "TOOL_CALL_CANCELLED".to_string(),
+                ));
+            }
+        }
+
+        if tool_calls_count > 0 {
+            log::info!("Cancelled {} active tool calls", tool_calls_count);
+        }
+        
+        Ok(())
     }
 }
