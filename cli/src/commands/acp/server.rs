@@ -18,6 +18,11 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use uuid::Uuid;
 
+// TODO:: MAKE SURE THAT TOOL CALL STREAM IS WORKING
+// TODO:: ADD ACP AGENT MESSAGE STREAM CANCELLATION
+// TODO:: ADD ACP TOOL CALL STREAM CANCELLATION
+// TODO:: EXTRACT SCRATCHPAD/CHECKLIST INTO TODOS CHECK LIST TO WORK ON ZED
+
 pub struct StakpakAcpAgent {
     config: AppConfig,
     client: Client,
@@ -426,6 +431,7 @@ impl StakpakAcpAgent {
         session_id: &acp::SessionId,
     ) -> Result<ChatCompletionResponse, String> {
         let mut stream = Box::pin(stream);
+        // TODO:: MAKE SURE THAT TOOL CALL STREAM IS WORKING
         let mut chat_completion_response = ChatCompletionResponse {
             id: "".to_string(),
             object: "".to_string(),
@@ -1461,6 +1467,8 @@ impl acp::Agent for StakpakAcpAgent {
     }
 
     async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
+        // TODO:: ASSISTANT MESSAGE STREAM CANCELLATION
+        // TODO:: TOOL CALL STREAM CANCELLATION
         log::info!("Received cancel request {args:?}");
         Ok(())
     }
