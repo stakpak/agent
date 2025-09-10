@@ -378,8 +378,7 @@ pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
 
 pub fn push_clear_message(state: &mut AppState) {
     state.messages.clear();
-    state.input.clear();
-    state.cursor_position = 0;
+    state.text_area.set_text("");
     state.show_helper_dropdown = false;
     let welcome_msg = welcome_messages(state.latest_version.clone());
     state.messages.extend(welcome_msg);

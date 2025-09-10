@@ -4,12 +4,12 @@ use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::{push_styled_message, welcome_messages};
 use crate::services::message::Message;
-use crate::services::render_input::get_multiline_input_lines;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
+use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -54,8 +54,8 @@ pub enum LoadingType {
 }
 
 pub struct AppState {
-    pub input: String,
-    pub cursor_position: usize,
+    pub text_area: TextArea,
+    pub text_area_state: TextAreaState,
     pub cursor_visible: bool,
     pub messages: Vec<Message>,
     pub scroll: usize,
@@ -120,6 +120,8 @@ pub struct AppState {
     pub message_lines_cache: Option<MessageLinesCache>,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
     pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
+
+    pub pending_pastes: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -259,8 +261,8 @@ impl AppState {
         ));
 
         AppState {
-            input: String::new(),
-            cursor_position: 0,
+            text_area: TextArea::new(),
+            text_area_state: TextAreaState::default(),
             cursor_visible: true,
             messages: welcome_messages(latest_version.clone()),
             scroll: 0,
@@ -322,12 +324,38 @@ impl AppState {
             message_lines_cache: None,
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
+            pending_pastes: Vec::new(),
         }
     }
-    pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
-        let (lines, cursor_rendered) = get_multiline_input_lines(self, area_width);
-        (lines, cursor_rendered)
+    // Convenience methods for accessing input and cursor
+    pub fn input(&self) -> &str {
+        self.text_area.text()
     }
+
+    pub fn cursor_position(&self) -> usize {
+        self.text_area.cursor()
+    }
+
+    pub fn set_input(&mut self, input: &str) {
+        self.text_area.set_text(input);
+    }
+
+    pub fn set_cursor_position(&mut self, pos: usize) {
+        self.text_area.set_cursor(pos);
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.text_area.insert_str(&c.to_string());
+    }
+
+    pub fn insert_str(&mut self, s: &str) {
+        self.text_area.insert_str(s);
+    }
+
+    pub fn clear_input(&mut self) {
+        self.text_area.set_text("");
+    }
+
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
         self.messages.push(Message::plain_text("SPACING_MARKER"));
@@ -382,6 +410,9 @@ impl AppState {
     pub fn poll_autocomplete_results(&mut self) {
         if let Some(rx) = &mut self.autocomplete_rx {
             while let Ok(result) = rx.try_recv() {
+                // Get input text before any mutable operations
+                let input_text = self.text_area.text().to_string();
+
                 let filtered_files = result.filtered_files.clone();
                 let is_files_empty = filtered_files.is_empty();
                 self.filtered_files = filtered_files;
@@ -406,8 +437,8 @@ impl AppState {
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                self.show_helper_dropdown = (self.input.trim().starts_with('/'))
-                    || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
+                self.show_helper_dropdown = (input_text.trim().starts_with('/'))
+                    || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
                     || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
             }
         }

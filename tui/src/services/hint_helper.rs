@@ -36,7 +36,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shortcuts && state.input.is_empty() {
+    if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
             Line::from(
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
@@ -48,7 +48,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input.is_empty() {
+    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
         // Show both hints when appropriate
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
