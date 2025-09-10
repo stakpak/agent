@@ -3,11 +3,10 @@ use std::sync::OnceLock;
 
 /// Example prompts that showcase Stakpak's strengths
 const STAKPAK_PROMPTS: &[&str] = &[
-    "Create an eks cluster",
-    "Create a deployment and service for an app",
-    "Dockerize my app and deploy it to a kubernetes cluster",
-    "Set up a CI/CD pipeline for this Node.js application with automated testing",
-    "Help me deploy my python app with github actions on aws lambda",
+    "Dockerize my app",
+    "Create github actions workflow to automate building and deploying my app on ECS",
+    "Load test my service to right-size the resources needed",
+    "Analyze the costs of my cloud account",
 ];
 
 /// Example shell commands for shell mode
