@@ -27,6 +27,24 @@ use url;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunCommandsRequest {
+    #[schemars(description = "List of shell commands to execute sequentially")]
+    pub commands: Vec<String>,
+    #[schemars(description = "Optional description of the command to execute")]
+    pub description: Option<String>,
+    #[schemars(description = "Optional timeout for the command execution in seconds")]
+    pub timeout: Option<u64>,
+    #[schemars(
+        description = "Optional remote connection string (format: user@host or user@host:port)"
+    )]
+    pub remote: Option<String>,
+    #[schemars(description = "Optional password for remote connection")]
+    pub password: Option<String>,
+    #[schemars(description = "Optional path to private key for remote connection")]
+    pub private_key_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RunCommandRequest {
     #[schemars(description = "The shell command to execute")]
     pub command: String,
@@ -143,7 +161,17 @@ pub struct ViewWebPageRequest {
 #[tool_router(router = tool_router_local, vis = "pub")]
 impl ToolContainer {
     #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access on local or remote systems via SSH.
+        description = "A system command execution totestol that allows running one or multiple shell commands sequentially with full system access on local or remote systems via SSH.
+
+COMMAND EXECUTION:
+- Supports single command or multiple commands executed sequentially
+- Batch related commands together for efficiency (e.g., setup steps, build pipeline, deployment sequence)
+- Commands are executed in order; if one fails, execution stops and partial results are returned
+- Keep in mind that there's no shell session persistence, so you can't use variables or functions from one command in another
+- Examples of good batching:
+  * ['mkdir -p /tmp/project', 'cd /tmp/project && git clone https://github.com/user/repo.git']
+  * ['npm install', 'npm run build', 'npm test']
+  * ['docker build -t myapp .', 'docker tag myapp:latest myapp:v1.0', 'docker push myapp:v1.0']
 
 REMOTE EXECUTION:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
@@ -159,50 +187,134 @@ SECRET HANDLING:
 - You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
 - Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
 
-If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
+If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory
+
+EFFICIENCY TIP: Instead of making multiple separate tool calls, batch related commands in a single call to reduce overhead and maintain context between commands."
     )]
     pub async fn run_command(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(RunCommandRequest {
-            command,
+        Parameters(RunCommandsRequest {
+            commands,
             description: _,
             timeout,
             remote,
             password,
             private_key_path,
-        }): Parameters<RunCommandRequest>,
+        }): Parameters<RunCommandsRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Use unified command execution helper
-        match self
-            .execute_command_unified(&command, timeout, remote, password, private_key_path, &ctx)
-            .await
-        {
-            Ok(mut result) => {
-                result = match handle_large_output(&result, "command.output") {
-                    Ok(result) => result,
-                    Err(e) => {
-                        return Ok(CallToolResult::error(vec![
-                            Content::text("OUTPUT_HANDLING_ERROR"),
-                            Content::text(format!("Failed to handle command output: {}", e)),
-                        ]));
-                    }
-                };
-
-                if result.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text("No output")]));
-                }
-
-                let redacted_output = self
-                    .get_secret_manager()
-                    .redact_and_store_secrets(&result, None);
-
-                Ok(CallToolResult::success(vec![Content::text(
-                    &redacted_output,
-                )]))
-            }
-            Err(error_result) => Ok(error_result),
+        if commands.is_empty() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("NO_COMMANDS"),
+                Content::text("No commands provided to execute"),
+            ]));
         }
+
+        let mut all_results = Vec::new();
+        let mut command_number = 1;
+        let total_commands = commands.len();
+
+        // Execute commands sequentially
+        for command in &commands {
+            // Use unified command execution helper
+            match self
+                .execute_command_unified(
+                    command,
+                    timeout,
+                    remote.clone(),
+                    password.clone(),
+                    private_key_path.clone(),
+                    &ctx,
+                )
+                .await
+            {
+                Ok(result) => {
+                    if total_commands > 1 {
+                        // Format like a terminal session: $ command followed by output
+                        all_results.push(format!("$ {}\n{}", command, result.trim_end()));
+                    } else {
+                        // For single commands, just show the output without the command prompt
+                        all_results.push(result);
+                    }
+                }
+                Err(error_result) => {
+                    // If a command fails, show the terminal-style command that failed and the error
+                    let failed_command_output = if total_commands > 1 {
+                        format!(
+                            "$ {}\n{}",
+                            command,
+                            error_result
+                                .content
+                                .first()
+                                .and_then(|c| c.raw.as_text())
+                                .map(|text| text.text.as_str())
+                                .unwrap_or("Unknown error")
+                        )
+                    } else {
+                        error_result
+                            .content
+                            .first()
+                            .and_then(|c| c.raw.as_text())
+                            .map(|text| text.text.to_string())
+                            .unwrap_or("Unknown error".to_string())
+                    };
+
+                    // Add the failed command to results
+                    all_results.push(failed_command_output);
+
+                    // Show remaining commands that were skipped (if any)
+                    if total_commands > 1 && command_number < total_commands {
+                        let remaining_commands: Vec<String> = commands[command_number..]
+                            .iter()
+                            .map(|cmd| format!("$ {} # SKIPPED: Previous command failed", cmd))
+                            .collect();
+
+                        if !remaining_commands.is_empty() {
+                            all_results.push(format!("\n{}", remaining_commands.join("\n")));
+                        }
+                    }
+
+                    let partial_output = all_results.join("\n\n");
+
+                    if total_commands > 1 {
+                        return Ok(CallToolResult::error(vec![
+                            Content::text("COMMAND_SEQUENCE_FAILED"),
+                            Content::text(format!(
+                                "Command {} of {} failed:\n\n{}",
+                                command_number, total_commands, partial_output
+                            )),
+                        ]));
+                    } else {
+                        return Ok(error_result);
+                    }
+                }
+            }
+            command_number += 1;
+        }
+
+        let combined_result = all_results.join("\n\n");
+
+        let final_result = match handle_large_output(&combined_result, "command.output") {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("OUTPUT_HANDLING_ERROR"),
+                    Content::text(format!("Failed to handle command output: {}", e)),
+                ]));
+            }
+        };
+
+        if final_result.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text("No output")]));
+        }
+
+        let redacted_output = self
+            .get_secret_manager()
+            .redact_and_store_secrets(&final_result, None);
+
+        Ok(CallToolResult::success(vec![Content::text(
+            &redacted_output,
+        )]))
     }
 
     #[tool(
