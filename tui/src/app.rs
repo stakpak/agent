@@ -2,7 +2,7 @@ use crate::services::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::push_error_message;
-use crate::services::helper_block::{push_styled_message, welcome_messages};
+use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
@@ -122,6 +122,7 @@ pub struct AppState {
     pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
 
     pub pending_pastes: Vec<(String, String)>,
+    pub mouse_capture_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -183,6 +184,7 @@ pub enum InputEvent {
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
     EmergencyClearTerminal,
+    ToggleMouseCapture, // Toggle mouse capture on/off
 }
 
 #[derive(Debug)]
@@ -233,6 +235,10 @@ impl AppState {
                 description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
             },
             HelperCommand {
+                command: "/mouse_capture",
+                description: "Toggle mouse capture on/off",
+            },
+            HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
             },
@@ -264,7 +270,7 @@ impl AppState {
             text_area: TextArea::new(),
             text_area_state: TextAreaState::default(),
             cursor_visible: true,
-            messages: welcome_messages(latest_version.clone()),
+            messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
             stay_at_bottom: true,
@@ -325,6 +331,7 @@ impl AppState {
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
+            mouse_capture_enabled: true, // Start with mouse capture enabled
         }
     }
     // Convenience methods for accessing input and cursor

@@ -864,7 +864,7 @@ fn handle_input_submitted(
                     state.messages.clear();
                     state
                         .messages
-                        .extend(welcome_messages(state.latest_version.clone()));
+                        .extend(welcome_messages(state.latest_version.clone(), state));
                     render_system_message(state, "Resuming last session.");
 
                     let _ = output_tx.try_send(OutputEvent::ResumeSession);
@@ -912,6 +912,14 @@ fn handle_input_submitted(
                 }
                 "/list_approved_tools" => {
                     list_auto_approved_tools(state);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/mouse_capture" => {
+                    // Toggle mouse capture using shared function
+                    let _ = crate::toggle_mouse_capture(state);
+
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
