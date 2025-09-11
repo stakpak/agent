@@ -1,5 +1,4 @@
 use crate::app::{AppState, LoadingType};
-use crate::services::detect_term::detect_terminal;
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,17 +10,7 @@ pub fn get_stakpak_version() -> String {
 
 /// Generate a mouse capture hint message based on the terminal type
 pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
-    let terminal_info = detect_terminal();
-    let emulator = &terminal_info.emulator;
-
-    let hint_text = match emulator.as_str() {
-        "iTerm2" | "Alacritty" | "Kitty" | "WezTerm" => "Hold Option + Click to select text",
-        "Terminal.app" => "Hold Fn/Option + Click to select text",
-        "tmux" | "GNU Screen" => "Hold Shift + Click to select text",
-        "xterm" | "X11 Terminal" | "Wayland Terminal" => "Hold Shift + Click to select text",
-        "VS Code Terminal" => "Hold Option + Click to select text",
-        _ => "Hold Option + Click to select text", // Default fallback
-    };
+    let hint_text = "Hold Fn/Option/Shift (depends on your terminal) + Click to select text";
 
     let status = if state.mouse_capture_enabled {
         "enabled"
@@ -425,13 +414,8 @@ pub fn welcome_messages(
         Message::info("SPACING_MARKER", None),
     ];
 
-    // Only show mouse capture hint for non-supported terminals
-    let terminal_info = crate::services::detect_term::detect_terminal();
-    if crate::services::detect_term::is_unsupported_terminal(&terminal_info.emulator) {
-        messages.push(mouse_capture_hint_message(state));
-        messages.push(Message::info("SPACING_MARKER", None));
-    }
-
+    messages.push(mouse_capture_hint_message(state));
+    messages.push(Message::info("SPACING_MARKER", None));
     messages
 }
 
