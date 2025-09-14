@@ -3,7 +3,7 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, OutputEvent, SessionInfo};
+pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
 pub use ratatui::style::Color;
 
 mod services;
@@ -205,7 +205,8 @@ pub async fn run_tui(
                        let outer_chunks = ratatui::layout::Layout::default()
                            .direction(ratatui::layout::Direction::Vertical)
                            .constraints([
-                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading indicator
                                ratatui::layout::Constraint::Length(input_height as u16),
                                ratatui::layout::Constraint::Length(dropdown_height),
                                ratatui::layout::Constraint::Length(hint_height),
@@ -240,7 +241,8 @@ pub async fn run_tui(
                        let outer_chunks = ratatui::layout::Layout::default()
                            .direction(ratatui::layout::Direction::Vertical)
                            .constraints([
-                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading indicator
                                ratatui::layout::Constraint::Length(input_height as u16),
                                ratatui::layout::Constraint::Length(dropdown_height),
                                ratatui::layout::Constraint::Length(hint_height),
