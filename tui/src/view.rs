@@ -18,6 +18,7 @@ use ratatui::{
 };
 
 const DROPDOWN_MAX_HEIGHT: usize = 8;
+const SCROLL_BUFFER_LINES: usize = 2;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content
@@ -50,9 +51,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         0
     };
 
-    // Layout: [messages][dialog_margin][dialog][input][dropdown][hint]
+    // Layout: [messages][loading_line][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
-        Constraint::Min(1), // messages
+        Constraint::Min(1),    // messages
+        Constraint::Length(1), // reserved line for loading indicator
         Constraint::Length(dialog_margin),
         Constraint::Length(dialog_height),
     ];
@@ -67,6 +69,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         .split(f.area());
 
     let message_area = chunks[0];
+    let loading_area = chunks[1]; // Reserved line for loading indicator
 
     // Create padded message area for content rendering
     let padded_message_area = Rect {
@@ -91,8 +94,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
-        input_area = chunks[3];
-        dropdown_area = chunks.get(4).copied().unwrap_or(input_area);
+        input_area = chunks[4]; // Updated index due to loading line
+        dropdown_area = chunks.get(5).copied().unwrap_or(input_area);
     }
 
     let message_area_width = padded_message_area.width as usize;
@@ -105,6 +108,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_width,
         message_area_height,
     );
+
+    // Render loading indicator in dedicated area
+    render_loading_indicator(f, state, loading_area);
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
@@ -138,13 +144,7 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
-    let mut processed_lines = get_wrapped_message_lines_cached(state, width);
-
-    if state.loading {
-        let loading_line = render_loading_spinner(state);
-        processed_lines.push(loading_line);
-    }
-
+    let processed_lines = get_wrapped_message_lines_cached(state, width);
     let total_lines = processed_lines.len();
 
     // Handle edge case where we have no content
@@ -155,22 +155,14 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         return;
     }
 
-    let max_scroll = total_lines.saturating_sub(height);
+    // Use consistent scroll calculation with buffer (matching update.rs)
+    let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
-    // Prevent snapping by adjusting scroll relative to the processed content
-    let original_total: usize = processed_lines.len();
-    let processed_total = total_lines;
-
+    // Calculate scroll position - ensure it doesn't exceed max_scroll
     let scroll = if state.stay_at_bottom {
         max_scroll
     } else {
-        // Scale the scroll position to account for processed content size difference
-        let adjusted_scroll = if original_total > 0 {
-            (state.scroll * processed_total) / original_total
-        } else {
-            state.scroll
-        };
-        adjusted_scroll.min(max_scroll)
+        state.scroll.min(max_scroll)
     };
 
     // Create visible lines with pre-allocated capacity for better performance
@@ -259,7 +251,9 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
     }
 
     let total_lines = processed_lines.len();
-    let max_scroll = total_lines.saturating_sub(height);
+    // Use consistent scroll calculation with buffer (matching update.rs)
+
+    let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Use collapsed_messages_scroll for this popup
     let scroll = if state.collapsed_messages_scroll > max_scroll {
@@ -297,7 +291,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     let content_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
-        width: area.width.saturating_sub(2),
+        width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
 
@@ -314,5 +308,17 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
         );
     } else {
         f.render_stateful_widget_ref(&state.text_area, content_area, &mut state.text_area_state);
+    }
+}
+
+fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
+    if state.loading {
+        let loading_line = render_loading_spinner(state);
+        let loading_widget =
+            Paragraph::new(loading_line).wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(loading_widget, area);
+    } else {
+        // Clear the area when not loading
+        f.render_widget(ratatui::widgets::Clear, area);
     }
 }

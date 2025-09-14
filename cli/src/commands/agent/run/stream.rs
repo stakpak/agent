@@ -5,7 +5,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
     FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall, Usage,
 };
-use stakpak_tui::InputEvent;
+use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
 
 pub async fn process_responses_stream(
@@ -37,9 +37,14 @@ pub async fn process_responses_stream(
     };
     let message_id = Uuid::new_v4();
 
-    while let Some(response) = stream.next().await {
-        send_input_event(input_tx, InputEvent::Loading(true)).await?;
+    // Start stream processing loading at the beginning
+    send_input_event(
+        input_tx,
+        InputEvent::StartLoadingOperation(LoadingOperation::StreamProcessing),
+    )
+    .await?;
 
+    while let Some(response) = stream.next().await {
         match &response {
             Ok(response) => {
                 let delta = &response.choices[0].delta;
@@ -155,6 +160,13 @@ pub async fn process_responses_stream(
         finish_reason: FinishReason::Stop,
         logprobs: None,
     });
+
+    // End stream processing loading when stream completes
+    send_input_event(
+        input_tx,
+        InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing),
+    )
+    .await?;
 
     Ok(chat_completion_response)
 }
