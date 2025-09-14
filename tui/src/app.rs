@@ -53,6 +53,63 @@ pub enum LoadingType {
     Sessions,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LoadingOperation {
+    LlmRequest,
+    ToolExecution,
+    SessionsList,
+    StreamProcessing,
+    LocalContext,
+    Rulebooks,
+    CheckpointResume,
+}
+
+#[derive(Debug)]
+pub struct LoadingStateManager {
+    active_operations: std::collections::HashSet<LoadingOperation>,
+}
+
+impl Default for LoadingStateManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LoadingStateManager {
+    pub fn new() -> Self {
+        Self {
+            active_operations: std::collections::HashSet::new(),
+        }
+    }
+
+    pub fn start_operation(&mut self, operation: LoadingOperation) {
+        self.active_operations.insert(operation);
+    }
+
+    pub fn end_operation(&mut self, operation: LoadingOperation) {
+        self.active_operations.remove(&operation);
+    }
+
+    pub fn is_loading(&self) -> bool {
+        !self.active_operations.is_empty()
+    }
+
+    pub fn get_loading_type(&self) -> LoadingType {
+        if self
+            .active_operations
+            .contains(&LoadingOperation::SessionsList)
+        {
+            LoadingType::Sessions
+        } else {
+            LoadingType::Llm
+        }
+    }
+
+    pub fn clear_all(&mut self) {
+        self.active_operations.clear();
+    }
+}
+
 pub struct AppState {
     pub text_area: TextArea,
     pub text_area_state: TextAreaState,
@@ -123,6 +180,7 @@ pub struct AppState {
 
     pub pending_pastes: Vec<(String, String)>,
     pub mouse_capture_enabled: bool,
+    pub loading_manager: LoadingStateManager,
 }
 
 #[derive(Debug)]
@@ -133,7 +191,8 @@ pub enum InputEvent {
     RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
     StreamToolResult(ToolCallResultProgress),
-    Loading(bool),
+    StartLoadingOperation(LoadingOperation),
+    EndLoadingOperation(LoadingOperation),
     InputChanged(char),
     ShellMode,
     GetStatus(String),
@@ -332,6 +391,7 @@ impl AppState {
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
             mouse_capture_enabled: true, // Start with mouse capture enabled
+            loading_manager: LoadingStateManager::new(),
         }
     }
     // Convenience methods for accessing input and cursor

@@ -1,6 +1,7 @@
 {
-    "cSpell.words": [
-        "crossterm",
-        "stakpak"
-    ]
+  "cSpell.words": [
+    "crossterm",
+    "stakpak"
+  ],
+  "terminal.integrated.macOptionClickForcesSelection": true
 }

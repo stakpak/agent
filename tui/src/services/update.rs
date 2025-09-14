@@ -266,9 +266,15 @@ pub fn update(
                 state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
             }
         }
-        InputEvent::Loading(is_loading) => {
-            state.is_streaming = is_loading;
-            state.loading = is_loading;
+        InputEvent::StartLoadingOperation(operation) => {
+            state.loading_manager.start_operation(operation.clone());
+            state.loading = state.loading_manager.is_loading();
+            state.loading_type = state.loading_manager.get_loading_type();
+        }
+        InputEvent::EndLoadingOperation(operation) => {
+            state.loading_manager.end_operation(operation);
+            state.loading = state.loading_manager.is_loading();
+            state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx),
 
@@ -851,16 +857,12 @@ fn handle_input_submitted(
 
             match selected.command {
                 "/sessions" => {
-                    state.loading_type = LoadingType::Sessions;
-                    state.loading = true;
                     let _ = output_tx.try_send(OutputEvent::ListSessions);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
                 "/resume" => {
-                    state.loading_type = LoadingType::Sessions;
-                    state.loading = true;
                     state.messages.clear();
                     state
                         .messages
@@ -869,7 +871,6 @@ fn handle_input_submitted(
 
                     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
-                    state.loading_type = LoadingType::Llm;
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
@@ -962,7 +963,7 @@ fn handle_input_submitted(
             state.scroll_to_bottom = true;
             state.stay_at_bottom = true;
         }
-        state.loading = true;
+        // Loading will be managed by stream processing
         state.spinner_frame = 0;
     }
 }
@@ -984,7 +985,7 @@ fn handle_input_submitted_with(
         s.clone(),
         color.map(|c| Style::default().fg(c)),
     ));
-    state.loading = true;
+    // Loading will be managed by stream processing
     state.text_area.set_text("");
     let total_lines = state.messages.len() * 2;
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
