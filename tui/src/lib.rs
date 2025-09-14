@@ -8,9 +8,12 @@ pub use ratatui::style::Color;
 
 mod services;
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
+use ratatui::style::Style;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
@@ -21,6 +24,60 @@ pub use view::view;
 
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::message::Message;
+
+pub fn ensure_vscode_option_click_setting(state: &mut AppState) -> io::Result<()> {
+    let is_vscode = crate::services::vscode_terminal::ensure_vscode_option_click_setting();
+    if is_vscode && state.mouse_capture_enabled {
+        state.messages.push(Message::info("SPACING_MARKER", None));
+        state.messages.push(Message::info(
+            "✅ VS Code Option+Click setting enabled in workspace",
+            None,
+        ));
+        state.messages.push(Message::info("SPACING_MARKER", None));
+    }
+    Ok(())
+}
+
+pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
+    state.mouse_capture_enabled = !state.mouse_capture_enabled;
+
+    if state.mouse_capture_enabled {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
+
+    let status = if state.mouse_capture_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+
+    let color = if state.mouse_capture_enabled {
+        Color::LightGreen
+    } else {
+        Color::LightRed
+    };
+    state.messages.push(Message::info("SPACING_MARKER", None));
+    state.messages.push(Message::info(
+        format!("Mouse capture {}", status),
+        Some(Style::default().fg(color)),
+    ));
+    state.messages.push(Message::info("SPACING_MARKER", None));
+
+    ensure_vscode_option_click_setting(state)?;
+
+    Ok(())
+}
+
+fn toggle_mouse_capture_with_redraw<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut AppState,
+) -> io::Result<()> {
+    toggle_mouse_capture(state)?;
+    emergency_clear_and_redraw(terminal, state)?;
+    Ok(())
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
@@ -37,11 +94,14 @@ pub async fn run_tui(
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
+
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        EnableMouseCapture
     )?;
+
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let mut state = AppState::new(
@@ -52,6 +112,12 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
     );
+
+    // Add welcome messages after state is created
+    let welcome_msg =
+        crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
+    state.messages.extend(welcome_msg);
+    ensure_vscode_option_click_setting(&mut state)?;
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
@@ -116,6 +182,10 @@ pub async fn run_tui(
 
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
+                   if let InputEvent::ToggleMouseCapture = event {
+                       toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                       continue;
+                   }
 
                    if let InputEvent::Quit = event { should_quit = true; }
                    else {
@@ -125,7 +195,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -148,6 +218,10 @@ pub async fn run_tui(
                    }
                }
                Some(event) = internal_rx.recv() => {
+                if let InputEvent::ToggleMouseCapture = event {
+                    toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                    continue;
+                }
                 if let InputEvent::Quit = event { should_quit = true; }
                    else {
                        let term_size = terminal.size()?;
@@ -156,7 +230,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -210,7 +284,8 @@ pub async fn run_tui(
     execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        DisableMouseCapture
     )?;
     Ok(())
 }

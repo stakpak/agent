@@ -31,7 +31,7 @@ async-trait = "0.1"
 futures = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = { workspace = true}
 reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 axum = "0.8"
 tower = "0.4"
