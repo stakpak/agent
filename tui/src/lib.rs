@@ -30,7 +30,7 @@ pub fn ensure_vscode_option_click_setting(state: &mut AppState) -> io::Result<()
     if is_vscode && state.mouse_capture_enabled {
         state.messages.push(Message::info("SPACING_MARKER", None));
         state.messages.push(Message::info(
-            "✅ VS Code Option+Click setting enabled in workspace",
+            "✅ VSCode Option+Click setting enabled in workspace",
             None,
         ));
         state.messages.push(Message::info("SPACING_MARKER", None));
