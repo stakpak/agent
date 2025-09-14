@@ -22,7 +22,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
-use stakpak_tui::{Color, InputEvent, OutputEvent};
+use stakpak_tui::{Color, InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -180,7 +180,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
         while let Some(output_event) = output_rx.recv().await {
             match output_event {
                 OutputEvent::UserMessage(user_input, tool_calls_results) => {
-                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                    // Loading will be managed by stream processing
                     let mut user_input = user_input.clone();
 
                     // Add user shell history to the user input
@@ -221,7 +221,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
-                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
+                    )
+                    .await?;
                     let result = run_tool_call(
                         &clients,
                         &tools_map,
@@ -265,7 +269,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             ),
                         )
                         .await?;
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
+                        )
+                        .await?;
 
                         // Continue to next tool or main loop if error
                         should_stop = match result.get_status() {
@@ -299,12 +307,27 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     continue;
                 }
                 OutputEvent::ListSessions => {
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::StartLoadingOperation(LoadingOperation::SessionsList),
+                    )
+                    .await?;
                     match list_sessions(&client).await {
                         Ok(sessions) => {
                             send_input_event(&input_tx, InputEvent::SetSessions(sessions)).await?;
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::SessionsList),
+                            )
+                            .await?;
                         }
                         Err(e) => {
                             send_input_event(&input_tx, InputEvent::Error(e)).await?;
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::SessionsList),
+                            )
+                            .await?;
                         }
                     }
                     continue;
@@ -321,7 +344,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     };
 
                     if let Some(session_id) = &session_id {
-                        send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::StartLoadingOperation(LoadingOperation::CheckpointResume),
+                        )
+                        .await?;
                         match resume_session_from_checkpoint(&client, session_id, &input_tx).await {
                             Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                 // Track the current session ID
@@ -334,10 +361,23 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                     let initial_tool_call = tools_queue.remove(0);
                                     send_tool_call(&input_tx, &initial_tool_call).await?;
                                 }
-                                send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::EndLoadingOperation(
+                                        LoadingOperation::CheckpointResume,
+                                    ),
+                                )
+                                .await?;
                             }
                             Err(_) => {
                                 // Error already handled in the function
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::EndLoadingOperation(
+                                        LoadingOperation::CheckpointResume,
+                                    ),
+                                )
+                                .await?;
                                 continue;
                             }
                         }
@@ -351,7 +391,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     continue;
                 }
                 OutputEvent::SwitchToSession(session_id) => {
-                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::StartLoadingOperation(LoadingOperation::CheckpointResume),
+                    )
+                    .await?;
                     match resume_session_from_checkpoint(&client, &session_id, &input_tx).await {
                         Ok((chat_messages, tool_calls, session_id_uuid)) => {
                             // Track the current session ID
@@ -364,23 +408,39 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 let initial_tool_call = tools_queue.remove(0);
                                 send_tool_call(&input_tx, &initial_tool_call).await?;
                             }
-                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::CheckpointResume),
+                            )
+                            .await?;
                         }
                         Err(_) => {
-                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::CheckpointResume),
+                            )
+                            .await?;
                             continue;
                         }
                     }
                     continue;
                 }
                 OutputEvent::SendToolResult(tool_call_result) => {
-                    send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
+                    )
+                    .await?;
                     messages.push(tool_result(
                         tool_call_result.call.clone().id,
                         tool_call_result.result.clone(),
                     ));
 
-                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::EndLoadingOperation(LoadingOperation::ToolExecution),
+                    )
+                    .await?;
 
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
@@ -418,7 +478,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 let (mut stream, current_request_id) = match stream_result {
                     Ok(result) => result,
                     Err(e) => {
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
                         break Err(ApiStreamError::Unknown(e));
                     }
@@ -435,7 +494,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if let Some(request_id) = &current_request_id {
                             client.cancel_stream(request_id.clone()).await?;
                         }
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         send_input_event(&input_tx, InputEvent::Error("STREAM_CANCELLED".to_string())).await?;
                         break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
                     }
@@ -445,7 +503,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         break Ok(response);
                     }
                     Err(e) => {
-                        send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                         if matches!(e, ApiStreamError::AgentInvalidResponseStream) {
                             if retry_attempts < MAX_RETRY_ATTEMPTS {
                                 retry_attempts += 1;
@@ -455,7 +512,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 )
                                 .await?;
 
-                                send_input_event(&input_tx, InputEvent::Loading(true)).await?;
+                                // Loading will be managed by stream processing on retry
                                 continue;
                             } else {
                                 send_input_event(
@@ -466,7 +523,6 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 break Err(e);
                             }
                         } else {
-                            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                             send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
                                 .await?;
                             break Err(e);
@@ -501,13 +557,13 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             continue;
                         }
                     }
+
+                    // Stream processing handles loading state automatically
                 }
                 Err(_) => {
-                    send_input_event(&input_tx, InputEvent::Loading(false)).await?;
                     continue;
                 }
             }
-            send_input_event(&input_tx, InputEvent::Loading(false)).await?;
         }
 
         Ok((messages, current_session_id))

@@ -1,5 +1,5 @@
 use stakpak_shared::models::integrations::openai::ToolCall;
-use stakpak_tui::InputEvent;
+use stakpak_tui::{InputEvent, LoadingOperation};
 
 pub async fn send_input_event(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
@@ -12,7 +12,11 @@ pub async fn send_tool_call(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     tool_call: &ToolCall,
 ) -> Result<(), String> {
-    send_input_event(input_tx, InputEvent::Loading(true)).await?;
+    send_input_event(
+        input_tx,
+        InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
+    )
+    .await?;
     send_input_event(input_tx, InputEvent::RunToolCall(tool_call.clone())).await?;
     Ok(())
 }

@@ -6,7 +6,7 @@ use stakpak_shared::models::integrations::{
     mcp::CallToolResultExt,
     openai::{ChatMessage, MessageContent, Role, ToolCall, ToolCallResult},
 };
-use stakpak_tui::InputEvent;
+use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
 
 pub async fn get_checkpoint_messages(
@@ -194,7 +194,11 @@ pub async fn resume_session_from_checkpoint(
             Ok((chat_messages, tool_calls, checkpoint.session.id))
         }
         Err(e) => {
-            send_input_event(input_tx, InputEvent::Loading(false)).await?;
+            send_input_event(
+                input_tx,
+                InputEvent::EndLoadingOperation(LoadingOperation::CheckpointResume),
+            )
+            .await?;
             send_input_event(input_tx, InputEvent::Error(e)).await?;
             Err("Failed to get session checkpoint".to_string())
         }
