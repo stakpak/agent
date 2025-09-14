@@ -23,6 +23,7 @@ use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 const SCROLL_LINES: usize = 2;
+const MAX_PASTE_CHAR_COUNT: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update(
@@ -175,24 +176,10 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::CursorLeft => {
-            if state.cursor_position > 0 {
-                let prev = state.input[..state.cursor_position]
-                    .chars()
-                    .next_back()
-                    .map(|c| c.len_utf8())
-                    .unwrap_or(1);
-                state.cursor_position -= prev;
-            }
+            state.text_area.move_cursor_left();
         }
         InputEvent::CursorRight => {
-            if state.cursor_position < state.input.len() {
-                let next = state.input[state.cursor_position..]
-                    .chars()
-                    .next()
-                    .map(|c| c.len_utf8())
-                    .unwrap_or(1);
-                state.cursor_position += next;
-            }
+            state.text_area.move_cursor_right();
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
         InputEvent::ToggleAutoApprove => {
@@ -326,6 +313,8 @@ pub fn update(
 
         InputEvent::ShellWaitingForInput => {
             state.waiting_for_shell_input = true;
+            // Set textarea to shell mode when waiting for input
+            state.text_area.set_shell_mode(true);
             // Allow user input when command is waiting
             adjust_scroll(state, message_area_height, message_area_width);
         }
@@ -356,8 +345,7 @@ pub fn update(
 
             state.active_shell_command = None;
             state.active_shell_command_output = None;
-            state.input.clear();
-            state.cursor_position = 0;
+            state.text_area.set_text("");
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -410,89 +398,33 @@ pub fn update(
             state.active_shell_command = None;
             state.active_shell_command_output = None;
             state.waiting_for_shell_input = false;
+            // Reset textarea shell mode
+            state.text_area.set_shell_mode(false);
         }
         InputEvent::HandlePaste(text) => {
-            // TODO:: REDACT SECRETS IN PASTED TEXT
-            let text = preprocess_terminal_output(&text);
-            let text = text.replace("\r\n", "\n").replace('\r', "\n");
-            let line_count = text.lines().count();
-            if line_count > 10 {
-                state.pasted_long_text = Some(text.clone());
-                let placeholder = format!("[Pasted text of {} lines]", line_count);
-                state.pasted_placeholder = Some(placeholder.clone());
-                // Insert the placeholder at the current cursor position
-                let pos = state.cursor_position.min(state.input.len());
-                state.input.insert_str(pos, &placeholder);
-                state.cursor_position = pos + placeholder.len();
-            } else {
-                // Normal paste
-                state.input.insert_str(state.cursor_position, &text);
-                state.cursor_position += text.len();
-                state.pasted_long_text = None;
-                state.pasted_placeholder = None;
-            }
+            handle_paste(state, text);
         }
         InputEvent::InputCursorStart => {
-            state.cursor_position = 0;
+            state.text_area.move_cursor_to_beginning_of_line(false);
         }
         InputEvent::InputCursorEnd => {
-            state.cursor_position = state.input.len();
+            state.text_area.move_cursor_to_end_of_line(false);
         }
         InputEvent::InputDelete => {
-            state.input.clear();
-            state.cursor_position = 0;
+            state.text_area.set_text("");
         }
         InputEvent::InputDeleteWord => {
-            if state.cursor_position > 0 {
-                let start = state.input[..state.cursor_position]
-                    .trim_end()
-                    .rfind(char::is_whitespace)
-                    .map_or(0, |i| i + 1);
-                state.input.drain(start..state.cursor_position);
-                state.cursor_position = start;
-            }
+            state.text_area.delete_backward_word();
         }
         InputEvent::InputCursorPrevWord => {
-            let mut pos = state.cursor_position;
-            // Skip any whitespace before the cursor
-            while pos > 0 {
-                let ch = state.input[..pos].chars().next_back();
-                if let Some(c) = ch {
-                    if c.is_whitespace() {
-                        pos -= c.len_utf8();
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            // Skip the previous word
-            while pos > 0 {
-                let ch = state.input[..pos].chars().next_back();
-                if let Some(c) = ch {
-                    if !c.is_whitespace() {
-                        pos -= c.len_utf8();
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            state.cursor_position = pos;
+            state
+                .text_area
+                .set_cursor(state.text_area.beginning_of_previous_word());
         }
         InputEvent::InputCursorNextWord => {
-            let mut pos = state.cursor_position;
-            // Skip current word forwards (if we're in the middle of a word)
-            while pos < state.input.len() && !state.input.as_bytes()[pos].is_ascii_whitespace() {
-                pos += 1;
-            }
-            // Skip whitespace forwards
-            while pos < state.input.len() && state.input.as_bytes()[pos].is_ascii_whitespace() {
-                pos += 1;
-            }
-            state.cursor_position = pos;
+            state
+                .text_area
+                .set_cursor(state.text_area.end_of_next_word());
         }
         InputEvent::RetryLastToolCall => {
             handle_retry_tool_call(state, input_tx, cancel_tx);
@@ -535,8 +467,7 @@ pub fn update(
                 || state.ctrl_c_timer.map(|t| now > t).unwrap_or(true)
             {
                 // First press or timer expired: clear input, move cursor, set timer
-                state.input.clear();
-                state.cursor_position = 0;
+                state.text_area.set_text("");
                 state.ctrl_c_pressed_once = true;
                 state.ctrl_c_timer = Some(now + std::time::Duration::from_secs(2));
             } else {
@@ -570,6 +501,9 @@ fn extract_command_from_tool_call(tool_call: &ToolCall) -> Result<String, String
 
 fn handle_shell_mode(state: &mut AppState) {
     state.show_shell_mode = !state.show_shell_mode;
+    // Update textarea shell mode
+    state.text_area.set_shell_mode(state.show_shell_mode);
+
     if state.show_shell_mode {
         state.is_dialog_open = false;
         if let Some(dialog_command) = &state.dialog_command {
@@ -580,21 +514,17 @@ fn handle_shell_mode(state: &mut AppState) {
                     return;
                 }
             };
-            let command_len = command.len();
-            state.input = command;
-            state.cursor_position = command_len;
+            state.text_area.set_text(&command);
         }
         state.ondemand_shell_mode = state.dialog_command.is_none();
         if state.ondemand_shell_mode {
             if state.shell_tool_calls.is_none() {
                 state.shell_tool_calls = Some(Vec::new());
             }
-            state.input.clear();
-            state.cursor_position = 0;
+            state.text_area.set_text("");
         }
     } else {
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         // only show dialog if id of latest tool call is not the same as dialog_command id
@@ -624,10 +554,9 @@ fn handle_tab(state: &mut AppState) {
             return;
         }
         // Handle helper selection - auto-complete the selected helper
-        if !state.filtered_helpers.is_empty() && state.input.starts_with('/') {
+        if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
             let selected_helper = &state.filtered_helpers[state.helper_selected];
-            state.input = selected_helper.command.to_string();
-            state.cursor_position = selected_helper.command.len();
+            state.text_area.set_text(selected_helper.command);
             state.show_helper_dropdown = false;
             state.filtered_helpers.clear();
             state.helper_selected = 0;
@@ -646,7 +575,7 @@ fn handle_dropdown_up(state: &mut AppState) {
             state.helper_selected -= 1;
         } else {
             // Regular helper mode
-            if !state.filtered_helpers.is_empty() && state.input.starts_with('/') {
+            if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
                 state.helper_selected -= 1;
             }
         }
@@ -663,7 +592,7 @@ fn handle_dropdown_down(state: &mut AppState) {
         } else {
             // Regular helper mode
             if !state.filtered_helpers.is_empty()
-                && state.input.starts_with('/')
+                && state.input().starts_with('/')
                 && state.helper_selected + 1 < state.filtered_helpers.len()
             {
                 state.helper_selected += 1;
@@ -673,31 +602,31 @@ fn handle_dropdown_down(state: &mut AppState) {
 }
 
 fn handle_input_changed(state: &mut AppState, c: char) {
-    if c == '?' && state.input.is_empty() && !state.is_dialog_open && !state.show_sessions_dialog {
+    if c == '?' && state.input().is_empty() && !state.is_dialog_open && !state.show_sessions_dialog
+    {
         state.show_shortcuts = !state.show_shortcuts;
         return;
     }
     state.show_shortcuts = false;
 
-    if c == '$' && (state.input.is_empty() || state.is_dialog_open) && !state.show_sessions_dialog {
-        state.input.clear();
+    if c == '$' && (state.input().is_empty() || state.is_dialog_open) && !state.show_sessions_dialog
+    {
+        state.text_area.set_text("");
         handle_shell_mode(state);
         return;
     }
 
-    let pos = state.cursor_position.min(state.input.len());
-    state.input.insert(pos, c);
-    state.cursor_position = pos + c.len_utf8();
+    state.text_area.insert_str(&c.to_string());
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
     if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input.contains(placeholder) {
+        if !state.input().contains(placeholder) {
             state.pasted_long_text = None;
             state.pasted_placeholder = None;
         }
     }
 
-    if state.input.starts_with('/') {
+    if state.input().starts_with('/') {
         if state.autocomplete.is_active() {
             state.autocomplete.reset();
         }
@@ -705,10 +634,10 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     }
 
     if let Some(tx) = &state.autocomplete_tx {
-        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+        let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
-    if state.input.is_empty() {
+    if state.input().is_empty() {
         state.show_helper_dropdown = false;
         state.filtered_helpers.clear();
         state.filtered_files.clear();
@@ -718,21 +647,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
 }
 
 fn handle_input_backspace(state: &mut AppState) {
-    if state.cursor_position > 0 && !state.input.is_empty() {
-        let pos = state.cursor_position;
-        let prev = state.input[..pos]
-            .chars()
-            .next_back()
-            .map(|c| c.len_utf8())
-            .unwrap_or(1);
-        let remove_at = pos - prev;
-        state.input.drain(remove_at..pos);
-        state.cursor_position = remove_at;
-    }
+    state.text_area.delete_backward(1);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
     if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input.contains(placeholder) {
+        if !state.input().contains(placeholder) {
             state.pasted_long_text = None;
             state.pasted_placeholder = None;
         }
@@ -740,11 +659,11 @@ fn handle_input_backspace(state: &mut AppState) {
 
     // Send input to autocomplete worker (async, non-blocking)
     if let Some(tx) = &state.autocomplete_tx {
-        let _ = tx.try_send((state.input.clone(), state.cursor_position));
+        let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
     // Handle helper filtering after backspace
-    if state.input.starts_with('/') {
+    if state.input().starts_with('/') {
         if state.autocomplete.is_active() {
             state.autocomplete.reset();
         }
@@ -752,7 +671,7 @@ fn handle_input_backspace(state: &mut AppState) {
     }
 
     // Hide dropdown if input is empty
-    if state.input.is_empty() {
+    if state.input().is_empty() {
         state.show_helper_dropdown = false;
         state.filtered_helpers.clear();
         state.filtered_files.clear();
@@ -797,21 +716,18 @@ fn handle_esc(
         state.is_dialog_open = false;
         state.dialog_command = None;
         state.dialog_focused = false; // Reset focus when dialog closes
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
     } else if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let _ = shell_tx.try_send(InputEvent::ShellKill);
         }
         state.show_shell_mode = false;
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
         if state.dialog_command.is_some() {
             state.is_dialog_open = true;
         }
     } else {
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
     }
 }
 
@@ -824,9 +740,8 @@ fn handle_input_submitted(
 ) {
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
-            let input = state.input.clone();
-            state.input.clear();
-            state.cursor_position = 0;
+            let input = state.input().to_string();
+            state.text_area.set_text("");
 
             // Send the input to the shell command
             if let Some(cmd) = &state.active_shell_command {
@@ -836,15 +751,13 @@ fn handle_input_submitted(
                 });
             }
             state.waiting_for_shell_input = false;
-
             return;
         }
 
         // Otherwise, it's a new shell command
-        if !state.input.trim().is_empty() {
-            let command = state.input.clone();
-            state.input.clear();
-            state.cursor_position = 0;
+        if !state.input().trim().is_empty() {
+            let command = state.input().to_string();
+            state.text_area.set_text("");
             state.show_helper_dropdown = false;
 
             // Run the shell command with the shell event channel
@@ -853,14 +766,15 @@ fn handle_input_submitted(
         return;
     }
 
-    if state.input.trim() == "clear" {
+    if state.input().trim() == "clear" {
         push_clear_message(state);
         return;
     }
 
     // Handle toggle auto-approve command
-    if state.input.trim().starts_with("/toggle_auto_approve") {
-        let input_parts: Vec<&str> = state.input.split_whitespace().collect();
+    let input_text = state.input().to_string();
+    if input_text.trim().starts_with("/toggle_auto_approve") {
+        let input_parts: Vec<&str> = input_text.split_whitespace().collect();
         if input_parts.len() >= 2 {
             let tool_name = input_parts[1];
 
@@ -900,8 +814,7 @@ fn handle_input_submitted(
         } else {
             push_error_message(state, "Usage: /toggle_auto_approve <tool_name>", None);
         }
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
         state.show_helper_dropdown = false;
         return;
     }
@@ -920,8 +833,8 @@ fn handle_input_submitted(
         state.dialog_selected = 0;
         state.dialog_command = None;
         state.dialog_focused = false;
-        state.input.clear();
-        state.cursor_position = 0; // Reset focus when dialog closes
+        state.text_area.set_text("");
+    // Reset focus when dialog closes
     } else if state.show_helper_dropdown {
         if state.autocomplete.is_active() {
             let selected_file = state
@@ -941,8 +854,7 @@ fn handle_input_submitted(
                     state.loading_type = LoadingType::Sessions;
                     state.loading = true;
                     let _ = output_tx.try_send(OutputEvent::ListSessions);
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
@@ -952,14 +864,13 @@ fn handle_input_submitted(
                     state.messages.clear();
                     state
                         .messages
-                        .extend(welcome_messages(state.latest_version.clone()));
+                        .extend(welcome_messages(state.latest_version.clone(), state));
                     render_system_message(state, "Resuming last session.");
 
                     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
                     state.loading_type = LoadingType::Llm;
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
@@ -971,42 +882,45 @@ fn handle_input_submitted(
                 "/memorize" => {
                     push_memorize_message(state);
                     let _ = output_tx.try_send(OutputEvent::Memorize);
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
                 "/help" => {
                     push_help_message(state);
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
                 "/status" => {
                     push_status_message(state);
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
                 "/quit" => {
                     state.show_helper_dropdown = false;
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
                     let _ = input_tx.try_send(InputEvent::Quit);
                 }
                 "/toggle_auto_approve" => {
                     let input = "/toggle_auto_approve ".to_string();
-                    state.input = input.clone();
-                    state.cursor_position = input.clone().len();
+                    state.text_area.set_text(&input);
+                    state.text_area.set_cursor(input.len());
                     state.show_helper_dropdown = false;
                     return;
                 }
                 "/list_approved_tools" => {
                     list_auto_approved_tools(state);
-                    state.input.clear();
-                    state.cursor_position = 0;
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                    return;
+                }
+                "/mouse_capture" => {
+                    // Toggle mouse capture using shared function
+                    let _ = crate::toggle_mouse_capture(state);
+
+                    state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
                 }
@@ -1014,7 +928,7 @@ fn handle_input_submitted(
                 _ => {}
             }
         }
-    } else if !state.input.trim().is_empty() {
+    } else if !state.input().trim().is_empty() {
         // PERFORMANCE FIX: Simplified condition for submission
         // Allow submission of any non-empty input that's not a recognized helper command
         let input_height = 3;
@@ -1026,22 +940,21 @@ fn handle_input_submitted(
         if let (Some(placeholder), Some(long_text)) =
             (&state.pasted_placeholder, &state.pasted_long_text)
         {
-            if state.input.contains(placeholder) {
-                let replaced = state.input.replace(placeholder, long_text);
-                state.input = replaced;
+            if state.input().contains(placeholder) {
+                let replaced = state.input().replace(placeholder, long_text);
+                state.text_area.set_text(&replaced);
             }
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
         let _ = output_tx.try_send(OutputEvent::UserMessage(
-            state.input.clone(),
+            state.input().to_string(),
             state.shell_tool_calls.clone(),
         ));
 
-        let _ = input_tx.try_send(InputEvent::AddUserMessage(state.input.clone()));
+        let _ = input_tx.try_send(InputEvent::AddUserMessage(state.input().to_string()));
         state.shell_tool_calls = None;
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
@@ -1072,8 +985,7 @@ fn handle_input_submitted_with(
         color.map(|c| Style::default().fg(c)),
     ));
     state.loading = true;
-    state.input.clear();
-    state.cursor_position = 0;
+    state.text_area.set_text("");
     let total_lines = state.messages.len() * 2;
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     if was_at_bottom {
@@ -1112,8 +1024,7 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
         state
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
-        state.input.clear();
-        state.cursor_position = 0;
+        state.text_area.set_text("");
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
@@ -1394,8 +1305,6 @@ fn handle_retry_tool_call(
                 return;
             }
         };
-        let command_len = command.len();
-
         // Enable shell mode
         state.show_shell_mode = true;
         state.is_dialog_open = false;
@@ -1406,13 +1315,15 @@ fn handle_retry_tool_call(
         }
 
         // Set the command in the input but don't execute it yet
-        state.input = command;
-        state.cursor_position = command_len;
+        state.text_area.set_text(&command);
+        state.text_area.set_cursor(command.len());
 
         // Clear any existing shell state
         state.active_shell_command = None;
         state.active_shell_command_output = None;
         state.waiting_for_shell_input = false;
+        // Reset textarea shell mode
+        state.text_area.set_shell_mode(false);
     }
 }
 
@@ -1451,7 +1362,8 @@ fn list_auto_approved_tools(state: &mut AppState) {
             .map(|(name, _)| name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-
+        // add a spacing marker
+        state.messages.push(Message::plain_text(""));
         push_styled_message(
             state,
             &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
@@ -1467,4 +1379,21 @@ fn list_auto_approved_tools(state: &mut AppState) {
         //     Color::Cyan,
         // );
     }
+}
+
+pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
+    // Normalize line endings: many terminals convert newlines to \r when pasting,
+    // but textarea expects \n. This is the same fix used in Codex.
+    let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+
+    let char_count = normalized_pasted.chars().count();
+    if char_count > MAX_PASTE_CHAR_COUNT {
+        let placeholder = format!("[Pasted Content {char_count} chars]");
+        state.text_area.insert_element(&placeholder);
+        state.pending_pastes.push((placeholder, normalized_pasted));
+    } else {
+        state.text_area.insert_str(&normalized_pasted);
+    }
+
+    true
 }

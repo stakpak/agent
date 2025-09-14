@@ -16,13 +16,13 @@ fn term_color(color: Color) -> Color {
 }
 
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
-    let input = state.input.trim();
+    let input = state.input().trim();
     let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
     if state.show_helper_dropdown && show {
         use ratatui::widgets::{List, ListItem, ListState};
         let item_style = Style::default();
         // Find the longest command name to calculate padding
-        let commands_to_show = if state.input == "/" {
+        let commands_to_show = if state.input() == "/" {
             &state.helpers
         } else {
             &state.filtered_helpers

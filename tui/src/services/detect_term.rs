@@ -176,7 +176,7 @@ fn detect_terminal_emulator() -> String {
 
 /// Check if the terminal is one of the known unsupported terminals
 #[allow(dead_code)]
-fn is_unsupported_terminal(emulator: &str) -> bool {
+pub fn is_unsupported_terminal(emulator: &str) -> bool {
     match emulator {
         // Terminals that don't support RGB colors
         "Terminal.app" => true, // macOS Terminal built-in
