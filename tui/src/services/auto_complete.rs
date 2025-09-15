@@ -277,7 +277,7 @@ pub fn get_current_word(input: &str, cursor_pos: usize, trigger_char: Option<cha
 
 /// Handle Tab trigger for file autocomplete - with debouncing
 pub fn handle_tab_trigger(state: &mut AppState) -> bool {
-    if state.input.trim().is_empty() {
+    if state.input().trim().is_empty() {
         return false;
     }
 
@@ -288,7 +288,7 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
         }
     }
 
-    let current_word = get_current_word(state.input.as_str(), state.cursor_position, None);
+    let current_word = get_current_word(state.input(), state.cursor_position(), None);
     state.autocomplete.filter_files(&current_word);
 
     if !state.autocomplete.filtered_files.is_empty() {
@@ -318,27 +318,34 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
     match state.autocomplete.trigger_char {
         Some('@') => {
             // Replace from @ to cursor with selected file
-            if let Some(at_pos) = find_at_trigger(state.input.as_str(), state.cursor_position) {
-                let before_at = state.input[..at_pos].to_string();
-                let after_cursor = state.input[state.cursor_position..].to_string();
-                state.input = format!("{}{}{}", before_at, selected_file, after_cursor);
-                state.cursor_position = before_at.len() + selected_file.len();
+            if let Some(at_pos) = find_at_trigger(state.input(), state.cursor_position()) {
+                let before_at = state.input()[..at_pos].to_string();
+                let after_cursor = state.input()[state.cursor_position()..].to_string();
+                let new_text = format!("{}{}{}", before_at, selected_file, after_cursor);
+                state.text_area.set_text(&new_text);
+                state
+                    .text_area
+                    .set_cursor(before_at.len() + selected_file.len());
             }
         }
         None => {
             // Tab mode - replace current word
-            let safe_pos = state.cursor_position.min(state.input.len());
-            let before_cursor = &state.input[..safe_pos];
+            let safe_pos = state.cursor_position().min(state.input().len());
+            let before_cursor = &state.input()[..safe_pos];
             if let Some(word_start) = before_cursor.rfind(char::is_whitespace) {
-                let before_word = &state.input[..word_start + 1];
-                let after_cursor = &state.input[state.cursor_position..];
-                state.input = format!("{}{}{}", before_word, selected_file, after_cursor);
-                state.cursor_position = word_start + 1 + selected_file.len();
+                let before_word = &state.input()[..word_start + 1];
+                let after_cursor = &state.input()[state.cursor_position()..];
+                let new_text = format!("{}{}{}", before_word, selected_file, after_cursor);
+                state.text_area.set_text(&new_text);
+                state
+                    .text_area
+                    .set_cursor(word_start + 1 + selected_file.len());
             } else {
                 // Replace from beginning
-                let after_cursor = &state.input[state.cursor_position..];
-                state.input = format!("{}{}", selected_file, after_cursor);
-                state.cursor_position = selected_file.len();
+                let after_cursor = &state.input()[state.cursor_position()..];
+                let new_text = format!("{}{}", selected_file, after_cursor);
+                state.text_area.set_text(&new_text);
+                state.text_area.set_cursor(selected_file.len());
             }
         }
         _ => {}
