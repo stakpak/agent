@@ -12,7 +12,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.2.40"
+version = "0.2.44"
 edition = "2024"
 
 
@@ -60,6 +60,7 @@ axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"
+tempfile = "3.0"
 
 # Required nightly
 [workspace.lints.clippy]
