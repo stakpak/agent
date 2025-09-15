@@ -47,6 +47,8 @@ pub struct StakpakAcpAgent {
     // Track active tool calls for cancellation
     active_tool_calls:
         Arc<tokio::sync::Mutex<Vec<stakpak_shared::models::integrations::openai::ToolCall>>>,
+    // Store current streaming message for todo extraction
+    current_streaming_message: Arc<tokio::sync::Mutex<String>>,
 }
 
 impl StakpakAcpAgent {
@@ -360,6 +362,107 @@ impl StakpakAcpAgent {
             "toolu_{}",
             uuid::Uuid::new_v4().to_string().replace('-', "")
         )
+    }
+
+    // Helper method to extract todos from the current streaming message and send them as session notifications
+    async fn extract_and_send_todos(&self, session_id: &acp::SessionId) -> Result<(), acp::Error> {
+        let current_message = {
+            let message = self.current_streaming_message.lock().await;
+            message.clone()
+        };
+
+        if current_message.trim().is_empty() {
+            return Ok(());
+        }
+
+        let mut todos = Vec::new();
+        let mut completed_todos = Vec::new();
+
+        // Extract todos from XML format: <scratchpad><todo>...</todo></scratchpad>
+        if let Some(todo_content) = self.extract_todos_from_xml(&current_message) {
+            // Parse the todo content line by line
+            for line in todo_content.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Check for markdown-style todos: - [ ] or - [x]
+                if line.starts_with("- [ ]") {
+                    let todo_text = line.strip_prefix("- [ ]").unwrap_or("").trim().to_string();
+                    if !todo_text.is_empty() {
+                        todos.push(todo_text);
+                    }
+                } else if line.starts_with("- [x]") {
+                    let todo_text = line.strip_prefix("- [x]").unwrap_or("").trim().to_string();
+                    if !todo_text.is_empty() {
+                        completed_todos.push(todo_text);
+                    }
+                }
+            }
+        }
+
+        // Send todos as session notifications if any were found
+        if !todos.is_empty() || !completed_todos.is_empty() {
+            let mut todo_message = String::new();
+
+            if !todos.is_empty() {
+                todo_message.push_str("📋 **Pending Tasks:**\n");
+                for (i, todo) in todos.iter().enumerate() {
+                    todo_message.push_str(&format!("{}. {}\n", i + 1, todo));
+                }
+            }
+
+            if !completed_todos.is_empty() {
+                if !todo_message.is_empty() {
+                    todo_message.push('\n');
+                }
+                todo_message.push_str("✅ **Completed Tasks:**\n");
+                for (i, todo) in completed_todos.iter().enumerate() {
+                    todo_message.push_str(&format!("{}. {}\n", i + 1, todo));
+                }
+            }
+
+            // Send the todo message as a session notification
+            let (tx, rx) = oneshot::channel();
+            self.session_update_tx
+                .send((
+                    SessionNotification {
+                        session_id: session_id.clone(),
+                        update: acp::SessionUpdate::AgentMessageChunk {
+                            content: acp::ContentBlock::Text(acp::TextContent {
+                                text: todo_message,
+                                annotations: None,
+                            }),
+                        },
+                    },
+                    tx,
+                ))
+                .map_err(|_| acp::Error::internal_error())?;
+            rx.await.map_err(|_| acp::Error::internal_error())?;
+
+            log::info!(
+                "Sent {} pending and {} completed todos as session notification",
+                todos.len(),
+                completed_todos.len()
+            );
+        }
+
+        Ok(())
+    }
+
+    // Helper method to extract todo content from XML format
+    fn extract_todos_from_xml(&self, message: &str) -> Option<String> {
+        // Look for <todo>...</todo> pattern using simple string matching
+        if let Some(start) = message.find("<todo>") {
+            if let Some(end) = message[start..].find("</todo>") {
+                let todo_start = start + 6; // Length of "<todo>"
+                let todo_end = start + end;
+                return Some(message[todo_start..todo_end].trim().to_string());
+            }
+        }
+
+        None
     }
 
     // Process tool calls with cancellation support
@@ -782,6 +885,12 @@ impl StakpakAcpAgent {
         // Create cancellation receiver
         let mut cancel_rx = self.stream_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
+        // Clear the current streaming message at the start
+        {
+            let mut current_message = self.current_streaming_message.lock().await;
+            *current_message = String::new();
+        }
+
         loop {
             // Race between stream processing and cancellation
             let result = if let Some(ref mut cancel_rx) = cancel_rx {
@@ -833,6 +942,12 @@ impl StakpakAcpAgent {
                                 }
                             )
                         );
+
+                        // Accumulate the raw content in the current streaming message BEFORE filtering
+                        {
+                            let mut current_message = self.current_streaming_message.lock().await;
+                            current_message.push_str(content);
+                        }
 
                         // Filter out checkpoint IDs from streaming content
                         let filtered_content = if content.contains("<checkpoint_id>") {
@@ -1010,6 +1125,7 @@ impl StakpakAcpAgent {
             stream_cancel_tx: Some(stream_cancel_tx),
             tool_cancel_tx: Some(tool_cancel_tx),
             active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
         })
     }
 
@@ -1073,6 +1189,7 @@ impl StakpakAcpAgent {
                     stream_cancel_tx: self.stream_cancel_tx.clone(),
                     tool_cancel_tx: self.tool_cancel_tx.clone(),
                     active_tool_calls: self.active_tool_calls.clone(),
+                    current_streaming_message: self.current_streaming_message.clone(),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -1182,6 +1299,7 @@ impl Clone for StakpakAcpAgent {
             stream_cancel_tx: self.stream_cancel_tx.clone(),
             tool_cancel_tx: self.tool_cancel_tx.clone(),
             active_tool_calls: self.active_tool_calls.clone(),
+            current_streaming_message: self.current_streaming_message.clone(),
         }
     }
 }
@@ -1573,6 +1691,12 @@ impl acp::Agent for StakpakAcpAgent {
 
         // Note: Content is already sent during streaming, no need to send again
         // This eliminates the redundant message sending issue
+
+        // Extract and send todos from the current streaming message before ending the turn
+        if let Err(e) = self.extract_and_send_todos(&arguments.session_id).await {
+            log::warn!("Failed to extract and send todos: {}", e);
+            // Don't fail the prompt response if todo extraction fails
+        }
 
         Ok(acp::PromptResponse {
             stop_reason: acp::StopReason::EndTurn,
