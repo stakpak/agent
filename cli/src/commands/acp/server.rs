@@ -19,8 +19,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use uuid::Uuid;
 
-// TODO:: EXTRACT SCRATCHPAD/CHECKLIST INTO TODOS CHECK LIST TO WORK ON ZED
-
 pub struct StakpakAcpAgent {
     config: AppConfig,
     client: Client,
@@ -49,6 +47,8 @@ pub struct StakpakAcpAgent {
         Arc<tokio::sync::Mutex<Vec<stakpak_shared::models::integrations::openai::ToolCall>>>,
     // Store current streaming message for todo extraction
     current_streaming_message: Arc<tokio::sync::Mutex<String>>,
+    // Buffer for handling partial XML tags during streaming
+    streaming_buffer: Arc<tokio::sync::Mutex<String>>,
 }
 
 impl StakpakAcpAgent {
@@ -364,15 +364,18 @@ impl StakpakAcpAgent {
         )
     }
 
-    // Helper method to extract todos from the current streaming message and send them as session notifications
-    async fn extract_and_send_todos(&self, session_id: &acp::SessionId) -> Result<(), acp::Error> {
+    // Helper method to extract todos from the current streaming message
+    fn extract_todos(&self) -> (Vec<String>, Vec<String>) {
         let current_message = {
-            let message = self.current_streaming_message.lock().await;
-            message.clone()
+            let message = self.current_streaming_message.try_lock();
+            match message {
+                Ok(msg) => msg.clone(),
+                Err(_) => return (Vec::new(), Vec::new()), // Return empty if lock fails
+            }
         };
 
         if current_message.trim().is_empty() {
-            return Ok(());
+            return (Vec::new(), Vec::new());
         }
 
         let mut todos = Vec::new();
@@ -402,60 +405,15 @@ impl StakpakAcpAgent {
             }
         }
 
-        // Send todos as session notifications if any were found
-        if !todos.is_empty() || !completed_todos.is_empty() {
-            let mut todo_message = String::new();
-
-            if !todos.is_empty() {
-                todo_message.push_str("📋 **Pending Tasks:**\n");
-                for (i, todo) in todos.iter().enumerate() {
-                    todo_message.push_str(&format!("{}. {}\n", i + 1, todo));
-                }
-            }
-
-            if !completed_todos.is_empty() {
-                if !todo_message.is_empty() {
-                    todo_message.push('\n');
-                }
-                todo_message.push_str("✅ **Completed Tasks:**\n");
-                for (i, todo) in completed_todos.iter().enumerate() {
-                    todo_message.push_str(&format!("{}. {}\n", i + 1, todo));
-                }
-            }
-
-            // Send the todo message as a session notification
-            let (tx, rx) = oneshot::channel();
-            self.session_update_tx
-                .send((
-                    SessionNotification {
-                        session_id: session_id.clone(),
-                        update: acp::SessionUpdate::AgentMessageChunk {
-                            content: acp::ContentBlock::Text(acp::TextContent {
-                                text: todo_message,
-                                annotations: None,
-                            }),
-                        },
-                    },
-                    tx,
-                ))
-                .map_err(|_| acp::Error::internal_error())?;
-            rx.await.map_err(|_| acp::Error::internal_error())?;
-
-            log::info!(
-                "Sent {} pending and {} completed todos as session notification",
-                todos.len(),
-                completed_todos.len()
-            );
-        }
-
-        Ok(())
+        (todos, completed_todos)
     }
 
     // Helper method to extract todo content from XML format
     fn extract_todos_from_xml(&self, message: &str) -> Option<String> {
-        // Look for <todo>...</todo> pattern using simple string matching
-        if let Some(start) = message.find("<todo>") {
-            if let Some(end) = message[start..].find("</todo>") {
+        // Look for <todo>...</todo> pattern using case-insensitive matching
+        let message_lower = message.to_lowercase();
+        if let Some(start) = message_lower.find("<todo>") {
+            if let Some(end) = message_lower[start..].find("</todo>") {
                 let todo_start = start + 6; // Length of "<todo>"
                 let todo_end = start + end;
                 return Some(message[todo_start..todo_end].trim().to_string());
@@ -463,6 +421,172 @@ impl StakpakAcpAgent {
         }
 
         None
+    }
+
+    // Helper method to extract todos and convert them to ACP plan entries
+    fn extract_todos_as_plan_entries(&self, message: &str) -> Vec<acp::PlanEntry> {
+        let mut plan_entries = Vec::new();
+
+        if let Some(todo_content) = self.extract_todos_from_xml(message) {
+            // Parse the todo content line by line
+            for line in todo_content.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Check for markdown-style todos: - [ ] or - [x]
+                if line.starts_with("- [ ]") {
+                    let todo_text = line.strip_prefix("- [ ]").unwrap_or("").trim().to_string();
+                    if !todo_text.is_empty() {
+                        plan_entries.push(acp::PlanEntry {
+                            content: todo_text,
+                            priority: acp::PlanEntryPriority::Medium,
+                            status: acp::PlanEntryStatus::Pending,
+                        });
+                    }
+                } else if line.starts_with("- [x]") {
+                    let todo_text = line.strip_prefix("- [x]").unwrap_or("").trim().to_string();
+                    if !todo_text.is_empty() {
+                        plan_entries.push(acp::PlanEntry {
+                            content: todo_text,
+                            priority: acp::PlanEntryPriority::Medium,
+                            status: acp::PlanEntryStatus::Completed,
+                        });
+                    }
+                }
+            }
+        }
+
+        plan_entries
+    }
+
+    // Helper method to send agent plan session update
+    async fn send_agent_plan(
+        &self,
+        session_id: &acp::SessionId,
+        plan_entries: Vec<acp::PlanEntry>,
+    ) -> Result<(), acp::Error> {
+        if plan_entries.is_empty() {
+            return Ok(());
+        }
+
+        let entries_count = plan_entries.len();
+        let (tx, rx) = oneshot::channel();
+        self.session_update_tx
+            .send((
+                SessionNotification {
+                    session_id: session_id.clone(),
+                    update: acp::SessionUpdate::Plan(acp::Plan {
+                        entries: plan_entries,
+                    }),
+                },
+                tx,
+            ))
+            .map_err(|_| acp::Error::internal_error())?;
+        rx.await.map_err(|_| acp::Error::internal_error())?;
+
+        log::info!("Sent agent plan with {} entries", entries_count);
+        Ok(())
+    }
+
+    // Process streaming content with buffering to handle partial XML tags
+    async fn process_streaming_content(
+        &self,
+        content: &str,
+        checkpoint_regex: &Option<regex::Regex>,
+    ) -> String {
+        // First, filter out checkpoint IDs from the incoming content
+        let filtered_content = if content.contains("<checkpoint_id>") {
+            if let Some(regex) = checkpoint_regex {
+                regex.replace_all(content, "").to_string()
+            } else {
+                content
+                    .replace("<checkpoint_id>", "")
+                    .replace("</checkpoint_id>", "")
+            }
+        } else {
+            content.to_string()
+        };
+
+        // Use buffering to handle partial XML tags
+        let (ready_content, held_back) = {
+            let mut buffer = self.streaming_buffer.lock().await;
+            buffer.push_str(&filtered_content);
+
+            // Extract content that's safe to process (doesn't end with partial XML tag)
+            self.extract_safe_content(&buffer)
+        };
+
+        // Update buffer with held back content
+        {
+            let mut buffer = self.streaming_buffer.lock().await;
+            *buffer = held_back;
+        }
+
+        // Use pattern-based conversion for the 4 specific tags
+        crate::commands::acp::utils::process_all_xml_patterns(&ready_content)
+    }
+
+    // Extract content that's safe to process, holding back potential partial XML tags
+    fn extract_safe_content(&self, buffer: &str) -> (String, String) {
+        // Define the XML tags we need to watch for
+        let xml_tags = [
+            "<scratchpad>",
+            "<todo>",
+            "<local_context>",
+            "<rulebooks>",
+            "</scratchpad>",
+            "</todo>",
+            "</local_context>",
+            "</rulebooks>",
+        ];
+
+        // Find the last '<' character
+        if let Some(last_lt_pos) = buffer.rfind('<') {
+            let remaining = &buffer[last_lt_pos..];
+
+            // If the remaining part contains '>', it's a complete tag - process everything
+            if remaining.contains('>') {
+                return (buffer.to_string(), String::new());
+            }
+
+            // Check if this could be the start of any XML tag (partial match)
+            // Only hold back if it's actually a partial match of our specific tags
+            let is_partial_match = xml_tags
+                .iter()
+                .any(|tag| remaining.len() < tag.len() && tag.starts_with(remaining));
+
+            if is_partial_match {
+                // Hold back only the potential partial tag
+                let safe_content = buffer[..last_lt_pos].to_string();
+                let held_back = remaining.to_string();
+                return (safe_content, held_back);
+            } else {
+                // Not a partial match of our tags, process everything
+                return (buffer.to_string(), String::new());
+            }
+        }
+
+        // No '<' found, process everything
+        (buffer.to_string(), String::new())
+    }
+
+    // Flush any remaining content from the buffer (called at end of stream)
+    async fn flush_streaming_buffer(&self) -> String {
+        let buffer_content = {
+            let mut buffer = self.streaming_buffer.lock().await;
+            let content = buffer.clone();
+            buffer.clear();
+            content
+        };
+
+        if !buffer_content.is_empty() {
+            // Process any remaining content
+            crate::commands::acp::utils::process_all_xml_patterns(&buffer_content)
+        } else {
+            String::new()
+        }
     }
 
     // Process tool calls with cancellation support
@@ -856,7 +980,7 @@ impl StakpakAcpAgent {
         session_id: &acp::SessionId,
     ) -> Result<ChatCompletionResponse, String> {
         let mut stream = Box::pin(stream);
-        // TODO:: MAKE SURE THAT TOOL CALL STREAM IS WORKING
+
         let mut chat_completion_response = ChatCompletionResponse {
             id: "".to_string(),
             object: "".to_string(),
@@ -885,10 +1009,14 @@ impl StakpakAcpAgent {
         // Create cancellation receiver
         let mut cancel_rx = self.stream_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
-        // Clear the current streaming message at the start
+        // Clear the current streaming message and buffer at the start
         {
             let mut current_message = self.current_streaming_message.lock().await;
             *current_message = String::new();
+        }
+        {
+            let mut buffer = self.streaming_buffer.lock().await;
+            *buffer = String::new();
         }
 
         loop {
@@ -949,22 +1077,23 @@ impl StakpakAcpAgent {
                             current_message.push_str(content);
                         }
 
-                        // Filter out checkpoint IDs from streaming content
-                        let filtered_content = if content.contains("<checkpoint_id>") {
-                            // Remove entire checkpoint_id blocks including content
-                            if let Some(regex) = &checkpoint_regex {
-                                let cleaned = regex.replace_all(content, "").to_string();
-                                // Also remove any leading/trailing whitespace and newlines
-                                cleaned.trim().to_string()
-                            } else {
-                                // Fallback to simple string replacement if regex fails
-                                content
-                                    .replace("<checkpoint_id>", "")
-                                    .replace("</checkpoint_id>", "")
-                            }
-                        } else {
-                            content.clone()
+                        // Extract and send agent plan from current streaming message
+                        let current_message = {
+                            let message = self.current_streaming_message.lock().await;
+                            message.clone()
                         };
+                        let plan_entries = self.extract_todos_as_plan_entries(&current_message);
+                        if !plan_entries.is_empty() {
+                            if let Err(e) = self.send_agent_plan(session_id, plan_entries).await {
+                                log::warn!("Failed to send agent plan during streaming: {}", e);
+                                // Don't fail the streaming if plan sending fails
+                            }
+                        }
+
+                        // Process streaming content with buffering for partial XML tags
+                        let filtered_content = self
+                            .process_streaming_content(content, &checkpoint_regex)
+                            .await;
 
                         // Only send non-empty content after filtering
                         if !filtered_content.trim().is_empty() {
@@ -1054,6 +1183,28 @@ impl StakpakAcpAgent {
             }
         }
 
+        // Flush any remaining content from the buffer at the end of the stream
+        let flushed_content = self.flush_streaming_buffer().await;
+        if !flushed_content.trim().is_empty() {
+            // Send the flushed content
+            let (tx, rx) = oneshot::channel();
+            self.session_update_tx
+                .send((
+                    SessionNotification {
+                        session_id: session_id.clone(),
+                        update: acp::SessionUpdate::AgentMessageChunk {
+                            content: acp::ContentBlock::Text(acp::TextContent {
+                                text: flushed_content,
+                                annotations: None,
+                            }),
+                        },
+                    },
+                    tx,
+                ))
+                .map_err(|_| "Failed to send flushed content")?;
+            rx.await.map_err(|_| "Failed to await flushed content")?;
+        }
+
         // filter out empty tool calls
         chat_message.tool_calls = Some(
             chat_message
@@ -1126,6 +1277,7 @@ impl StakpakAcpAgent {
             tool_cancel_tx: Some(tool_cancel_tx),
             active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
+            streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
         })
     }
 
@@ -1190,6 +1342,7 @@ impl StakpakAcpAgent {
                     tool_cancel_tx: self.tool_cancel_tx.clone(),
                     active_tool_calls: self.active_tool_calls.clone(),
                     current_streaming_message: self.current_streaming_message.clone(),
+                    streaming_buffer: self.streaming_buffer.clone(),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -1300,6 +1453,7 @@ impl Clone for StakpakAcpAgent {
             tool_cancel_tx: self.tool_cancel_tx.clone(),
             active_tool_calls: self.active_tool_calls.clone(),
             current_streaming_message: self.current_streaming_message.clone(),
+            streaming_buffer: self.streaming_buffer.clone(),
         }
     }
 }
@@ -1692,10 +1846,14 @@ impl acp::Agent for StakpakAcpAgent {
         // Note: Content is already sent during streaming, no need to send again
         // This eliminates the redundant message sending issue
 
-        // Extract and send todos from the current streaming message before ending the turn
-        if let Err(e) = self.extract_and_send_todos(&arguments.session_id).await {
-            log::warn!("Failed to extract and send todos: {}", e);
-            // Don't fail the prompt response if todo extraction fails
+        // Extract todos from the current streaming message (for logging purposes)
+        let (todos, completed_todos) = self.extract_todos();
+        if !todos.is_empty() || !completed_todos.is_empty() {
+            log::info!(
+                "Final todo extraction: {} pending, {} completed",
+                todos.len(),
+                completed_todos.len()
+            );
         }
 
         Ok(acp::PromptResponse {

@@ -114,11 +114,14 @@ async fn main() {
     // Initialize rustls crypto provider
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 
-    if let Err(e) = auto_update().await {
-        eprintln!("Auto-update failed: {}", e);
-    }
-
     let cli = Cli::parse();
+
+    // Skip auto-update for ACP command
+    if !matches!(cli.command, Some(Commands::Acp)) {
+        if let Err(e) = auto_update().await {
+            eprintln!("Auto-update failed: {}", e);
+        }
+    }
 
     if let Some(workdir) = cli.workdir {
         let workdir = Path::new(&workdir);
@@ -161,7 +164,11 @@ async fn main() {
 
             match cli.command {
                 Some(command) => {
-                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    // Skip check_update for ACP command
+                    if !matches!(command, Commands::Acp) {
+                        let _ =
+                            check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    }
                     if config.api_key.is_none() && command.requires_auth() {
                         prompt_for_api_key(&mut config).await;
                     }
