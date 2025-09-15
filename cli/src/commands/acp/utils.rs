@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn test_convert_xml_tags_to_markdown() {
         let input = "<scratchpad>\n<todo>\n- Task 1\n- Task 2\n</todo>\n</scratchpad>";
-        let expected = "## **Scratchpad**\n### **Todo**\n- Task 1\n- Task 2\n";
+        let expected = "## **Scratchpad**\n\n### **Todo**\n\n- Task 1\n- Task 2\n\n";
         let result = convert_xml_tags_to_markdown(input);
         assert_eq!(result, expected);
     }
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn test_process_all_xml_patterns() {
         let input = "<checkpoint_id>abc</checkpoint_id><scratchpad>\n<todo>\n- Task\n</todo>\n</scratchpad>";
-        let expected = "## **Scratchpad**\n### **Todo**\n- Task\n";
+        let expected = "## **Scratchpad**\n\n### **Todo**\n\n- Task\n\n";
         let result = process_all_xml_patterns(input);
         assert_eq!(result, expected);
     }
