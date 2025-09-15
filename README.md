@@ -147,23 +147,21 @@ stakpak mcp --disable-mcp-mtls
 
 ### Agent Client Protocol (ACP)
 
-Stakpak implements the [Agent Client Protocol (ACP)](https://github.com/zed-industries/agent-client-protocol) to enable seamless integration with code editors like Zed. ACP standardizes communication between AI agents and development environments, providing a unified interface for AI-powered coding assistance.
+ACP is a standardized protocol that enables AI agents to integrate directly with code editors like Zed, providing seamless AI-powered development assistance.
 
-#### Features Implemented
+#### What ACP Offers with Stakpak
 
-- **Chat Completion** - Natural language conversations with the AI agent for code generation, refactoring, and debugging
-- **Session Management** - Persistent sessions with checkpoint support for resuming conversations
-- **Streaming Responses** - Real-time streaming of AI responses for better user experience
+- **Real-time AI Chat** - Natural language conversations with context-aware AI assistance
+- **Live Code Analysis** - AI can read, understand, and modify your codebase in real-time
+- **Tool Execution** - AI can run commands, edit files, search code, and perform development tasks
+- **Session Persistence** - Maintains conversation context across editor sessions
+- **Streaming Responses** - Real-time AI responses with live progress updates
+- **Agent Plans** - Visual task breakdown and progress tracking
 
-#### Integration with Zed Editor
+#### Installation & Setup
 
-To use Stakpak as an ACP agent in Zed, you need to configure it in Zed's settings:
-
-##### Through Zed UI
-1. **Open Zed** and click the Assistant (✨) icon in the bottom right corner
-2. **Access Settings** in the Agent Panel (top right corner)
-3. Add the following configuration to your Zed settings file (`~/.config/zed/settings.json`):
-
+1. **Install Stakpak** (if not already installed)
+2. **Configure Zed Editor** - Add to `~/.config/zed/settings.json`:
 ```json
 {
   "agent_servers": {
@@ -175,24 +173,12 @@ To use Stakpak as an ACP agent in Zed, you need to configure it in Zed's setting
   }
 }
 ```
-4. Click on the `+` icon on the top right corner and choose `New stakpak thread` under `External Agents`
-Once configured, you can:
-- Engage in natural language conversations with the AI agent
-- Generate code snippets and refactor existing code
-- Receive explanations for complex code segments
-- Resume previous conversations using checkpoint IDs
-
-#### Start ACP Agent
-
+3. **Start ACP Agent**:
 ```bash
-# Start ACP agent (requires API key)
 stakpak acp
 ```
+4. **Use in Zed** - Click Assistant (✨) → `+` → `New stakpak thread`
 
-#### MCP Tool Calls Status
-IN_PROGRESS
-
-For more information about ACP integration, visit the [Zed Documentation on Agent Panel](https://zed.dev/docs/ai/agent-panel) and [Model Context Protocol Documentation](https://zed.dev/docs/ai/mcp).
 
 ---
 
