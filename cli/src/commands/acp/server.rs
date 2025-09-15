@@ -19,9 +19,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use uuid::Uuid;
 
-// TODO:: MAKE SURE THAT TOOL CALL STREAM IS WORKING
-// TODO:: ADD ACP AGENT MESSAGE STREAM CANCELLATION
-// TODO:: ADD ACP TOOL CALL STREAM CANCELLATION
 // TODO:: EXTRACT SCRATCHPAD/CHECKLIST INTO TODOS CHECK LIST TO WORK ON ZED
 
 pub struct StakpakAcpAgent {
