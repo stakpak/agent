@@ -1494,23 +1494,11 @@ impl acp::Agent for StakpakAcpAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         log::info!("Received new session request {arguments:?}");
 
-        // Create a new agent session using the API client
-        use stakpak_api::models::{AgentID, AgentSessionVisibility};
-
-        let session = self
-            .client
-            .create_agent_session(
-                AgentID::NorbertV1,              // Use default agent
-                AgentSessionVisibility::Private, // Private session
-                None,                            // No input
-            )
-            .await
-            .map_err(|_e| acp::Error::internal_error())?;
-
-        let session_id = acp::SessionId(session.id.to_string().into());
+        let temp_session_id = Uuid::new_v4();
+        let session_id = acp::SessionId(temp_session_id.to_string().into());
 
         // Track the current session ID
-        self.current_session_id.set(Some(session.id));
+        self.current_session_id.set(Some(temp_session_id));
 
         // Clear message history for new session
         {
