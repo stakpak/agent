@@ -390,7 +390,9 @@ impl AppState {
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
-            mouse_capture_enabled: true, // Start with mouse capture enabled
+            mouse_capture_enabled: crate::services::detect_term::is_unsupported_terminal(
+                &crate::services::detect_term::detect_terminal().emulator,
+            ), // Start with mouse capture enabled only for supported terminals
             loading_manager: LoadingStateManager::new(),
         }
     }

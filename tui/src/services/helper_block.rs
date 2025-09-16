@@ -10,8 +10,6 @@ pub fn get_stakpak_version() -> String {
 
 /// Generate a mouse capture hint message based on the terminal type
 pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
-    let hint_text = "Hold Fn/Option/Shift (depends on your terminal) + Click to select text";
-
     let status = if state.mouse_capture_enabled {
         "enabled"
     } else {
@@ -32,8 +30,6 @@ pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
         ),
         Span::raw("  Mouse capture "),
         Span::styled(status, Style::default().fg(status_color)),
-        Span::raw(" • "),
-        Span::raw(hint_text),
         Span::styled(
             " • Ctrl+L to toggle",
             Style::default().fg(Color::LightMagenta),
@@ -414,8 +410,10 @@ pub fn welcome_messages(
         Message::info("SPACING_MARKER", None),
     ];
 
-    messages.push(mouse_capture_hint_message(state));
-    messages.push(Message::info("SPACING_MARKER", None));
+    if state.mouse_capture_enabled {
+        messages.push(mouse_capture_hint_message(state));
+        messages.push(Message::info("SPACING_MARKER", None));
+    }
     messages
 }
 

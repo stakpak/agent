@@ -1,5 +1,5 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, LoadingType, OutputEvent};
+use crate::app::{AppState, InputEvent, OutputEvent};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -290,9 +290,6 @@ pub fn update(
         }
         InputEvent::SetSessions(sessions) => {
             state.sessions = sessions;
-            state.loading = false;
-            state.spinner_frame = 0;
-            state.loading_type = LoadingType::Llm;
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
@@ -938,22 +935,34 @@ fn handle_input_submitted(
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         let was_at_bottom = state.scroll == max_scroll;
 
+        let mut final_input = state.input().to_string();
+
+        // Process any pending pastes first
+        for (placeholder, long_text) in state.pending_pastes.drain(..) {
+            if final_input.contains(&placeholder) {
+                final_input = final_input.replace(&placeholder, &long_text);
+                state.text_area.set_text(&final_input);
+                break; // Only process the first matching paste
+            }
+        }
+
+        // Also handle the existing pasted_placeholder system
         if let (Some(placeholder), Some(long_text)) =
             (&state.pasted_placeholder, &state.pasted_long_text)
         {
-            if state.input().contains(placeholder) {
-                let replaced = state.input().replace(placeholder, long_text);
-                state.text_area.set_text(&replaced);
+            if final_input.contains(placeholder) {
+                final_input = final_input.replace(placeholder, long_text);
+                state.text_area.set_text(&final_input);
             }
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
         let _ = output_tx.try_send(OutputEvent::UserMessage(
-            state.input().to_string(),
+            final_input.clone(),
             state.shell_tool_calls.clone(),
         ));
 
-        let _ = input_tx.try_send(InputEvent::AddUserMessage(state.input().to_string()));
+        let _ = input_tx.try_send(InputEvent::AddUserMessage(final_input));
         state.shell_tool_calls = None;
         state.text_area.set_text("");
         let total_lines = state.messages.len() * 2;
