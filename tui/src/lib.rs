@@ -23,20 +23,8 @@ use tokio::time::{Duration, interval};
 pub use view::view;
 
 use crate::services::bash_block::render_collapsed_result_block;
+use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::message::Message;
-
-pub fn ensure_vscode_option_click_setting(state: &mut AppState) -> io::Result<()> {
-    let is_vscode = crate::services::vscode_terminal::ensure_vscode_option_click_setting();
-    if is_vscode && state.mouse_capture_enabled {
-        state.messages.push(Message::info("SPACING_MARKER", None));
-        state.messages.push(Message::info(
-            "✅ VSCode Option+Click setting enabled in workspace",
-            None,
-        ));
-        state.messages.push(Message::info("SPACING_MARKER", None));
-    }
-    Ok(())
-}
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     state.mouse_capture_enabled = !state.mouse_capture_enabled;
@@ -50,7 +38,7 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     let status = if state.mouse_capture_enabled {
         "enabled"
     } else {
-        "disabled"
+        "disabled . Ctrl+L to enable"
     };
 
     let color = if state.mouse_capture_enabled {
@@ -64,8 +52,6 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
         Some(Style::default().fg(color)),
     ));
     state.messages.push(Message::info("SPACING_MARKER", None));
-
-    ensure_vscode_option_click_setting(state)?;
 
     Ok(())
 }
@@ -95,12 +81,21 @@ pub async fn run_tui(
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
 
+    // Detect terminal support for mouse capture
+    let terminal_info = crate::services::detect_term::detect_terminal();
+    let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
+
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
-        EnableBracketedPaste,
-        EnableMouseCapture
+        EnableBracketedPaste
     )?;
+
+    if enable_mouse_capture {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
@@ -117,7 +112,6 @@ pub async fn run_tui(
     let welcome_msg =
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
     state.messages.extend(welcome_msg);
-    ensure_vscode_option_click_setting(&mut state)?;
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
