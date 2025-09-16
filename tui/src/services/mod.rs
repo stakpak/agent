@@ -16,5 +16,4 @@ pub mod shell_mode;
 pub mod syntax_highlighter;
 pub mod textarea;
 pub mod update;
-pub mod vscode_terminal;
 pub mod wrapping;
