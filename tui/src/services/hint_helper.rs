@@ -75,8 +75,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let hint = Paragraph::new(Line::from(spans));
             f.render_widget(hint, area);
         } else {
+            let select_hint = if state.mouse_capture_enabled {
+                " . Fn/Option/Shift + drag to select text"
+            } else {
+                ""
+            };
             let hint = Paragraph::new(Span::styled(
-                "? for shortcuts . @ for files . / for commands",
+                format!(
+                    "? for shortcuts . @ for files . / for commands{}",
+                    select_hint
+                ),
                 Style::default().fg(Color::Cyan),
             ));
             f.render_widget(hint, area);

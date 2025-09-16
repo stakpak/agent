@@ -22,7 +22,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
-use stakpak_tui::{Color, InputEvent, LoadingOperation, OutputEvent};
+use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -191,32 +191,13 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
 
                     // Add local context to the user input
-                    let (user_input, local_context) =
+                    let (user_input, _) =
                         add_local_context(&messages, &user_input, &config.local_context)
                             .await
                             .map_err(|e| format!("Failed to format local context: {}", e))?;
-                    if let Some(local_context) = local_context {
-                        let context_display =
-                            local_context.format_display().await.map_err(|e| {
-                                format!("Failed to format local context display: {}", e)
-                            })?;
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::InputSubmittedWithColor(context_display, Color::DarkGray),
-                        )
-                        .await?;
-                    }
 
                     // Add rulebooks to the user input
-                    let (user_input, rulebooks_text) =
-                        add_rulebooks(&messages, &user_input, &config.rulebooks);
-                    if let Some(rulebooks_text) = rulebooks_text {
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::InputSubmittedWithColor(rulebooks_text, Color::DarkGray),
-                        )
-                        .await?;
-                    }
+                    let (user_input, _) = add_rulebooks(&messages, &user_input, &config.rulebooks);
 
                     messages.push(user_message(user_input));
                 }
