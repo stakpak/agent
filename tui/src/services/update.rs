@@ -115,6 +115,9 @@ pub fn update(
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
         }
+        InputEvent::HasUserMessage => {
+            state.has_user_messages = true;
+        }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
             // Add spacing before user message if not the first message

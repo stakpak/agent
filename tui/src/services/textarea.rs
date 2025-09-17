@@ -27,6 +27,7 @@ pub struct TextArea {
     preferred_col: Option<usize>,
     elements: Vec<TextElement>,
     shell_mode: bool,
+    session_empty: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ impl TextArea {
             preferred_col: None,
             elements: Vec::new(),
             shell_mode: false,
+            session_empty: true,
         }
     }
 
@@ -171,6 +173,14 @@ impl TextArea {
 
     pub fn is_shell_mode(&self) -> bool {
         self.shell_mode
+    }
+
+    pub fn set_session_empty(&mut self, empty: bool) {
+        self.session_empty = empty;
+    }
+
+    pub fn is_session_empty(&self) -> bool {
+        self.session_empty
     }
 
     pub fn get_prefix(&self) -> &'static str {
@@ -967,8 +977,8 @@ impl TextArea {
         let prefix = self.get_prefix();
         let prefix_width = self.get_prefix_width() as u16;
 
-        // If text is empty, render placeholder text
-        if self.text.is_empty() {
+        // If text is empty and session is empty, render placeholder text
+        if self.text.is_empty() && self.session_empty {
             let placeholder = self.get_placeholder_text();
             let y = area.y;
             // Draw prefix

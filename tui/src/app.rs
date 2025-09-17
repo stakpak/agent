@@ -181,6 +181,7 @@ pub struct AppState {
     pub pending_pastes: Vec<(String, String)>,
     pub mouse_capture_enabled: bool,
     pub loading_manager: LoadingStateManager,
+    pub has_user_messages: bool,
 }
 
 #[derive(Debug)]
@@ -222,6 +223,7 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
+    HasUserMessage,
     Tab,
     ShellOutput(String),
     ShellError(String),
@@ -394,8 +396,16 @@ impl AppState {
                 &crate::services::detect_term::detect_terminal().emulator,
             ), // Start with mouse capture enabled only for supported terminals
             loading_manager: LoadingStateManager::new(),
+            has_user_messages: false,
         }
     }
+
+    pub fn update_session_empty_status(&mut self) {
+        // Check if there are any user messages (not just any messages)
+        let session_empty = !self.has_user_messages && self.text_area.text().is_empty();
+        self.text_area.set_session_empty(session_empty);
+    }
+
     // Convenience methods for accessing input and cursor
     pub fn input(&self) -> &str {
         self.text_area.text()
