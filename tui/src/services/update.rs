@@ -415,9 +415,11 @@ pub fn update(
         }
         InputEvent::InputDelete => {
             state.text_area.set_text("");
+            state.show_helper_dropdown = false;
         }
         InputEvent::InputDeleteWord => {
             state.text_area.delete_backward_word();
+            state.show_helper_dropdown = false;
         }
         InputEvent::InputCursorPrevWord => {
             state

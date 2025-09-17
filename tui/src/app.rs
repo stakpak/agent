@@ -483,7 +483,6 @@ impl AppState {
                 let input_text = self.text_area.text().to_string();
 
                 let filtered_files = result.filtered_files.clone();
-                let is_files_empty = filtered_files.is_empty();
                 self.filtered_files = filtered_files;
                 self.autocomplete.filtered_files = self.filtered_files.clone();
                 self.autocomplete.is_file_mode = !self.filtered_files.is_empty();
@@ -508,7 +507,7 @@ impl AppState {
                     find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (input_text.trim().starts_with('/'))
                     || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
-                    || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
+                    || (has_at_trigger && !self.waiting_for_shell_input);
             }
         }
     }
