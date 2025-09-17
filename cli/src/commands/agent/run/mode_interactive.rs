@@ -198,7 +198,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Add rulebooks to the user input
                     let (user_input, _) = add_rulebooks(&messages, &user_input, &config.rulebooks);
-
+                    send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
