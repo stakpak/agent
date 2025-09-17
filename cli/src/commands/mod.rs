@@ -16,6 +16,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
+pub mod acp;
 pub mod agent;
 pub mod auto_update;
 pub mod flow;
@@ -42,6 +43,9 @@ pub enum Commands {
 
     /// Logout from Stakpak
     Logout,
+
+    /// Start Agent Client Protocol server (for editor integration)
+    Acp,
 
     /// Set configuration values
     Set {
@@ -180,6 +184,7 @@ impl Commands {
                 | Commands::Config(_)
                 | Commands::Version
                 | Commands::Update
+                | Commands::Acp
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -545,6 +550,22 @@ impl Commands {
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
+            }
+            Commands::Acp => {
+                // Start ACP agent
+                let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                let agent = match crate::commands::acp::StakpakAcpAgent::new(config, tx).await {
+                    Ok(agent) => agent,
+                    Err(e) => {
+                        eprintln!("Failed to create ACP agent: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+
+                if let Err(e) = agent.run_stdio().await {
+                    eprintln!("ACP agent failed: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
         Ok(())
