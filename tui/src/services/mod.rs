@@ -1,9 +1,9 @@
 pub mod auto_approve;
-pub mod auto_complete;
 pub mod bash_block;
 pub mod confirmation_dialog;
 pub mod detect_term;
 pub mod file_diff;
+pub mod file_search;
 pub mod helper_block;
 pub mod helper_dropdown;
 pub mod hint_helper;
