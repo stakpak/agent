@@ -2,6 +2,7 @@ use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::mpsc;
 
@@ -19,6 +20,9 @@ pub struct AutoComplete {
     // Pre-computed lowercase versions for faster matching
     lowercase_files: Vec<String>,
     pub debounced_filter: DebouncedFilter,
+    // Cache invalidation
+    last_scan_time: SystemTime,
+    current_directory: String,
 }
 
 impl Default for AutoComplete {
@@ -31,6 +35,8 @@ impl Default for AutoComplete {
             filter_cache: HashMap::new(),
             lowercase_files: Vec::new(),
             debounced_filter: DebouncedFilter::new(120), // 120ms debounce
+            last_scan_time: SystemTime::UNIX_EPOCH,
+            current_directory: String::new(),
         }
     }
 }
@@ -38,10 +44,24 @@ impl Default for AutoComplete {
 impl AutoComplete {
     /// Load all files from current directory recursively
     pub fn load_files_from_directory(&mut self, dir: &Path) {
-        // Only scan if not already cached for this session
-        if !self.file_suggestions.is_empty() {
+        let dir_str = dir.to_string_lossy().to_string();
+        let now = SystemTime::now();
+
+        // Check if we need to reload:
+        // 1. No files cached yet
+        // 2. Different directory
+        // 3. Cache is older than 5 seconds (for newly created files)
+        let should_reload = self.file_suggestions.is_empty()
+            || self.current_directory != dir_str
+            || now
+                .duration_since(self.last_scan_time)
+                .unwrap_or(Duration::from_secs(10))
+                > Duration::from_secs(5);
+
+        if !should_reload {
             return;
         }
+
         self.file_suggestions.clear();
         self.lowercase_files.clear();
         self.filter_cache.clear();
@@ -57,6 +77,10 @@ impl AutoComplete {
             .iter()
             .map(|f| f.to_lowercase())
             .collect();
+
+        // Update cache metadata
+        self.last_scan_time = now;
+        self.current_directory = dir_str;
     }
 
     fn collect_files_recursive(
@@ -201,6 +225,14 @@ impl AutoComplete {
         self.file_suggestions.clear();
         self.lowercase_files.clear();
         self.filter_cache.clear();
+        self.last_scan_time = SystemTime::UNIX_EPOCH;
+        self.current_directory.clear();
+    }
+
+    /// Force reload files from directory (useful when files are created/deleted)
+    pub fn force_reload_files(&mut self, dir: &Path) {
+        self.clear_caches();
+        self.load_files_from_directory(dir);
     }
 }
 
@@ -281,11 +313,9 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
         return false;
     }
 
-    // Load files if not already loaded
-    if state.autocomplete.file_suggestions.is_empty() {
-        if let Ok(current_dir) = std::env::current_dir() {
-            state.autocomplete.load_files_from_directory(&current_dir);
-        }
+    // Always try to load files (will use cache if recent)
+    if let Ok(current_dir) = std::env::current_dir() {
+        state.autocomplete.load_files_from_directory(&current_dir);
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
@@ -303,10 +333,9 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
 
 // Refactored: Handle @ trigger for file autocomplete - with debouncing
 pub fn handle_at_trigger(input: &str, cursor_pos: usize, autocomplete: &mut AutoComplete) -> bool {
-    if autocomplete.file_suggestions.is_empty() {
-        if let Ok(current_dir) = std::env::current_dir() {
-            autocomplete.load_files_from_directory(&current_dir);
-        }
+    // Always try to load files (will use cache if recent)
+    if let Ok(current_dir) = std::env::current_dir() {
+        autocomplete.load_files_from_directory(&current_dir);
     }
     let current_word = get_current_word(input, cursor_pos, Some('@'));
     autocomplete.filter_files(&current_word);
@@ -395,10 +424,15 @@ pub async fn autocomplete_worker(
     helpers: Vec<HelperCommand>,
     mut autocomplete: AutoComplete,
 ) {
+    // Load files initially
     if let Ok(current_dir) = std::env::current_dir() {
         autocomplete.load_files_from_directory(&current_dir);
     }
     while let Some((input, cursor_position)) = rx.recv().await {
+        // Reload files on each request to catch new files
+        if let Ok(current_dir) = std::env::current_dir() {
+            autocomplete.load_files_from_directory(&current_dir);
+        }
         // Filter helpers - only when input starts with '/' and is not empty
         let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
             helpers

@@ -407,6 +407,95 @@ pub fn render_styled_block_ansi_to_tui(
     owned_lines
 }
 
+/// Simple text formatting function that processes content and wraps it to fit terminal width
+/// This is a stripped-down version of render_styled_block_ansi_to_tui without borders or styling
+pub fn format_text_content(content: &str, terminal_width: usize) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+
+    let inner_width = content_width;
+
+    // Preprocess content to handle terminal control sequences
+    let preprocessed_content = preprocess_terminal_output(content);
+
+    // Convert ANSI content to ratatui Text
+    let ratatui_text = preprocessed_content
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::from(preprocessed_content.clone()));
+
+    let mut formatted_lines = Vec::new();
+
+    for text_line in ratatui_text.lines {
+        if text_line.spans.is_empty() {
+            // Empty line
+            formatted_lines.push(Line::from(vec![Span::from("")]));
+            continue;
+        }
+
+        // Check if line needs wrapping
+        let display_width: usize = text_line
+            .spans
+            .iter()
+            .map(|span| calculate_display_width(&span.content))
+            .sum();
+
+        if display_width <= inner_width {
+            // Line fits, add as-is
+            let mut line_spans = Vec::new();
+            for s in &text_line.spans {
+                line_spans.push(Span::styled(
+                    s.content.clone(),
+                    Style::default().fg(Color::Reset),
+                ));
+            }
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            // Line needs wrapping
+            let original_line: String = text_line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            let wrapped_lines = wrap_ansi_text(&original_line, inner_width);
+
+            for wrapped_line in wrapped_lines {
+                let wrapped_ratatui = wrapped_line
+                    .clone()
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
+
+                if let Some(first_line) = wrapped_ratatui.lines.first() {
+                    let mut line_spans = Vec::new();
+                    for s in &first_line.spans {
+                        line_spans.push(Span::styled(
+                            s.content.clone(),
+                            Style::default().fg(Color::Reset),
+                        ));
+                    }
+                    formatted_lines.push(Line::from(line_spans));
+                }
+            }
+        }
+    }
+
+    // Convert to owned lines
+    formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect()
+}
+
 pub fn extract_bash_block_info(
     tool_call: &ToolCall,
     output: &str,

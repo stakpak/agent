@@ -22,7 +22,7 @@ use stakpak_shared::models::integrations::openai::{
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-const SCROLL_LINES: usize = 2;
+const SCROLL_LINES: usize = 1;
 const MAX_PASTE_CHAR_COUNT: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
@@ -115,6 +115,9 @@ pub fn update(
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
         }
+        InputEvent::HasUserMessage => {
+            state.has_user_messages = true;
+        }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
             // Add spacing before user message if not the first message
@@ -139,7 +142,13 @@ pub fn update(
                 return;
             }
             if err == "STREAM_CANCELLED" {
-                render_bash_block_rejected("Interrupted by user", "System", None);
+                let rendered_lines =
+                    render_bash_block_rejected("Interrupted by user", "System", None);
+                state.messages.push(Message {
+                    id: Uuid::new_v4(),
+                    content: MessageContent::StyledBlock(rendered_lines),
+                    is_collapsed: None,
+                });
                 return;
             }
             let mut error_message = handle_errors(err);
@@ -293,9 +302,6 @@ pub fn update(
             state.show_sessions_dialog = true;
         }
         InputEvent::ShellOutput(line) => {
-            // remove ansi codes
-            let line = preprocess_terminal_output(&line);
-            // normalize line endings
             let mut line = line.replace("\r\n", "\n").replace('\r', "\n");
 
             if let Some(output) = state.active_shell_command_output.as_mut() {
@@ -305,7 +311,9 @@ pub fn update(
             }
 
             line = truncate_output(&line);
-            state.messages.push(Message::plain_text(line));
+            state
+                .messages
+                .push(Message::render_escaped_text_block(line));
         }
 
         InputEvent::ShellError(line) => {
