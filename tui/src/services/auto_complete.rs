@@ -1,24 +1,89 @@
 use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::fs;
 use std::path::Path;
 
+use nucleo_matcher::{
+    Matcher, Utf32Str,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+};
 use tokio::sync::mpsc;
 
 use crate::AppState;
 use crate::app::{AutoCompleteResult, HelperCommand};
 
-#[derive(Debug, Clone)]
+/// Fuzzy file matcher that maintains only the best N matches for performance
+#[derive(Debug)]
+struct FuzzyFileMatcher {
+    max_matches: usize,
+    pattern: Pattern,
+    matcher: Matcher,
+    matches: BinaryHeap<Reverse<(u32, String)>>, // (score, path) - Reverse for max-heap behavior
+    utf32buf: Vec<char>,
+}
+
+impl FuzzyFileMatcher {
+    fn new(max_matches: usize, pattern_text: &str) -> Self {
+        let pattern = Pattern::new(
+            pattern_text,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+
+        Self {
+            max_matches,
+            pattern,
+            matcher: Matcher::new(nucleo_matcher::Config::DEFAULT),
+            matches: BinaryHeap::new(),
+            utf32buf: Vec::new(),
+        }
+    }
+
+    fn add_file(&mut self, file_path: &str) {
+        let haystack: Utf32Str<'_> = Utf32Str::new(file_path, &mut self.utf32buf);
+
+        if let Some(score) = self.pattern.score(haystack, &mut self.matcher) {
+            if self.matches.len() < self.max_matches {
+                self.matches.push(Reverse((score, file_path.to_string())));
+            } else if let Some(&Reverse((min_score, _))) = self.matches.peek() {
+                if score > min_score {
+                    self.matches.pop();
+                    self.matches.push(Reverse((score, file_path.to_string())));
+                }
+            }
+        }
+    }
+
+    fn get_sorted_matches(&mut self) -> Vec<String> {
+        let mut sorted_matches: Vec<(u32, String)> = self
+            .matches
+            .drain()
+            .map(|Reverse((score, path))| (score, path))
+            .collect();
+
+        // Sort by descending score, then ascending path for consistent ordering
+        sorted_matches.sort_by(|a, b| match b.0.cmp(&a.0) {
+            std::cmp::Ordering::Equal => a.1.cmp(&b.1),
+            other => other,
+        });
+
+        sorted_matches.into_iter().map(|(_, path)| path).collect()
+    }
+}
+
+#[derive(Debug)]
 pub struct AutoComplete {
     pub file_suggestions: Vec<String>,
     pub filtered_files: Vec<String>,
     pub is_file_mode: bool,
     pub trigger_char: Option<char>, // '@' or None for Tab
-    // Cache for filtered results to avoid recomputation
-    filter_cache: HashMap<String, Vec<String>>,
-    // Pre-computed lowercase versions for faster matching
-    lowercase_files: Vec<String>,
+    // Fuzzy matcher for efficient file matching
+    fuzzy_matcher: Option<FuzzyFileMatcher>,
     pub debounced_filter: DebouncedFilter,
+    // Maximum number of matches to return
+    max_matches: usize,
 }
 
 impl Default for AutoComplete {
@@ -28,35 +93,23 @@ impl Default for AutoComplete {
             filtered_files: Vec::new(),
             is_file_mode: false,
             trigger_char: None,
-            filter_cache: HashMap::new(),
-            lowercase_files: Vec::new(),
+            fuzzy_matcher: None,
             debounced_filter: DebouncedFilter::new(120), // 120ms debounce
+            max_matches: 50,                             // Default to 50 matches for performance
         }
     }
 }
 
 impl AutoComplete {
-    /// Load all files from current directory recursively
+    /// Load all files from current directory recursively (no caching)
     pub fn load_files_from_directory(&mut self, dir: &Path) {
-        // Only scan if not already cached for this session
-        if !self.file_suggestions.is_empty() {
-            return;
-        }
+        // Always clear and reload - no caching
         self.file_suggestions.clear();
-        self.lowercase_files.clear();
-        self.filter_cache.clear();
 
         // Read gitignore patterns from the directory
         let base_dir = dir.to_string_lossy();
         let ignore_patterns = read_gitignore_patterns(&base_dir);
         self.collect_files_recursive(dir, dir, &ignore_patterns);
-
-        // Pre-compute lowercase versions for faster filtering
-        self.lowercase_files = self
-            .file_suggestions
-            .iter()
-            .map(|f| f.to_lowercase())
-            .collect();
     }
 
     fn collect_files_recursive(
@@ -77,9 +130,20 @@ impl AutoComplete {
                 let path_str = relative_path.to_string_lossy();
 
                 // Check if path matches any gitignore pattern
-                let should_ignore = ignore_patterns
-                    .iter()
-                    .any(|pattern| matches_gitignore_pattern(pattern, &path_str));
+                let should_ignore = ignore_patterns.iter().any(|pattern| {
+                    // First try the standard pattern matching
+                    if matches_gitignore_pattern(pattern, &path_str) {
+                        return true;
+                    }
+
+                    // Extra step: if pattern starts with "/", also check if path starts with pattern without the leading slash
+                    if let Some(pattern_without_slash) = pattern.strip_prefix('/') {
+                        path_str == pattern_without_slash
+                            || path_str.starts_with(&format!("{}/", pattern_without_slash))
+                    } else {
+                        false
+                    }
+                });
 
                 if should_ignore {
                     continue;
@@ -98,74 +162,39 @@ impl AutoComplete {
         }
     }
 
-    /// Filter files based on current input - optimized version, debounced
+    /// Filter files based on current input using fuzzy matching - optimized version, debounced
     pub fn filter_files(&mut self, current_word: &str) {
         if !self.debounced_filter.should_filter(current_word) {
             return;
         }
-        // Fast path: if input is empty, just show the first 50 files
+
+        // Fast path: if input is empty, just show the first N files
         if current_word.is_empty() {
-            self.filtered_files = self.file_suggestions.iter().take(50).cloned().collect();
+            self.filtered_files = self
+                .file_suggestions
+                .iter()
+                .take(self.max_matches)
+                .cloned()
+                .collect();
             return;
         }
 
-        // Check cache first
-        if let Some(cached_result) = self.filter_cache.get(current_word) {
-            self.filtered_files = cached_result.clone();
-            return;
-        }
+        // Create or update fuzzy matcher for the current pattern
+        self.fuzzy_matcher = Some(FuzzyFileMatcher::new(self.max_matches, current_word));
 
-        let word_lower = current_word.to_lowercase();
-        let mut results = Vec::new();
-
-        // Use pre-computed lowercase versions for faster matching
-        for (i, file_lower) in self.lowercase_files.iter().enumerate() {
-            if file_lower.contains(&word_lower) || fuzzy_match_optimized(file_lower, &word_lower) {
-                results.push(self.file_suggestions[i].clone());
-
-                // Early exit if we have enough results
-                if results.len() >= 100 {
-                    break;
-                }
+        // Add all files to the fuzzy matcher
+        for file_path in &self.file_suggestions {
+            if let Some(ref mut matcher) = self.fuzzy_matcher {
+                matcher.add_file(file_path);
             }
         }
 
-        // Sort by relevance (exact matches first, then prefix matches, then contains)
-        results.sort_by(|a, b| {
-            let a_lower = a.to_lowercase();
-            let b_lower = b.to_lowercase();
-
-            // Exact match check
-            if a_lower == word_lower {
-                return std::cmp::Ordering::Less;
-            }
-            if b_lower == word_lower {
-                return std::cmp::Ordering::Greater;
-            }
-
-            // Prefix match check
-            let a_starts = a_lower.starts_with(&word_lower);
-            let b_starts = b_lower.starts_with(&word_lower);
-            match (a_starts, b_starts) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.len().cmp(&b.len()), // Shorter files first for same category
-            }
-        });
-
-        // Limit results to prevent overwhelming UI
-        results.truncate(50);
-
-        // Cache the result for future use
-        self.filter_cache
-            .insert(current_word.to_string(), results.clone());
-
-        // Limit cache size to prevent memory issues
-        if self.filter_cache.len() > 100 {
-            self.filter_cache.clear();
+        // Get the best matches
+        if let Some(ref mut matcher) = self.fuzzy_matcher {
+            self.filtered_files = matcher.get_sorted_matches();
+        } else {
+            self.filtered_files.clear();
         }
-
-        self.filtered_files = results;
     }
 
     /// Get the current filtered files for display
@@ -188,7 +217,8 @@ impl AutoComplete {
         self.filtered_files.clear();
         self.is_file_mode = false;
         self.trigger_char = None;
-        // Don't clear cache and lowercase_files - keep them for performance
+        self.fuzzy_matcher = None;
+        // Keep file_suggestions for performance
     }
 
     /// Check if currently in file autocomplete mode
@@ -199,35 +229,14 @@ impl AutoComplete {
     /// Clear all caches (call this when directory changes)
     pub fn clear_caches(&mut self) {
         self.file_suggestions.clear();
-        self.lowercase_files.clear();
-        self.filter_cache.clear();
-    }
-}
-
-/// Optimized fuzzy matching with early exit
-fn fuzzy_match_optimized(text: &str, pattern: &str) -> bool {
-    if pattern.is_empty() {
-        return true;
+        self.fuzzy_matcher = None;
     }
 
-    if text.len() < pattern.len() {
-        return false;
+    /// Force reload files from directory (useful when files are created/deleted)
+    pub fn force_reload_files(&mut self, dir: &Path) {
+        self.clear_caches();
+        self.load_files_from_directory(dir);
     }
-
-    let text_chars: Vec<char> = text.chars().collect();
-    let pattern_chars: Vec<char> = pattern.chars().collect();
-
-    let mut text_idx = 0;
-    let mut pattern_idx = 0;
-
-    while text_idx < text_chars.len() && pattern_idx < pattern_chars.len() {
-        if text_chars[text_idx] == pattern_chars[pattern_idx] {
-            pattern_idx += 1;
-        }
-        text_idx += 1;
-    }
-
-    pattern_idx == pattern_chars.len()
 }
 
 // Refactored: Find @ trigger before cursor position - optimized
@@ -244,6 +253,11 @@ pub fn find_at_trigger(input: &str, cursor_pos: usize) -> Option<usize> {
                     .nth(i.saturating_sub(1))
                     .is_some_and(|ch| ch.is_whitespace())
             {
+                // Check if @ is followed by whitespace - if so, don't consider it a valid trigger
+                let after_at = &input[i + 1..safe_pos];
+                if after_at.starts_with(char::is_whitespace) {
+                    continue; // Skip this @ and look for the next one
+                }
                 return Some(i);
             }
         }
@@ -395,10 +409,11 @@ pub async fn autocomplete_worker(
     helpers: Vec<HelperCommand>,
     mut autocomplete: AutoComplete,
 ) {
-    if let Ok(current_dir) = std::env::current_dir() {
-        autocomplete.load_files_from_directory(&current_dir);
-    }
     while let Some((input, cursor_position)) = rx.recv().await {
+        // Always load files fresh on each request (no caching)
+        if let Ok(current_dir) = std::env::current_dir() {
+            autocomplete.load_files_from_directory(&current_dir);
+        }
         // Filter helpers - only when input starts with '/' and is not empty
         let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
             helpers
