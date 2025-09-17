@@ -249,6 +249,7 @@ pub async fn run_tui(
                     continue;
                    }
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       state.update_session_empty_status();
                        state.poll_autocomplete_results();
                    }
                }
@@ -271,6 +272,7 @@ pub async fn run_tui(
             break;
         }
         state.poll_autocomplete_results();
+        state.update_session_empty_status();
         terminal.draw(|f| view::view(f, &mut state))?;
     }
 
