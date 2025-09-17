@@ -11,7 +11,7 @@ use nucleo_matcher::{
 use tokio::sync::mpsc;
 
 use crate::AppState;
-use crate::app::{AutoCompleteResult, HelperCommand};
+use crate::app::{FileSearchResult, HelperCommand};
 
 /// Fuzzy file matcher that maintains only the best N matches for performance
 #[derive(Debug)]
@@ -74,7 +74,7 @@ impl FuzzyFileMatcher {
 }
 
 #[derive(Debug)]
-pub struct AutoComplete {
+pub struct FileSearch {
     pub file_suggestions: Vec<String>,
     pub filtered_files: Vec<String>,
     pub is_file_mode: bool,
@@ -86,7 +86,7 @@ pub struct AutoComplete {
     max_matches: usize,
 }
 
-impl Default for AutoComplete {
+impl Default for FileSearch {
     fn default() -> Self {
         Self {
             file_suggestions: Vec::new(),
@@ -100,7 +100,7 @@ impl Default for AutoComplete {
     }
 }
 
-impl AutoComplete {
+impl FileSearch {
     /// Load all files from current directory recursively (no caching)
     pub fn load_files_from_directory(&mut self, dir: &Path) {
         // Always clear and reload - no caching
@@ -212,7 +212,7 @@ impl AutoComplete {
         self.filtered_files.len()
     }
 
-    /// Reset autocomplete state
+    /// Reset file_search state
     pub fn reset(&mut self) {
         self.filtered_files.clear();
         self.is_file_mode = false;
@@ -221,7 +221,7 @@ impl AutoComplete {
         // Keep file_suggestions for performance
     }
 
-    /// Check if currently in file autocomplete mode
+    /// Check if currently in file file_search mode
     pub fn is_active(&self) -> bool {
         self.is_file_mode
     }
@@ -289,25 +289,25 @@ pub fn get_current_word(input: &str, cursor_pos: usize, trigger_char: Option<cha
     }
 }
 
-/// Handle Tab trigger for file autocomplete - with debouncing
+/// Handle Tab trigger for file file_search - with debouncing
 pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     if state.input().trim().is_empty() {
         return false;
     }
 
     // Load files if not already loaded
-    if state.autocomplete.file_suggestions.is_empty() {
+    if state.file_search.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
-            state.autocomplete.load_files_from_directory(&current_dir);
+            state.file_search.load_files_from_directory(&current_dir);
         }
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
-    state.autocomplete.filter_files(&current_word);
+    state.file_search.filter_files(&current_word);
 
-    if !state.autocomplete.filtered_files.is_empty() {
-        state.autocomplete.is_file_mode = true;
-        state.autocomplete.trigger_char = None;
+    if !state.file_search.filtered_files.is_empty() {
+        state.file_search.is_file_mode = true;
+        state.file_search.trigger_char = None;
         state.show_helper_dropdown = true;
         state.helper_selected = 0;
         return true;
@@ -315,21 +315,21 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     false
 }
 
-// Refactored: Handle @ trigger for file autocomplete - with debouncing
-pub fn handle_at_trigger(input: &str, cursor_pos: usize, autocomplete: &mut AutoComplete) -> bool {
-    if autocomplete.file_suggestions.is_empty() {
+// Refactored: Handle @ trigger for file file_search - with debouncing
+pub fn handle_at_trigger(input: &str, cursor_pos: usize, file_search: &mut FileSearch) -> bool {
+    if file_search.file_suggestions.is_empty() {
         if let Ok(current_dir) = std::env::current_dir() {
-            autocomplete.load_files_from_directory(&current_dir);
+            file_search.load_files_from_directory(&current_dir);
         }
     }
     let current_word = get_current_word(input, cursor_pos, Some('@'));
-    autocomplete.filter_files(&current_word);
-    !autocomplete.filtered_files.is_empty()
+    file_search.filter_files(&current_word);
+    !file_search.filtered_files.is_empty()
 }
 
 /// Handle file selection and update input string
 pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
-    match state.autocomplete.trigger_char {
+    match state.file_search.trigger_char {
         Some('@') => {
             // Replace from @ to cursor with selected file
             if let Some(at_pos) = find_at_trigger(state.input(), state.cursor_position()) {
@@ -365,8 +365,8 @@ pub fn handle_file_selection(state: &mut AppState, selected_file: &str) {
         _ => {}
     }
 
-    // Reset autocomplete state
-    state.autocomplete.reset();
+    // Reset file_search state
+    state.file_search.reset();
     state.show_helper_dropdown = false;
     state.filtered_helpers.clear();
     state.helper_selected = 0;
@@ -402,17 +402,17 @@ impl DebouncedFilter {
     }
 }
 
-/// Async autocomplete worker for background filtering
-pub async fn autocomplete_worker(
+/// Async file_search worker for background filtering
+pub async fn file_search_worker(
     mut rx: mpsc::Receiver<(String, usize)>, // (input, cursor_position)
-    tx: mpsc::Sender<AutoCompleteResult>,
+    tx: mpsc::Sender<FileSearchResult>,
     helpers: Vec<HelperCommand>,
-    mut autocomplete: AutoComplete,
+    mut file_search: FileSearch,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
         // Always load files fresh on each request (no caching)
         if let Ok(current_dir) = std::env::current_dir() {
-            autocomplete.load_files_from_directory(&current_dir);
+            file_search.load_files_from_directory(&current_dir);
         }
         // Filter helpers - only when input starts with '/' and is not empty
         let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
@@ -438,17 +438,17 @@ pub async fn autocomplete_worker(
                     .chars()
                     .nth(at_pos.saturating_sub(1))
                     .is_some_and(|ch| ch.is_whitespace());
-            if is_valid_at && handle_at_trigger(&input, cursor_position, &mut autocomplete) {
-                autocomplete.is_file_mode = true;
-                autocomplete.trigger_char = Some('@');
-                filtered_files = autocomplete.filtered_files.clone();
+            if is_valid_at && handle_at_trigger(&input, cursor_position, &mut file_search) {
+                file_search.is_file_mode = true;
+                file_search.trigger_char = Some('@');
+                filtered_files = file_search.filtered_files.clone();
             }
         }
 
         // TODO: Add / and other triggers as needed
 
         let _ = tx
-            .send(AutoCompleteResult {
+            .send(FileSearchResult {
                 filtered_helpers,
                 filtered_files,
                 cursor_position,

@@ -161,7 +161,7 @@ pub async fn run_tui(
                    if let InputEvent::RunToolCall(tool_call) = &event {
 
                        services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
-                       state.poll_autocomplete_results();
+                       state.poll_file_search_results();
                        terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
                    }
@@ -209,7 +209,7 @@ pub async fn run_tui(
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
-                       state.poll_autocomplete_results();
+                       state.poll_file_search_results();
                    }
                }
                Some(event) = internal_rx.recv() => {
@@ -249,7 +249,7 @@ pub async fn run_tui(
                     continue;
                    }
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
-                       state.poll_autocomplete_results();
+                       state.poll_file_search_results();
                    }
                }
                _ = spinner_interval.tick() => {
@@ -263,14 +263,14 @@ pub async fn run_tui(
                        }
                    }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
-                   state.poll_autocomplete_results();
+                   state.poll_file_search_results();
                    terminal.draw(|f| view::view(f, &mut state))?;
                }
            }
         if should_quit {
             break;
         }
-        state.poll_autocomplete_results();
+        state.poll_file_search_results();
         terminal.draw(|f| view::view(f, &mut state))?;
     }
 
