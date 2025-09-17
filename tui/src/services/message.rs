@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::services::bash_block::{
-    is_collapsed_tool_call, render_bash_block, render_file_diff, render_file_diff_full,
-    render_result_block, render_styled_block,
+    format_text_content, is_collapsed_tool_call, render_bash_block, render_file_diff,
+    render_file_diff_full, render_result_block, render_styled_block,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines;
@@ -35,6 +35,7 @@ pub enum MessageContent {
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
     RenderResultBorderBlock(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
+    RenderEscapedTextBlock(String),
     BashBubble {
         title: String,
         content: Vec<String>,
@@ -156,6 +157,15 @@ impl Message {
             is_collapsed: None,
         }
     }
+
+    pub fn render_escaped_text_block(content: String) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderEscapedTextBlock(content),
+            is_collapsed: None,
+        }
+    }
+
     pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
         let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
             && tool_call_result.result.lines().count() > 3;
@@ -692,6 +702,12 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderResultBorderBlock(tool_call_result) => {
                 let rendered_lines = render_result_block(tool_call_result, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderEscapedTextBlock(content) => {
+                let rendered_lines = format_text_content(content, width);
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);

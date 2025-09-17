@@ -475,6 +475,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if let Some(request_id) = &current_request_id {
                             client.cancel_stream(request_id.clone()).await?;
                         }
+                        // End any ongoing loading operation
+                        send_input_event(&input_tx, InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing)).await?;
                         send_input_event(&input_tx, InputEvent::Error("STREAM_CANCELLED".to_string())).await?;
                         break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
                     }
