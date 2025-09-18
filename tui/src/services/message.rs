@@ -513,31 +513,29 @@ fn get_wrapped_message_lines_internal(
         match &msg.content {
             MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
-                if !agent_mode_removed {
-                    if let Some(start) = cleaned.find("<agent_mode>") {
-                        if let Some(end) = cleaned.find("</agent_mode>") {
-                            cleaned.replace_range(start..end + "</agent_mode>".len(), "");
-                        }
-                    }
+                if !agent_mode_removed
+                    && let Some(start) = cleaned.find("<agent_mode>")
+                    && let Some(end) = cleaned.find("</agent_mode>")
+                {
+                    cleaned.replace_range(start..end + "</agent_mode>".len(), "");
                 }
-                if !checkpoint_id_removed {
-                    if let Some(start) = cleaned.find("<checkpoint_id>") {
-                        if let Some(end) = cleaned.find("</checkpoint_id>") {
-                            // Remove the checkpoint_id tag and any preceding newline
-                            let before_checkpoint = &cleaned[..start];
-                            let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
+                if !checkpoint_id_removed
+                    && let Some(start) = cleaned.find("<checkpoint_id>")
+                    && let Some(end) = cleaned.find("</checkpoint_id>")
+                {
+                    // Remove the checkpoint_id tag and any preceding newline
+                    let before_checkpoint = &cleaned[..start];
+                    let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
 
-                            // If there's a newline before the checkpoint_id, remove it too
-                            let cleaned_before =
-                                if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
-                                    stripped
-                                } else {
-                                    before_checkpoint
-                                };
+                    // If there's a newline before the checkpoint_id, remove it too
+                    let cleaned_before =
+                        if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
+                            stripped
+                        } else {
+                            before_checkpoint
+                        };
 
-                            cleaned = format!("{}{}", cleaned_before, after_checkpoint);
-                        }
-                    }
+                    cleaned = format!("{}{}", cleaned_before, after_checkpoint);
                 }
 
                 let borrowed_lines =
@@ -756,11 +754,11 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
         }
 
         // If no keywords found, return the first parameter
-        if let Value::Object(obj) = arguments {
-            if let Some((key, val)) = obj.into_iter().next() {
-                let formatted_val = format_simple_value(&val);
-                return format!("{} = {}", key, formatted_val);
-            }
+        if let Value::Object(obj) = arguments
+            && let Some((key, val)) = obj.into_iter().next()
+        {
+            let formatted_val = format_simple_value(&val);
+            return format!("{} = {}", key, formatted_val);
         }
     }
 
@@ -877,47 +875,47 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
         }
     }
 
-    if command.starts_with("cat >") {
-        if let Some(after_cat) = command.strip_prefix("cat >") {
-            if let Some(filename) = after_cat.split_whitespace().next() {
-                return format!("Creating {}", filename);
-            }
-        }
+    if command.starts_with("cat >")
+        && let Some(after_cat) = command.strip_prefix("cat >")
+        && let Some(filename) = after_cat.split_whitespace().next()
+    {
+        return format!("Creating {}", filename);
     }
 
-    if command.contains("echo") && command.contains(" > ") {
-        if let Some(pos) = command.find(" > ") {
-            let after_redirect = &command[pos + 3..];
-            if let Some(filename) = after_redirect.split_whitespace().next() {
-                return format!("Creating {}", filename);
-            }
+    if command.contains("echo")
+        && command.contains(" > ")
+        && let Some(pos) = command.find(" > ")
+    {
+        let after_redirect = &command[pos + 3..];
+        if let Some(filename) = after_redirect.split_whitespace().next() {
+            return format!("Creating {}", filename);
         }
     }
 
     if command.starts_with("touch ") {
         let after_touch = command.strip_prefix("touch ");
-        if let Some(filename) = after_touch {
-            if let Some(filename) = filename.split_whitespace().next() {
-                return format!("Creating {}", filename);
-            }
+        if let Some(filename) = after_touch
+            && let Some(filename) = filename.split_whitespace().next()
+        {
+            return format!("Creating {}", filename);
         }
     }
 
     if command.starts_with("mkdir ") {
         let after_mkdir = command.strip_prefix("mkdir ");
-        if let Some(dirname) = after_mkdir {
-            if let Some(dirname) = dirname.split_whitespace().next() {
-                return format!("Creating directory {}", dirname);
-            }
+        if let Some(dirname) = after_mkdir
+            && let Some(dirname) = dirname.split_whitespace().next()
+        {
+            return format!("Creating directory {}", dirname);
         }
     }
 
     if command.starts_with("rm ") {
         let after_rm = command.strip_prefix("rm ");
-        if let Some(filename) = after_rm {
-            if let Some(filename) = filename.split_whitespace().next() {
-                return format!("Deleting {}", filename);
-            }
+        if let Some(filename) = after_rm
+            && let Some(filename) = filename.split_whitespace().next()
+        {
+            return format!("Deleting {}", filename);
         }
     }
 
@@ -935,10 +933,10 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
 
     if command.starts_with("cd ") {
         let after_cd = command.strip_prefix("cd ");
-        if let Some(dirname) = after_cd {
-            if let Some(dirname) = dirname.split_whitespace().next() {
-                return format!("Changing to {}", dirname);
-            }
+        if let Some(dirname) = after_cd
+            && let Some(dirname) = dirname.split_whitespace().next()
+        {
+            return format!("Changing to {}", dirname);
         }
     }
 
@@ -995,7 +993,7 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
     if words.is_empty() {
         "Running command".to_string()
     } else if !outside_title.is_empty() {
-        return outside_title.to_string();
+        outside_title.to_string()
     } else {
         words.join(" ")
     }
