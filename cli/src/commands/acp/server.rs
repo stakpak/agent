@@ -10,7 +10,7 @@ use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionResponse, ChatCompletionStreamResponse, ToolCall, ToolCallResultProgress,
+    ChatCompletionResponse, ChatCompletionStreamResponse, Role, ToolCall, ToolCallResultProgress,
 };
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -1509,7 +1509,15 @@ impl acp::Agent for StakpakAcpAgent {
         // Clear message history for new session
         {
             let mut messages = self.messages.lock().await;
+            //copy system message if exists
+            let system_message = messages
+                .iter()
+                .find(|msg| msg.role == Role::System)
+                .cloned();
             messages.clear();
+            if let Some(system_message) = system_message {
+                messages.push(system_message);
+            }
         }
 
         Ok(acp::NewSessionResponse { session_id })
@@ -1683,31 +1691,31 @@ impl acp::Agent for StakpakAcpAgent {
 
         while has_tool_calls {
             // Check for cancellation before processing tool calls
-            if let Some(ref mut cancel_rx) = tool_cancel_rx {
-                if cancel_rx.try_recv().is_ok() {
-                    log::info!("Tool call processing cancelled by user");
-                    // Add cancellation messages for any active tool calls
-                    let active_tool_calls = {
-                        let mut active_tool_calls = self.active_tool_calls.lock().await;
-                        let tool_calls = active_tool_calls.clone();
-                        active_tool_calls.clear();
-                        tool_calls
-                    };
+            if let Some(ref mut cancel_rx) = tool_cancel_rx
+                && cancel_rx.try_recv().is_ok()
+            {
+                log::info!("Tool call processing cancelled by user");
+                // Add cancellation messages for any active tool calls
+                let active_tool_calls = {
+                    let mut active_tool_calls = self.active_tool_calls.lock().await;
+                    let tool_calls = active_tool_calls.clone();
+                    active_tool_calls.clear();
+                    tool_calls
+                };
 
-                    for tool_call in active_tool_calls {
-                        {
-                            let mut messages = self.messages.lock().await;
-                            messages.push(crate::commands::agent::run::helpers::tool_result(
-                                tool_call.id.clone(),
-                                "TOOL_CALL_CANCELLED".to_string(),
-                            ));
-                        }
+                for tool_call in active_tool_calls {
+                    {
+                        let mut messages = self.messages.lock().await;
+                        messages.push(crate::commands::agent::run::helpers::tool_result(
+                            tool_call.id.clone(),
+                            "TOOL_CALL_CANCELLED".to_string(),
+                        ));
                     }
-
-                    return Ok(acp::PromptResponse {
-                        stop_reason: acp::StopReason::Cancelled,
-                    });
                 }
+
+                return Ok(acp::PromptResponse {
+                    stop_reason: acp::StopReason::Cancelled,
+                });
             }
             // Get the latest message from the conversation
             let latest_message = match current_messages.last() {
@@ -1745,13 +1753,13 @@ impl acp::Agent for StakpakAcpAgent {
                 }
 
                 // Check for cancellation after tool call processing
-                if let Some(ref mut cancel_rx) = tool_cancel_rx {
-                    if cancel_rx.try_recv().is_ok() {
-                        log::info!("Tool call processing cancelled after tool execution");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
+                if let Some(ref mut cancel_rx) = tool_cancel_rx
+                    && cancel_rx.try_recv().is_ok()
+                {
+                    log::info!("Tool call processing cancelled after tool execution");
+                    return Ok(acp::PromptResponse {
+                        stop_reason: acp::StopReason::Cancelled,
+                    });
                 }
 
                 // Check if any tool calls were cancelled
