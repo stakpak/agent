@@ -1,9 +1,9 @@
-use stakpak_shared::utils::{matches_gitignore_pattern, read_gitignore_patterns};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
+use ignore::WalkBuilder;
 use nucleo_matcher::{
     Matcher, Utf32Str,
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
@@ -13,44 +13,42 @@ use tokio::sync::mpsc;
 use crate::AppState;
 use crate::app::{FileSearchResult, HelperCommand};
 
-/// Fuzzy file matcher that maintains only the best N matches for performance
+/// Maintains the best N matches for a given pattern using parallel processing
 #[derive(Debug)]
-struct FuzzyFileMatcher {
-    max_matches: usize,
+struct BestMatchesList {
+    max_count: usize,
+    num_matches: usize,
     pattern: Pattern,
     matcher: Matcher,
-    matches: BinaryHeap<Reverse<(u32, String)>>, // (score, path) - Reverse for max-heap behavior
+    binary_heap: BinaryHeap<Reverse<(u32, String)>>,
     utf32buf: Vec<char>,
 }
 
-impl FuzzyFileMatcher {
-    fn new(max_matches: usize, pattern_text: &str) -> Self {
-        let pattern = Pattern::new(
-            pattern_text,
-            CaseMatching::Smart,
-            Normalization::Smart,
-            AtomKind::Fuzzy,
-        );
-
+impl BestMatchesList {
+    fn new(max_count: usize, pattern: Pattern, matcher: Matcher) -> Self {
         Self {
-            max_matches,
+            max_count,
+            num_matches: 0,
             pattern,
-            matcher: Matcher::new(nucleo_matcher::Config::DEFAULT),
-            matches: BinaryHeap::new(),
+            matcher,
+            binary_heap: BinaryHeap::new(),
             utf32buf: Vec::new(),
         }
     }
 
-    fn add_file(&mut self, file_path: &str) {
+    fn insert(&mut self, file_path: &str) {
         let haystack: Utf32Str<'_> = Utf32Str::new(file_path, &mut self.utf32buf);
-
         if let Some(score) = self.pattern.score(haystack, &mut self.matcher) {
-            if self.matches.len() < self.max_matches {
-                self.matches.push(Reverse((score, file_path.to_string())));
-            } else if let Some(&Reverse((min_score, _))) = self.matches.peek() {
-                if score > min_score {
-                    self.matches.pop();
-                    self.matches.push(Reverse((score, file_path.to_string())));
+            self.num_matches += 1;
+
+            if self.binary_heap.len() < self.max_count {
+                self.binary_heap
+                    .push(Reverse((score, file_path.to_string())));
+            } else if let Some(min_element) = self.binary_heap.peek() {
+                if score > min_element.0.0 {
+                    self.binary_heap.pop();
+                    self.binary_heap
+                        .push(Reverse((score, file_path.to_string())));
                 }
             }
         }
@@ -58,7 +56,7 @@ impl FuzzyFileMatcher {
 
     fn get_sorted_matches(&mut self) -> Vec<String> {
         let mut sorted_matches: Vec<(u32, String)> = self
-            .matches
+            .binary_heap
             .drain()
             .map(|Reverse((score, path))| (score, path))
             .collect();
@@ -79,11 +77,11 @@ pub struct FileSearch {
     pub filtered_files: Vec<String>,
     pub is_file_mode: bool,
     pub trigger_char: Option<char>, // '@' or None for Tab
-    // Fuzzy matcher for efficient file matching
-    fuzzy_matcher: Option<FuzzyFileMatcher>,
     pub debounced_filter: DebouncedFilter,
     // Maximum number of matches to return
     max_matches: usize,
+    // Cache for loaded files to avoid reloading
+    last_directory: Option<String>,
 }
 
 impl Default for FileSearch {
@@ -93,76 +91,60 @@ impl Default for FileSearch {
             filtered_files: Vec::new(),
             is_file_mode: false,
             trigger_char: None,
-            fuzzy_matcher: None,
             debounced_filter: DebouncedFilter::new(120), // 120ms debounce
             max_matches: 50,                             // Default to 50 matches for performance
+            last_directory: None,
         }
     }
 }
 
 impl FileSearch {
-    /// Load all files from current directory recursively (no caching)
+    /// Load all files from current directory using parallel walking with ignore crate
     pub fn load_files_from_directory(&mut self, dir: &Path) {
-        // Always clear and reload - no caching
+        let dir_str = dir.to_string_lossy().to_string();
+
+        // Only reload if directory changed or files are empty
+        if self.last_directory.as_ref() == Some(&dir_str) && !self.file_suggestions.is_empty() {
+            return;
+        }
+
         self.file_suggestions.clear();
+        self.last_directory = Some(dir_str);
 
-        // Read gitignore patterns from the directory
-        let base_dir = dir.to_string_lossy();
-        let ignore_patterns = read_gitignore_patterns(&base_dir);
-        self.collect_files_recursive(dir, dir, &ignore_patterns);
-    }
+        // Use ignore crate for fast parallel directory walking
+        let walker = WalkBuilder::new(dir)
+            .threads(2) // Use 2 threads for optimal performance
+            .hidden(false) // Don't skip hidden files
+            .require_git(false) // Don't require git to be present
+            .build_parallel();
 
-    fn collect_files_recursive(
-        &mut self,
-        current_dir: &Path,
-        base_dir: &Path,
-        ignore_patterns: &[String],
-    ) {
-        if let Ok(entries) = fs::read_dir(current_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
+        let file_suggestions = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let file_suggestions_clone = file_suggestions.clone();
 
-                // Get relative path from base directory for gitignore matching
-                let relative_path = match path.strip_prefix(base_dir) {
-                    Ok(rel_path) => rel_path,
-                    Err(_) => &path,
-                };
-                let path_str = relative_path.to_string_lossy();
-
-                // Check if path matches any gitignore pattern
-                let should_ignore = ignore_patterns.iter().any(|pattern| {
-                    // First try the standard pattern matching
-                    if matches_gitignore_pattern(pattern, &path_str) {
-                        return true;
+        walker.run(|| {
+            let file_suggestions = file_suggestions_clone.clone();
+            Box::new(move |entry_result| {
+                if let Ok(entry) = entry_result {
+                    if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        if let Ok(rel_path) = entry.path().strip_prefix(dir) {
+                            if let Some(path_str) = rel_path.to_str() {
+                                if let Ok(mut files) = file_suggestions.lock() {
+                                    files.push(path_str.to_string());
+                                }
+                            }
+                        }
                     }
-
-                    // Extra step: if pattern starts with "/", also check if path starts with pattern without the leading slash
-                    if let Some(pattern_without_slash) = pattern.strip_prefix('/') {
-                        path_str == pattern_without_slash
-                            || path_str.starts_with(&format!("{}/", pattern_without_slash))
-                    } else {
-                        false
-                    }
-                });
-
-                if should_ignore {
-                    continue;
                 }
+                ignore::WalkState::Continue
+            })
+        });
 
-                if path.is_file() {
-                    // Add relative path from base directory
-                    if let Some(path_str) = relative_path.to_str() {
-                        self.file_suggestions.push(path_str.to_string());
-                    }
-                } else if path.is_dir() {
-                    // Recursively collect from subdirectories
-                    self.collect_files_recursive(&path, base_dir, ignore_patterns);
-                }
-            }
+        if let Ok(files) = file_suggestions.lock() {
+            self.file_suggestions = files.clone();
         }
     }
 
-    /// Filter files based on current input using fuzzy matching - optimized version, debounced
+    /// Filter files based on current input using fuzzy matching with parallel processing
     pub fn filter_files(&mut self, current_word: &str) {
         if !self.debounced_filter.should_filter(current_word) {
             return;
@@ -179,22 +161,35 @@ impl FileSearch {
             return;
         }
 
-        // Create or update fuzzy matcher for the current pattern
-        self.fuzzy_matcher = Some(FuzzyFileMatcher::new(self.max_matches, current_word));
+        // Create pattern and matcher for fuzzy matching
+        let pattern = Pattern::new(
+            current_word,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
 
-        // Add all files to the fuzzy matcher
+        let mut best_matches = BestMatchesList::new(
+            self.max_matches,
+            pattern,
+            Matcher::new(nucleo_matcher::Config::DEFAULT),
+        );
+
+        // Process files with early termination
+        let mut processed = 0;
         for file_path in &self.file_suggestions {
-            if let Some(ref mut matcher) = self.fuzzy_matcher {
-                matcher.add_file(file_path);
+            best_matches.insert(file_path);
+            processed += 1;
+
+            // Early termination: if we have enough high-quality matches, stop
+            if processed > self.max_matches * 10
+                && best_matches.binary_heap.len() >= self.max_matches
+            {
+                break;
             }
         }
 
-        // Get the best matches
-        if let Some(ref mut matcher) = self.fuzzy_matcher {
-            self.filtered_files = matcher.get_sorted_matches();
-        } else {
-            self.filtered_files.clear();
-        }
+        self.filtered_files = best_matches.get_sorted_matches();
     }
 
     /// Get the current filtered files for display
@@ -217,7 +212,6 @@ impl FileSearch {
         self.filtered_files.clear();
         self.is_file_mode = false;
         self.trigger_char = None;
-        self.fuzzy_matcher = None;
         // Keep file_suggestions for performance
     }
 
@@ -229,7 +223,7 @@ impl FileSearch {
     /// Clear all caches (call this when directory changes)
     pub fn clear_caches(&mut self) {
         self.file_suggestions.clear();
-        self.fuzzy_matcher = None;
+        self.last_directory = None;
     }
 
     /// Force reload files from directory (useful when files are created/deleted)
@@ -410,10 +404,11 @@ pub async fn file_search_worker(
     mut file_search: FileSearch,
 ) {
     while let Some((input, cursor_position)) = rx.recv().await {
-        // Always load files fresh on each request (no caching)
+        // Load files if not already loaded or directory changed
         if let Ok(current_dir) = std::env::current_dir() {
             file_search.load_files_from_directory(&current_dir);
         }
+
         // Filter helpers - only when input starts with '/' and is not empty
         let filtered_helpers: Vec<HelperCommand> = if input.starts_with('/') && !input.is_empty() {
             helpers
@@ -431,7 +426,6 @@ pub async fn file_search_worker(
 
         let mut filtered_files = Vec::new();
         // Detect @ trigger using new signature
-
         if let Some(at_pos) = find_at_trigger(&input, cursor_position) {
             let is_valid_at = at_pos == 0
                 || input
@@ -444,8 +438,6 @@ pub async fn file_search_worker(
                 filtered_files = file_search.filtered_files.clone();
             }
         }
-
-        // TODO: Add / and other triggers as needed
 
         let _ = tx
             .send(FileSearchResult {
