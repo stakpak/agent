@@ -98,6 +98,20 @@ pub fn update(
                 }
             }
         }
+        InputEvent::BulkAutoApproveMessage => {
+            state.auto_approve_message = true;
+            if let Some(dialog_command) = &state.dialog_command {
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+            }
+            state.is_dialog_open = false;
+            state.dialog_selected = 0;
+            state.dialog_command = None;
+            state.dialog_focused = false;
+            state.text_area.set_text("");
+        }
+        InputEvent::ResetAutoApproveMessage => {
+            state.auto_approve_message = false;
+        }
         InputEvent::InputChanged(c) => handle_input_changed(state, c),
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
@@ -264,7 +278,9 @@ pub fn update(
             state.pending_bash_message_id = Some(message_id);
 
             // Check if auto-approve should be used
-            if state.auto_approve_manager.should_auto_approve(&tool_call) {
+            if state.auto_approve_manager.should_auto_approve(&tool_call)
+                || (state.tool_call_count > 0 && state.auto_approve_message)
+            {
                 // Auto-approve the tool call
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
             } else {
@@ -274,6 +290,10 @@ pub fn update(
                 state.loading = false;
                 state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
             }
+        }
+
+        InputEvent::ToolCallCount(count) => {
+            state.tool_call_count = count;
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());

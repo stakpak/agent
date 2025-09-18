@@ -182,6 +182,9 @@ pub struct AppState {
     pub mouse_capture_enabled: bool,
     pub loading_manager: LoadingStateManager,
     pub has_user_messages: bool,
+
+    pub tool_call_count: usize,
+    pub auto_approve_message: bool,
 }
 
 #[derive(Debug)]
@@ -204,6 +207,9 @@ pub enum InputEvent {
     InputSubmitted,
     InputSubmittedWith(String),
     InputSubmittedWithColor(String, Color),
+    ToolCallCount(usize),
+    BulkAutoApproveMessage,
+    ResetAutoApproveMessage,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -397,6 +403,8 @@ impl AppState {
             ), // Start with mouse capture enabled only for supported terminals
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
+            tool_call_count: 0,
+            auto_approve_message: false,
         }
     }
 
