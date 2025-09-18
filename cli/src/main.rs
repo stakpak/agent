@@ -117,10 +117,10 @@ async fn main() {
     let cli = Cli::parse();
 
     // Skip auto-update for ACP command
-    if !matches!(cli.command, Some(Commands::Acp)) {
-        if let Err(e) = auto_update().await {
-            eprintln!("Auto-update failed: {}", e);
-        }
+    if !matches!(cli.command, Some(Commands::Acp { .. }))
+        && let Err(e) = auto_update().await
+    {
+        eprintln!("Auto-update failed: {}", e);
     }
 
     if let Some(workdir) = cli.workdir {
@@ -165,7 +165,7 @@ async fn main() {
             match cli.command {
                 Some(command) => {
                     // Skip check_update for ACP command
-                    if !matches!(command, Commands::Acp) {
+                    if !matches!(command, Commands::Acp { .. }) {
                         let _ =
                             check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
                     }
