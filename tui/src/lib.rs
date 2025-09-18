@@ -250,6 +250,7 @@ pub async fn run_tui(
                    }
                        services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
                        state.poll_file_search_results();
+                       state.update_session_empty_status();
                    }
                }
                _ = spinner_interval.tick() => {
@@ -271,6 +272,7 @@ pub async fn run_tui(
             break;
         }
         state.poll_file_search_results();
+        state.update_session_empty_status();
         terminal.draw(|f| view::view(f, &mut state))?;
     }
 
