@@ -323,15 +323,15 @@ impl MarkdownRenderer {
         let trimmed = line.trim();
 
         // Look for pattern like "number:" at the beginning (with or without space after colon)
-        if let Some(colon_pos) = trimmed.find(':') {
-            if colon_pos < 10 {
-                // Reasonable limit for line numbers
-                let prefix = &trimmed[..colon_pos];
-                if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
-                    // Remove the colon and any following whitespace
-                    let after_colon = &trimmed[colon_pos + 1..];
-                    return after_colon.trim_start().to_string();
-                }
+        if let Some(colon_pos) = trimmed.find(':')
+            && colon_pos < 10
+        {
+            // Reasonable limit for line numbers
+            let prefix = &trimmed[..colon_pos];
+            if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
+                // Remove the colon and any following whitespace
+                let after_colon = &trimmed[colon_pos + 1..];
+                return after_colon.trim_start().to_string();
             }
         }
 
@@ -367,17 +367,20 @@ impl MarkdownRenderer {
         }
 
         // Images - handle ![alt](url) syntax
-        if line.contains("![") && line.contains("](") {
-            if let Some((alt, url)) = self.parse_image_safe(line) {
-                return Some(MarkdownComponent::Image { alt, url });
-            }
+        if line.contains("![")
+            && line.contains("](")
+            && let Some((alt, url)) = self.parse_image_safe(line)
+        {
+            return Some(MarkdownComponent::Image { alt, url });
         }
 
         // Links - handle [text](url) syntax
-        if line.contains('[') && line.contains("](") && line.contains(')') {
-            if let Some((text, url)) = self.parse_link_safe(line) {
-                return Some(MarkdownComponent::Link { text, url });
-            }
+        if line.contains('[')
+            && line.contains("](")
+            && line.contains(')')
+            && let Some((text, url)) = self.parse_link_safe(line)
+        {
+            return Some(MarkdownComponent::Link { text, url });
         }
 
         // Tasks
@@ -455,18 +458,17 @@ impl MarkdownRenderer {
 
     fn parse_simplified_link(&self, line: &str) -> Option<MarkdownComponent> {
         // Handle simplified links from badges
-        if let Some(start) = line.find("🔗 [") {
-            if let Some(middle) = line[start..].find("](") {
-                if let Some(end) = line[start + middle + 2..].find(')') {
-                    let text_part = &line[start + 4..start + middle];
-                    let url_start = start + middle + 2;
-                    let url_part = &line[url_start..url_start + end];
-                    return Some(MarkdownComponent::Link {
-                        text: text_part.to_string(),
-                        url: url_part.to_string(),
-                    });
-                }
-            }
+        if let Some(start) = line.find("🔗 [")
+            && let Some(middle) = line[start..].find("](")
+            && let Some(end) = line[start + middle + 2..].find(')')
+        {
+            let text_part = &line[start + 4..start + middle];
+            let url_start = start + middle + 2;
+            let url_part = &line[url_start..url_start + end];
+            return Some(MarkdownComponent::Link {
+                text: text_part.to_string(),
+                url: url_part.to_string(),
+            });
         }
         None
     }
@@ -615,13 +617,13 @@ impl MarkdownRenderer {
     fn parse_numbered_list(&self, line: &str) -> Option<String> {
         // Match patterns like "1. ", "2. ", etc.
         let trimmed = line.trim();
-        if let Some(dot_pos) = trimmed.find(". ") {
-            if dot_pos < 5 {
-                // Reasonable limit for list numbers
-                let prefix = &trimmed[..dot_pos];
-                if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
-                    return Some(trimmed[dot_pos + 2..].to_string());
-                }
+        if let Some(dot_pos) = trimmed.find(". ")
+            && dot_pos < 5
+        {
+            // Reasonable limit for list numbers
+            let prefix = &trimmed[..dot_pos];
+            if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
+                return Some(trimmed[dot_pos + 2..].to_string());
             }
         }
         None
@@ -728,18 +730,17 @@ impl MarkdownRenderer {
             return None;
         }
 
-        if let Some(start) = text.find("![") {
-            if let Some(middle) = text[start..].find("](") {
-                if start + middle < text.len() {
-                    let alt_part = &text[start + 2..start + middle];
-                    let url_start = start + middle + 2;
-                    if let Some(end) = text[url_start..].find(')') {
-                        if url_start + end <= text.len() {
-                            let url_part = &text[url_start..url_start + end];
-                            return Some((alt_part.to_string(), url_part.to_string()));
-                        }
-                    }
-                }
+        if let Some(start) = text.find("![")
+            && let Some(middle) = text[start..].find("](")
+            && start + middle < text.len()
+        {
+            let alt_part = &text[start + 2..start + middle];
+            let url_start = start + middle + 2;
+            if let Some(end) = text[url_start..].find(')')
+                && url_start + end <= text.len()
+            {
+                let url_part = &text[url_start..url_start + end];
+                return Some((alt_part.to_string(), url_part.to_string()));
             }
         }
         None
@@ -751,18 +752,17 @@ impl MarkdownRenderer {
             return None;
         }
 
-        if let Some(start) = text.find('[') {
-            if let Some(middle) = text[start..].find("](") {
-                if start + middle < text.len() {
-                    let text_part = &text[start + 1..start + middle];
-                    let url_start = start + middle + 2;
-                    if let Some(end) = text[url_start..].find(')') {
-                        if url_start + end <= text.len() {
-                            let url_part = &text[url_start..url_start + end];
-                            return Some((text_part.to_string(), url_part.to_string()));
-                        }
-                    }
-                }
+        if let Some(start) = text.find('[')
+            && let Some(middle) = text[start..].find("](")
+            && start + middle < text.len()
+        {
+            let text_part = &text[start + 1..start + middle];
+            let url_start = start + middle + 2;
+            if let Some(end) = text[url_start..].find(')')
+                && url_start + end <= text.len()
+            {
+                let url_part = &text[url_start..url_start + end];
+                return Some((text_part.to_string(), url_part.to_string()));
             }
         }
         None

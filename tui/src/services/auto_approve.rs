@@ -295,10 +295,10 @@ impl AutoApproveManager {
     }
 
     fn extract_command(&self, tool_call: &ToolCall) -> String {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
-            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
-                return cmd.to_string();
-            }
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            && let Some(cmd) = json.get("command").and_then(|v| v.as_str())
+        {
+            return cmd.to_string();
         }
 
         // Fallback to old parsing method

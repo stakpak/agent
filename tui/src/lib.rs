@@ -118,12 +118,11 @@ pub async fn run_tui(
     let internal_tx_thread = internal_tx.clone();
     std::thread::spawn(move || {
         loop {
-            if let Ok(event) = crossterm::event::read() {
-                if let Some(event) = crate::event::map_crossterm_event_to_input_event(event) {
-                    if internal_tx_thread.blocking_send(event).is_err() {
-                        break;
-                    }
-                }
+            if let Ok(event) = crossterm::event::read()
+                && let Some(event) = crate::event::map_crossterm_event_to_input_event(event)
+                && internal_tx_thread.blocking_send(event).is_err()
+            {
+                break;
             }
         }
     });
@@ -137,13 +136,12 @@ pub async fn run_tui(
     let mut should_quit = false;
     loop {
         // Check if double Ctrl+C timer expired
-        if state.ctrl_c_pressed_once {
-            if let Some(timer) = state.ctrl_c_timer {
-                if std::time::Instant::now() > timer {
-                    state.ctrl_c_pressed_once = false;
-                    state.ctrl_c_timer = None;
-                }
-            }
+        if state.ctrl_c_pressed_once
+            && let Some(timer) = state.ctrl_c_timer
+            && std::time::Instant::now() > timer
+        {
+            state.ctrl_c_pressed_once = false;
+            state.ctrl_c_timer = None;
         }
         tokio::select! {
 
@@ -255,14 +253,12 @@ pub async fn run_tui(
                }
                _ = spinner_interval.tick() => {
                    // Also check double Ctrl+C timer expiry on every tick
-                   if state.ctrl_c_pressed_once {
-                       if let Some(timer) = state.ctrl_c_timer {
-                           if std::time::Instant::now() > timer {
+                   if state.ctrl_c_pressed_once
+                       && let Some(timer) = state.ctrl_c_timer
+                           && std::time::Instant::now() > timer {
                                state.ctrl_c_pressed_once = false;
                                state.ctrl_c_timer = None;
                            }
-                       }
-                   }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
                    state.poll_autocomplete_results();
                    terminal.draw(|f| view::view(f, &mut state))?;

@@ -163,6 +163,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             tools_queue.extend(tool_calls.clone());
 
             if !tools_queue.is_empty() {
+                send_input_event(&input_tx, InputEvent::ToolCallCount(tools_queue.len())).await?;
                 let initial_tool_call = tools_queue.remove(0);
                 send_tool_call(&input_tx, &initial_tool_call).await?;
             }
@@ -199,6 +200,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     // Add rulebooks to the user input
                     let (user_input, _) = add_rulebooks(&messages, &user_input, &config.rulebooks);
                     send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                    send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
@@ -266,6 +268,9 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Process next tool in queue if available
                     if !tools_queue.is_empty() {
+                        let tool_call_count = tools_queue.len();
+                        send_input_event(&input_tx, InputEvent::ToolCallCount(tool_call_count))
+                            .await?;
                         let next_tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &next_tool_call).await?;
                         continue;
@@ -535,13 +540,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                         tools_queue.extend(tool_calls.clone());
                         if !tools_queue.is_empty() {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::ToolCallCount(tools_queue.len()),
+                            )
+                            .await?;
                             let tool_call = tools_queue.remove(0);
                             send_tool_call(&input_tx, &tool_call).await?;
                             continue;
                         }
                     }
 
-                    // Stream processing handles loading state automatically
+                    send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                 }
                 Err(_) => {
                     continue;

@@ -984,15 +984,14 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         }
 
         // Close the parentheses on the last line
-        if let Some(last_line) = lines.last_mut() {
-            if let Some(last_content_span) = last_line
+        if let Some(last_line) = lines.last_mut()
+            && let Some(last_content_span) = last_line
                 .spans
                 .iter_mut()
                 .rev()
                 .find(|span| span.style.fg == Some(Color::White) && !span.content.contains("│"))
-            {
-                last_content_span.content = format!("{}", last_content_span.content).into();
-            }
+        {
+            last_content_span.content = format!("{}", last_content_span.content).into();
         }
     }
     if is_collapsed {
@@ -1262,15 +1261,12 @@ pub fn render_styled_lines(
         }
 
         // Close the parentheses on the last line if we had multiple lines
-        if wrapped_args.len() > 1 {
-            if let Some(last_line) = lines.last_mut() {
-                if let Some(last_content_span) = last_line.spans.last_mut() {
-                    if last_content_span.style.fg == Some(Color::Gray) {
-                        last_content_span.content =
-                            format!("{})", last_content_span.content).into();
-                    }
-                }
-            }
+        if wrapped_args.len() > 1
+            && let Some(last_line) = lines.last_mut()
+            && let Some(last_content_span) = last_line.spans.last_mut()
+            && last_content_span.style.fg == Some(Color::Gray)
+        {
+            last_content_span.content = format!("{})", last_content_span.content).into();
         }
     }
 

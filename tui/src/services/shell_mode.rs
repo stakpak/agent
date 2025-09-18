@@ -62,24 +62,24 @@ impl ShellCommand {
 
         // Try to kill the process directly using the registry
         let registry = get_process_registry();
-        if let Ok(registry) = registry.lock() {
-            if let Some(&pid) = registry.get(&self.id) {
-                #[cfg(unix)]
-                {
-                    use std::process::Command;
-                    // First try SIGTERM (graceful)
-                    let _ = Command::new("kill").args([&pid.to_string()]).output();
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    // Then try SIGKILL (forceful)
-                    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
-                }
-                #[cfg(windows)]
-                {
-                    use std::process::Command;
-                    let _ = Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/F"])
-                        .output();
-                }
+        if let Ok(registry) = registry.lock()
+            && let Some(&pid) = registry.get(&self.id)
+        {
+            #[cfg(unix)]
+            {
+                use std::process::Command;
+                // First try SIGTERM (graceful)
+                let _ = Command::new("kill").args([&pid.to_string()]).output();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                // Then try SIGKILL (forceful)
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+            }
+            #[cfg(windows)]
+            {
+                use std::process::Command;
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output();
             }
         }
 
