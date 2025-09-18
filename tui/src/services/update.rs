@@ -723,6 +723,9 @@ fn handle_esc(
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
     }
+    if state.auto_approve_message {
+        state.auto_approve_message = false;
+    }
 
     state.is_streaming = false;
     if state.show_sessions_dialog {
@@ -1332,6 +1335,10 @@ fn handle_retry_tool_call(
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
+    }
+
+    if state.auto_approve_message {
+        state.auto_approve_message = false;
     }
 
     if let Some(tool_call) = &state.latest_tool_call {

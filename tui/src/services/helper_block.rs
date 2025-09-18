@@ -289,7 +289,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
     });
 }
 
-pub fn render_loading_spinner(state: &AppState) -> Line {
+pub fn render_loading_spinner(state: &AppState) -> Line<'_> {
     let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
     let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
     let spinner_text = if state.loading_type == LoadingType::Sessions {
