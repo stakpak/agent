@@ -1,4 +1,4 @@
-use crate::commands::agent::run::helpers::user_message;
+use crate::commands::agent::run::helpers::{system_message, user_message};
 use crate::utils::network;
 use crate::{commands::agent::run::helpers::convert_tools_map_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
@@ -52,6 +52,64 @@ pub struct StakpakAcpAgent {
 }
 
 impl StakpakAcpAgent {
+    pub async fn new(
+        config: AppConfig,
+        session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+        system_prompt: Option<String>,
+    ) -> Result<Self, String> {
+        let api_config: ClientConfig = config.clone().into();
+        let client =
+            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?;
+
+        // Initialize MCP server and tools (optional for ACP)
+        let (mcp_server_host, clients, tools) =
+            match Self::initialize_mcp_server_and_tools(&config, None).await {
+                Ok((host, client_manager, tool_list)) => {
+                    log::info!("MCP server initialized successfully");
+                    (host, Some(client_manager), tool_list)
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to initialize MCP server: {}, continuing without tools",
+                        e
+                    );
+                    (String::new(), None, Vec::new())
+                }
+            };
+
+        // Create cancellation channels
+        let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
+        let (tool_cancel_tx, _) = tokio::sync::broadcast::channel(1);
+
+        let messages = match system_prompt {
+            Some(system_prompt) => vec![system_message(system_prompt)],
+            None => Vec::new(),
+        };
+
+        Ok(Self {
+            config,
+            client,
+            session_update_tx,
+            next_session_id: Cell::new(0),
+            mcp_server_host: if mcp_server_host.is_empty() {
+                None
+            } else {
+                Some(mcp_server_host)
+            },
+            clients,
+            tools: if tools.is_empty() { None } else { Some(tools) },
+            current_session_id: Cell::new(None),
+            progress_tx: None,
+            messages: Arc::new(tokio::sync::Mutex::new(messages)),
+            permission_request_tx: None,
+            stream_cancel_tx: Some(stream_cancel_tx),
+            tool_cancel_tx: Some(tool_cancel_tx),
+            active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
+            streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
+        })
+    }
+
     // Helper method to send proper ACP tool call notifications
     #[allow(clippy::too_many_arguments)]
     async fn send_tool_call_notification(
@@ -1227,58 +1285,6 @@ impl StakpakAcpAgent {
         );
 
         Ok(chat_completion_response)
-    }
-
-    pub async fn new(
-        config: AppConfig,
-        session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
-    ) -> Result<Self, String> {
-        let api_config: ClientConfig = config.clone().into();
-        let client =
-            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?;
-
-        // Initialize MCP server and tools (optional for ACP)
-        let (mcp_server_host, clients, tools) =
-            match Self::initialize_mcp_server_and_tools(&config, None).await {
-                Ok((host, client_manager, tool_list)) => {
-                    log::info!("MCP server initialized successfully");
-                    (host, Some(client_manager), tool_list)
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to initialize MCP server: {}, continuing without tools",
-                        e
-                    );
-                    (String::new(), None, Vec::new())
-                }
-            };
-
-        // Create cancellation channels
-        let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
-        let (tool_cancel_tx, _) = tokio::sync::broadcast::channel(1);
-
-        Ok(Self {
-            config,
-            client,
-            session_update_tx,
-            next_session_id: Cell::new(0),
-            mcp_server_host: if mcp_server_host.is_empty() {
-                None
-            } else {
-                Some(mcp_server_host)
-            },
-            clients,
-            tools: if tools.is_empty() { None } else { Some(tools) },
-            current_session_id: Cell::new(None),
-            progress_tx: None,
-            messages: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            permission_request_tx: None,
-            stream_cancel_tx: Some(stream_cancel_tx),
-            tool_cancel_tx: Some(tool_cancel_tx),
-            active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
-            streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
-        })
     }
 
     pub async fn run_stdio(&self) -> Result<(), String> {
