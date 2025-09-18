@@ -357,12 +357,11 @@ pub fn update(
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
-                if let Some(dialog_command) = &state.dialog_command {
-                    if let Some(latest_tool_call) = &state.latest_tool_call {
-                        if dialog_command.id == latest_tool_call.id {
-                            state.latest_tool_call = None;
-                        }
-                    }
+                if let Some(dialog_command) = &state.dialog_command
+                    && let Some(latest_tool_call) = &state.latest_tool_call
+                    && dialog_command.id == latest_tool_call.id
+                {
+                    state.latest_tool_call = None;
                 }
                 state.show_shell_mode = false;
                 state.dialog_command = None;
@@ -422,9 +421,9 @@ pub fn update(
         }
         InputEvent::ShellKill => {
             // Kill the running command if there is one
-            if let Some(cmd) = &state.active_shell_command {
-                if let Err(_e) = cmd.kill() {}
-            }
+            if let Some(cmd) = &state.active_shell_command
+                && let Err(_e) = cmd.kill()
+            {}
             // Reset shell state
             state.active_shell_command = None;
             state.active_shell_command_output = None;
@@ -559,12 +558,11 @@ fn handle_shell_mode(state: &mut AppState) {
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         // only show dialog if id of latest tool call is not the same as dialog_command id
-        if let Some(latest_tool_call) = &state.latest_tool_call {
-            if let Some(dialog_command) = &state.dialog_command {
-                if latest_tool_call.id != dialog_command.id {
-                    state.is_dialog_open = true;
-                }
-            }
+        if let Some(latest_tool_call) = &state.latest_tool_call
+            && let Some(dialog_command) = &state.dialog_command
+            && latest_tool_call.id != dialog_command.id
+        {
+            state.is_dialog_open = true;
         }
         state.ondemand_shell_mode = false;
     }
@@ -650,11 +648,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     state.text_area.insert_str(&c.to_string());
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input().contains(placeholder) {
-            state.pasted_long_text = None;
-            state.pasted_placeholder = None;
-        }
+    if let Some(placeholder) = &state.pasted_placeholder
+        && !state.input().contains(placeholder)
+    {
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
     }
 
     if state.input().starts_with('/') {
@@ -681,11 +679,11 @@ fn handle_input_backspace(state: &mut AppState) {
     state.text_area.delete_backward(1);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input().contains(placeholder) {
-            state.pasted_long_text = None;
-            state.pasted_placeholder = None;
-        }
+    if let Some(placeholder) = &state.pasted_placeholder
+        && !state.input().contains(placeholder)
+    {
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
     }
 
     // Send input to autocomplete worker (async, non-blocking)
@@ -888,7 +886,6 @@ fn handle_input_submitted(
                     let _ = output_tx.try_send(OutputEvent::ListSessions);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/resume" => {
                     state.messages.clear();
@@ -901,31 +898,26 @@ fn handle_input_submitted(
 
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
 
                 "/clear" => {
                     push_clear_message(state);
-                    return;
                 }
                 "/memorize" => {
                     push_memorize_message(state);
                     let _ = output_tx.try_send(OutputEvent::Memorize);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/help" => {
                     push_help_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/status" => {
                     push_status_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/quit" => {
                     state.show_helper_dropdown = false;
@@ -937,13 +929,11 @@ fn handle_input_submitted(
                     state.text_area.set_text(&input);
                     state.text_area.set_cursor(input.len());
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/list_approved_tools" => {
                     list_auto_approved_tools(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/mouse_capture" => {
                     // Toggle mouse capture using shared function
@@ -951,7 +941,6 @@ fn handle_input_submitted(
 
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
 
                 _ => {}
@@ -980,11 +969,10 @@ fn handle_input_submitted(
         // Also handle the existing pasted_placeholder system
         if let (Some(placeholder), Some(long_text)) =
             (&state.pasted_placeholder, &state.pasted_long_text)
+            && final_input.contains(placeholder)
         {
-            if final_input.contains(placeholder) {
-                final_input = final_input.replace(placeholder, long_text);
-                state.text_area.set_text(&final_input);
-            }
+            final_input = final_input.replace(placeholder, long_text);
+            state.text_area.set_text(&final_input);
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
@@ -1384,10 +1372,10 @@ fn list_auto_approved_tools(state: &mut AppState) {
         .collect();
 
     // Filter by allowed_tools if configured
-    if let Some(allowed_tools) = &state.allowed_tools {
-        if !allowed_tools.is_empty() {
-            auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
-        }
+    if let Some(allowed_tools) = &state.allowed_tools
+        && !allowed_tools.is_empty()
+    {
+        auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
     }
 
     if auto_approved_tools.is_empty() {
