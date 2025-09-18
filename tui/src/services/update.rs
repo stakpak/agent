@@ -1,8 +1,8 @@
 use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, OutputEvent};
 use crate::services::auto_approve::AutoApprovePolicy;
-use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
+use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message,
     push_memorize_message, push_status_message, push_styled_message, render_system_message,
@@ -423,9 +423,11 @@ pub fn update(
         }
         InputEvent::InputDelete => {
             state.text_area.set_text("");
+            state.show_helper_dropdown = false;
         }
         InputEvent::InputDeleteWord => {
             state.text_area.delete_backward_word();
+            state.show_helper_dropdown = false;
         }
         InputEvent::InputCursorPrevWord => {
             state
@@ -553,10 +555,10 @@ fn handle_shell_mode(state: &mut AppState) {
 fn handle_tab(state: &mut AppState) {
     // Check if we're already in helper dropdown mode
     if state.show_helper_dropdown {
-        // If in file autocomplete mode, handle file selection
-        if state.autocomplete.is_active() {
+        // If in file file_search mode, handle file selection
+        if state.file_search.is_active() {
             let selected_file = state
-                .autocomplete
+                .file_search
                 .get_file_at_index(state.helper_selected)
                 .map(|s| s.to_string());
             if let Some(selected_file) = selected_file {
@@ -575,14 +577,14 @@ fn handle_tab(state: &mut AppState) {
         }
         return;
     }
-    // Trigger file autocomplete with Tab
+    // Trigger file file_search with Tab
     handle_tab_trigger(state);
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
     if state.show_helper_dropdown && state.helper_selected > 0 {
-        if state.autocomplete.is_active() {
-            // File autocomplete mode
+        if state.file_search.is_active() {
+            // File file_search mode
             state.helper_selected -= 1;
         } else {
             // Regular helper mode
@@ -595,9 +597,9 @@ fn handle_dropdown_up(state: &mut AppState) {
 
 fn handle_dropdown_down(state: &mut AppState) {
     if state.show_helper_dropdown {
-        if state.autocomplete.is_active() {
-            // File autocomplete mode
-            if state.helper_selected + 1 < state.autocomplete.filtered_count() {
+        if state.file_search.is_active() {
+            // File file_search mode
+            if state.helper_selected + 1 < state.file_search.filtered_count() {
                 state.helper_selected += 1;
             }
         } else {
@@ -638,13 +640,13 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     }
 
     if state.input().starts_with('/') {
-        if state.autocomplete.is_active() {
-            state.autocomplete.reset();
+        if state.file_search.is_active() {
+            state.file_search.reset();
         }
         state.show_helper_dropdown = true;
     }
 
-    if let Some(tx) = &state.autocomplete_tx {
+    if let Some(tx) = &state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
@@ -653,7 +655,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.filtered_helpers.clear();
         state.filtered_files.clear();
         state.helper_selected = 0;
-        state.autocomplete.reset();
+        state.file_search.reset();
     }
 }
 
@@ -668,15 +670,15 @@ fn handle_input_backspace(state: &mut AppState) {
         }
     }
 
-    // Send input to autocomplete worker (async, non-blocking)
-    if let Some(tx) = &state.autocomplete_tx {
+    // Send input to file_search worker (async, non-blocking)
+    if let Some(tx) = &state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
     }
 
     // Handle helper filtering after backspace
     if state.input().starts_with('/') {
-        if state.autocomplete.is_active() {
-            state.autocomplete.reset();
+        if state.file_search.is_active() {
+            state.file_search.reset();
         }
         state.show_helper_dropdown = true;
     }
@@ -687,7 +689,7 @@ fn handle_input_backspace(state: &mut AppState) {
         state.filtered_helpers.clear();
         state.filtered_files.clear();
         state.helper_selected = 0;
-        state.autocomplete.reset();
+        state.file_search.reset();
     }
 }
 
@@ -847,9 +849,9 @@ fn handle_input_submitted(
         state.text_area.set_text("");
     // Reset focus when dialog closes
     } else if state.show_helper_dropdown {
-        if state.autocomplete.is_active() {
+        if state.file_search.is_active() {
             let selected_file = state
-                .autocomplete
+                .file_search
                 .get_file_at_index(state.helper_selected)
                 .map(|s| s.to_string());
             if let Some(selected_file) = selected_file {

@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::render_loading_spinner;
-use crate::services::helper_dropdown::{render_autocomplete_dropdown, render_helper_dropdown};
+use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
     get_wrapped_collapsed_message_lines_cached, get_wrapped_message_lines_cached,
@@ -121,7 +121,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
-        render_autocomplete_dropdown(f, state, dropdown_area);
+        render_file_search_dropdown(f, state, dropdown_area);
     }
     // Render hint/shortcuts if not hiding for dropdown and not showing collapsed messages (unless dialog is open)
     if !state.show_helper_dropdown && !state.show_collapsed_messages {
