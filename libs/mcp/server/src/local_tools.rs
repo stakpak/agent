@@ -4,6 +4,7 @@ use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
+use stakpak_shared::file_backup_manager::FileBackupManager;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -65,7 +66,7 @@ pub struct GetAllTasksRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ViewRequest {
     #[schemars(
-        description = "The path to the file or directory to view. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+        description = "The path to the file or directory to view. For remote files, use format: user@host:/path or user@host#port:/path (use ABSOLUTE paths for remote files)"
     )]
     pub path: String,
     #[schemars(
@@ -85,7 +86,7 @@ pub struct ViewRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct StrReplaceRequest {
     #[schemars(
-        description = "The path to the file to modify. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+        description = "The path to the file to modify. For remote files, use format: user@host:/path or user@host#port:/path (use ABSOLUTE paths for remote files)"
     )]
     pub path: String,
     #[schemars(
@@ -111,7 +112,7 @@ pub struct StrReplaceRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateRequest {
     #[schemars(
-        description = "The path where the new file should be created. For remote files, use format: user@host:/path or ssh://user@host/path (use ABSOLUTE paths for remote files)"
+        description = "The path where the new file should be created. For remote files, use format: user@host:/path or user@host#port:/path (use ABSOLUTE paths for remote files)"
     )]
     pub path: String,
     #[schemars(
@@ -132,6 +133,24 @@ pub struct GeneratePasswordRequest {
     pub length: Option<usize>,
     #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
     pub no_symbols: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveRequest {
+    #[schemars(
+        description = "The path to the file or directory to remove. For remote files, use format: user@host:/path or user@host#port:/path (use ABSOLUTE paths for remote files)"
+    )]
+    pub path: String,
+    #[schemars(
+        description = "Whether to remove directories recursively (required for non-empty directories, default: false)"
+    )]
+    pub recursive: Option<bool>,
+    #[schemars(description = "Optional password for remote connection (if path is remote)")]
+    pub password: Option<String>,
+    #[schemars(
+        description = "Optional path to private key for remote connection (if path is remote)"
+    )]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -521,7 +540,7 @@ Use this tool to check the progress and results of long-running background tasks
         description = "View the contents of a local or remote file/directory. Can read entire files or specific line ranges.
 
 REMOTE FILE ACCESS:
-- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
 - IMPORTANT: Use ABSOLUTE paths for remote files/directories (e.g., '/etc/config' not 'config')
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
@@ -578,7 +597,7 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
         description = "Replace a specific string in a local or remote file with new text. The old_str must match exactly including whitespace and indentation.
 
 REMOTE FILE EDITING:
-- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
 - IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/etc/config' not 'config')
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
@@ -636,7 +655,7 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         description = "Create a new local or remote file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist.
 
 REMOTE FILE CREATION:
-- Use path formats: 'user@host:/path' or 'ssh://user@host/path' for remote files
+- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
 - IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/script.sh' not 'script.sh')
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
@@ -818,7 +837,64 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         )]))
     }
 
-    // Helper functions to avoid code duplication
+    #[tool(
+        description = "Remove/delete a local or remote file or directory. Files are automatically backed up before removal and can be recovered.
+
+REMOTE FILE REMOVAL:
+- Supports SSH connections for remote file operations
+- Use format: 'user@host:/path' or 'user@host#port:/path' 
+- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/file.txt' not 'file.txt')
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
+- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
+- Examples:
+  * 'user@server.com:/tmp/old-file.txt' - Remove remote file
+  * 'user@server.com#2222:/var/log/old-logs/' - Remove remote directory (with recursive=true)
+  * '/local/path/file.txt' - Remove local file (default behavior)
+
+DIRECTORY REMOVAL:
+- Use 'recursive=true' to remove directories and their contents
+- Files can be removed without the recursive flag
+
+BACKUP & RECOVERY:
+- ALL removed files and directories are automatically backed up before deletion
+- Local files: Moved to '.stakpak/session/backups/{uuid}/' on the local machine
+- Remote files: Moved to '.stakpak/session/backups/{uuid}/' on the remote machine
+- Backup paths are returned in XML format showing original and backup locations
+- Files are moved (not copied) to backup location, making removal efficient
+- Both files and entire directories can be recovered from backup locations
+
+SAFETY NOTES:
+- Files are moved to backup location (not permanently deleted)
+- Backup locations are preserved until manually cleaned up
+- Use backup paths from XML output to restore files if needed"
+    )]
+    pub async fn remove(
+        &self,
+        _ctx: RequestContext<RoleServer>,
+        Parameters(RemoveRequest {
+            path,
+            recursive,
+            password,
+            private_key_path,
+        }): Parameters<RemoveRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let recursive = recursive.unwrap_or(false);
+
+        if Self::is_remote_path(&path) {
+            match self
+                .get_remote_connection(&path, password, private_key_path)
+                .await
+            {
+                Ok((conn, remote_path)) => {
+                    self.remove_remote_path(&conn, &remote_path, &path, recursive)
+                        .await
+                }
+                Err(error_result) => Ok(error_result),
+            }
+        } else {
+            self.remove_local_path(&path, recursive).await
+        }
+    }
 
     /// Get remote connection for a path, handling authentication
     async fn get_remote_connection(
@@ -1567,6 +1643,124 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
                 Content::text(format!("Cannot create file: {}", e)),
             ])),
         }
+    }
+
+    /// Remove a remote file or directory using native SFTP operations where possible
+    async fn remove_remote_path(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        recursive: bool,
+    ) -> Result<CallToolResult, McpError> {
+        if !conn.exists(remote_path).await {
+            return Ok(CallToolResult::error(vec![
+                Content::text("PATH_NOT_FOUND"),
+                Content::text(format!("Path does not exist: {}", original_path)),
+            ]));
+        }
+
+        let is_directory = conn.is_directory(remote_path).await;
+
+        let ssh_prefix = match conn.get_ssh_prefix() {
+            Ok(prefix) => prefix,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CONNECTION_ERROR"),
+                    Content::text(format!("Failed to get SSH connection info: {}", e)),
+                ]));
+            }
+        };
+
+        let canonical_original_path = match conn.canonicalize(remote_path).await {
+            Ok(abs_path) => abs_path,
+            Err(_) => remote_path.to_string(),
+        };
+        let ssh_prefixed_original_path = format!("{}{}", ssh_prefix, canonical_original_path);
+
+        // Move the entire path (file or directory) to backup location - this IS the removal
+        let backup_path =
+            match FileBackupManager::move_remote_path_to_backup(conn, remote_path).await {
+                Ok(backup_path) => backup_path,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("BACKUP_ERROR"),
+                        Content::text(format!("Failed to move remote path to backup: {}", e)),
+                    ]));
+                }
+            };
+
+        let ssh_prefixed_backup_path = format!("{}{}", ssh_prefix, backup_path);
+
+        let mut backup_mapping = std::collections::HashMap::new();
+        backup_mapping.insert(ssh_prefixed_original_path, ssh_prefixed_backup_path);
+
+        let item_type = if is_directory { "directory" } else { "file" };
+        let recursive_note = if is_directory && recursive {
+            " (recursively)"
+        } else {
+            ""
+        };
+
+        let backup_xml = FileBackupManager::format_backup_xml(&backup_mapping, "remote");
+        let output = format!(
+            "Successfully removed {} '{}'{}\n\n{}",
+            item_type, original_path, recursive_note, backup_xml
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    /// Remove a local file or directory
+    async fn remove_local_path(
+        &self,
+        path: &str,
+        recursive: bool,
+    ) -> Result<CallToolResult, McpError> {
+        let local_path = Path::new(path);
+
+        if !local_path.exists() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("PATH_NOT_FOUND"),
+                Content::text(format!("Path does not exist: {}", path)),
+            ]));
+        }
+
+        let is_directory = local_path.is_dir();
+
+        let absolute_original_path = match local_path.canonicalize() {
+            Ok(abs_path) => abs_path.to_string_lossy().to_string(),
+            Err(_) => path.to_string(),
+        };
+
+        // Move the entire path (file or directory) to backup location - this IS the removal
+        let backup_path = match FileBackupManager::move_local_path_to_backup(path) {
+            Ok(backup_path) => backup_path,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("BACKUP_ERROR"),
+                    Content::text(format!("Failed to move local path to backup: {}", e)),
+                ]));
+            }
+        };
+
+        let mut backup_mapping = std::collections::HashMap::new();
+        backup_mapping.insert(absolute_original_path, backup_path);
+
+        let item_type = if is_directory { "directory" } else { "file" };
+        let recursive_note = if is_directory && recursive {
+            " (recursively)"
+        } else {
+            ""
+        };
+
+        let backup_xml = FileBackupManager::format_backup_xml(&backup_mapping, "local");
+        let output = format!(
+            "Successfully removed {} '{}'{}\n\n{}",
+            item_type, path, recursive_note, backup_xml
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 }
 

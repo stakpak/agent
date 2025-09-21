@@ -262,6 +262,20 @@ impl RemoteConnection {
             .map_err(|e| anyhow!("Failed to canonicalize path {}: {}", path, e))
     }
 
+    /// Get the SSH connection string in the format user@host: or user@host#port:
+    /// Uses # as port separator to distinguish from path separators in SSH URLs
+    pub fn get_ssh_prefix(&self) -> Result<String> {
+        let parsed = self.connection_info.parse_connection_string()?;
+        if parsed.port == 22 {
+            Ok(format!("{}@{}:", parsed.username, parsed.hostname))
+        } else {
+            Ok(format!(
+                "{}@{}#{}:",
+                parsed.username, parsed.hostname, parsed.port
+            ))
+        }
+    }
+
     pub async fn read_file(&self, path: &str) -> Result<Vec<u8>> {
         self.sftp
             .read(path)
@@ -385,6 +399,13 @@ impl RemoteConnection {
 
     pub async fn exists(&self, path: &str) -> bool {
         self.sftp.metadata(path).await.is_ok()
+    }
+
+    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
+        self.sftp
+            .rename(old_path, new_path)
+            .await
+            .map_err(|e| anyhow!("Failed to rename '{}' to '{}': {}", old_path, new_path, e))
     }
 
     pub async fn execute_command_unified(
