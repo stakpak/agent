@@ -113,8 +113,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     render_loading_indicator(f, state, loading_area);
 
     // Render popup if visible
-    if state.popup.is_visible() {
-        state.popup.render(f, f.area());
+    if state.approval_popup.is_visible() {
+        state.approval_popup.render(f, f.area());
     }
 
     if state.show_collapsed_messages {
