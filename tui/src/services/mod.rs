@@ -1,3 +1,4 @@
+pub mod approval_popup;
 pub mod auto_approve;
 pub mod auto_complete;
 pub mod bash_block;
@@ -11,7 +12,6 @@ pub mod markdown_renderer;
 pub mod message;
 pub mod message_pattern;
 pub mod placeholder_prompts;
-pub mod approval_popup;
 pub mod sessions_dialog;
 pub mod shell_mode;
 pub mod syntax_highlighter;
