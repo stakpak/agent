@@ -39,6 +39,10 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
+            if state.popup.is_visible() {
+                state.popup.scroll_up();
+                return; // Event was consumed by popup
+            }
             if state.show_sessions_dialog {
                 if state.session_selected > 0 {
                     state.session_selected -= 1;
@@ -58,6 +62,10 @@ pub fn update(
             }
         }
         InputEvent::Down => {
+            if state.popup.is_visible() {
+                state.popup.scroll_down();
+                return; // Event was consumed by popup
+            }
             if state.show_sessions_dialog {
                 if state.session_selected + 1 < state.sessions.len() {
                     state.session_selected += 1;
@@ -199,9 +207,17 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::CursorLeft => {
+            if state.popup.is_visible() {
+                state.popup.prev_tab();
+                return; // Event was consumed by popup
+            }
             state.text_area.move_cursor_left();
         }
         InputEvent::CursorRight => {
+            if state.popup.is_visible() {
+                state.popup.next_tab();
+                return; // Event was consumed by popup
+            }
             state.text_area.move_cursor_right();
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
@@ -305,7 +321,13 @@ pub fn update(
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx),
+        InputEvent::HandleEsc => {
+            if state.popup.is_visible() {
+                state.popup.escape();
+                return; // Event was consumed by popup
+            }
+            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
+        }
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -918,6 +940,12 @@ fn handle_input_submitted(
                     push_status_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
+                }
+                "/popup" => {
+                    state.popup.toggle();
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                    return;
                 }
                 "/quit" => {
                     state.show_helper_dropdown = false;

@@ -1,29 +1,22 @@
-use ratatui::{
-    Frame,
-    layout::Rect,
-    text::Line,
-    style::Style,
-    widgets::Paragraph,
-};
+use ratatui::{layout::Rect, style::Style, text::Line, widgets::Paragraph, Frame};
 
 /// Trait for popup content that can be rendered
 pub trait PopupContent: std::fmt::Debug {
     /// Render the content for the given area with scroll offset
     fn render(&self, f: &mut Frame, area: Rect, scroll: usize);
-    
+
     /// Get the height needed for the content (used for scrolling calculations)
     fn height(&self) -> usize;
-    
+
     /// Get the width needed for the content
     fn width(&self) -> usize;
-    
+
     /// Get the raw lines of content for text wrapping calculations
     fn get_lines(&self) -> Vec<String>;
-    
+
     /// Calculate the actual rendered height with text wrapping
-    fn calculate_rendered_height(&self, width: u16) -> usize;
-    
-    
+    fn calculate_rendered_height(&self) -> usize;
+
     /// Clone the content (required for trait objects)
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync>;
 }
@@ -39,11 +32,12 @@ pub struct StyledLineContent {
 impl StyledLineContent {
     pub fn new(lines: Vec<(Line<'static>, Style)>) -> Self {
         let height = lines.len();
-        let width = lines.iter()
+        let width = lines
+            .iter()
             .map(|(line, _)| line.width())
             .max()
             .unwrap_or(0);
-        
+
         Self {
             lines,
             width,
@@ -54,49 +48,44 @@ impl StyledLineContent {
 
 impl PopupContent for StyledLineContent {
     fn render(&self, f: &mut Frame, area: Rect, scroll: usize) {
-        let styled_lines: Vec<Line> = self.lines
+        let styled_lines: Vec<Line> = self
+            .lines
             .iter()
             .skip(scroll) // Skip lines based on scroll offset
-            .map(|(line, style)| {
-                line.clone().patch_style(*style)
-            })
+            .map(|(line, style)| line.clone().patch_style(*style))
             .collect();
-        
-        let widget = Paragraph::new(styled_lines)
-            .wrap(ratatui::widgets::Wrap { trim: false });
-        
+
+        let widget = Paragraph::new(styled_lines).wrap(ratatui::widgets::Wrap { trim: false });
+
         f.render_widget(widget, area);
     }
-    
+
     fn height(&self) -> usize {
         self.height
     }
-    
+
     fn width(&self) -> usize {
         self.width
     }
-    
+
     fn get_lines(&self) -> Vec<String> {
-        self.lines.iter()
+        self.lines
+            .iter()
             .map(|(line, _)| line.to_string())
             .collect()
     }
-    
+
     /// Calculate the actual rendered height with text wrapping
-    fn calculate_rendered_height(&self, width: u16) -> usize {
+    fn calculate_rendered_height(&self) -> usize {
         // Simple approach: just use the raw line count without complex wrapping calculation
         let raw_line_count = self.lines.len();
-        
-        // Debug: Print the calculated height
-        eprintln!("DEBUG: Raw line count: {} for width: {}", raw_line_count, width);
-        
+
         // Just use raw line count - no adjustments
         let estimated_height = raw_line_count;
-        
-        eprintln!("DEBUG: Estimated height: {}", estimated_height);
+
         estimated_height + 2
     }
-    
+
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
         Box::new(self.clone())
     }
@@ -106,7 +95,7 @@ impl PopupContent for StyledLineContent {
 pub trait TabContent: PopupContent {
     /// Get the tab title
     fn title(&self) -> &str;
-    
+
     /// Get the tab identifier
     fn id(&self) -> &str;
 }
@@ -133,48 +122,44 @@ impl TextContent {
 
 impl PopupContent for TextContent {
     fn render(&self, f: &mut Frame, area: Rect, scroll: usize) {
-        use ratatui::widgets::Paragraph;
         use ratatui::text::Line;
-        
-        let lines: Vec<Line> = self.text
+        use ratatui::widgets::Paragraph;
+
+        let lines: Vec<Line> = self
+            .text
             .lines()
             .skip(scroll) // Skip lines based on scroll offset
             .map(|line| Line::from(line))
             .collect();
-        
-        let widget = Paragraph::new(lines)
-            .wrap(ratatui::widgets::Wrap { trim: false });
-        
+
+        let widget = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
+
         f.render_widget(widget, area);
     }
-    
+
     fn height(&self) -> usize {
         self.height
     }
-    
+
     fn width(&self) -> usize {
         self.width
     }
-    
+
     fn get_lines(&self) -> Vec<String> {
         self.text.lines().map(|s| s.to_string()).collect()
     }
-    
-    fn calculate_rendered_height(&self, width: u16) -> usize {
+
+    fn calculate_rendered_height(&self) -> usize {
         // Simple approach: just use the raw line count without complex wrapping calculation
         let lines: Vec<&str> = self.text.lines().collect();
         let raw_line_count = lines.len();
-        
-        // Debug: Print the calculated height
-        eprintln!("DEBUG: Raw line count: {} for width: {}", raw_line_count, width);
-        
+
         // Just use raw line count - no adjustments
         let estimated_height = raw_line_count;
-        
-        eprintln!("DEBUG: Estimated height: {}", estimated_height);
+
         estimated_height + 2
     }
-    
+
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
         Box::new(self.clone())
     }
