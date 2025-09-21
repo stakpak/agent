@@ -3373,6 +3373,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "popup-widget"
+version = "0.1.0"
+dependencies = [
+ "crossterm 0.29.0",
+ "ratatui",
+]
+
+[[package]]
 name = "portable-pty"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4849,6 +4857,7 @@ dependencies = [
  "chrono",
  "console",
  "crossterm 0.29.0",
+ "popup-widget",
  "portable-pty",
  "rand 0.9.1",
  "ratatui",
