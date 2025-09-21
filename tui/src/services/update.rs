@@ -39,8 +39,8 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
-            if state.popup.is_visible() {
-                state.popup.scroll_up();
+            if state.approval_popup.is_visible() {
+                state.approval_popup.scroll_up();
                 return; // Event was consumed by popup
             }
             if state.show_sessions_dialog {
@@ -62,8 +62,8 @@ pub fn update(
             }
         }
         InputEvent::Down => {
-            if state.popup.is_visible() {
-                state.popup.scroll_down();
+            if state.approval_popup.is_visible() {
+                state.approval_popup.scroll_down();
                 return; // Event was consumed by popup
             }
             if state.show_sessions_dialog {
@@ -207,15 +207,15 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::CursorLeft => {
-            if state.popup.is_visible() {
-                state.popup.prev_tab();
+            if state.approval_popup.is_visible() {
+                state.approval_popup.prev_tab();
                 return; // Event was consumed by popup
             }
             state.text_area.move_cursor_left();
         }
         InputEvent::CursorRight => {
-            if state.popup.is_visible() {
-                state.popup.next_tab();
+            if state.approval_popup.is_visible() {
+                state.approval_popup.next_tab();
                 return; // Event was consumed by popup
             }
             state.text_area.move_cursor_right();
@@ -322,8 +322,8 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
-            if state.popup.is_visible() {
-                state.popup.escape();
+            if state.approval_popup.is_visible() {
+                state.approval_popup.escape();
                 return; // Event was consumed by popup
             }
             handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
@@ -942,7 +942,7 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                 }
                 "/popup" => {
-                    state.popup.toggle();
+                    state.approval_popup.toggle();
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                     return;
