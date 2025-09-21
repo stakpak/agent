@@ -112,6 +112,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render loading indicator in dedicated area
     render_loading_indicator(f, state, loading_area);
 
+    // Render popup if visible
+    if state.popup.is_visible() {
+        state.popup.render(f, f.area());
+    }
+
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.show_sessions_dialog {

@@ -4,6 +4,7 @@ use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
+use crate::services::popup::PopupService;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
@@ -185,6 +186,7 @@ pub struct AppState {
 
     pub tool_call_count: usize,
     pub auto_approve_message: bool,
+    pub popup: PopupService,
 }
 
 #[derive(Debug)]
@@ -306,6 +308,10 @@ impl AppState {
                 description: "Toggle mouse capture on/off",
             },
             HelperCommand {
+                command: "/popup",
+                description: "Toggle popup",
+            },
+            HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
             },
@@ -405,6 +411,7 @@ impl AppState {
             has_user_messages: false,
             tool_call_count: 0,
             auto_approve_message: false,
+            popup: PopupService::new(),
         }
     }
 
