@@ -1,10 +1,10 @@
+use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
-use crate::services::approval_popup::PopupService;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
@@ -184,10 +184,10 @@ pub struct AppState {
     pub loading_manager: LoadingStateManager,
     pub has_user_messages: bool,
 
-    pub tool_call_count: usize,
+    pub message_tool_calls: Option<Vec<ToolCall>>,
     pub auto_approve_message: bool,
     pub approval_popup: PopupService,
-}   
+}
 
 #[derive(Debug)]
 pub enum InputEvent {
@@ -209,7 +209,7 @@ pub enum InputEvent {
     InputSubmitted,
     InputSubmittedWith(String),
     InputSubmittedWithColor(String, Color),
-    ToolCallCount(usize),
+    MessageToolCalls(Vec<ToolCall>),
     BulkAutoApproveMessage,
     ResetAutoApproveMessage,
     ScrollUp,
@@ -409,7 +409,7 @@ impl AppState {
             ), // Start with mouse capture enabled only for supported terminals
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
-            tool_call_count: 0,
+            message_tool_calls: None,
             auto_approve_message: false,
             approval_popup: PopupService::new(),
         }

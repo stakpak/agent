@@ -163,7 +163,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             tools_queue.extend(tool_calls.clone());
 
             if !tools_queue.is_empty() {
-                send_input_event(&input_tx, InputEvent::ToolCallCount(tools_queue.len())).await?;
+                send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
+                    .await?;
                 let initial_tool_call = tools_queue.remove(0);
                 send_tool_call(&input_tx, &initial_tool_call).await?;
             }
@@ -268,9 +269,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Process next tool in queue if available
                     if !tools_queue.is_empty() {
-                        let tool_call_count = tools_queue.len();
-                        send_input_event(&input_tx, InputEvent::ToolCallCount(tool_call_count))
-                            .await?;
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::MessageToolCalls(tools_queue.clone()),
+                        )
+                        .await?;
                         let next_tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &next_tool_call).await?;
                         continue;
@@ -542,7 +545,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         if !tools_queue.is_empty() {
                             send_input_event(
                                 &input_tx,
-                                InputEvent::ToolCallCount(tools_queue.len()),
+                                InputEvent::MessageToolCalls(tools_queue.clone()),
                             )
                             .await?;
                             let tool_call = tools_queue.remove(0);

@@ -293,9 +293,15 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
+            let tool_call_count = state
+                .message_tool_calls
+                .as_ref()
+                .map(|tool_calls| tool_calls.len())
+                .unwrap_or(0);
+
             // Check if auto-approve should be used
             if state.auto_approve_manager.should_auto_approve(&tool_call)
-                || (state.tool_call_count > 0 && state.auto_approve_message)
+                || (tool_call_count > 0 && state.auto_approve_message)
             {
                 // Auto-approve the tool call
                 let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
@@ -308,8 +314,8 @@ pub fn update(
             }
         }
 
-        InputEvent::ToolCallCount(count) => {
-            state.tool_call_count = count;
+        InputEvent::MessageToolCalls(tool_calls) => {
+            state.message_tool_calls = Some(tool_calls);
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
