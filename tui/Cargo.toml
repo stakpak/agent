@@ -5,14 +5,11 @@ edition = "2024"
 
 [dependencies]
 stakpak-shared = { path = "../libs/shared" }
+popup-widget = { path = "../libs/popup-widget" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ratatui = { version = "0.29.0", features = [
-    "scrolling-regions",
-    "unstable-rendered-line-info",
-    "unstable-widget-ref",
-] }
+ratatui = { workspace = true }
 tempfile = { workspace = true }
 rand = "0.9"
 textwrap = "0.16.2"

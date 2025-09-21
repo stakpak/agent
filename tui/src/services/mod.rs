@@ -17,3 +17,4 @@ pub mod syntax_highlighter;
 pub mod textarea;
 pub mod update;
 pub mod wrapping;
+pub mod popup;
