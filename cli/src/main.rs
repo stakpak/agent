@@ -2,6 +2,7 @@ use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{Client, ClientConfig};
+use stakpak_shared::models::subagent::SubagentConfigs;
 use std::{env, path::Path};
 
 mod apkey_auth;
@@ -82,6 +83,14 @@ struct Cli {
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
     disable_mcp_mtls: bool,
 
+    /// Enable subagents
+    #[arg(long = "enable-subagents", default_value_t = false)]
+    enable_subagents: bool,
+
+    /// Subagent configuration file subagents.toml
+    #[arg(long = "subagent-config")]
+    subagent_config_path: Option<String>,
+
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
     allowed_tools: Option<Vec<String>>,
@@ -108,6 +117,8 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 }
+
+static DEFAULT_SUBAGENT_CONFIG: &str = include_str!("../../subagents.toml");
 
 #[tokio::main]
 async fn main() {
@@ -216,6 +227,26 @@ async fn main() {
                         }
                     });
 
+                    let subagent_configs = if cli.enable_subagents {
+                        if let Some(subagent_config_path) = &cli.subagent_config_path {
+                            SubagentConfigs::load_from_file(subagent_config_path)
+                                .map_err(|e| {
+                                    eprintln!("Warning: Failed to load subagent configs: {}", e);
+                                    e
+                                })
+                                .ok()
+                        } else {
+                            SubagentConfigs::load_from_str(DEFAULT_SUBAGENT_CONFIG)
+                                .map_err(|e| {
+                                    eprintln!("Warning: Failed to load subagent configs: {}", e);
+                                    e
+                                })
+                                .ok()
+                        }
+                    } else {
+                        None
+                    };
+
                     match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
                         .await
                     {
@@ -308,6 +339,7 @@ async fn main() {
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
+                                subagent_configs,
                                 max_steps,
                                 output_format: cli.output_format,
                                 enable_mtls: !cli.disable_mcp_mtls,
@@ -333,6 +365,7 @@ async fn main() {
                                 redact_secrets: !cli.disable_secret_redaction,
                                 privacy_mode: cli.privacy_mode,
                                 rulebooks,
+                                subagent_configs,
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 is_git_repo: gitignore::is_git_repo(),
                                 study_mode: cli.study_mode,
