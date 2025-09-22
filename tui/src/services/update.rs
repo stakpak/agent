@@ -789,7 +789,7 @@ fn handle_esc(
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-            let truncated_command = extract_truncated_command_arguments(tool_call);
+            let truncated_command = extract_truncated_command_arguments(tool_call, None);
             let title = get_command_type_name(tool_call);
             let rendered_lines = render_bash_block_rejected(&truncated_command, &title, None);
             state.messages.push(Message {

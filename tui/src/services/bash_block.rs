@@ -775,7 +775,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let tool_call_status = tool_call_result.status.clone();
 
     let title: String = get_command_type_name(&tool_call);
-    let command_args = extract_truncated_command_arguments(&tool_call);
+    let command_args = extract_truncated_command_arguments(&tool_call, None);
 
     let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
@@ -1308,7 +1308,7 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
     let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
         && tool_call_result.result.lines().count() > 3;
     let result = tool_call_result.result.clone();
-    let command_args = extract_truncated_command_arguments(&tool_call_result.call);
+    let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
     let title = get_command_type_name(&tool_call_result.call);
     if is_collapsed {
         let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
