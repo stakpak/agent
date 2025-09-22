@@ -71,7 +71,12 @@ impl Tab {
     }
 
     /// Render the tab content with fixed header lines
-    pub fn render_content_with_fixed_header(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
+    pub fn render_content_with_fixed_header(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        fixed_header_lines: usize,
+    ) {
         if fixed_header_lines == 0 {
             // No fixed header, render normally
             self.content.render(f, area, self.scroll);
@@ -81,7 +86,7 @@ impl Tab {
         // Get all lines from content
         let all_lines = self.content.get_lines();
         let total_lines = all_lines.len();
-        
+
         if total_lines <= fixed_header_lines {
             // Not enough content for scrolling, just render everything
             self.content.render(f, area, 0);
@@ -91,7 +96,7 @@ impl Tab {
         // Split the area into fixed header and scrollable content
         let constraints = vec![
             Constraint::Length(fixed_header_lines as u16), // Fixed header
-            Constraint::Min(1), // Scrollable content
+            Constraint::Min(1),                            // Scrollable content
         ];
 
         let chunks = Layout::default()
@@ -111,13 +116,18 @@ impl Tab {
     /// Render only the fixed header lines
     fn render_fixed_header(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
         // Create a custom content that only renders the first fixed_header_lines
-        if let Some(styled_content) = self.content.as_any().downcast_ref::<crate::traits::StyledLineContent>() {
-            let header_lines: Vec<_> = styled_content.lines
+        if let Some(styled_content) = self
+            .content
+            .as_any()
+            .downcast_ref::<crate::traits::StyledLineContent>()
+        {
+            let header_lines: Vec<_> = styled_content
+                .lines
                 .iter()
                 .take(fixed_header_lines)
                 .map(|(line, style)| line.clone().patch_style(*style))
                 .collect();
-            
+
             let widget = Paragraph::new(header_lines).wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(widget, area);
         } else {
@@ -129,18 +139,25 @@ impl Tab {
     /// Render only the scrollable content lines
     fn render_scrollable_content(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
         // Create a custom content that renders from fixed_header_lines + scroll onwards
-        if let Some(styled_content) = self.content.as_any().downcast_ref::<crate::traits::StyledLineContent>() {
-            let scrollable_lines: Vec<_> = styled_content.lines
+        if let Some(styled_content) = self
+            .content
+            .as_any()
+            .downcast_ref::<crate::traits::StyledLineContent>()
+        {
+            let scrollable_lines: Vec<_> = styled_content
+                .lines
                 .iter()
                 .skip(fixed_header_lines + self.scroll)
                 .map(|(line, style)| line.clone().patch_style(*style))
                 .collect();
-            
-            let widget = Paragraph::new(scrollable_lines).wrap(ratatui::widgets::Wrap { trim: false });
+
+            let widget =
+                Paragraph::new(scrollable_lines).wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(widget, area);
         } else {
             // Fallback for other content types
-            self.content.render(f, area, fixed_header_lines + self.scroll);
+            self.content
+                .render(f, area, fixed_header_lines + self.scroll);
         }
     }
 

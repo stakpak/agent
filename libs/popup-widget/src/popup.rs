@@ -1,6 +1,6 @@
 use crate::{
     tab::render_custom_tabs, Alignment, PopupConfig, PopupContent, PopupEvent, PopupEventResult,
-    PopupState,
+    PopupPosition, PopupState,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -289,7 +289,11 @@ impl PopupWidget {
             // Update tab scroll to match popup scroll
             // The tab's internal scroll handling will account for fixed header lines
             selected_tab.set_scroll(self.state.scroll);
-            selected_tab.render_content_with_fixed_header(f, tab_content_area, self.config.fixed_header_lines);
+            selected_tab.render_content_with_fixed_header(
+                f,
+                tab_content_area,
+                self.config.fixed_header_lines,
+            );
         }
 
         // Render footer if present
@@ -300,7 +304,9 @@ impl PopupWidget {
                 return; // No footer area allocated
             };
 
-            let footer_style = self.config.footer_style
+            let footer_style = self
+                .config
+                .footer_style
                 .unwrap_or_else(|| Style::default().fg(Color::Gray).add_modifier(Modifier::DIM));
             let footer_lines: Vec<Line> = footer_lines
                 .iter()
@@ -384,8 +390,9 @@ impl PopupWidget {
                     return; // No footer area allocated
                 };
 
-                let footer_style = self.config.footer_style
-                .unwrap_or_else(|| Style::default().fg(Color::Gray).add_modifier(Modifier::DIM));
+                let footer_style = self.config.footer_style.unwrap_or_else(|| {
+                    Style::default().fg(Color::Gray).add_modifier(Modifier::DIM)
+                });
                 let footer_lines: Vec<Line> = footer_lines
                     .iter()
                     .map(|line| Line::from(Span::styled(line, footer_style)))
@@ -554,7 +561,8 @@ impl PopupWidget {
         };
 
         // Subtract fixed header lines from available height for scrollable content
-        let scrollable_available_height = available_height.saturating_sub(self.config.fixed_header_lines);
+        let scrollable_available_height =
+            available_height.saturating_sub(self.config.fixed_header_lines);
 
         // Calculate the actual content height including text wrapping
         let content_height = if self.config.show_tabs && !self.config.tabs.is_empty() {
@@ -570,17 +578,22 @@ impl PopupWidget {
         };
 
         // Subtract fixed header lines from content height for scroll calculation
-        let scrollable_content_height = content_height.saturating_sub(self.config.fixed_header_lines);
+        let scrollable_content_height =
+            content_height.saturating_sub(self.config.fixed_header_lines);
 
         // Calculate max scroll: if scrollable content is taller than available space, allow scrolling
         let max_scroll = if scrollable_content_height > scrollable_available_height {
             let scroll = scrollable_content_height - scrollable_available_height;
-            eprintln!("DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}", 
-                     scrollable_content_height, scrollable_available_height, scroll);
+            eprintln!(
+                "DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}",
+                scrollable_content_height, scrollable_available_height, scroll
+            );
             scroll
         } else {
-            eprintln!("DEBUG: No scrolling - content: {}, available: {}", 
-                     scrollable_content_height, scrollable_available_height);
+            eprintln!(
+                "DEBUG: No scrolling - content: {}, available: {}",
+                scrollable_content_height, scrollable_available_height
+            );
             0
         };
 
@@ -706,6 +719,30 @@ impl PopupWidget {
         if index < self.config.tabs.len() {
             self.config.selected_tab = index;
             self.state.selected_tab = index;
+        }
+    }
+
+    /// Get the inner width of the popup (content area width)
+    pub fn inner_width(&self) -> usize {
+        // Get the width from the position configuration
+        let popup_width = match &self.config.position {
+            PopupPosition::Centered { width, .. } => *width as usize,
+            PopupPosition::Absolute { width, .. } => *width as usize,
+            PopupPosition::Relative { width_percent, .. } => {
+                // For relative positioning, use a reasonable default terminal width
+                (120.0 * width_percent) as usize
+            }
+            PopupPosition::Responsive { width_percent, .. } => {
+                // For responsive positioning, use a reasonable default terminal width
+                (120.0 * width_percent) as usize
+            }
+        };
+
+        // Calculate inner width based on popup width minus borders and padding
+        if popup_width > 4 {
+            popup_width - 4 // Account for borders and padding
+        } else {
+            40 // Default minimum width
         }
     }
 }
