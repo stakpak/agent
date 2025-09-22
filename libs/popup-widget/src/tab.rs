@@ -14,6 +14,7 @@ pub struct Tab {
     pub content: Box<dyn TabContent + Send + Sync>,
     pub scroll: usize,
     pub status_color: Option<Color>,
+    pub custom_title_line: Option<Line<'static>>,
 }
 
 impl Tab {
@@ -28,6 +29,7 @@ impl Tab {
             content: Box::new(content),
             scroll: 0,
             status_color: None,
+            custom_title_line: None,
         }
     }
 
@@ -43,6 +45,23 @@ impl Tab {
             content: Box::new(content),
             scroll: 0,
             status_color,
+            custom_title_line: None,
+        }
+    }
+
+    pub fn new_with_custom_title<C: TabContent + Send + Sync + 'static>(
+        id: String,
+        title: String,
+        content: C,
+        custom_title_line: Line<'static>,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            content: Box::new(content),
+            scroll: 0,
+            status_color: None,
+            custom_title_line: Some(custom_title_line),
         }
     }
 
@@ -238,23 +257,39 @@ pub fn render_custom_tabs(
     for (i, tab) in tabs.iter().enumerate() {
         let tab_area = tab_areas[area_index];
 
-        // Style based on selection and status
-        let tab_style_to_use = if i == selected_tab {
-            // Selected tab: use selected style (white text)
-            selected_tab_style
+        // Use custom title line if available, otherwise create from title string
+        let tab_line = if let Some(ref custom_line) = tab.custom_title_line {
+            // Use custom title line with padding
+            let mut spans = vec![Span::styled(" ", Style::default())]; // Left padding
+            spans.extend(custom_line.spans.iter().cloned());
+            spans.push(Span::styled(" ", Style::default())); // Right padding
+            Line::from(spans)
         } else {
-            // Non-selected tab: use status color if available, otherwise default tab style
-            if let Some(status_color) = tab.status_color {
-                Style::default().fg(status_color)
+            // Style based on selection and status
+            let tab_style_to_use = if i == selected_tab {
+                // Selected tab: use selected style (white text)
+                selected_tab_style
             } else {
-                tab_style
-            }
+                // Non-selected tab: use status color if available, otherwise default tab style
+                if let Some(status_color) = tab.status_color {
+                    Style::default().fg(status_color)
+                } else {
+                    tab_style
+                }
+            };
+
+            // Create tab button with padding and centered text
+            let tab_text = format!(" {} ", tab.title);
+            let tab_span = Span::styled(tab_text, tab_style_to_use);
+            Line::from(tab_span)
         };
 
-        // Create tab button with padding and centered text
-        let tab_text = format!(" {} ", tab.title);
-        let tab_span = Span::styled(tab_text, tab_style_to_use);
-        let tab_line = Line::from(tab_span);
+        // Determine style for paragraph (use selected style for selected tab, otherwise default)
+        let paragraph_style = if i == selected_tab {
+            selected_tab_style
+        } else {
+            tab_style
+        };
 
         // Create paragraph with optional borders
         let tab_paragraph = if show_borders {
@@ -263,13 +298,13 @@ pub fn render_custom_tabs(
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .style(tab_style_to_use),
+                        .style(paragraph_style),
                 )
-                .style(tab_style_to_use)
+                .style(paragraph_style)
                 .alignment(ratatui::layout::Alignment::Center)
         } else {
             Paragraph::new(tab_line)
-                .style(tab_style_to_use)
+                .style(paragraph_style)
                 .alignment(ratatui::layout::Alignment::Center)
         };
 

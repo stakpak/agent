@@ -32,7 +32,7 @@ use crate::services::detect_term::{self, is_unsupported_terminal};
 use crate::services::message::{get_command_type_name, extract_truncated_command_arguments};
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 
 /// Tool call approval status
@@ -137,39 +137,7 @@ impl PopupService {
         let _ = self.popup.handle_event(popup_widget::PopupEvent::Escape);
     }
 
-    /// Toggle approval status of current tool call
-    pub fn toggle_approval(&mut self) {
-        if let Some(tool_call_info) = self.tool_calls.get_mut(self.selected_index) {
-            tool_call_info.status = match tool_call_info.status {
-                ApprovalStatus::Approved => ApprovalStatus::Rejected,
-                ApprovalStatus::Rejected => ApprovalStatus::Approved,
-                ApprovalStatus::Pending => ApprovalStatus::Approved,
-            };
-            
-            // Update the tab title in place without recreating the entire popup
-            self.update_tab_title(self.selected_index);
-        }
-    }
 
-    /// Update a specific tab title without recreating the entire popup
-    fn update_tab_title(&mut self, index: usize) {
-        if let Some(tool_call_info) = self.tool_calls.get(index) {
-            let tool_call = &tool_call_info.tool_call;
-            let tool_name = get_command_type_name(tool_call);
-            let status_symbol = match tool_call_info.status {
-                ApprovalStatus::Approved => " ✓",
-                ApprovalStatus::Rejected => " ✗",
-                ApprovalStatus::Pending => "",
-            };
-            
-            let tab_title = format!("{}.{}{}", index + 1, tool_name, status_symbol);
-            
-            // Update the tab title in the popup configuration
-            if let Some(tab) = self.popup.config_mut().tabs.get_mut(index) {
-                tab.title = tab_title;
-            }
-        }
-    }
 
     /// Get approval status for a specific tool call
     pub fn get_approval_status(&self, index: usize) -> Option<&ApprovalStatus> {
@@ -227,21 +195,27 @@ impl PopupService {
                 // Create status symbol with color
                 let (status_symbol, status_color) = match tool_call_info.status {
                     ApprovalStatus::Approved => (" ✓", Color::Green),
-                    ApprovalStatus::Rejected => (" ✗", Color::Red),
+                    ApprovalStatus::Rejected => (" ✗", Color::LightRed),
                     ApprovalStatus::Pending => ("", Color::Gray),
                 };
                 
-                // Format tab title like: "1.Create ✓" with colored status
-                let tab_title = format!("{}.{}{}", index + 1, tool_name, status_symbol);
+                eprintln!("DEBUG: Tab {} - Status: {:?}, Symbol: '{}', Color: {:?}", 
+                    index, tool_call_info.status, status_symbol, status_color);
+                
+                // Create styled tab title with separate spans for text and status
+                let tab_title_line = Line::from(vec![
+                    Span::styled(format!("{}.{}", index + 1, tool_name), Style::default()),
+                    Span::styled(status_symbol, Style::default().fg(status_color)),
+                ]);
                 
                 // Create content for this tab
                 let content = self.create_tool_call_content(tool_call);
                 
-                Tab::new_with_status(
+                Tab::new_with_custom_title(
                     format!("tool_call_{}", index),
-                    tab_title.clone(),
-                    TabContent::new(tab_title, format!("tool_call_{}", index), content),
-                    Some(status_color),
+                    format!("{}.{}{}", index + 1, tool_name, status_symbol),
+                    TabContent::new(format!("{}.{}{}", index + 1, tool_name, status_symbol), format!("tool_call_{}", index), content),
+                    tab_title_line,
                 )
             })
             .collect();
@@ -318,7 +292,7 @@ impl PopupService {
         
         // Create a line with tool name and status on the same line
         let tool_status_line = Line::from(vec![
-            ratatui::text::Span::styled(format!("Tool {}", tool_name), Style::default().fg(Color::DarkGray)),
+            ratatui::text::Span::styled(format!("Tool  {}", tool_name), Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled("                  ", Style::default()), // spacing
             ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
@@ -407,6 +381,91 @@ impl PopupService {
             });
 
         PopupWidget::new(config)
+    }
+
+    /// Toggle the approval status of the currently selected tool call
+    pub fn toggle_approval_status(&mut self) {
+        eprintln!("toggle_approval_status");
+        if let Some(tool_call_info) = self.tool_calls.get_mut(self.selected_index) {
+            let old_status = tool_call_info.status.clone();
+            tool_call_info.status = match tool_call_info.status {
+                ApprovalStatus::Approved => ApprovalStatus::Rejected,
+                ApprovalStatus::Rejected => ApprovalStatus::Approved,
+                ApprovalStatus::Pending => ApprovalStatus::Approved,
+            };
+            
+            eprintln!("DEBUG: Toggled tool call {} from {:?} to {:?}", 
+                self.selected_index, old_status, tool_call_info.status);
+            
+            // Recreate the popup with updated status and preserve selected tab
+            self.popup = self.create_popup_with_tool_calls(&self.tool_calls);
+            // Set the selected tab to maintain the current selection
+            self.popup.set_selected_tab(self.selected_index);
+            // Make sure the popup stays visible after recreation
+            self.popup.show();
+            
+            // Debug: Print approval lists
+            let approved = self.get_approved_tool_calls().len();
+            let rejected = self.get_rejected_tool_calls().len();
+            let pending = self.get_pending_tool_calls().len();
+            eprintln!("DEBUG: Approval counts - Approved: {}, Rejected: {}, Pending: {}", 
+                approved, rejected, pending);
+        }
+    }
+
+    /// Get all approved tool calls
+    pub fn get_approved_tool_calls(&self) -> Vec<&ToolCall> {
+        self.tool_calls
+            .iter()
+            .filter(|info| info.status == ApprovalStatus::Approved)
+            .map(|info| &info.tool_call)
+            .collect()
+    }
+
+    /// Get all rejected tool calls
+    pub fn get_rejected_tool_calls(&self) -> Vec<&ToolCall> {
+        self.tool_calls
+            .iter()
+            .filter(|info| info.status == ApprovalStatus::Rejected)
+            .map(|info| &info.tool_call)
+            .collect()
+    }
+
+    /// Get all pending tool calls
+    pub fn get_pending_tool_calls(&self) -> Vec<&ToolCall> {
+        self.tool_calls
+            .iter()
+            .filter(|info| info.status == ApprovalStatus::Pending)
+            .map(|info| &info.tool_call)
+            .collect()
+    }
+
+    /// Get approval status summary
+    pub fn get_approval_summary(&self) -> (usize, usize, usize) {
+        let approved = self.get_approved_tool_calls().len();
+        let rejected = self.get_rejected_tool_calls().len();
+        let pending = self.get_pending_tool_calls().len();
+        (approved, rejected, pending)
+    }
+
+    /// Handle popup events and update selected index accordingly
+    pub fn handle_event(&mut self, event: popup_widget::PopupEvent) -> popup_widget::PopupEventResult {
+        let result = self.popup.handle_event(event);
+        
+        // Update our selected index to match the popup's selected tab
+        self.selected_index = self.popup.config().selected_tab;
+        
+        result
+    }
+
+    /// Get the current selected tab index
+    pub fn selected_tab_index(&self) -> usize {
+        self.selected_index
+    }
+
+    /// Get the current selected tool call
+    pub fn selected_tool_call(&self) -> Option<&ToolCall> {
+        self.tool_calls.get(self.selected_index).map(|info| &info.tool_call)
     }
 }
 

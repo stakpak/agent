@@ -124,7 +124,7 @@ pub fn update(
         InputEvent::InputChanged(c) => {
             if state.approval_popup.is_visible() {
                 if c == ' ' {
-                    state.approval_popup.toggle_approval();
+                    state.approval_popup.toggle_approval_status();
                     return;
                 }
                 return; // Consume all input when popup is visible
@@ -369,6 +369,9 @@ pub fn update(
             } else {
                 handle_tab(state);
             }
+        }
+        InputEvent::ToggleApprovalStatus => {
+            state.approval_popup.toggle_approval_status();
         }
         InputEvent::SetSessions(sessions) => {
             state.sessions = sessions;
