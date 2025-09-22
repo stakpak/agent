@@ -254,6 +254,12 @@ pub enum InputEvent {
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
     EmergencyClearTerminal,
     ToggleMouseCapture, // Toggle mouse capture on/off
+    // Approval popup events
+    ApprovalPopupNextTab,
+    ApprovalPopupPrevTab,
+    ApprovalPopupToggleApproval,
+    ApprovalPopupSubmit,
+    ApprovalPopupEscape,
 }
 
 #[derive(Debug)]

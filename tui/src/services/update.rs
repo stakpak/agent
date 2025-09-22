@@ -1,5 +1,6 @@
 use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::auto_complete::{handle_file_selection, handle_tab_trigger};
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -120,9 +121,23 @@ pub fn update(
         InputEvent::ResetAutoApproveMessage => {
             state.auto_approve_message = false;
         }
-        InputEvent::InputChanged(c) => handle_input_changed(state, c),
+        InputEvent::InputChanged(c) => {
+            if state.approval_popup.is_visible() {
+                if c == ' ' {
+                    state.approval_popup.toggle_approval();
+                    return;
+                }
+                return; // Consume all input when popup is visible
+            }
+            handle_input_changed(state, c);
+        },
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
+            if state.approval_popup.is_visible() {
+                // TODO: Handle approval popup submission
+                state.approval_popup.escape(); // For now, just close
+                return;
+            }
             if !state.is_pasting {
                 handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
@@ -299,6 +314,10 @@ pub fn update(
                 .map(|tool_calls| tool_calls.len())
                 .unwrap_or(0);
 
+            if tool_call_count > 1 {
+                state.approval_popup.toggle();
+            }
+
             // Check if auto-approve should be used
             if state.auto_approve_manager.should_auto_approve(&tool_call)
                 || (tool_call_count > 0 && state.auto_approve_message)
@@ -315,7 +334,13 @@ pub fn update(
         }
 
         InputEvent::MessageToolCalls(tool_calls) => {
-            state.message_tool_calls = Some(tool_calls);
+            state.message_tool_calls = Some(tool_calls.clone());
+            
+            // Update approval popup with tool calls if there are multiple
+            if tool_calls.len() > 1 {
+                state.approval_popup = PopupService::new_with_tool_calls(tool_calls);
+                state.approval_popup.toggle();
+            }
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());

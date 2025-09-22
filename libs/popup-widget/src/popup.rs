@@ -287,8 +287,9 @@ impl PopupWidget {
         // Render selected tab content
         if let Some(selected_tab) = self.config.tabs.get_mut(self.state.selected_tab) {
             // Update tab scroll to match popup scroll
+            // The tab's internal scroll handling will account for fixed header lines
             selected_tab.set_scroll(self.state.scroll);
-            selected_tab.render_content(f, tab_content_area);
+            selected_tab.render_content_with_fixed_header(f, tab_content_area, self.config.fixed_header_lines);
         }
 
         // Render footer if present
@@ -453,16 +454,20 @@ impl PopupWidget {
 
     /// Scroll up
     fn scroll_up(&mut self) {
+        eprintln!("DEBUG: scroll_up called - current: {}", self.state.scroll);
         if self.state.scroll > 0 {
             self.state.scroll -= 1;
+            eprintln!("DEBUG: scroll_up - new: {}", self.state.scroll);
         }
     }
 
     /// Scroll down
     fn scroll_down(&mut self) {
+        eprintln!("DEBUG: scroll_down called - current: {}", self.state.scroll);
         // We'll calculate max scroll in render method and store it in state
         // For now, just increment scroll - it will be clamped in render
         self.state.scroll += 1;
+        eprintln!("DEBUG: scroll_down - new: {}", self.state.scroll);
     }
 
     /// Page up
@@ -546,6 +551,9 @@ impl PopupWidget {
             available
         };
 
+        // Subtract fixed header lines from available height for scrollable content
+        let scrollable_available_height = available_height.saturating_sub(self.config.fixed_header_lines);
+
         // Calculate the actual content height including text wrapping
         let content_height = if self.config.show_tabs && !self.config.tabs.is_empty() {
             if let Some(selected_tab) = self.config.tabs.get(self.state.selected_tab) {
@@ -559,11 +567,18 @@ impl PopupWidget {
             0
         };
 
-        // Calculate max scroll: if content is taller than available space, allow scrolling
-        let max_scroll = if content_height > available_height {
-            let scroll = content_height - available_height;
+        // Subtract fixed header lines from content height for scroll calculation
+        let scrollable_content_height = content_height.saturating_sub(self.config.fixed_header_lines);
+
+        // Calculate max scroll: if scrollable content is taller than available space, allow scrolling
+        let max_scroll = if scrollable_content_height > scrollable_available_height {
+            let scroll = scrollable_content_height - scrollable_available_height;
+            eprintln!("DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}", 
+                     scrollable_content_height, scrollable_available_height, scroll);
             scroll
         } else {
+            eprintln!("DEBUG: No scrolling - content: {}, available: {}", 
+                     scrollable_content_height, scrollable_available_height);
             0
         };
 
