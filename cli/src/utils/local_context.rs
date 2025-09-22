@@ -40,7 +40,7 @@ impl LocalContext {
     pub async fn format_display(&self) -> Result<String, Box<dyn std::error::Error>> {
         let mut result = String::new();
 
-        result.push_str("# System Details\nSPACING_MARKER\n");
+        result.push_str("# System Details\n\n");
         result.push_str(&format!("Machine Name: {}\n", self.machine_name));
         result.push_str(&format!(
             "Current Date/Time: {}\n",
@@ -77,7 +77,7 @@ impl LocalContext {
         }
 
         result.push_str(&format!(
-            "SPACING_MARKER\n# Current Working Directory ({})\nSPACING_MARKER\n",
+            "\n# Current Working Directory ({})\n\n",
             self.working_directory
         ));
 

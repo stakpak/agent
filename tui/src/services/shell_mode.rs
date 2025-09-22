@@ -5,8 +5,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-use crate::services::bash_block::preprocess_terminal_output;
-
 // Global process registry to track running commands
 static PROCESS_REGISTRY: std::sync::OnceLock<Arc<Mutex<HashMap<String, u32>>>> =
     std::sync::OnceLock::new();
@@ -117,9 +115,17 @@ pub fn run_background_shell_command(
 
     // Spawn command in a separate thread
     std::thread::spawn(move || {
+        // Get the current working directory
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+        });
+
         let child = if cfg!(target_os = "windows") {
             Command::new("cmd")
                 .args(["/C", &command])
+                .current_dir(&current_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -127,6 +133,7 @@ pub fn run_background_shell_command(
         } else {
             Command::new("sh")
                 .args(["-c", &command])
+                .current_dir(&current_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -173,7 +180,6 @@ pub fn run_background_shell_command(
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
-                            let line = preprocess_terminal_output(&line);
                             // Always send the output so user can see the prompt
                             let _ = tx_clone.blocking_send(ShellEvent::Output(line));
                         }
@@ -195,7 +201,6 @@ pub fn run_background_shell_command(
                     match line {
                         Ok(line) => {
                             // Check for interactive prompts in stderr too
-                            let line = preprocess_terminal_output(&line);
 
                             // Check if this stderr line is actually an error or just progress info
                             let lower_line = line.to_lowercase();
@@ -298,8 +303,16 @@ pub fn run_pty_command(
             }
         };
 
+        // Get the current working directory
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+        });
+
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", &command]);
+        cmd.cwd(&current_dir);
 
         let mut child = match pair.slave.spawn_command(cmd) {
             Ok(c) => c,
@@ -371,7 +384,6 @@ pub fn run_pty_command(
 
                     // Process accumulated data
                     if let Ok(text) = String::from_utf8(accumulated.clone()) {
-                        let text = preprocess_terminal_output(&text);
                         // Look for interactive prompt patterns
                         if !text.ends_with('\n') {
                             // This is likely an interactive prompt without newline

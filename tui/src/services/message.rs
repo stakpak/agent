@@ -1,3 +1,9 @@
+use crate::AppState;
+use crate::services::bash_block::{
+    format_text_content, is_collapsed_tool_call, render_bash_block, render_file_diff,
+    render_file_diff_full, render_result_block, render_styled_block,
+};
+use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
@@ -7,7 +13,7 @@ use regex::Regex;
 use serde_json::Value;
 #[cfg(test)]
 use stakpak_shared::models::integrations::openai::FunctionCall;
-use stakpak_shared::models::integrations::openai::ToolCall;
+use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BubbleColors {
@@ -25,12 +31,25 @@ pub enum MessageContent {
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
     PlainText(String),
+    RenderPendingBorderBlock(ToolCall, bool),
+    RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
+    RenderResultBorderBlock(ToolCallResult),
+    RenderCollapsedMessage(ToolCall),
+    RenderEscapedTextBlock(String),
     BashBubble {
         title: String,
         content: Vec<String>,
         colors: BubbleColors,
         tool_type: String,
     },
+}
+
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +65,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 text.into(),
-                style.unwrap_or(Style::default().fg(ratatui::style::Color::DarkGray)),
+                style.unwrap_or(Style::default().fg(Color::DarkGray)),
             ),
             is_collapsed: None,
         }
@@ -56,7 +75,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Plain(
                 format!("→ {}", text.into()),
-                style.unwrap_or(Style::default().fg(ratatui::style::Color::Rgb(180, 180, 180))),
+                style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
             ),
             is_collapsed: None,
         }
@@ -95,6 +114,65 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::PlainText(text.into()),
             is_collapsed: None,
+        }
+    }
+
+    pub fn render_collapsed_message(tool_call: ToolCall) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderCollapsedMessage(tool_call),
+            is_collapsed: Some(true),
+        }
+    }
+
+    pub fn render_pending_border_block(
+        tool_call: ToolCall,
+        is_auto_approved: bool,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved),
+            is_collapsed: None,
+        }
+    }
+
+    pub fn render_streaming_border_block(
+        content: &str,
+        outside_title: &str,
+        bubble_title: &str,
+        colors: Option<BubbleColors>,
+        tool_type: &str,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderStreamingBorderBlock(
+                content.to_string(),
+                outside_title.to_string(),
+                bubble_title.to_string(),
+                colors,
+                tool_type.to_string(),
+            ),
+            is_collapsed: None,
+        }
+    }
+
+    pub fn render_escaped_text_block(content: String) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderEscapedTextBlock(content),
+            is_collapsed: None,
+        }
+    }
+
+    pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
+        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
+            && tool_call_result.result.lines().count() > 3;
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderResultBorderBlock(tool_call_result),
+            is_collapsed: if is_collapsed { Some(true) } else { None },
         }
     }
 }
@@ -220,7 +298,10 @@ fn render_shell_bubble_with_unicode_border(
     let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
     lines.push(Line::from(vec![
         Span::styled("│ ", Style::default().fg(Color::Magenta)),
-        Span::styled(cmd_line, Style::default().fg(Color::LightYellow)),
+        Span::styled(
+            cmd_line,
+            Style::default().fg(term_color(Color::LightYellow)),
+        ),
         Span::from(" ".repeat(cmd_padding)),
         Span::styled(" │", Style::default().fg(Color::Magenta)),
     ]));
@@ -229,7 +310,7 @@ fn render_shell_bubble_with_unicode_border(
         let padded = format!("{:<width$}", out, width = border_width - 4);
         lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(Color::Magenta)),
-            Span::styled(padded, Style::default().fg(Color::Rgb(180, 180, 180))),
+            Span::styled(padded, Style::default().fg(AdaptiveColors::text())),
             Span::styled(" │", Style::default().fg(Color::Magenta)),
         ]));
     }
@@ -265,11 +346,150 @@ pub fn get_wrapped_message_lines(
     get_wrapped_message_lines_internal(messages, width, false)
 }
 
-pub fn get_wrapped_collapsed_message_lines(
-    messages: &[Message],
+pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
+    let messages = state.messages.clone();
+    // Check if cache is valid
+    let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
+        cached_messages.len() == messages.len()
+            && *cached_width == width
+            && cached_messages
+                .iter()
+                .zip(messages.iter())
+                .all(|(a, b)| a.id == b.id)
+    } else {
+        false
+    };
+
+    if !cache_valid {
+        // Calculate and cache the processed lines directly
+        let processed_lines = get_processed_message_lines(&messages, width);
+        state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
+        processed_lines
+    } else {
+        // Return cached processed lines immediately - no more processing needed!
+        if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+            cached_lines.clone()
+        } else {
+            // Fallback if cache is somehow invalid
+            get_processed_message_lines(&messages, width)
+        }
+    }
+}
+
+// New function that does all the heavy processing once and caches the result
+pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
+    use crate::services::message_pattern::{
+        process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
+    };
+
+    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
+
+    // Pre-allocate with estimated capacity to reduce reallocations
+    let estimated_capacity = all_lines.len() + (all_lines.len() / 10); // +10% for processing overhead
+    let mut processed_lines: Vec<Line> = Vec::with_capacity(estimated_capacity);
+
+    for (line, _style) in all_lines.iter() {
+        let line_text = spans_to_string(line);
+        if line_text.contains("<checkpoint_id>") {
+            processed_lines.push(Line::from(""));
+            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
+            for (processed_line, _) in processed {
+                processed_lines.push(processed_line);
+            }
+            processed_lines.push(Line::from(""));
+        } else {
+            let section_tags = ["local_context", "rulebooks"];
+            let mut found = false;
+
+            for tag in &section_tags {
+                let closing_tag = format!("</{}>", tag);
+                if line_text.trim() == closing_tag {
+                    found = true;
+                    break;
+                }
+                if line_text.contains(&format!("<{}>", tag)) {
+                    processed_lines.push(Line::from(""));
+                    let processed =
+                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
+                    for (processed_line, _) in processed {
+                        processed_lines.push(processed_line);
+                    }
+                    processed_lines.push(Line::from(""));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                if line_text.trim() == "SPACING_MARKER" {
+                    processed_lines.push(Line::from(""));
+                } else {
+                    processed_lines.push(line.clone());
+                }
+            }
+        }
+    }
+
+    processed_lines
+}
+
+/// Invalidate the message lines cache when messages change
+pub fn invalidate_message_lines_cache(state: &mut AppState) {
+    state.message_lines_cache = None;
+    state.collapsed_message_lines_cache = None;
+}
+
+pub fn get_wrapped_collapsed_message_lines_cached(
+    state: &mut AppState,
     width: usize,
-) -> Vec<(Line<'static>, Style)> {
-    get_wrapped_message_lines_internal(messages, width, true)
+) -> Vec<Line<'static>> {
+    // Get only collapsed messages
+    let collapsed_messages: Vec<Message> = state
+        .messages
+        .iter()
+        .filter(|m| m.is_collapsed == Some(true))
+        .cloned()
+        .collect();
+
+    // Check if cache is valid
+    let cache_valid =
+        if let Some((cached_messages, cached_width, _)) = &state.collapsed_message_lines_cache {
+            cached_messages.len() == collapsed_messages.len()
+                && *cached_width == width
+                && (collapsed_messages.is_empty()
+                    || cached_messages
+                        .iter()
+                        .zip(collapsed_messages.iter())
+                        .all(|(a, b)| a.id == b.id))
+        } else {
+            false
+        };
+
+    if !cache_valid {
+        // Calculate and cache the processed lines directly
+
+        let processed_lines: Vec<Line<'static>> =
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+                .into_iter()
+                .map(|(line, _style)| line)
+                .collect();
+
+        state.collapsed_message_lines_cache =
+            Some((collapsed_messages.to_vec(), width, processed_lines.clone()));
+        processed_lines
+    } else {
+        // Return cached processed lines immediately
+        if let Some((_, _, cached_lines)) = &state.collapsed_message_lines_cache {
+            cached_lines.clone()
+        } else {
+            // Fallback if cache is somehow invalid
+
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+                .into_iter()
+                .map(|(line, _style)| line)
+                .collect()
+        }
+    }
 }
 
 fn get_wrapped_message_lines_internal(
@@ -330,6 +550,7 @@ fn get_wrapped_message_lines_internal(
             MessageContent::Plain(text, style) => {
                 let cleaned = text.to_string();
 
+                // Check for shell history first (before newline processing)
                 if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
                     let mut remaining = cleaned.as_str();
                     while let Some(start) = remaining.find("```shell") {
@@ -400,6 +621,26 @@ fn get_wrapped_message_lines_internal(
                         let owned_lines = convert_to_owned_lines(borrowed_lines);
                         all_lines.extend(owned_lines);
                     }
+                } else if cleaned.contains("\n\n") {
+                    // Handle double newlines: split sections and add spacing
+                    for (i, section) in cleaned.split("\n\n").enumerate() {
+                        if i > 0 {
+                            all_lines.push((
+                                Line::from(vec![Span::from("SPACING_MARKER")]),
+                                Style::default(),
+                            ));
+                        }
+                        for line in section.split('\n') {
+                            let borrowed_lines = get_wrapped_plain_lines(line, style, width);
+                            all_lines.extend(convert_to_owned_lines(borrowed_lines));
+                        }
+                    }
+                } else if cleaned.contains('\n') {
+                    // Handle single newlines: split into lines
+                    for line in cleaned.split('\n') {
+                        let borrowed_lines = get_wrapped_plain_lines(line, style, width);
+                        all_lines.extend(convert_to_owned_lines(borrowed_lines));
+                    }
                 } else {
                     let borrowed_lines = get_wrapped_plain_lines(text, style, width);
                     let owned_lines = convert_to_owned_lines(borrowed_lines);
@@ -413,6 +654,61 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::StyledBlock(lines) => {
                 let borrowed_lines = get_wrapped_styled_block_lines(lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
+                let full_command = extract_full_command_arguments(tool_call);
+                let rendered_lines = if tool_call.function.name == "str_replace"
+                    && !render_file_diff(tool_call, width).is_empty()
+                {
+                    render_file_diff(tool_call, width)
+                } else {
+                    render_bash_block(tool_call, &full_command, false, width, *is_auto_approved)
+                };
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+
+            MessageContent::RenderCollapsedMessage(tool_call) => {
+                if tool_call.function.name == "str_replace" {
+                    let rendered_lines = render_file_diff_full(tool_call, width);
+                    if !rendered_lines.is_empty() {
+                        let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                        let owned_lines = convert_to_owned_lines(borrowed_lines);
+                        all_lines.extend(owned_lines);
+                    }
+                }
+            }
+            MessageContent::RenderStreamingBorderBlock(
+                content,
+                outside_title,
+                bubble_title,
+                colors,
+                tool_type,
+            ) => {
+                let rendered_lines = render_styled_block(
+                    content,
+                    outside_title,
+                    bubble_title,
+                    colors.clone(),
+                    width,
+                    tool_type,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderResultBorderBlock(tool_call_result) => {
+                let rendered_lines = render_result_block(tool_call_result, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderEscapedTextBlock(content) => {
+                let rendered_lines = format_text_content(content, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }
@@ -448,32 +744,27 @@ fn get_wrapped_message_lines_internal(
 
 pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
-    match arguments {
-        Ok(Value::Object(obj)) => {
-            // Look for a parameter with path/file/uri/url in the key name
-            for (key, val) in &obj {
-                let key_lower = key.to_lowercase();
-                if key_lower.contains("path")
-                    || key_lower.contains("file")
-                    || key_lower.contains("uri")
-                    || key_lower.contains("url")
-                    || key_lower.contains("command")
-                    || key_lower.contains("keywords")
-                {
-                    let formatted_val = format_simple_value(val);
-                    return format!("{} = {}", key, formatted_val);
-                }
-            }
-            // If no file path found, return the first parameter
-            if let Some((key, val)) = obj.into_iter().next() {
-                let formatted_val = format_simple_value(&val);
-                format!("{} = {}", key, formatted_val)
-            } else {
-                "no arguments".to_string()
+    const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
+
+    if let Ok(arguments) = arguments {
+        // Check each keyword in order of priority
+        for &keyword in &KEYWORDS {
+            if let Some(value) = arguments.get(keyword) {
+                let formatted_val = format_simple_value(value);
+                return format!("{} = {}", keyword, formatted_val);
             }
         }
-        _ => "unable to parse arguments".to_string(),
+
+        // If no keywords found, return the first parameter
+        if let Value::Object(obj) = arguments {
+            if let Some((key, val)) = obj.into_iter().next() {
+                let formatted_val = format_simple_value(&val);
+                return format!("{} = {}", key, formatted_val);
+            }
+        }
     }
+
+    "no arguments".to_string()
 }
 
 pub fn extract_full_command_arguments(tool_call: &ToolCall) -> String {

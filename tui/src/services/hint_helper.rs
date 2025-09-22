@@ -1,5 +1,6 @@
-use crate::app::AppState;
+use crate::services::detect_term::should_use_rgb_colors;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -29,13 +30,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on     '$' to undo shell mode",
-            Style::default().fg(Color::Rgb(160, 92, 158)),
+            Style::default().fg(AdaptiveColors::dark_magenta()),
         ));
         f.render_widget(hint, area);
         return;
     }
 
-    if state.show_shortcuts && state.input.is_empty() {
+    if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
             Line::from(
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
@@ -47,7 +48,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         ];
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input.is_empty() {
+    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
         // Show both hints when appropriate
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
@@ -60,17 +61,30 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let retry_len = retry_text.len();
             let spacing = total_width.saturating_sub(shortcuts_len + retry_len);
 
+            let retry_color = if should_use_rgb_colors() {
+                Color::Yellow
+            } else {
+                Color::Cyan
+            };
             let spans = vec![
                 Span::styled(shortcuts_text, Style::default().fg(Color::Cyan)),
                 Span::styled(" ".repeat(spacing), Style::default()),
-                Span::styled(retry_text, Style::default().fg(Color::Yellow)),
+                Span::styled(retry_text, Style::default().fg(retry_color)),
             ];
 
             let hint = Paragraph::new(Line::from(spans));
             f.render_widget(hint, area);
         } else {
+            let select_hint = if state.mouse_capture_enabled {
+                " . Fn/Option/Shift + drag to select text"
+            } else {
+                ""
+            };
             let hint = Paragraph::new(Span::styled(
-                "? for shortcuts . @ for files . / for commands",
+                format!(
+                    "? for shortcuts . @ for files . / for commands{}",
+                    select_hint
+                ),
                 Style::default().fg(Color::Cyan),
             ));
             f.render_widget(hint, area);
@@ -83,7 +97,11 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             "🔒 Auto-approve OFF"
         };
         let status_color = if state.auto_approve_manager.is_enabled() {
-            Color::LightYellow
+            if should_use_rgb_colors() {
+                Color::LightYellow
+            } else {
+                Color::Cyan
+            }
         } else {
             Color::DarkGray
         };

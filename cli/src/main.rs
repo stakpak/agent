@@ -127,8 +127,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // Skip auto-update when running in async or print mode
-    if !cli.r#async && !cli.print {
+    if !matches!(cli.command, Some(Commands::Acp { .. })) && !cli.r#async && !cli.print {
         if let Err(e) = auto_update().await {
             eprintln!("Auto-update failed: {}", e);
         }
@@ -175,7 +174,11 @@ async fn main() {
 
             match cli.command {
                 Some(command) => {
-                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    // Skip check_update for ACP command
+                    if !matches!(command, Commands::Acp { .. }) {
+                        let _ =
+                            check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
+                    }
                     if config.api_key.is_none() && command.requires_auth() {
                         prompt_for_api_key(&mut config).await;
                     }

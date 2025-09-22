@@ -3,20 +3,67 @@ mod event;
 mod terminal;
 mod view;
 
-pub use app::{AppState, InputEvent, OutputEvent, SessionInfo};
+pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
 pub use ratatui::style::Color;
 
 mod services;
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::{execute, terminal::EnterAlternateScreen};
 pub use event::map_crossterm_event_to_input_event;
+use ratatui::style::Style;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
 pub use terminal::TerminalGuard;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
+
+use crate::services::bash_block::render_collapsed_result_block;
+use crate::services::detect_term::is_unsupported_terminal;
+use crate::services::message::Message;
+
+pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
+    state.mouse_capture_enabled = !state.mouse_capture_enabled;
+
+    if state.mouse_capture_enabled {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
+
+    let status = if state.mouse_capture_enabled {
+        "enabled"
+    } else {
+        "disabled . Ctrl+L to enable"
+    };
+
+    let color = if state.mouse_capture_enabled {
+        Color::LightGreen
+    } else {
+        Color::LightRed
+    };
+    state.messages.push(Message::info("SPACING_MARKER", None));
+    state.messages.push(Message::info(
+        format!("Mouse capture {}", status),
+        Some(Style::default().fg(color)),
+    ));
+    state.messages.push(Message::info("SPACING_MARKER", None));
+
+    Ok(())
+}
+
+fn toggle_mouse_capture_with_redraw<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut AppState,
+) -> io::Result<()> {
+    toggle_mouse_capture(state)?;
+    emergency_clear_and_redraw(terminal, state)?;
+    Ok(())
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
@@ -33,11 +80,23 @@ pub async fn run_tui(
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
     crossterm::terminal::enable_raw_mode()?;
+
+    // Detect terminal support for mouse capture
+    let terminal_info = crate::services::detect_term::detect_terminal();
+    let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
+
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste
     )?;
+
+    if enable_mouse_capture {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
+
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
     let mut state = AppState::new(
@@ -48,6 +107,11 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
     );
+
+    // Add welcome messages after state is created
+    let welcome_msg =
+        crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
+    state.messages.extend(welcome_msg);
 
     // Internal channel for event handling
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
@@ -67,10 +131,9 @@ pub async fn run_tui(
     let shell_event_tx = internal_tx.clone();
 
     let mut spinner_interval = interval(Duration::from_millis(100));
-    // get terminal width
-    let terminal_size = terminal.size()?;
+
     // Main async update/view loop
-    terminal.draw(|f| view::view(f, &state))?;
+    terminal.draw(|f| view::view(f, &mut state))?;
     let mut should_quit = false;
     loop {
         // Check if double Ctrl+C timer expired
@@ -92,18 +155,30 @@ pub async fn run_tui(
             continue;
         }
                    if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
-                       state.poll_autocomplete_results();
-                       terminal.draw(|f| view::view(f, &state))?;
+
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       state.poll_file_search_results();
+                       terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        services::update::clear_streaming_tool_results(&mut state);
-                       services::bash_block::render_result_block(tool_call_result, &mut state, terminal_size);
+                       if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_call_result.call.function.name == "run_command" {
+
+                            state.latest_tool_call = Some(tool_call_result.call.clone());
+
+                       }
+                       render_collapsed_result_block(tool_call_result, &mut state);
+
+                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                   }
+                   if let InputEvent::ToggleMouseCapture = event {
+                       toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                       continue;
                    }
 
                    if let InputEvent::Quit = event { should_quit = true; }
@@ -114,7 +189,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -124,7 +199,8 @@ pub async fn run_tui(
                        let outer_chunks = ratatui::layout::Layout::default()
                            .direction(ratatui::layout::Direction::Vertical)
                            .constraints([
-                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading indicator
                                ratatui::layout::Constraint::Length(input_height as u16),
                                ratatui::layout::Constraint::Length(dropdown_height),
                                ratatui::layout::Constraint::Length(hint_height),
@@ -132,11 +208,15 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
-                       state.poll_autocomplete_results();
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       state.poll_file_search_results();
                    }
                }
                Some(event) = internal_rx.recv() => {
+                if let InputEvent::ToggleMouseCapture = event {
+                    toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                    continue;
+                }
                 if let InputEvent::Quit = event { should_quit = true; }
                    else {
                        let term_size = terminal.size()?;
@@ -145,7 +225,7 @@ pub async fn run_tui(
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && !state.filtered_helpers.is_empty()
-                           && state.input.starts_with('/');
+                           && state.input().starts_with('/');
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -155,7 +235,8 @@ pub async fn run_tui(
                        let outer_chunks = ratatui::layout::Layout::default()
                            .direction(ratatui::layout::Direction::Vertical)
                            .constraints([
-                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading indicator
                                ratatui::layout::Constraint::Length(input_height as u16),
                                ratatui::layout::Constraint::Length(dropdown_height),
                                ratatui::layout::Constraint::Length(hint_height),
@@ -163,19 +244,13 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                    //    if let InputEvent::InputSubmitted = event {
-                    //     if (state.show_helper_dropdown && state.autocomplete.is_active()) || (state.show_shell_mode && !state.waiting_for_shell_input) {
-                    //         // Do nothing for these cases
-                    //     } else if !state.show_shell_mode && !state.input.trim().is_empty() && !state.input.trim().starts_with('/') && state.input.trim() != "clear" {
-                    //         let _ = output_tx.try_send(OutputEvent::UserMessage(state.input.clone(), state.shell_tool_calls.clone()));
-                    //     }
-                    //    }
                     if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &state)?;
+                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), terminal_size, &shell_event_tx);
-                       state.poll_autocomplete_results();
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       state.poll_file_search_results();
+                       state.update_session_empty_status();
                    }
                }
                _ = spinner_interval.tick() => {
@@ -189,15 +264,16 @@ pub async fn run_tui(
                        }
                    }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
-                   state.poll_autocomplete_results();
-                   terminal.draw(|f| view::view(f, &state))?;
+                   state.poll_file_search_results();
+                   terminal.draw(|f| view::view(f, &mut state))?;
                }
            }
         if should_quit {
             break;
         }
-        state.poll_autocomplete_results();
-        terminal.draw(|f| view::view(f, &state))?;
+        state.poll_file_search_results();
+        state.update_session_empty_status();
+        terminal.draw(|f| view::view(f, &mut state))?;
     }
 
     println!("Quitting...");
@@ -206,14 +282,15 @@ pub async fn run_tui(
     execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        DisableMouseCapture
     )?;
     Ok(())
 }
 
 pub fn emergency_clear_and_redraw<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    state: &AppState,
+    state: &mut AppState,
 ) -> io::Result<()> {
     use crossterm::{
         cursor::MoveTo,

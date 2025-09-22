@@ -1,5 +1,7 @@
-use crate::app::AppState;
-use crate::services::message::get_wrapped_message_lines;
+use crate::{
+    app::AppState,
+    services::{detect_term::should_use_rgb_colors, message::get_wrapped_message_lines_cached},
+};
 use ratatui::{
     Frame,
     layout::Alignment,
@@ -8,9 +10,17 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
+fn term_color(color: Color) -> Color {
+    if should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
+}
+
+pub fn render_confirmation_dialog(f: &mut Frame, state: &mut AppState) {
     let screen = f.area();
-    let message_lines = get_wrapped_message_lines(&state.messages, screen.width as usize);
+    let message_lines = get_wrapped_message_lines_cached(state, screen.width as usize);
     let mut last_message_y = message_lines.len() as u16 + 1; // +1 for a gap
 
     // Fixed dialog height: just 3 lines (border, message, border)
@@ -34,14 +44,20 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &AppState) {
     let line = Line::from(vec![Span::styled(
         message,
         Style::default()
-            .fg(Color::White)
+            .fg(term_color(Color::White))
             .add_modifier(Modifier::BOLD),
     )]);
+
+    let border_color = if should_use_rgb_colors() {
+        Color::LightYellow
+    } else {
+        Color::Cyan
+    };
     let dialog = Paragraph::new(vec![line])
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::LightYellow))
+                .border_style(Style::default().fg(border_color))
                 .title("Confirmation"),
         )
         .alignment(Alignment::Center);

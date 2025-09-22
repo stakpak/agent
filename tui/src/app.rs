@@ -1,8 +1,15 @@
 use crate::services::auto_approve::AutoApproveManager;
-use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
-use crate::services::helper_block::{push_styled_message, welcome_messages};
+use crate::services::detect_term::AdaptiveColors;
+use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
+use crate::services::helper_block::push_error_message;
+use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
-use crate::services::render_input::get_multiline_input_lines;
+#[cfg(not(unix))]
+use crate::services::shell_mode::run_background_shell_command;
+#[cfg(unix)]
+use crate::services::shell_mode::run_pty_command;
+use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
+use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -13,18 +20,13 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
-
-use crate::services::helper_block::push_error_message;
-#[cfg(not(unix))]
-use crate::services::shell_mode::run_background_shell_command;
-#[cfg(unix)]
-use crate::services::shell_mode::run_pty_command;
+// Type alias to reduce complexity - now stores processed lines for better performance
+type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
 
 const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
-// --- NEW: Async autocomplete result struct ---
-pub struct AutoCompleteResult {
+// --- NEW: Async file_search result struct ---
+pub struct FileSearchResult {
     pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>,
     pub cursor_position: usize,
@@ -51,9 +53,66 @@ pub enum LoadingType {
     Sessions,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LoadingOperation {
+    LlmRequest,
+    ToolExecution,
+    SessionsList,
+    StreamProcessing,
+    LocalContext,
+    Rulebooks,
+    CheckpointResume,
+}
+
+#[derive(Debug)]
+pub struct LoadingStateManager {
+    active_operations: std::collections::HashSet<LoadingOperation>,
+}
+
+impl Default for LoadingStateManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LoadingStateManager {
+    pub fn new() -> Self {
+        Self {
+            active_operations: std::collections::HashSet::new(),
+        }
+    }
+
+    pub fn start_operation(&mut self, operation: LoadingOperation) {
+        self.active_operations.insert(operation);
+    }
+
+    pub fn end_operation(&mut self, operation: LoadingOperation) {
+        self.active_operations.remove(&operation);
+    }
+
+    pub fn is_loading(&self) -> bool {
+        !self.active_operations.is_empty()
+    }
+
+    pub fn get_loading_type(&self) -> LoadingType {
+        if self
+            .active_operations
+            .contains(&LoadingOperation::SessionsList)
+        {
+            LoadingType::Sessions
+        } else {
+            LoadingType::Llm
+        }
+    }
+
+    pub fn clear_all(&mut self) {
+        self.active_operations.clear();
+    }
+}
+
 pub struct AppState {
-    pub input: String,
-    pub cursor_position: usize,
+    pub text_area: TextArea,
+    pub text_area_state: TextAreaState,
     pub cursor_visible: bool,
     pub messages: Vec<Message>,
     pub scroll: usize,
@@ -63,7 +122,7 @@ pub struct AppState {
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
     pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>, // NEW: for file autocomplete
+    pub filtered_files: Vec<String>, // NEW: for file file_search
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
     pub dialog_command: Option<ToolCall>,
@@ -89,16 +148,16 @@ pub struct AppState {
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
     pub dialog_message_id: Option<Uuid>,
-    pub autocomplete: AutoComplete,
+    pub file_search: FileSearch,
     pub secret_manager: SecretManager,
     pub latest_version: Option<String>,
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
     pub pasted_long_text: Option<String>,
     pub pasted_placeholder: Option<String>,
-    // --- NEW: autocomplete channels ---
-    pub autocomplete_tx: Option<mpsc::Sender<(String, usize)>>,
-    pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
+    // --- NEW: FileSearch channels ---
+    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
+    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
     pub auto_approve_manager: AutoApproveManager,
@@ -115,6 +174,14 @@ pub struct AppState {
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
     pub is_git_repo: bool,
+    pub message_lines_cache: Option<MessageLinesCache>,
+    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
+    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
+
+    pub pending_pastes: Vec<(String, String)>,
+    pub mouse_capture_enabled: bool,
+    pub loading_manager: LoadingStateManager,
+    pub has_user_messages: bool,
 }
 
 #[derive(Debug)]
@@ -125,7 +192,8 @@ pub enum InputEvent {
     RunToolCall(ToolCall),
     ToolResult(ToolCallResult),
     StreamToolResult(ToolCallResultProgress),
-    Loading(bool),
+    StartLoadingOperation(LoadingOperation),
+    EndLoadingOperation(LoadingOperation),
     InputChanged(char),
     ShellMode,
     GetStatus(String),
@@ -155,6 +223,7 @@ pub enum InputEvent {
     ShowConfirmationDialog(ToolCall),
     DialogConfirm,
     DialogCancel,
+    HasUserMessage,
     Tab,
     ShellOutput(String),
     ShellError(String),
@@ -176,6 +245,7 @@ pub enum InputEvent {
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
     EmergencyClearTerminal,
+    ToggleMouseCapture, // Toggle mouse capture on/off
 }
 
 #[derive(Debug)]
@@ -226,6 +296,10 @@ impl AppState {
                 description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
             },
             HelperCommand {
+                command: "/mouse_capture",
+                description: "Toggle mouse capture on/off",
+            },
+            HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
             },
@@ -241,23 +315,23 @@ impl AppState {
         allowed_tools: Option<&Vec<String>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
-        let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
-        let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
+        let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
+        let (result_tx, result_rx) = mpsc::channel::<FileSearchResult>(10);
         let helpers_clone = helpers.clone();
-        let autocomplete_instance = AutoComplete::default();
-        // Spawn autocomplete worker from auto_complete.rs
-        tokio::spawn(autocomplete_worker(
-            autocomplete_rx,
+        let file_search_instance = FileSearch::default();
+        // Spawn file_search worker from file_search.rs
+        tokio::spawn(file_search_worker(
+            file_search_rx,
             result_tx,
             helpers_clone,
-            autocomplete_instance,
+            file_search_instance,
         ));
 
         AppState {
-            input: String::new(),
-            cursor_position: 0,
+            text_area: TextArea::new(),
+            text_area_state: TextAreaState::default(),
             cursor_visible: true,
-            messages: welcome_messages(latest_version.clone()),
+            messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
             stay_at_bottom: true,
@@ -291,15 +365,15 @@ impl AppState {
             ondemand_shell_mode: false,
             shell_tool_calls: None,
             dialog_message_id: None,
-            autocomplete: AutoComplete::default(),
+            file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
             pasted_long_text: None,
             pasted_placeholder: None,
-            autocomplete_tx: Some(autocomplete_tx),
-            autocomplete_rx: Some(result_rx),
+            file_search_tx: Some(file_search_tx),
+            file_search_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
@@ -314,21 +388,62 @@ impl AppState {
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
             is_git_repo,
+            message_lines_cache: None,
+            collapsed_message_lines_cache: None,
+            processed_lines_cache: None,
+            pending_pastes: Vec::new(),
+            mouse_capture_enabled: crate::services::detect_term::is_unsupported_terminal(
+                &crate::services::detect_term::detect_terminal().emulator,
+            ), // Start with mouse capture enabled only for supported terminals
+            loading_manager: LoadingStateManager::new(),
+            has_user_messages: false,
         }
     }
-    pub fn render_input(&self, area_width: usize) -> (Vec<Line>, bool) {
-        let (lines, cursor_rendered) = get_multiline_input_lines(self, area_width);
-        (lines, cursor_rendered)
+
+    pub fn update_session_empty_status(&mut self) {
+        // Check if there are any user messages (not just any messages)
+        let session_empty = !self.has_user_messages && self.text_area.text().is_empty();
+        self.text_area.set_session_empty(session_empty);
     }
+
+    // Convenience methods for accessing input and cursor
+    pub fn input(&self) -> &str {
+        self.text_area.text()
+    }
+
+    pub fn cursor_position(&self) -> usize {
+        self.text_area.cursor()
+    }
+
+    pub fn set_input(&mut self, input: &str) {
+        self.text_area.set_text(input);
+    }
+
+    pub fn set_cursor_position(&mut self, pos: usize) {
+        self.text_area.set_cursor(pos);
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.text_area.insert_str(&c.to_string());
+    }
+
+    pub fn insert_str(&mut self, s: &str) {
+        self.text_area.insert_str(s);
+    }
+
+    pub fn clear_input(&mut self) {
+        self.text_area.set_text("");
+    }
+
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {
         let (shell_tx, mut shell_rx) = mpsc::channel::<ShellEvent>(100);
         self.messages.push(Message::plain_text("SPACING_MARKER"));
         push_styled_message(
             self,
             &command,
-            Color::Rgb(180, 180, 180),
+            AdaptiveColors::text(),
             SHELL_PROMPT_PREFIX,
-            Color::Rgb(160, 92, 158),
+            AdaptiveColors::dark_magenta(),
         );
         self.messages.push(Message::plain_text("SPACING_MARKER"));
         #[cfg(unix)]
@@ -370,16 +485,18 @@ impl AppState {
         });
     }
 
-    // --- NEW: Poll autocomplete results and update state ---
-    pub fn poll_autocomplete_results(&mut self) {
-        if let Some(rx) = &mut self.autocomplete_rx {
+    // --- NEW: Poll file_search results and update state ---
+    pub fn poll_file_search_results(&mut self) {
+        if let Some(rx) = &mut self.file_search_rx {
             while let Ok(result) = rx.try_recv() {
+                // Get input text before any mutable operations
+                let input_text = self.text_area.text().to_string();
+
                 let filtered_files = result.filtered_files.clone();
-                let is_files_empty = filtered_files.is_empty();
                 self.filtered_files = filtered_files;
-                self.autocomplete.filtered_files = self.filtered_files.clone();
-                self.autocomplete.is_file_mode = !self.filtered_files.is_empty();
-                self.autocomplete.trigger_char = if !self.filtered_files.is_empty() {
+                self.file_search.filtered_files = self.filtered_files.clone();
+                self.file_search.is_file_mode = !self.filtered_files.is_empty();
+                self.file_search.trigger_char = if !self.filtered_files.is_empty() {
                     Some('@')
                 } else {
                     None
@@ -398,9 +515,9 @@ impl AppState {
                 // Show dropdown if input is exactly '/' or if filtered_helpers is not empty and input starts with '/'
                 let has_at_trigger =
                     find_at_trigger(&result.input, result.cursor_position).is_some();
-                self.show_helper_dropdown = (self.input.trim().starts_with('/'))
-                    || (!self.filtered_helpers.is_empty() && self.input.starts_with('/'))
-                    || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
+                self.show_helper_dropdown = (input_text.trim().starts_with('/'))
+                    || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
+                    || (has_at_trigger && !self.waiting_for_shell_input);
             }
         }
     }

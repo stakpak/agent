@@ -1,12 +1,19 @@
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Color, ThemeSet};
+use syntect::highlighting::{Color as SyntectColor, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-fn syntect_color_to_ratatui_color(syntect_color: Color) -> ratatui::style::Color {
-    ratatui::style::Color::Rgb(syntect_color.r, syntect_color.g, syntect_color.b)
+use crate::services::detect_term::should_use_rgb_colors;
+
+fn syntect_color_to_ratatui_color(syntect_color: SyntectColor) -> Color {
+    if should_use_rgb_colors() {
+        Color::Rgb(syntect_color.r, syntect_color.g, syntect_color.b)
+    } else {
+        // For non-RGB terminals, use a simple cyan color
+        Color::Cyan
+    }
 }
 
 //  apply_syntax_highlighting -> takes string and optional extension and returns highlighted ratatui lines
@@ -34,12 +41,10 @@ pub fn apply_syntax_highlighting(text: &str, extension: Option<&str>) -> Vec<Lin
 
         for (style, text) in ranges {
             let color = syntect_color_to_ratatui_color(style.foreground);
-            // Apply background color to make code blocks stand out
+            // Use only foreground color for better compatibility
             let styled_span = Span::styled(
                 text.to_string(),
-                Style::default()
-                    .fg(color)
-                    .bg(ratatui::style::Color::Rgb(30, 30, 30)), // Dark background
+                Style::default().fg(color), // Only foreground color, no background
             );
             spans.push(styled_span);
         }
