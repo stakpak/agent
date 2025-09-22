@@ -15,6 +15,7 @@ pub struct Tab {
     pub scroll: usize,
     pub status_color: Option<Color>,
     pub custom_title_line: Option<Line<'static>>,
+    pub subheader: Option<Vec<(Line<'static>, Style)>>,
 }
 
 impl Tab {
@@ -30,6 +31,7 @@ impl Tab {
             scroll: 0,
             status_color: None,
             custom_title_line: None,
+            subheader: None,
         }
     }
 
@@ -46,6 +48,7 @@ impl Tab {
             scroll: 0,
             status_color,
             custom_title_line: None,
+            subheader: None,
         }
     }
 
@@ -62,6 +65,7 @@ impl Tab {
             scroll: 0,
             status_color: None,
             custom_title_line: Some(custom_title_line),
+            subheader: None,
         }
     }
 
@@ -169,6 +173,42 @@ impl Tab {
     /// Get current scroll position
     pub fn get_scroll(&self) -> usize {
         self.scroll
+    }
+
+    /// Set the subheader for this tab
+    pub fn set_subheader(&mut self, subheader: Option<Vec<(Line<'static>, Style)>>) {
+        self.subheader = subheader;
+    }
+
+    /// Get the subheader for this tab
+    pub fn get_subheader(&self) -> &Option<Vec<(Line<'static>, Style)>> {
+        &self.subheader
+    }
+
+    /// Get the height of the subheader (number of lines)
+    pub fn subheader_height(&self) -> usize {
+        self.subheader
+            .as_ref()
+            .map(|lines| lines.len())
+            .unwrap_or(0)
+    }
+
+    /// Create a new tab with subheader
+    pub fn new_with_subheader<C: TabContent + Send + Sync + 'static>(
+        id: String,
+        title: String,
+        content: C,
+        subheader: Option<Vec<(Line<'static>, Style)>>,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            content: Box::new(content),
+            scroll: 0,
+            status_color: None,
+            custom_title_line: None,
+            subheader,
+        }
     }
 }
 

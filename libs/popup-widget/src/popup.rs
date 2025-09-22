@@ -171,7 +171,14 @@ impl PopupWidget {
 
         // Calculate and clamp scroll to maximum
         let max_scroll = self.calculate_max_scroll(terminal_size);
+        let old_scroll = self.state.scroll;
         self.state.scroll = self.state.scroll.min(max_scroll);
+        if old_scroll != self.state.scroll {
+            eprintln!(
+                "DEBUG: Scroll clamped from {} to {} (max_scroll: {})",
+                old_scroll, self.state.scroll, max_scroll
+            );
+        }
 
         // Create the main block
         let block = self.create_block();
@@ -233,20 +240,55 @@ impl PopupWidget {
             0
         };
 
+        // Check if current tab has subheader
+        let has_subheader = self
+            .config
+            .tabs
+            .get(self.state.selected_tab)
+            .map(|tab| tab.subheader.is_some())
+            .unwrap_or(false);
+        let subheader_height = if has_subheader {
+            self.config
+                .tabs
+                .get(self.state.selected_tab)
+                .map(|tab| tab.subheader_height())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         if has_footer {
-            constraints.extend([
-                Constraint::Length(1),                    // Tab headers
-                Constraint::Length(1),                    // Space after tabs
+            let mut constraint_list = vec![
+                Constraint::Length(1), // Tab headers
+                Constraint::Length(1), // Space after tabs
+            ];
+
+            if has_subheader {
+                constraint_list.push(Constraint::Length(subheader_height as u16)); // Subheader lines
+                constraint_list.push(Constraint::Length(1)); // Space after subheader
+            }
+
+            constraint_list.extend([
                 Constraint::Min(1),                       // Tab content (flexible)
                 Constraint::Length(1),                    // Space before footer
                 Constraint::Length(footer_height as u16), // Footer lines
             ]);
+
+            constraints.extend(constraint_list);
         } else {
-            constraints.extend([
+            let mut constraint_list = vec![
                 Constraint::Length(1), // Tab headers
                 Constraint::Length(1), // Space after tabs
-                Constraint::Min(1),    // Tab content
-            ]);
+            ];
+
+            if has_subheader {
+                constraint_list.push(Constraint::Length(subheader_height as u16)); // Subheader lines
+                constraint_list.push(Constraint::Length(1)); // Space after subheader
+            }
+
+            constraint_list.push(Constraint::Min(1)); // Tab content
+
+            constraints.extend(constraint_list);
         }
 
         let chunks = Layout::default()
@@ -279,10 +321,23 @@ impl PopupWidget {
         }
 
         let tab_header_area = chunks[chunk_index];
-        let tab_content_area = chunks[chunk_index + 2]; // Skip space after tabs
+
+        // Calculate content area index based on whether subheader is present
+        let content_area_index = if has_subheader {
+            chunk_index + 4 // Skip tab headers, space, subheader, and space
+        } else {
+            chunk_index + 2 // Skip tab headers and space
+        };
+        let tab_content_area = chunks[content_area_index];
 
         // Render tab headers
         self.render_tab_headers(f, tab_header_area);
+
+        // Render subheader if present
+        if has_subheader {
+            let subheader_area = chunks[chunk_index + 2]; // Skip tab headers and space
+            self.render_subheader(f, subheader_area);
+        }
 
         // Render selected tab content
         if let Some(selected_tab) = self.config.tabs.get_mut(self.state.selected_tab) {
@@ -299,7 +354,13 @@ impl PopupWidget {
         // Render footer if present
         if let Some(footer_lines) = &self.config.footer {
             let footer_area = if has_footer {
-                chunks[chunk_index + 4] // Skip tab headers, space, content, and space
+                // Calculate footer area index based on whether subheader is present
+                let footer_index = if has_subheader {
+                    chunk_index + 6 // Skip tab headers, space, subheader, space, content, and space
+                } else {
+                    chunk_index + 4 // Skip tab headers, space, content, and space
+                };
+                chunks[footer_index]
             } else {
                 return; // No footer area allocated
             };
@@ -461,6 +522,24 @@ impl PopupWidget {
         );
     }
 
+    /// Render subheader for the currently selected tab
+    fn render_subheader(&self, f: &mut Frame, area: Rect) {
+        if let Some(selected_tab) = self.config.tabs.get(self.state.selected_tab) {
+            if let Some(subheader_lines) = &selected_tab.subheader {
+                let styled_lines: Vec<Line> = subheader_lines
+                    .iter()
+                    .map(|(line, style)| line.clone().patch_style(*style))
+                    .collect();
+
+                let widget = Paragraph::new(styled_lines)
+                    .style(self.config.background_style)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+
+                f.render_widget(widget, area);
+            }
+        }
+    }
+
     /// Scroll up
     fn scroll_up(&mut self) {
         eprintln!("DEBUG: scroll_up called - current: {}", self.state.scroll);
@@ -522,6 +601,23 @@ impl PopupWidget {
         // Check if footer is present
         let has_footer = self.config.footer.is_some();
 
+        // Check if current tab has subheader
+        let has_subheader = self
+            .config
+            .tabs
+            .get(self.state.selected_tab)
+            .map(|tab| tab.subheader.is_some())
+            .unwrap_or(false);
+        let subheader_height = if has_subheader {
+            self.config
+                .tabs
+                .get(self.state.selected_tab)
+                .map(|tab| tab.subheader_height())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         // Calculate available height for content using the same logic as rendering
         let available_height = if self.config.show_tabs && !self.config.tabs.is_empty() {
             // Calculate the same way as in render_with_tabs
@@ -530,6 +626,9 @@ impl PopupWidget {
                 fixed_height += 2; // Title + space
             }
             fixed_height += 2; // Tabs + space
+            if has_subheader {
+                fixed_height += subheader_height + 1; // Subheader lines + space after subheader
+            }
             if has_footer {
                 let footer_height = self
                     .config
@@ -567,12 +666,16 @@ impl PopupWidget {
         // Calculate the actual content height including text wrapping
         let content_height = if self.config.show_tabs && !self.config.tabs.is_empty() {
             if let Some(selected_tab) = self.config.tabs.get(self.state.selected_tab) {
-                selected_tab.content.calculate_rendered_height()
+                let height = selected_tab.content.calculate_rendered_height();
+                eprintln!("DEBUG: Tab content height: {}", height);
+                height
             } else {
                 0
             }
         } else if let Some(content) = &self.content {
-            content.calculate_rendered_height()
+            let height = content.calculate_rendered_height();
+            eprintln!("DEBUG: Direct content height: {}", height);
+            height
         } else {
             0
         };
@@ -581,9 +684,16 @@ impl PopupWidget {
         let scrollable_content_height =
             content_height.saturating_sub(self.config.fixed_header_lines);
 
-        // Calculate max scroll: if scrollable content is taller than available space, allow scrolling
-        let max_scroll = if scrollable_content_height > scrollable_available_height {
-            let scroll = scrollable_content_height - scrollable_available_height;
+        // Calculate max scroll: allow scrolling if content has more than 1 line
+        // This enables scrolling even when there's extra space available
+        let max_scroll = if scrollable_content_height > 1 {
+            let scroll = if scrollable_content_height > scrollable_available_height {
+                // Content exceeds available space - normal scrolling
+                scrollable_content_height - scrollable_available_height
+            } else {
+                // Content fits but we still want to allow scrolling through all content
+                scrollable_content_height.saturating_sub(1)
+            };
             eprintln!(
                 "DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}",
                 scrollable_content_height, scrollable_available_height, scroll

@@ -58,7 +58,9 @@ impl PopupContent for StyledLineContent {
             .map(|(line, style)| line.clone().patch_style(*style))
             .collect();
 
-        let widget = Paragraph::new(styled_lines).wrap(ratatui::widgets::Wrap { trim: false });
+        let widget = Paragraph::new(styled_lines)
+            .style(ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(24, 25, 36)))
+            .wrap(ratatui::widgets::Wrap { trim: false });
 
         f.render_widget(widget, area);
     }
