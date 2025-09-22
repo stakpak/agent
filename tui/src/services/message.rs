@@ -671,7 +671,7 @@ fn get_wrapped_message_lines_internal(
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
                 if tool_call.function.name == "str_replace" {
-                    let rendered_lines = render_file_diff_full(tool_call, width);
+                    let rendered_lines = render_file_diff_full(tool_call, width, Some(true));
                     if !rendered_lines.is_empty() {
                         let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                         let owned_lines = convert_to_owned_lines(borrowed_lines);

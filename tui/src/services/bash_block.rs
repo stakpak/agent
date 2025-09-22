@@ -651,13 +651,17 @@ pub fn render_styled_header_and_borders(
     result
 }
 
-pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
+pub fn render_file_diff_full(
+    tool_call: &ToolCall,
+    terminal_width: usize,
+    do_show: Option<bool>,
+) -> Vec<Line<'static>> {
     let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
     let path = args["path"].as_str().unwrap_or("");
 
-    if full_diff_lines.is_empty() {
+    if full_diff_lines.is_empty() && !do_show.unwrap_or(false) {
         return Vec::new();
     }
     // render header dot

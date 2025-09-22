@@ -28,11 +28,13 @@
 //! let approvals = popup_service.get_all_approvals();
 //! ```
 
-use crate::services::bash_block::format_text_content;
+use crate::services::bash_block::{format_text_content, render_file_diff_full};
 use crate::services::detect_term::{self, is_unsupported_terminal};
+use crate::services::file_diff::render_file_diff_block;
 use crate::services::message::{
     extract_full_command_arguments, extract_truncated_command_arguments, get_command_type_name,
 };
+use crate::services::message_pattern::spans_to_string;
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -285,8 +287,6 @@ impl PopupService {
 
         // Get tool details
         let tool_name = get_command_type_name(tool_call).to_string();
-        let tool_path =
-            extract_truncated_command_arguments(tool_call, Some("".to_string())).to_string();
 
         // Use the status from the specific tool call info
         let status = &tool_call_info.status;
@@ -302,36 +302,47 @@ impl PopupService {
 
         // Create a line with tool name and status on the same line
         let tool_status_line = Line::from(vec![
+            ratatui::text::Span::styled("Tool".to_string(), Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(
-                format!("Tool  {}", tool_name),
-                Style::default().fg(Color::DarkGray),
+                format!(" {}", tool_name),
+                Style::default().fg(Color::Gray),
             ),
-            ratatui::text::Span::styled("                  ", Style::default()), // spacing
+            ratatui::text::Span::styled("       ".to_string(), Style::default()),
             ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
         ]);
         lines.push((tool_status_line, Style::default()));
 
         lines.push((Line::from(""), Style::default()));
-
-        if !tool_path.is_empty() {
-            lines.push((Line::from(tool_path), Style::default().fg(Color::DarkGray)));
-        }
-
-        lines.push((Line::from(""), Style::default()));
         lines.push((Line::from(""), Style::default()));
 
         let output = extract_full_command_arguments(tool_call);
 
+        // remove first line of output and return the rest
+        let output = output.lines().skip(1).collect::<Vec<_>>().join("\n");
+
         // Use the popup's inner width for text formatting
         let inner_width = self.inner_width();
         eprintln!("inner_width: {}", inner_width);
-        let rendered_lines = format_text_content(&output, inner_width);
-        lines.extend(
-            rendered_lines
-                .into_iter()
-                .map(|line| (line, Style::default())),
-        );
+        let rendered_lines = if tool_call.function.name == "str_replace" {
+            let (_diff_lines, full_diff_lines) = render_file_diff_block(tool_call, inner_width);
+            if !full_diff_lines.is_empty() {
+                full_diff_lines
+            } else {
+                format_text_content(&output, inner_width)
+            }
+        } else {
+            format_text_content(&output, inner_width)
+        };
+
+        lines.extend(rendered_lines.into_iter().map(|line| {
+            let line_text = spans_to_string(&line);
+            if line_text.trim() == "SPACING_MARKER" {
+                (Line::from(""), Style::default())
+            } else {
+                (line, Style::default())
+            }
+        }));
 
         // add simulated dummy text in lines
         // for _ in 0..50 {
