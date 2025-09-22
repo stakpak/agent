@@ -749,7 +749,11 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<St
         for &keyword in &KEYWORDS {
             if let Some(value) = arguments.get(keyword) {
                 let formatted_val = format_simple_value(value);
-                let sign = if sign.is_some() { format!("{} ", sign.unwrap()) } else { "= ".to_string() };
+                let sign = if sign.is_some() {
+                    format!("{} ", sign.unwrap())
+                } else {
+                    "= ".to_string()
+                };
                 return format!("{} {}{}", keyword, sign, formatted_val);
             }
         }

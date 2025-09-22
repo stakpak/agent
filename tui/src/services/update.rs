@@ -130,7 +130,7 @@ pub fn update(
                 return; // Consume all input when popup is visible
             }
             handle_input_changed(state, c);
-        },
+        }
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if state.approval_popup.is_visible() {
@@ -335,7 +335,7 @@ pub fn update(
 
         InputEvent::MessageToolCalls(tool_calls) => {
             state.message_tool_calls = Some(tool_calls.clone());
-            
+
             // Update approval popup with tool calls if there are multiple
             if tool_calls.len() > 1 {
                 state.approval_popup = PopupService::new_with_tool_calls(tool_calls);
