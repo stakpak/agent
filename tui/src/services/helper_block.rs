@@ -8,6 +8,37 @@ pub fn get_stakpak_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Generate a mouse capture hint message based on the terminal type
+pub fn mouse_capture_hint_message(state: &crate::app::AppState) -> Message {
+    let status = if state.mouse_capture_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    let status_color = if state.mouse_capture_enabled {
+        Color::LightGreen
+    } else {
+        Color::LightRed
+    };
+
+    let styled_line = Line::from(vec![
+        Span::styled(
+            "█",
+            Style::default()
+                .fg(Color::LightMagenta)
+                .bg(Color::LightMagenta),
+        ),
+        Span::raw("  Mouse capture "),
+        Span::styled(status, Style::default().fg(status_color)),
+        Span::styled(
+            " • Ctrl+L to toggle",
+            Style::default().fg(Color::LightMagenta),
+        ),
+    ]);
+
+    Message::styled(styled_line)
+}
+
 pub fn push_status_message(state: &mut AppState) {
     let status_text = state.account_info.clone();
     let version = get_stakpak_version();
@@ -34,7 +65,7 @@ pub fn push_status_message(state: &mut AppState) {
         Line::from(vec![Span::styled(
             format!("Stakpak Code Status v{}", version),
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -75,7 +106,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         Line::from(""),
         Line::from(vec![Span::styled(
             "We're extracting important information from your conversation in the background.",
-            Style::default().fg(Color::White),
+            Style::default().fg(Color::Reset),
         )]),
         Line::from(vec![Span::styled(
             "Feel free to continue talking to the agent while this happens!",
@@ -98,16 +129,16 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Usage Mode",
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Reset)
             .add_modifier(Modifier::BOLD),
     )]));
 
     let usage_modes = vec![
-        ("REPL", "stakpak (interactive session)", Color::White),
+        ("REPL", "stakpak (interactive session)", Color::Reset),
         (
             "Non-interactive",
             "stakpak -p  \"prompt\" -c <checkpoint_id>",
-            Color::White,
+            Color::Reset,
         ),
     ];
     for (mode, desc, color) in usage_modes {
@@ -132,7 +163,7 @@ pub fn push_help_message(state: &mut AppState) {
         Span::styled(
             " stakpak --help ",
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("to see all commands", Style::default().fg(Color::Gray)),
@@ -142,7 +173,7 @@ pub fn push_help_message(state: &mut AppState) {
     lines.push(Line::from(vec![Span::styled(
         "Available commands",
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Reset)
             .add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(""));
@@ -173,11 +204,12 @@ pub fn push_help_message(state: &mut AppState) {
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     )]));
+
     // Shortcuts list
     let shortcuts = vec![
         ("Enter", "send message", Color::Yellow),
         ("Ctrl+J or Shift+Enter", "insert newline", Color::Yellow),
-        ("Up/Down", "scroll prompt history", Color::Yellow),
+        // ("Up/Down", "scroll prompt history", Color::Yellow),
         ("Ctrl+C", "quit Stakpak", Color::Yellow),
     ];
     for (key, desc, color) in shortcuts {
@@ -257,7 +289,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
     });
 }
 
-pub fn render_loading_spinner(state: &AppState) -> Line {
+pub fn render_loading_spinner(state: &'_ AppState) -> Line<'_> {
     let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
     let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
     let spinner_text = if state.loading_type == LoadingType::Sessions {
@@ -348,8 +380,11 @@ pub fn version_message(latest_version: Option<String>) -> Message {
 //     ]
 // }
 
-pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
-    vec![
+pub fn welcome_messages(
+    latest_version: Option<String>,
+    state: &crate::app::AppState,
+) -> Vec<Message> {
+    let mut messages = vec![
         Message::info(
             r"
    ██████╗████████╗ █████╗ ██╗  ██╗██████╗  █████╗ ██╗  ██╗ 
@@ -372,15 +407,21 @@ pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
             ),
             None,
         ),
-    ]
+        Message::info("SPACING_MARKER", None),
+    ];
+
+    if state.mouse_capture_enabled {
+        messages.push(mouse_capture_hint_message(state));
+        messages.push(Message::info("SPACING_MARKER", None));
+    }
+    messages
 }
 
 pub fn push_clear_message(state: &mut AppState) {
     state.messages.clear();
-    state.input.clear();
-    state.cursor_position = 0;
+    state.text_area.set_text("");
     state.show_helper_dropdown = false;
-    let welcome_msg = welcome_messages(state.latest_version.clone());
+    let welcome_msg = welcome_messages(state.latest_version.clone(), state);
     state.messages.extend(welcome_msg);
 }
 

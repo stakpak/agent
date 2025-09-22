@@ -1,12 +1,13 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
 use crate::app::AppState;
+use crate::services::detect_term::AdaptiveColors;
+use crate::services::file_diff::render_file_diff_block;
 use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
 };
 use ansi_to_tui::IntoText;
 use console::strip_ansi_codes;
-use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
@@ -21,6 +22,14 @@ use uuid::Uuid;
 pub enum ContentAlignment {
     Left,
     Center,
+}
+
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
 }
 
 pub fn strip_all_ansi(text: &str) -> String {
@@ -204,15 +213,12 @@ pub fn render_styled_block_ansi_to_tui(
     _outside_title: &str,
     bubble_title: &str,
     colors: Option<BubbleColors>,
-    state: &mut AppState,
-    terminal_size: Size,
+    terminal_width: usize,
     _tool_type: &str,
-    message_id: Option<Uuid>,
     content_alignment: Option<ContentAlignment>,
-) -> Uuid {
-    let terminal_width = terminal_size.width as usize;
+) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
-        terminal_width - 6
+        terminal_width - 4
     } else {
         40
     };
@@ -379,8 +385,6 @@ pub fn render_styled_block_ansi_to_tui(
 
     formatted_lines.push(bottom_border);
 
-    let message_id = message_id.unwrap_or_else(Uuid::new_v4);
-
     let mut owned_lines: Vec<Line<'static>> = Vec::new();
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     // Convert to owned lines for storage
@@ -400,14 +404,96 @@ pub fn render_styled_block_ansi_to_tui(
 
     // add spaceing marker
     owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    owned_lines
+}
 
-    // Store as StyledBlock (same as result block) instead of BashBubble
-    state.messages.push(Message {
-        id: message_id,
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: None,
-    });
-    message_id
+/// Simple text formatting function that processes content and wraps it to fit terminal width
+/// This is a stripped-down version of render_styled_block_ansi_to_tui without borders or styling
+pub fn format_text_content(content: &str, terminal_width: usize) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+
+    let inner_width = content_width;
+
+    // Preprocess content to handle terminal control sequences
+    let preprocessed_content = preprocess_terminal_output(content);
+
+    // Convert ANSI content to ratatui Text
+    let ratatui_text = preprocessed_content
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::from(preprocessed_content.clone()));
+
+    let mut formatted_lines = Vec::new();
+
+    for text_line in ratatui_text.lines {
+        if text_line.spans.is_empty() {
+            // Empty line
+            formatted_lines.push(Line::from(vec![Span::from("")]));
+            continue;
+        }
+
+        // Check if line needs wrapping
+        let display_width: usize = text_line
+            .spans
+            .iter()
+            .map(|span| calculate_display_width(&span.content))
+            .sum();
+
+        if display_width <= inner_width {
+            // Line fits, add as-is
+            let mut line_spans = Vec::new();
+            for s in &text_line.spans {
+                line_spans.push(Span::styled(
+                    s.content.clone(),
+                    Style::default().fg(Color::Reset),
+                ));
+            }
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            // Line needs wrapping
+            let original_line: String = text_line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            let wrapped_lines = wrap_ansi_text(&original_line, inner_width);
+
+            for wrapped_line in wrapped_lines {
+                let wrapped_ratatui = wrapped_line
+                    .clone()
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
+
+                if let Some(first_line) = wrapped_ratatui.lines.first() {
+                    let mut line_spans = Vec::new();
+                    for s in &first_line.spans {
+                        line_spans.push(Span::styled(
+                            s.content.clone(),
+                            Style::default().fg(Color::Reset),
+                        ));
+                    }
+                    formatted_lines.push(Line::from(line_spans));
+                }
+            }
+        }
+    }
+
+    // Convert to owned lines
+    formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect()
 }
 
 pub fn extract_bash_block_info(
@@ -425,38 +511,38 @@ pub fn extract_bash_block_info(
     let colors = match tool_call.function.name.as_str() {
         "create_file" => BubbleColors {
             border_color: Color::Green,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightGreen,
             tool_type: "Create File".to_string(),
         },
         "edit_file" => BubbleColors {
             border_color: Color::Yellow,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightYellow,
             tool_type: "Edit File".to_string(),
         },
         "run_command" => BubbleColors {
             border_color: Color::Cyan,
             title_color: Color::Yellow,
-            content_color: Color::Gray,
+            content_color: term_color(Color::Gray),
             tool_type: "Run Command".to_string(),
         },
         "read_file" => BubbleColors {
             border_color: Color::Magenta,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightMagenta,
             tool_type: "Read File".to_string(),
         },
         "delete_file" => BubbleColors {
             border_color: Color::Red,
-            title_color: Color::White,
+            title_color: term_color(Color::Gray),
             content_color: Color::LightRed,
             tool_type: "Delete File".to_string(),
         },
         _ => BubbleColors {
             border_color: Color::Cyan,
-            title_color: Color::White,
-            content_color: Color::Gray,
+            title_color: term_color(Color::White),
+            content_color: term_color(Color::Gray),
             tool_type: "unknown".to_string(),
         },
     };
@@ -469,36 +555,176 @@ pub fn render_styled_block(
     outside_title: &str,
     bubble_title: &str,
     colors: Option<BubbleColors>,
-    state: &mut AppState,
-    terminal_size: Size,
+    terminal_width: usize,
     tool_type: &str,
-    message_id: Option<Uuid>,
-) -> Uuid {
+) -> Vec<Line<'static>> {
     // Just delegate to the ANSI-aware version
     render_styled_block_ansi_to_tui(
         content,
         outside_title,
         bubble_title,
         colors,
-        state,
-        terminal_size,
+        terminal_width,
         tool_type,
-        message_id,
         None,
     )
+}
+
+pub fn render_styled_header_and_borders(
+    title: &str,
+    content_lines: Vec<Line<'static>>,
+    colors: Option<BubbleColors>,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    let border_color = colors.map(|c| c.border_color).unwrap_or(Color::Cyan);
+
+    // Create title border
+    let stripped_title = strip_ansi_codes(title);
+    let title_border = {
+        let title_width = calculate_display_width(&stripped_title);
+        if title_width <= inner_width {
+            let remaining_dashes = inner_width + 2 - title_width;
+            Line::from(vec![Span::styled(
+                format!("╭{}{}╮", title, "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            )])
+        } else {
+            let mut truncated_chars = String::new();
+            let mut current_width = 0;
+            for ch in stripped_title.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if current_width + char_width <= inner_width {
+                    truncated_chars.push(ch);
+                    current_width += char_width;
+                } else {
+                    break;
+                }
+            }
+            Line::from(vec![Span::styled(
+                format!("╭{}─╮", truncated_chars),
+                Style::default().fg(border_color),
+            )])
+        }
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut result = Vec::new();
+    result.push(title_border);
+    // Add side borders to each content line
+    for line in content_lines {
+        let mut bordered_line = Vec::new();
+        bordered_line.push(Span::styled("│", Style::default().fg(border_color)));
+        bordered_line.push(Span::from(" "));
+
+        // Calculate content width BEFORE moving spans
+        let content_width: usize = line
+            .spans
+            .iter()
+            .map(|span| calculate_display_width(&span.content))
+            .sum();
+
+        // Add the content spans
+        bordered_line.extend(line.spans);
+
+        // Add padding to fill the width
+        let padding_needed = inner_width.saturating_sub(content_width);
+        if padding_needed > 0 {
+            bordered_line.push(Span::from(" ".repeat(padding_needed)));
+        }
+
+        bordered_line.push(Span::styled(" │", Style::default().fg(border_color)));
+        result.push(Line::from(bordered_line));
+    }
+    result.push(bottom_border);
+    result
+}
+
+pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
+    let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let path = args["path"].as_str().unwrap_or("");
+
+    if full_diff_lines.is_empty() {
+        return Vec::new();
+    }
+    // render header dot
+    let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+
+    full_diff_lines = [
+        vec![spacing_marker.clone()],
+        render_styled_header_with_dot(
+            "Str Replace",
+            path,
+            Some(LinesColors {
+                dot: Color::Magenta,
+                title: Color::Yellow,
+                command: AdaptiveColors::text(),
+                message: Color::LightGreen,
+            }),
+        ),
+        vec![spacing_marker.clone()],
+        full_diff_lines,
+    ]
+    .concat();
+
+    full_diff_lines
+}
+
+pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
+    if tool_call.function.name == "str_replace" {
+        let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
+        // render header dot
+        let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+        if diff_lines.is_empty() {
+            return Vec::new();
+        }
+        diff_lines = [
+            vec![Line::from(vec![Span::from(" ")])],
+            diff_lines,
+            vec![Line::from(vec![Span::from(" ")])],
+        ]
+        .concat();
+
+        let result =
+            render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
+
+        let adjusted_result = [
+            vec![spacing_marker.clone()],
+            result,
+            vec![spacing_marker.clone()],
+        ]
+        .concat();
+
+        return adjusted_result;
+    }
+
+    Vec::new()
 }
 
 pub fn render_bash_block(
     tool_call: &ToolCall,
     output: &str,
     _accepted: bool,
-    state: &mut AppState,
-    terminal_size: Size,
-) -> Uuid {
+    terminal_width: usize,
+    is_auto_approved: bool,
+) -> Vec<Line<'static>> {
     let (command, outside_title, mut bubble_title, colors) =
         extract_bash_block_info(tool_call, output);
 
-    if state.auto_approve_manager.should_auto_approve(tool_call) {
+    if is_auto_approved {
         bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
     }
 
@@ -507,10 +733,8 @@ pub fn render_bash_block(
         &outside_title,
         &bubble_title,
         Some(colors.clone()),
-        state,
-        terminal_size,
+        terminal_width,
         &tool_call.function.name,
-        None,
         None,
     )
 }
@@ -519,8 +743,7 @@ pub fn render_markdown_block(
     preprocessed_result: String,
     command_args: String,
     title: String,
-    state: &mut AppState,
-) {
+) -> Vec<Line<'static>> {
     let processed_result = preprocess_terminal_output(&preprocessed_result);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
@@ -530,7 +753,7 @@ pub fn render_markdown_block(
         Some(LinesColors {
             dot: Color::Magenta,
             title: Color::Yellow,
-            command: Color::Rgb(180, 180, 180),
+            command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
     ));
@@ -543,64 +766,37 @@ pub fn render_markdown_block(
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(lines),
-        is_collapsed: Some(true),
-    });
+    lines
 }
 
-pub fn render_result_block(
-    tool_call_result: &ToolCallResult,
-    state: &mut AppState,
-    terminal_size: Size,
-) {
+pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
     let tool_call_status = tool_call_result.status.clone();
+
     let title: String = get_command_type_name(&tool_call);
     let command_args = extract_truncated_command_arguments(&tool_call);
 
     let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
     if tool_call_status == ToolCallResultStatus::Error {
-        render_bash_block_rejected(&command_args, &title, state, Some(result.to_string()));
-        return;
+        return render_bash_block_rejected(&command_args, &title, Some(result.to_string()));
     }
     if tool_call_status == ToolCallResultStatus::Cancelled {
-        // Store the latest tool call for potential retry (only for run_command)
-        if tool_call.function.name == "run_command" {
-            state.latest_tool_call = Some(tool_call.clone());
-        }
-
-        render_bash_block_rejected(
+        return render_bash_block_rejected(
             &command_args,
             &title,
-            state,
             Some("Interrupted by user".to_string()),
         );
-        return;
     }
 
-    if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
-        let colors = LinesColors {
-            dot: Color::LightGreen,
-            title: Color::White,
-            command: Color::Rgb(180, 180, 180),
-            message: Color::Rgb(180, 180, 180),
-        };
-        render_styled_lines(&command_args, &title, state, Some(message), Some(colors));
+    if command_args.contains(".md") && is_collapsed {
+        return render_markdown_block(result.clone(), command_args.clone(), title.clone());
     }
 
-    if command_args.contains(".md") {
-        render_markdown_block(result, command_args, title, state);
-        return;
-    }
-
-    let terminal_width = terminal_size.width as usize;
+    let terminal_width = width;
     let content_width = if terminal_width > 4 {
-        terminal_width - 6
+        terminal_width - 4
     } else {
         40
     };
@@ -617,7 +813,7 @@ pub fn render_result_block(
     let top_border = if !is_collapsed {
         Line::from(vec![Span::styled(
             format!("╭{}╮", horizontal_line),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         )])
     } else {
         Line::from(vec![Span::from("")])
@@ -625,7 +821,7 @@ pub fn render_result_block(
     let bottom_border = if !is_collapsed {
         Line::from(vec![Span::styled(
             format!("╰{}╯", horizontal_line),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         )])
     } else {
         Line::from(vec![Span::from("")])
@@ -648,7 +844,7 @@ pub fn render_result_block(
     let title_color = if is_collapsed {
         Color::Yellow
     } else {
-        Color::White
+        term_color(Color::White)
     };
     // Check if the title with arguments fits on one line
     if title_with_args.len() <= available_width {
@@ -656,7 +852,10 @@ pub fn render_result_block(
         let mut header_spans = vec![];
 
         if !is_collapsed {
-            header_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                "│",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
             header_spans.push(Span::from(" "));
         }
 
@@ -672,14 +871,17 @@ pub fn render_result_block(
         ));
         header_spans.push(Span::styled(
             format!(" ({})", command_args),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(term_color(Color::Gray)),
         ));
 
         if !is_collapsed {
             let header_content_width = 2 + title_with_args.len();
             let header_padding = inner_width.saturating_sub(header_content_width);
             header_spans.push(Span::from(" ".repeat(header_padding)));
-            header_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                " │",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
         }
 
         lines.push(Line::from(header_spans));
@@ -688,7 +890,10 @@ pub fn render_result_block(
         let mut header_spans = vec![];
 
         if !is_collapsed {
-            header_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                "│",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
             header_spans.push(Span::from(" "));
         }
 
@@ -707,7 +912,10 @@ pub fn render_result_block(
             let title_content_width = 2 + title.len();
             let title_padding = inner_width.saturating_sub(title_content_width);
             header_spans.push(Span::from(" ".repeat(title_padding)));
-            header_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+            header_spans.push(Span::styled(
+                " │",
+                Style::default().fg(term_color(Color::Gray)),
+            ));
         }
 
         lines.push(Line::from(header_spans));
@@ -739,7 +947,10 @@ pub fn render_result_block(
                 let mut line_spans = vec![];
 
                 if !is_collapsed {
-                    line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                    line_spans.push(Span::styled(
+                        "│",
+                        Style::default().fg(term_color(Color::Gray)),
+                    ));
                     line_spans.push(Span::from(format!(" {}", line_indent)));
                 } else {
                     line_spans.push(Span::from(line_indent));
@@ -751,7 +962,7 @@ pub fn render_result_block(
                     if let Some(first_span) = first_line.spans.first() {
                         line_spans.push(Span::styled(
                             format!("{}", first_span.content),
-                            Style::default().fg(Color::Rgb(180, 180, 180)),
+                            Style::default().fg(term_color(Color::Gray)),
                         ));
                     }
                 } else {
@@ -762,7 +973,10 @@ pub fn render_result_block(
                 line_spans.push(Span::from(padding));
 
                 if !is_collapsed {
-                    line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                    line_spans.push(Span::styled(
+                        " │",
+                        Style::default().fg(term_color(Color::Gray)),
+                    ));
                 }
 
                 lines.push(Line::from(line_spans));
@@ -796,9 +1010,15 @@ pub fn render_result_block(
             // Empty line with border
             let mut line_spans = vec![];
             if !is_collapsed {
-                line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    "│",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
                 line_spans.push(Span::from(format!(" {}", " ".repeat(inner_width))));
-                line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    " │",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
             }
             lines.push(Line::from(line_spans));
             continue;
@@ -821,7 +1041,10 @@ pub fn render_result_block(
             let mut line_spans = vec![];
 
             if !is_collapsed {
-                line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    "│",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
                 line_spans.push(Span::from(format!(" {}", line_indent)));
             } else {
                 line_spans.push(Span::from(line_indent));
@@ -831,13 +1054,16 @@ pub fn render_result_block(
             for span in &text_line.spans {
                 line_spans.push(Span::styled(
                     span.content.clone(),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(term_color(Color::White)),
                 ));
             }
             line_spans.push(Span::from(padding));
 
             if !is_collapsed {
-                line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                line_spans.push(Span::styled(
+                    " │",
+                    Style::default().fg(term_color(Color::Gray)),
+                ));
             }
 
             lines.push(Line::from(line_spans));
@@ -872,7 +1098,10 @@ pub fn render_result_block(
                     let mut line_spans = vec![];
 
                     if !is_collapsed {
-                        line_spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                        line_spans.push(Span::styled(
+                            "│",
+                            Style::default().fg(term_color(Color::Gray)),
+                        ));
                         line_spans.push(Span::from(format!(" {}", line_indent)));
                     } else {
                         line_spans.push(Span::from(line_indent));
@@ -882,7 +1111,10 @@ pub fn render_result_block(
                     line_spans.push(Span::from(padding));
 
                     if !is_collapsed {
-                        line_spans.push(Span::styled(" │", Style::default().fg(Color::Gray)));
+                        line_spans.push(Span::styled(
+                            " │",
+                            Style::default().fg(term_color(Color::Gray)),
+                        ));
                     }
 
                     lines.push(Line::from(line_spans));
@@ -909,21 +1141,16 @@ pub fn render_result_block(
         })
         .collect();
 
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: if is_collapsed { Some(true) } else { None },
-    });
+    owned_lines
 }
 
 // Function to render a rejected bash command (when user selects "No")
 pub fn render_bash_block_rejected(
     command_name: &str,
     title: &str,
-    state: &mut AppState,
     message: Option<String>,
-) {
-    render_styled_lines(command_name, title, state, message, None);
+) -> Vec<Line<'static>> {
+    render_styled_lines(command_name, title, message, None)
 }
 
 #[derive(Clone)]
@@ -941,8 +1168,8 @@ fn render_styled_header_with_dot(
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
     vec![Line::from(vec![
@@ -967,14 +1194,13 @@ fn render_styled_header_with_dot(
 pub fn render_styled_lines(
     command_name: &str,
     title: &str,
-    state: &mut AppState,
     message: Option<String>,
     colors: Option<LinesColors>,
-) {
+) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
-        title: Color::White,
-        command: Color::Rgb(180, 180, 180),
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
 
@@ -1003,7 +1229,7 @@ pub fn render_styled_lines(
             Span::styled(
                 title,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(term_color(Color::White))
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -1069,18 +1295,38 @@ pub fn render_styled_lines(
             Line::from(owned_spans)
         })
         .collect();
-    state.messages.push(Message {
-        id: Uuid::new_v4(),
-        content: MessageContent::StyledBlock(owned_lines),
-        is_collapsed: None,
-    });
+
+    owned_lines
 }
 
-fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
+pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_call_name = tool_call.function.name.clone();
     let tool_calls = ["view", "search_memory", "search_docs", "local_code_search"];
     if tool_calls.contains(&tool_call_name.as_str()) {
         return true;
     }
     false
+}
+
+pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &mut AppState) {
+    let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
+        && tool_call_result.result.lines().count() > 3;
+    let result = tool_call_result.result.clone();
+    let command_args = extract_truncated_command_arguments(&tool_call_result.call);
+    let title = get_command_type_name(&tool_call_result.call);
+    if is_collapsed {
+        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
+        let colors = LinesColors {
+            dot: Color::LightGreen,
+            title: term_color(Color::White),
+            command: AdaptiveColors::text(),
+            message: AdaptiveColors::text(),
+        };
+        let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
+        state.messages.push(Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::StyledBlock(lines),
+            is_collapsed: None,
+        });
+    }
 }

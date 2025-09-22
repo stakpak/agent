@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -7,14 +7,22 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
+fn term_color(color: Color) -> Color {
+    if crate::services::detect_term::should_use_rgb_colors() {
+        color
+    } else {
+        Color::Reset
+    }
+}
+
 pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Rect) {
-    let input = state.input.trim();
+    let input = state.input().trim();
     let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
     if state.show_helper_dropdown && show {
         use ratatui::widgets::{List, ListItem, ListState};
         let item_style = Style::default();
         // Find the longest command name to calculate padding
-        let commands_to_show = if state.input == "/" {
+        let commands_to_show = if state.input() == "/" {
             &state.helpers
         } else {
             &state.filtered_helpers
@@ -42,10 +50,10 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
 
                 let description_style = if is_selected {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Rgb(180, 180, 180))
+                        .fg(term_color(Color::Black))
+                        .bg(AdaptiveColors::text())
                 } else {
-                    Style::default().fg(Color::Rgb(180, 180, 180))
+                    Style::default().fg(AdaptiveColors::text())
                 };
 
                 ListItem::new(Line::from(vec![
@@ -66,7 +74,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
     }
 }
 
-pub fn render_autocomplete_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_file_search_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
     if !state.show_helper_dropdown {
         return;
     }
@@ -78,13 +86,13 @@ pub fn render_autocomplete_dropdown(f: &mut Frame, state: &AppState, area: Rect)
 }
 
 fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
-    let files = state.autocomplete.get_filtered_files();
+    let files = state.file_search.get_filtered_files();
     if files.is_empty() {
         return;
     }
 
     // Set title and styling based on trigger
-    let (title, title_color) = match state.autocomplete.trigger_char {
+    let (title, title_color) = match state.file_search.trigger_char {
         Some('@') => ("📁 Files (@)", Color::Cyan),
         None => ("📁 Files (Tab)", Color::Blue),
         _ => ("📁 Files", Color::Gray),
@@ -99,7 +107,7 @@ fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(160, 160, 160))
+                Style::default().fg(AdaptiveColors::text())
             };
 
             let display_text = format!("{} {}", get_file_icon(item), item);

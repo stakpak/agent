@@ -7,7 +7,7 @@
 ## 🔒 Security Hardened
 
 - **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
-- **Dynamic Secret Redaction** - AI can work with secrets without seeing actual values
+- **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
 
@@ -144,6 +144,41 @@ stakpak mcp
 # Disable mTLS (NOT recommended for production)
 stakpak mcp --disable-mcp-mtls
 ```
+
+### Agent Client Protocol (ACP)
+
+ACP is a standardized protocol that enables AI agents to integrate directly with code editors like Zed, providing seamless AI-powered development assistance.
+
+#### What ACP Offers with Stakpak
+
+- **Real-time AI Chat** - Natural language conversations with context-aware AI assistance
+- **Live Code Analysis** - AI can read, understand, and modify your codebase in real-time
+- **Tool Execution** - AI can run commands, edit files, search code, and perform development tasks
+- **Session Persistence** - Maintains conversation context across editor sessions
+- **Streaming Responses** - Real-time AI responses with live progress updates
+- **Agent Plans** - Visual task breakdown and progress tracking
+
+#### Installation & Setup
+
+1. **Install Stakpak** (if not already installed)
+2. **Configure Zed Editor** - Add to `~/.config/zed/settings.json`:
+```json
+{
+  "agent_servers": {
+    "Stakpak": {
+      "command": "stakpak",
+      "args": ["acp"],
+      "env": {}
+    }
+  }
+}
+```
+3. **Start ACP Agent**:
+```bash
+stakpak acp
+```
+4. **Use in Zed** - Click Assistant (✨) → `+` → `New stakpak thread`
+
 
 ---
 
