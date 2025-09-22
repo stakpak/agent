@@ -83,9 +83,9 @@ struct Cli {
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
     disable_mcp_mtls: bool,
 
-    /// Disable subagents
-    #[arg(long = "disable-subagents", default_value_t = false)]
-    disable_subagents: bool,
+    /// Enable subagents
+    #[arg(long = "enable-subagents", default_value_t = false)]
+    enable_subagents: bool,
 
     /// Subagent configuration file subagents.toml
     #[arg(long = "subagent-config")]
@@ -227,7 +227,7 @@ async fn main() {
                         }
                     });
 
-                    let subagent_configs = if !cli.disable_subagents {
+                    let subagent_configs = if cli.enable_subagents {
                         if let Some(subagent_config_path) = &cli.subagent_config_path {
                             SubagentConfigs::load_from_file(subagent_config_path)
                                 .map_err(|e| {
