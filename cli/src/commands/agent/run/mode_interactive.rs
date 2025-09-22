@@ -24,7 +24,7 @@ use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
 use stakpak_shared::models::subagent::SubagentConfigs;
-use stakpak_tui::{Color, InputEvent, LoadingOperation, OutputEvent};
+use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -203,7 +203,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     let (user_input, _) = add_rulebooks(&messages, &user_input, &config.rulebooks);
 
-                    let (user_input, subagents_text) =
+                    let (user_input, _) =
                         add_subagents(&messages, &user_input, &config.subagent_configs);
 
                     send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
