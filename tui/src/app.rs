@@ -233,6 +233,7 @@ pub enum InputEvent {
     DialogCancel,
     HasUserMessage,
     Tab,
+    ToggleApprovalStatus,
     ShellOutput(String),
     ShellError(String),
     ShellWaitingForInput,

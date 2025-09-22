@@ -700,4 +700,12 @@ impl PopupWidget {
     pub fn state_mut(&mut self) -> &mut PopupState {
         &mut self.state
     }
+
+    /// Set the selected tab index
+    pub fn set_selected_tab(&mut self, index: usize) {
+        if index < self.config.tabs.len() {
+            self.config.selected_tab = index;
+            self.state.selected_tab = index;
+        }
+    }
 }
