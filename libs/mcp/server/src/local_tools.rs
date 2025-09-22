@@ -22,6 +22,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::time::{Duration, sleep, timeout as tokio_timeout};
 use tracing::error;
 use url;
 use uuid::Uuid;
@@ -60,6 +61,14 @@ pub struct GetTaskDetailsRequest {
 pub struct GetAllTasksRequest {
     #[schemars(description = "View parameter (required for compatibility, any value works)")]
     pub view: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AwaitTasksRequest {
+    #[schemars(description = "Space-separated list of task IDs to wait for completion")]
+    pub task_ids: String,
+    #[schemars(description = "Optional timeout in seconds. If not specified, waits indefinitely")]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -236,9 +245,9 @@ SECRET HANDLING:
 - Task output will be redacted when retrieved
 - Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in commands
 
-Use the get_all_tasks tool to monitor task progress, or the cancel_async_task tool to cancel a task."
+Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
     )]
-    pub async fn run_command_async(
+    pub async fn run_command_task(
         &self,
         _ctx: RequestContext<RoleServer>,
         Parameters(RunCommandRequest {
@@ -290,7 +299,7 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_async_task to
                 error!("Failed to start background task: {}", e);
 
                 Ok(CallToolResult::error(vec![
-                    Content::text("RUN_COMMAND_ASYNC_ERROR"),
+                    Content::text("RUN_COMMAND_TASK_ERROR"),
                     Content::text(format!("Failed to start background task: {}", e)),
                 ]))
             }
@@ -298,18 +307,18 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_async_task to
     }
 
     #[tool(
-        description = "Get the status of all background tasks started with run_command_async.
+        description = "Get the status of all background tasks started with run_command_task.
 
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
-  - Task ID: Full unique identifier (required for cancel_async_task)
+  - Task ID: Full unique identifier (required for cancel_task)
   - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
   - Start Time: When the task was started
   - Duration: How long the task has been running or took to complete
   - Output: Command output preview (truncated to 80 chars, redacted for security)
 
 This tool provides a clean tabular overview of all background tasks and their current state.
-Use the full Task ID from this output with cancel_async_task to cancel specific tasks."
+Use the full Task ID from this output with cancel_task to cancel specific tasks."
     )]
     pub async fn get_all_tasks(
         &self,
@@ -401,7 +410,7 @@ Use the full Task ID from this output with cancel_async_task to cancel specific 
     }
 
     #[tool(
-        description = "Cancel a running asynchronous background task started with run_command_async.
+        description = "Cancel a running asynchronous background task started with run_command_task.
 
 PARAMETERS:
 - task_id: The unique identifier of the task to cancel. Use the get_all_tasks tool to get the task ID.
@@ -409,7 +418,7 @@ PARAMETERS:
 This will immediately terminate the background task and update the task status to 'Cancelled'.
 The task will be removed from the active tasks list."
     )]
-    pub async fn cancel_async_task(
+    pub async fn cancel_task(
         &self,
         _ctx: RequestContext<RoleServer>,
         Parameters(TaskStatusRequest { task_id }): Parameters<TaskStatusRequest>,
@@ -436,9 +445,81 @@ The task will be removed from the active tasks list."
     }
 
     #[tool(
+        description = "Wait for one or more background tasks to complete or fail, then return the status of all tasks.
+
+PARAMETERS:
+- task_ids: Space-separated list of task IDs to wait for completion (e.g., \"abc123 def456 ghi789\")
+- timeout: Optional timeout in seconds. If not specified, waits indefinitely
+
+BEHAVIOR:
+- Waits until ALL specified tasks reach a final state (Completed, Failed, Cancelled, or TimedOut)
+- If timeout is specified, returns an error if tasks don't complete within that time
+- Returns the same format as get_all_tasks showing all background tasks after waiting
+- If any task ID doesn't exist, returns an error immediately
+- This is useful for coordinating async tasks and getting results once they're done
+
+EXAMPLE USAGE:
+1. Start multiple async tasks with run_command_task
+2. Use wait_for_tasks with those IDs to wait for completion
+3. Process the results from all tasks
+
+This tool enables proper task synchronization and coordination in complex workflows."
+    )]
+    pub async fn wait_for_tasks(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(AwaitTasksRequest { task_ids, timeout }): Parameters<AwaitTasksRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let task_ids: Vec<String> = task_ids.split_whitespace().map(|s| s.to_string()).collect();
+
+        if task_ids.is_empty() {
+            return Ok(CallToolResult::error(vec![
+                Content::text("AWAIT_TASKS_ERROR"),
+                Content::text(
+                    "No task IDs provided. Please provide a space-separated list of task IDs.",
+                ),
+            ]));
+        }
+
+        let timeout = timeout.map(std::time::Duration::from_secs);
+
+        match self
+            .wait_for_tasks_with_streaming(&task_ids, timeout, &ctx)
+            .await
+        {
+            Ok(tasks) => {
+                let redacted_tasks: Vec<TaskInfo> = tasks
+                    .into_iter()
+                    .map(|mut task| {
+                        if let Some(ref output) = task.output {
+                            task.output = Some(
+                                self.get_secret_manager()
+                                    .redact_and_store_secrets(output, None),
+                            );
+                        }
+                        task
+                    })
+                    .collect();
+
+                let table = self.format_tasks_table(&redacted_tasks, &task_ids);
+
+                Ok(CallToolResult::success(vec![Content::text(table)]))
+            }
+            Err(e) => {
+                error!("Failed to await tasks: {}", e);
+
+                Ok(CallToolResult::error(vec![
+                    Content::text("AWAIT_TASKS_ERROR"),
+                    Content::text(format!("Failed to await tasks: {}", e)),
+                ]))
+            }
+        }
+    }
+
+    #[tool(
         description = "Get detailed information about a specific background task by its ID.
 
-This tool provides comprehensive details about a background task started with run_command_async, including:
+This tool provides comprehensive details about a background task started with run_command_task, including:
 - Current status (Running, Completed, Failed, Cancelled, TimedOut, Pending)
 - Task ID and start time
 - Duration (elapsed time for running tasks, total time for completed tasks)
@@ -1567,6 +1648,162 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
                 Content::text(format!("Cannot create file: {}", e)),
             ])),
         }
+    }
+
+    async fn wait_for_tasks_with_streaming(
+        &self,
+        task_ids: &[String],
+        timeout: Option<std::time::Duration>,
+        ctx: &RequestContext<RoleServer>,
+    ) -> Result<Vec<TaskInfo>, stakpak_shared::task_manager::TaskError> {
+        let mut missing_tasks: Vec<String> = Vec::new();
+        for task_id in task_ids {
+            let task_status = self
+                .get_task_manager()
+                .get_task_status(task_id.clone())
+                .await?;
+            if task_status.is_none() {
+                missing_tasks.push(task_id.clone());
+            }
+        }
+
+        if !missing_tasks.is_empty() {
+            return Err(stakpak_shared::task_manager::TaskError::TaskNotFound(
+                format!("Tasks not found: {}", missing_tasks.join(", ")),
+            ));
+        }
+
+        let progress_id = Uuid::new_v4();
+
+        let wait_operation = async {
+            loop {
+                let all_tasks = self.get_task_manager().get_all_tasks().await?;
+                let mut target_tasks_completed = true;
+
+                for task_id in task_ids {
+                    if let Some(task) = all_tasks.iter().find(|t| &t.id == task_id) {
+                        match task.status {
+                            stakpak_shared::task_manager::TaskStatus::Pending
+                            | stakpak_shared::task_manager::TaskStatus::Running => {
+                                target_tasks_completed = false;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                let progress_table = self.format_tasks_table(&all_tasks, task_ids);
+
+                let _ = ctx
+                    .peer
+                    .notify_progress(ProgressNotificationParam {
+                        progress_token: ProgressToken(NumberOrString::Number(0)),
+                        progress: if target_tasks_completed { 100 } else { 50 },
+                        total: Some(100),
+                        message: Some(
+                            serde_json::to_string(&ToolCallResultProgress {
+                                id: progress_id,
+                                message: progress_table,
+                            })
+                            .unwrap_or_default(),
+                        ),
+                    })
+                    .await;
+
+                if target_tasks_completed {
+                    return Ok(all_tasks);
+                }
+
+                sleep(Duration::from_millis(1000)).await;
+            }
+        };
+
+        // Apply timeout if specified
+        if let Some(timeout_duration) = timeout {
+            match tokio_timeout(timeout_duration, wait_operation).await {
+                Ok(result) => result,
+                Err(_) => Err(stakpak_shared::task_manager::TaskError::TaskTimeout),
+            }
+        } else {
+            wait_operation.await
+        }
+    }
+
+    fn format_tasks_table(&self, tasks: &[TaskInfo], target_task_ids: &[String]) -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let mut table = String::new();
+
+        // Add timestamp and clear separator for streaming
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_secs();
+        let time_str = chrono::DateTime::from_timestamp(timestamp as i64, 0)
+            .unwrap_or_else(chrono::Utc::now)
+            .format("%H:%M:%S");
+
+        table.push_str(&format!("═══ Background Tasks Update [{}] ═══\n", time_str));
+        table.push_str(&format!("Waiting for: {}\n", target_task_ids.join(", ")));
+
+        if tasks.is_empty() {
+            table.push_str("No background tasks found.\n");
+            table.push_str("═══════════════════════════════════════\n\n");
+            return table;
+        }
+
+        // Sort tasks by start time (newest first)
+        let mut sorted_tasks = tasks.to_vec();
+        sorted_tasks.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+
+        // Compact format for streaming - one line per task
+        for task in &sorted_tasks {
+            let task_id = &task.id;
+            let status = format!("{:?}", task.status);
+            let duration = if let Some(duration) = task.duration {
+                format!("{:.1}s", duration.as_secs_f64())
+            } else {
+                "running".to_string()
+            };
+
+            let redacted_command = self
+                .get_secret_manager()
+                .redact_and_store_secrets(&task.command, None);
+
+            let truncated_command = redacted_command
+                .chars()
+                .take(30)
+                .collect::<String>()
+                .replace('\n', " ");
+
+            // Highlight target tasks and show status
+            let marker = if target_task_ids.contains(task_id) {
+                ">"
+            } else {
+                " "
+            };
+            let status_icon = match status.as_str() {
+                "Running" => "[RUN]",
+                "Completed" => "[OK]",
+                "Failed" => "[ERR]",
+                _ => "[---]",
+            };
+
+            table.push_str(&format!(
+                "{} {} {} [{}] {} - {}\n",
+                marker, status_icon, task_id, duration, status, truncated_command
+            ));
+        }
+
+        table.push_str(&format!(
+            "Total: {} tasks | Waiting for: {}\n",
+            sorted_tasks.len(),
+            target_task_ids.len()
+        ));
+        table.push_str("═══════════════════════════════════════\n\n");
+
+        table
     }
 }
 

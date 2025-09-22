@@ -1000,6 +1000,7 @@ impl StakpakAcpAgent {
                     tool_mode: ToolMode::Combined,
                     bind_address,
                     certificate_chain: certificate_chain_for_server,
+                    subagent_configs: None,
                 },
                 Some(listener),
                 None,
