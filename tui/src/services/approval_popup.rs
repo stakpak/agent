@@ -28,16 +28,14 @@
 //! let approvals = popup_service.get_all_approvals();
 //! ```
 
-use crate::services::bash_block::{format_text_content, render_file_diff_full};
+use crate::services::bash_block::format_text_content;
 use crate::services::detect_term::{self, is_unsupported_terminal};
 use crate::services::file_diff::render_file_diff_block;
-use crate::services::message::{
-    extract_full_command_arguments, extract_truncated_command_arguments, get_command_type_name,
-};
+use crate::services::message::{extract_full_command_arguments, get_command_type_name};
 use crate::services::message_pattern::spans_to_string;
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::ToolCall;
 
 /// Tool call approval status
@@ -190,6 +188,12 @@ impl PopupService {
             return Self::create_empty_popup();
         }
 
+        // Create subheaders for all tool calls first
+        let subheaders: Vec<Vec<(Line<'static>, Style)>> = tool_call_infos
+            .iter()
+            .map(|tool_call_info| self.render_subheader(&tool_call_info.tool_call, tool_call_info))
+            .collect();
+
         let tabs: Vec<Tab> = tool_call_infos
             .iter()
             .enumerate()
@@ -209,16 +213,15 @@ impl PopupService {
                     index, tool_call_info.status, status_symbol, status_color
                 );
 
-                // Create styled tab title with separate spans for text and status
-                let tab_title_line = Line::from(vec![
-                    Span::styled(format!("{}.{}", index + 1, tool_name), Style::default()),
-                    Span::styled(status_symbol, Style::default().fg(status_color)),
-                ]);
+                // Note: tab_title_line was removed as it's no longer needed with subheaders
 
                 // Create content for this tab
                 let content = self.create_tool_call_content(tool_call, &tool_call_info);
 
-                Tab::new_with_custom_title(
+                // Get the subheader for this tab
+                let subheader = subheaders.get(index).cloned();
+
+                Tab::new_with_subheader(
                     format!("tool_call_{}", index),
                     format!("{}.{}{}", index + 1, tool_name, status_symbol),
                     TabContent::new(
@@ -226,7 +229,7 @@ impl PopupService {
                         format!("tool_call_{}", index),
                         content,
                     ),
-                    tab_title_line,
+                    subheader,
                 )
             })
             .collect();
@@ -245,8 +248,8 @@ impl PopupService {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )
-            .background_style(Style::default().bg(Color::Rgb(25, 26, 38)))
-            .popup_background_style(Style::default().bg(Color::Rgb(25, 26, 38)))
+            .background_style(Style::default().bg(Color::Black))
+            .popup_background_style(Style::default().bg(Color::Black))
             .show_tabs(true)
             .tab_alignment(popup_widget::Alignment::Left)
             .tab_style(Style::default().fg(Color::White).bg(Color::DarkGray))
@@ -257,7 +260,6 @@ impl PopupService {
                 let terminal_info = detect_term::detect_terminal();
                 is_unsupported_terminal(&terminal_info.emulator)
             })
-            .fixed_header_lines(8) // Fixed header: Tool Details + Content sections
             .footer(Some(vec![
                 "Enter submit    ←→ for action    Space toggle approve/reject   ↑↓ to scroll    Esc exit".to_string(),
             ]))
@@ -281,41 +283,11 @@ impl PopupService {
     fn create_tool_call_content(
         &self,
         tool_call: &ToolCall,
-        tool_call_info: &ToolCallInfo,
+        _tool_call_info: &ToolCallInfo,
     ) -> StyledLineContent {
         let mut lines = Vec::new();
 
-        // Get tool details
-        let tool_name = get_command_type_name(tool_call).to_string();
-
-        // Use the status from the specific tool call info
-        let status = &tool_call_info.status;
-
-        let (status_text, status_color) = match status {
-            ApprovalStatus::Approved => ("Approved".to_string(), Color::Green),
-            ApprovalStatus::Rejected => ("Rejected".to_string(), Color::Red),
-            ApprovalStatus::Pending => ("Pending".to_string(), Color::Yellow),
-        };
-
-        // push empty line
         lines.push((Line::from(""), Style::default()));
-
-        // Create a line with tool name and status on the same line
-        let tool_status_line = Line::from(vec![
-            ratatui::text::Span::styled("Tool".to_string(), Style::default().fg(Color::DarkGray)),
-            ratatui::text::Span::styled(
-                format!(" {}", tool_name),
-                Style::default().fg(Color::Gray),
-            ),
-            ratatui::text::Span::styled("       ".to_string(), Style::default()),
-            ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
-            ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
-        ]);
-        lines.push((tool_status_line, Style::default()));
-
-        lines.push((Line::from(""), Style::default()));
-        lines.push((Line::from(""), Style::default()));
-
         let output = extract_full_command_arguments(tool_call);
 
         // remove first line of output and return the rest
@@ -329,10 +301,10 @@ impl PopupService {
             if !full_diff_lines.is_empty() {
                 full_diff_lines
             } else {
-                format_text_content(&output, inner_width)
+                format_text_content(&output, inner_width - 2)
             }
         } else {
-            format_text_content(&output, inner_width)
+            format_text_content(&output, inner_width - 2)
         };
 
         lines.extend(rendered_lines.into_iter().map(|line| {
@@ -345,16 +317,16 @@ impl PopupService {
         }));
 
         // add simulated dummy text in lines
-        // for _ in 0..50 {
-        //     lines.push((
-        //         Line::from("This is a simulated dummy text"),
-        //         Style::default().fg(Color::Gray),
-        //     ));
-        // }
-        // lines.push((
-        //     Line::from("This is a simulated THIS IS THE END OF DUMMY TEXT"),
-        //     Style::default().fg(Color::Gray),
-        // ));
+        for _ in 0..7 {
+            lines.push((
+                Line::from("I see the issue now! The padding is being applied to the entire content area (the widget/paragraph), but you want the padding to be applied to each individual line within the content. The current approach shifts the entire text block to the right, but the lines themselves are still left-aligned within that shifted block."),
+                Style::default().fg(Color::Gray),
+            ));
+        }
+        lines.push((
+            Line::from("This is a simulated THIS IS THE END OF DUMMY TEXT"),
+            Style::default().fg(Color::Gray),
+        ));
 
         StyledLineContent::new(lines)
     }
@@ -382,6 +354,7 @@ impl PopupService {
                 let terminal_info = detect_term::detect_terminal();
                 is_unsupported_terminal(&terminal_info.emulator)
             })
+            .fixed_header_lines(0)
             .position(PopupPosition::Responsive {
                 width_percent: 0.8,
                 height_percent: 0.7,
@@ -499,6 +472,45 @@ impl PopupService {
     /// Get the inner width of the popup
     pub fn inner_width(&self) -> usize {
         self.popup.inner_width()
+    }
+
+    /// Render subheader for a tool call tab
+    fn render_subheader(
+        &self,
+        tool_call: &ToolCall,
+        tool_call_info: &ToolCallInfo,
+    ) -> Vec<(Line<'static>, Style)> {
+        let mut lines = Vec::new();
+
+        // Get tool details
+        let tool_name = get_command_type_name(tool_call).to_string();
+
+        // Use the status from the specific tool call info
+        let status = &tool_call_info.status;
+
+        let (status_text, status_color) = match status {
+            ApprovalStatus::Approved => ("Approved".to_string(), Color::Green),
+            ApprovalStatus::Rejected => ("Rejected".to_string(), Color::Red),
+            ApprovalStatus::Pending => ("Pending".to_string(), Color::Yellow),
+        };
+
+        // push empty line
+        lines.push((Line::from(""), Style::default()));
+
+        // Create a line with tool name and status on the same line
+        let tool_status_line = Line::from(vec![
+            ratatui::text::Span::styled("Tool".to_string(), Style::default().fg(Color::DarkGray)),
+            ratatui::text::Span::styled(
+                format!(" {}", tool_name),
+                Style::default().fg(Color::Gray),
+            ),
+            ratatui::text::Span::styled("       ".to_string(), Style::default()),
+            ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
+            ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
+        ]);
+        lines.push((tool_status_line, Style::default()));
+
+        lines
     }
 }
 

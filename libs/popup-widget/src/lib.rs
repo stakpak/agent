@@ -60,6 +60,8 @@ pub struct PopupConfig {
     pub footer_style: Option<Style>,
     /// Number of fixed lines at the top that should not scroll
     pub fixed_header_lines: usize,
+    /// Subheader style (color, modifiers, etc.) for tab subheaders
+    pub subheader_style: Style,
 }
 
 impl Default for PopupConfig {
@@ -92,6 +94,9 @@ impl Default for PopupConfig {
             footer: None,
             footer_style: None,
             fixed_header_lines: 0,
+            subheader_style: Style::default()
+                .fg(Color::Gray)
+                .add_modifier(ratatui::style::Modifier::DIM),
         }
     }
 }
@@ -224,6 +229,12 @@ impl PopupConfig {
     /// Set the number of fixed header lines that should not scroll
     pub fn fixed_header_lines(mut self, lines: usize) -> Self {
         self.fixed_header_lines = lines;
+        self
+    }
+
+    /// Set the subheader style
+    pub fn subheader_style(mut self, style: Style) -> Self {
+        self.subheader_style = style;
         self
     }
 }
