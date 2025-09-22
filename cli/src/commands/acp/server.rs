@@ -1691,7 +1691,6 @@ impl acp::Agent for StakpakAcpAgent {
         let mut tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
         while has_tool_calls {
-            // Check for cancellation before processing tool calls
             if let Some(ref mut cancel_rx) = tool_cancel_rx {
                 if cancel_rx.try_recv().is_ok() {
                     log::info!("Tool call processing cancelled by user");
