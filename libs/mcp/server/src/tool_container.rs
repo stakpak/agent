@@ -4,6 +4,7 @@ use rmcp::{
     service::RequestContext, tool_router,
 };
 use stakpak_api::{Client, ClientConfig};
+use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
 use stakpak_shared::secret_manager::SecretManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
@@ -15,6 +16,7 @@ pub struct ToolContainer {
     pub secret_manager: SecretManager,
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
+    pub subagent_configs: Option<SubagentConfigs>,
     pub tool_router: ToolRouter<Self>,
 }
 
@@ -25,6 +27,7 @@ impl ToolContainer {
         redact_secrets: bool,
         privacy_mode: bool,
         task_manager: Arc<TaskManagerHandle>,
+        subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
     ) -> Result<Self, String> {
         let client = if let Some(api_config) = api_config {
@@ -38,6 +41,7 @@ impl ToolContainer {
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             task_manager,
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
+            subagent_configs,
             tool_router,
         })
     }
@@ -56,6 +60,10 @@ impl ToolContainer {
 
     pub fn get_remote_connection_manager(&self) -> &Arc<RemoteConnectionManager> {
         &self.remote_connection_manager
+    }
+
+    pub fn get_subagent_configs(&self) -> &Option<SubagentConfigs> {
+        &self.subagent_configs
     }
 
     pub fn get_session_id(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
