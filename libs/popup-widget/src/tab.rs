@@ -1,7 +1,7 @@
 use crate::traits::TabContent;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -13,6 +13,7 @@ pub struct Tab {
     pub title: String,
     pub content: Box<dyn TabContent + Send + Sync>,
     pub scroll: usize,
+    pub status_color: Option<Color>,
 }
 
 impl Tab {
@@ -26,6 +27,22 @@ impl Tab {
             title,
             content: Box::new(content),
             scroll: 0,
+            status_color: None,
+        }
+    }
+
+    pub fn new_with_status<C: TabContent + Send + Sync + 'static>(
+        id: String,
+        title: String,
+        content: C,
+        status_color: Option<Color>,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            content: Box::new(content),
+            scroll: 0,
+            status_color,
         }
     }
 
@@ -221,11 +238,17 @@ pub fn render_custom_tabs(
     for (i, tab) in tabs.iter().enumerate() {
         let tab_area = tab_areas[area_index];
 
-        // Style based on selection
+        // Style based on selection and status
         let tab_style_to_use = if i == selected_tab {
+            // Selected tab: use selected style (white text)
             selected_tab_style
         } else {
-            tab_style
+            // Non-selected tab: use status color if available, otherwise default tab style
+            if let Some(status_color) = tab.status_color {
+                Style::default().fg(status_color)
+            } else {
+                tab_style
+            }
         };
 
         // Create tab button with padding and centered text

@@ -740,7 +740,7 @@ fn get_wrapped_message_lines_internal(
     all_lines
 }
 
-pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
+pub fn extract_truncated_command_arguments(tool_call: &ToolCall, sign: Option<String>) -> String {
     let arguments = serde_json::from_str::<Value>(&tool_call.function.arguments);
     const KEYWORDS: [&str; 6] = ["path", "file", "uri", "url", "command", "keywords"];
 
@@ -749,7 +749,8 @@ pub fn extract_truncated_command_arguments(tool_call: &ToolCall) -> String {
         for &keyword in &KEYWORDS {
             if let Some(value) = arguments.get(keyword) {
                 let formatted_val = format_simple_value(value);
-                return format!("{} = {}", keyword, formatted_val);
+                let sign = if sign.is_some() { format!("{} ", sign.unwrap()) } else { "= ".to_string() };
+                return format!("{} {}{}", keyword, sign, formatted_val);
             }
         }
 

@@ -300,7 +300,8 @@ impl PopupWidget {
                 return; // No footer area allocated
             };
 
-            let footer_style = Style::default().fg(Color::Gray).add_modifier(Modifier::DIM);
+            let footer_style = self.config.footer_style
+                .unwrap_or_else(|| Style::default().fg(Color::Gray).add_modifier(Modifier::DIM));
             let footer_lines: Vec<Line> = footer_lines
                 .iter()
                 .map(|line| Line::from(Span::styled(line, footer_style)))
@@ -383,7 +384,8 @@ impl PopupWidget {
                     return; // No footer area allocated
                 };
 
-                let footer_style = Style::default().fg(Color::Gray).add_modifier(Modifier::DIM);
+                let footer_style = self.config.footer_style
+                .unwrap_or_else(|| Style::default().fg(Color::Gray).add_modifier(Modifier::DIM));
                 let footer_lines: Vec<Line> = footer_lines
                     .iter()
                     .map(|line| Line::from(Span::styled(line, footer_style)))

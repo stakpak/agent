@@ -56,6 +56,8 @@ pub struct PopupConfig {
     pub terminal_detector: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     /// Footer text (optional) - can be multiple lines
     pub footer: Option<Vec<String>>,
+    /// Footer style (color, modifiers, etc.)
+    pub footer_style: Option<Style>,
     /// Number of fixed lines at the top that should not scroll
     pub fixed_header_lines: usize,
 }
@@ -88,6 +90,7 @@ impl Default for PopupConfig {
             use_fallback_colors: false,
             terminal_detector: None,
             footer: None,
+            footer_style: None,
             fixed_header_lines: 0,
         }
     }
@@ -197,6 +200,12 @@ impl PopupConfig {
     /// Set the footer text (can be multiple lines)
     pub fn footer(mut self, footer: Option<Vec<String>>) -> Self {
         self.footer = footer;
+        self
+    }
+
+    /// Set the footer style
+    pub fn footer_style(mut self, footer_style: Option<Style>) -> Self {
+        self.footer_style = footer_style;
         self
     }
 

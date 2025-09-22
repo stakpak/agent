@@ -225,7 +225,7 @@ impl PopupService {
                 let tool_name = get_command_type_name(tool_call);
                 
                 // Create status symbol with color
-                let (status_symbol, _status_color) = match tool_call_info.status {
+                let (status_symbol, status_color) = match tool_call_info.status {
                     ApprovalStatus::Approved => (" ✓", Color::Green),
                     ApprovalStatus::Rejected => (" ✗", Color::Red),
                     ApprovalStatus::Pending => ("", Color::Gray),
@@ -237,10 +237,11 @@ impl PopupService {
                 // Create content for this tab
                 let content = self.create_tool_call_content(tool_call);
                 
-                Tab::new(
+                Tab::new_with_status(
                     format!("tool_call_{}", index),
                     tab_title.clone(),
                     TabContent::new(tab_title, format!("tool_call_{}", index), content),
+                    Some(status_color),
                 )
             })
             .collect();
@@ -275,6 +276,7 @@ impl PopupService {
             .footer(Some(vec![
                 "Enter submit    ←→ for action    Space toggle approve/reject   ↑↓ to scroll    Esc exit".to_string(),
             ]))
+            .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
                 width_percent: 0.8,
                 height_percent: 0.7,
@@ -297,28 +299,9 @@ impl PopupService {
         
         // Get tool details
         let tool_name = get_command_type_name(tool_call).to_string();
-        let tool_path = extract_truncated_command_arguments(tool_call).to_string();
+        let tool_path = extract_truncated_command_arguments(tool_call, Some("".to_string())).to_string();
         
-        // Add tool details (no section headers)
-        lines.push((
-            Line::from(format!("Tool {}", tool_name)),
-            Style::default().fg(Color::DarkGray),
-        ));
-        
-        // Determine command type and format based on tool
-        let command_type = match tool_name.to_lowercase().as_str() {
-            "create" | "write" | "edit" => "File",
-            "run" | "execute" | "command" => "Command", 
-            "read" | "view" | "show" => "Path",
-            _ => "Command", // default
-        };
-        
-        if !tool_path.is_empty() {
-            lines.push((
-                Line::from(format!("{} {}", command_type, tool_path)),
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
+      
         
         // Get the actual status for this tool call
         let status = if let Some(tool_call_info) = self.tool_calls.get(self.selected_index) {
@@ -333,12 +316,21 @@ impl PopupService {
             ApprovalStatus::Pending => ("Pending".to_string(), Color::Yellow),
         };
         
-        // Create a line with colored status
-        let status_line = Line::from(vec![
+        // Create a line with tool name and status on the same line
+        let tool_status_line = Line::from(vec![
+            ratatui::text::Span::styled(format!("Tool {}", tool_name), Style::default().fg(Color::DarkGray)),
+            ratatui::text::Span::styled("                  ", Style::default()), // spacing
             ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
         ]);
-        lines.push((status_line, Style::default()));
+        lines.push((tool_status_line, Style::default()));
+        
+        if !tool_path.is_empty() {
+            lines.push((
+                Line::from(tool_path),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
         
         lines.push((Line::from(""), Style::default()));
         lines.push((Line::from(""), Style::default()));
