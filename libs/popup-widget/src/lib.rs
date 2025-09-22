@@ -56,6 +56,8 @@ pub struct PopupConfig {
     pub terminal_detector: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     /// Footer text (optional) - can be multiple lines
     pub footer: Option<Vec<String>>,
+    /// Number of fixed lines at the top that should not scroll
+    pub fixed_header_lines: usize,
 }
 
 impl Default for PopupConfig {
@@ -86,6 +88,7 @@ impl Default for PopupConfig {
             use_fallback_colors: false,
             terminal_detector: None,
             footer: None,
+            fixed_header_lines: 0,
         }
     }
 }
@@ -206,6 +209,12 @@ impl PopupConfig {
     /// Set the tab alignment
     pub fn tab_alignment(mut self, alignment: Alignment) -> Self {
         self.tab_alignment = alignment;
+        self
+    }
+
+    /// Set the number of fixed header lines that should not scroll
+    pub fn fixed_header_lines(mut self, lines: usize) -> Self {
+        self.fixed_header_lines = lines;
         self
     }
 }

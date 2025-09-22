@@ -1,225 +1,138 @@
 # Popup Widget
 
-A flexible, trait-based popup widget crate for Ratatui applications.
+A flexible popup widget for Ratatui applications with support for tabs, scrolling, and fixed header lines.
 
 ## Features
 
-- **Trait-based content system**: Implement custom content using the `PopupContent` trait
-- **Tab support**: Optional tabbed interface with keyboard navigation
-- **Flexible positioning**: Centered, absolute, or relative positioning
-- **Built-in scrolling**: Automatic scroll handling with keyboard controls
-- **Customizable appearance**: Configurable colors, borders, and titles
-- **Stateless design**: Easy to show/hide and manage multiple popups
-- **Event handling**: Comprehensive event system for user interaction
+- **Tabs**: Multiple tabs with custom styling
+- **Scrolling**: Vertical scrolling with configurable behavior
+- **Fixed Header Lines**: Control which parts of content scroll and which remain fixed
+- **Responsive**: Adapts to different terminal sizes
+- **Styling**: Full control over colors, borders, and text formatting
+- **Terminal Detection**: Automatic fallback for unsupported terminals
 
-## Quick Start
+## Basic Usage
 
 ```rust
-use popup_widget::{PopupWidget, PopupConfig, PopupPosition, TextContent, PopupEvent, StyledLineContent};
+use popup_widget::{PopupWidget, PopupConfig, PopupPosition, StyledLineContent, Tab};
 use ratatui::style::{Color, Style, Modifier};
 use ratatui::text::Line;
 
-// Create configuration with enhanced styling
+// Create content
+let content = StyledLineContent::new(vec![
+    (Line::from("Fixed Header Line 1"), Style::default().fg(Color::Yellow)),
+    (Line::from("Fixed Header Line 2"), Style::default().fg(Color::Yellow)),
+    (Line::from(""), Style::default()),
+    (Line::from("Scrollable Content Line 1"), Style::default().fg(Color::White)),
+    (Line::from("Scrollable Content Line 2"), Style::default().fg(Color::White)),
+    // ... more scrollable content
+]);
+
+// Create tab
+let tab = Tab::new(
+    "tab1".to_string(),
+    "Example".to_string(),
+    content,
+);
+
+// Create popup with fixed header lines
 let config = PopupConfig::new()
-    .title("My Popup")
-    .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-    .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-    .background_style(Style::default().bg(Color::Black))
-    .show_tabs(false)
-    .position(PopupPosition::Centered { width: 50, height: 20 });
+    .title("Example Popup")
+    .show_tabs(true)
+    .fixed_header_lines(3) // First 3 lines won't scroll
+    .add_tab(tab)
+    .position(PopupPosition::Responsive {
+        width_percent: 0.8,
+        height_percent: 0.7,
+        min_width: 30,
+        min_height: 20,
+    });
 
-// Create popup with styled content
-let styled_content = StyledLineContent::new(vec![
-    (Line::from("Hello, World!"), Style::default().fg(Color::Green)),
-    (Line::from("Styled text"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-]);
-
-let mut popup = PopupWidget::with_content(config, styled_content);
-
-// Show the popup
+let mut popup = PopupWidget::new(config);
 popup.show();
-
-// Handle events
-let result = popup.handle_event(PopupEvent::ScrollUp);
 ```
 
-## Configuration
+## Fixed Header Lines
 
-### PopupConfig
+The `fixed_header_lines` feature allows you to specify which lines at the top of the content should remain fixed while the rest scrolls. This is perfect for:
+
+- **Tool Details**: Keep tool name, path, and status visible
+- **Headers**: Keep section headers visible
+- **Important Info**: Keep critical information always visible
+
+### Example: Tool Call Approval Popup
 
 ```rust
-pub struct PopupConfig {
-    pub show_title: bool,           // Whether to show a title
-    pub title: Option<String>,      // Title text
-    pub title_color: Color,         // Title color
-    pub border_color: Color,        // Border color
-    pub show_tabs: bool,            // Whether to show tabs
-    pub tabs: Vec<Tab>,             // Tab configuration
-    pub selected_tab: usize,        // Currently selected tab
-    pub position: PopupPosition,    // Position and size
-    pub background_style: Style,    // Background style
-    pub border_style: Style,        // Border style
-}
+// Create popup with tool details that don't scroll
+let config = PopupConfig::new()
+    .title("Permission Required")
+    .fixed_header_lines(8) // Tool details + content header
+    .add_tab(tool_call_tab)
+    .footer(Some(vec![
+        "Space: toggle approve/reject  ↑↓: scroll  ←→: switch tabs".to_string(),
+    ]));
 ```
 
-### Positioning
+In this example:
+- **Lines 1-8**: Tool details (Tool, Path, Status) and "Content:" header - **FIXED**
+- **Lines 9+**: Tool arguments and other content - **SCROLLABLE**
+
+## API Reference
+
+### PopupConfig Methods
+
+- `fixed_header_lines(lines: usize)` - Set number of fixed header lines
+- `title(title: impl Into<String>)` - Set popup title
+- `show_tabs(show: bool)` - Enable/disable tabs
+- `add_tab(tab: Tab)` - Add a tab
+- `position(position: PopupPosition)` - Set popup position and size
+- `border_style(style: Style)` - Set border styling
+- `background_style(style: Style)` - Set background styling
+
+### Events
+
+- `PopupEvent::ScrollUp` / `PopupEvent::ScrollDown` - Scroll content
+- `PopupEvent::NextTab` / `PopupEvent::PrevTab` - Switch tabs
+- `PopupEvent::Toggle` - Show/hide popup
+- `PopupEvent::Escape` - Close popup
+
+## Advanced Example
 
 ```rust
-// Centered popup
-PopupPosition::Centered { width: 50, height: 20 }
-
-// Absolute position
-PopupPosition::Absolute { x: 10, y: 5, width: 40, height: 15 }
-
-// Relative position (percentages)
-PopupPosition::Relative { 
-    x_percent: 0.1, 
-    y_percent: 0.1, 
-    width_percent: 0.8, 
-    height_percent: 0.8 
-}
-```
-
-## Custom Content
-
-### StyledLineContent
-
-For content with custom styling, use `StyledLineContent`:
-
-```rust
-use popup_widget::StyledLineContent;
-use ratatui::text::Line;
+use popup_widget::*;
 use ratatui::style::{Color, Style, Modifier};
+use ratatui::text::Line;
 
-let styled_content = StyledLineContent::new(vec![
-    (Line::from("Header"), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-    (Line::from("Regular text"), Style::default().fg(Color::White)),
-    (Line::from("Error message"), Style::default().fg(Color::Red).add_modifier(Modifier::ITALIC)),
-]);
-```
+// Create multiple tabs with different content
+let mut config = PopupConfig::new()
+    .title("Multi-Tab Popup")
+    .show_tabs(true)
+    .fixed_header_lines(5) // Keep headers fixed
+    .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+    .background_style(Style::default().bg(Color::Rgb(25, 26, 38)))
+    .tab_style(Style::default().fg(Color::White).bg(Color::DarkGray))
+    .selected_tab_style(Style::default().fg(Color::White).bg(Color::Cyan))
+    .position(PopupPosition::Responsive {
+        width_percent: 0.8,
+        height_percent: 0.7,
+        min_width: 30,
+        min_height: 20,
+    });
 
-### Custom Content Types
-
-Implement the `PopupContent` trait for custom content:
-
-```rust
-use popup_widget::traits::PopupContent;
-
-struct MyContent {
-    data: String,
+// Add tabs
+for i in 0..3 {
+    let content = create_tab_content(i);
+    let tab = Tab::new(
+        format!("tab_{}", i),
+        format!("Tab {}", i + 1),
+        content,
+    );
+    config = config.add_tab(tab);
 }
 
-impl PopupContent for MyContent {
-    fn render(&self, f: &mut Frame, area: Rect) {
-        // Your custom rendering logic
-    }
-    
-    fn height(&self) -> usize {
-        // Return content height
-    }
-    
-    fn width(&self) -> usize {
-        // Return content width
-    }
-    
-    fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
+let mut popup = PopupWidget::new(config);
 ```
-
-## Tab Support
-
-Create tabs with custom content:
-
-```rust
-use popup_widget::{Tab, PopupConfig};
-
-let tabs = vec![
-    Tab::new(
-        "tab1".to_string(),
-        "First Tab".to_string(),
-        MyContent::new("Tab 1 content".to_string())
-    ),
-    Tab::new(
-        "tab2".to_string(),
-        "Second Tab".to_string(),
-        MyContent::new("Tab 2 content".to_string())
-    ),
-];
-
-let config = PopupConfig {
-    show_tabs: true,
-    tabs,
-    ..Default::default()
-};
-```
-
-## Events
-
-Handle user input with the event system:
-
-```rust
-// Show/hide
-popup.handle_event(PopupEvent::Show);
-popup.handle_event(PopupEvent::Hide);
-popup.handle_event(PopupEvent::Toggle);
-
-// Scrolling
-popup.handle_event(PopupEvent::ScrollUp);
-popup.handle_event(PopupEvent::ScrollDown);
-popup.handle_event(PopupEvent::PageUp);
-popup.handle_event(PopupEvent::PageDown);
-
-// Tab navigation
-popup.handle_event(PopupEvent::NextTab);
-popup.handle_event(PopupEvent::PrevTab);
-popup.handle_event(PopupEvent::SwitchTab(1));
-
-// Close
-popup.handle_event(PopupEvent::Escape);
-```
-
-## Integration with Ratatui
-
-```rust
-use ratatui::{Frame, Terminal};
-
-// In your render function
-fn render(f: &mut Frame, state: &mut AppState) {
-    // Render your main content
-    // ...
-    
-    // Render popups
-    for popup in &mut state.popups {
-        popup.render(f, f.size());
-    }
-}
-
-// In your event handling
-fn handle_key(key: KeyCode, state: &mut AppState) {
-    match key {
-        KeyCode::Char('p') => {
-            state.popups[0].handle_event(PopupEvent::Toggle);
-        }
-        // ... other key handling
-    }
-}
-```
-
-## Examples
-
-See the `examples/` directory for complete usage examples:
-
-- `basic_usage.rs` - Simple popup with tabs and keyboard controls
-- `custom_content.rs` - Custom content implementation
-- `multiple_popups.rs` - Managing multiple popups
-
-## Dependencies
-
-- `ratatui` - TUI framework
-- `crossterm` - Terminal handling
 
 ## License
 
-This crate is part of the Stakpak project.
+This project is licensed under the MIT License.

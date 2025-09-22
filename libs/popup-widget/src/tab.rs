@@ -34,6 +34,80 @@ impl Tab {
         self.content.render(f, area, self.scroll);
     }
 
+    /// Render the tab content with fixed header lines
+    pub fn render_content_with_fixed_header(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
+        if fixed_header_lines == 0 {
+            // No fixed header, render normally
+            self.content.render(f, area, self.scroll);
+            return;
+        }
+
+        // Get all lines from content
+        let all_lines = self.content.get_lines();
+        let total_lines = all_lines.len();
+        
+        if total_lines <= fixed_header_lines {
+            // Not enough content for scrolling, just render everything
+            self.content.render(f, area, 0);
+            return;
+        }
+
+        // Split the area into fixed header and scrollable content
+        let constraints = vec![
+            Constraint::Length(fixed_header_lines as u16), // Fixed header
+            Constraint::Min(1), // Scrollable content
+        ];
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(area);
+
+        // Render fixed header (first few lines without scroll)
+        let header_area = chunks[0];
+        self.render_fixed_header(f, header_area, fixed_header_lines);
+
+        // Render scrollable content (remaining lines with scroll)
+        let content_area = chunks[1];
+        self.render_scrollable_content(f, content_area, fixed_header_lines);
+    }
+
+    /// Render only the fixed header lines
+    fn render_fixed_header(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
+        // Create a custom content that only renders the first fixed_header_lines
+        if let Some(styled_content) = self.content.as_any().downcast_ref::<crate::traits::StyledLineContent>() {
+            let header_lines: Vec<_> = styled_content.lines
+                .iter()
+                .take(fixed_header_lines)
+                .map(|(line, style)| line.clone().patch_style(*style))
+                .collect();
+            
+            let widget = Paragraph::new(header_lines).wrap(ratatui::widgets::Wrap { trim: false });
+            f.render_widget(widget, area);
+        } else {
+            // Fallback for other content types
+            self.content.render(f, area, 0);
+        }
+    }
+
+    /// Render only the scrollable content lines
+    fn render_scrollable_content(&self, f: &mut Frame, area: Rect, fixed_header_lines: usize) {
+        // Create a custom content that renders from fixed_header_lines + scroll onwards
+        if let Some(styled_content) = self.content.as_any().downcast_ref::<crate::traits::StyledLineContent>() {
+            let scrollable_lines: Vec<_> = styled_content.lines
+                .iter()
+                .skip(fixed_header_lines + self.scroll)
+                .map(|(line, style)| line.clone().patch_style(*style))
+                .collect();
+            
+            let widget = Paragraph::new(scrollable_lines).wrap(ratatui::widgets::Wrap { trim: false });
+            f.render_widget(widget, area);
+        } else {
+            // Fallback for other content types
+            self.content.render(f, area, fixed_header_lines + self.scroll);
+        }
+    }
+
     /// Update scroll position
     pub fn set_scroll(&mut self, scroll: usize) {
         self.scroll = scroll;
@@ -64,7 +138,7 @@ pub fn render_custom_tabs(
     let tab_spacing = 1; // 1 space between tabs
     let total_tab_width: u16 = tabs
         .iter()
-        .map(|tab| tab.title.len() as u16 + 6) // text + 3 spaces padding on each side
+        .map(|tab| tab.title.len() as u16 + 2) // text + 1 space padding on each side
         .sum::<u16>()
         + (tabs.len() as u16 - 1) * tab_spacing;
 
@@ -75,7 +149,7 @@ pub fn render_custom_tabs(
         crate::Alignment::Left => {
             // Tabs aligned to the left
             for (i, tab) in tabs.iter().enumerate() {
-                let tab_width = tab.title.len() as u16 + 6; // text + padding
+                let tab_width = tab.title.len() as u16 + 2; // text + padding
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
@@ -93,7 +167,7 @@ pub fn render_custom_tabs(
                 constraints.push(Constraint::Length(remaining_space / 2));
             }
             for (i, tab) in tabs.iter().enumerate() {
-                let tab_width = tab.title.len() as u16 + 6; // text + padding
+                let tab_width = tab.title.len() as u16 + 2; // text + padding
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
@@ -111,7 +185,7 @@ pub fn render_custom_tabs(
                 constraints.push(Constraint::Min(0));
             }
             for (i, tab) in tabs.iter().enumerate() {
-                let tab_width = tab.title.len() as u16 + 6; // text + padding
+                let tab_width = tab.title.len() as u16 + 2; // text + padding
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
@@ -155,7 +229,7 @@ pub fn render_custom_tabs(
         };
 
         // Create tab button with padding and centered text
-        let tab_text = format!("   {}   ", tab.title);
+        let tab_text = format!(" {} ", tab.title);
         let tab_span = Span::styled(tab_text, tab_style_to_use);
         let tab_line = Line::from(tab_span);
 

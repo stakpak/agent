@@ -19,6 +19,9 @@ pub trait PopupContent: std::fmt::Debug {
 
     /// Clone the content (required for trait objects)
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync>;
+
+    /// Get a reference to the concrete type for downcasting
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Content that renders styled lines
@@ -80,14 +83,16 @@ impl PopupContent for StyledLineContent {
         // Simple approach: just use the raw line count without complex wrapping calculation
         let raw_line_count = self.lines.len();
 
-        // Just use raw line count - no adjustments
-        let estimated_height = raw_line_count;
-
-        estimated_height + 2
+        // Just use raw line count - no adjustments needed
+        raw_line_count
     }
 
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
         Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -154,13 +159,15 @@ impl PopupContent for TextContent {
         let lines: Vec<&str> = self.text.lines().collect();
         let raw_line_count = lines.len();
 
-        // Just use raw line count - no adjustments
-        let estimated_height = raw_line_count;
-
-        estimated_height + 2
+        // Just use raw line count - no adjustments needed
+        raw_line_count
     }
 
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
         Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
