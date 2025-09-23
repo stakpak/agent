@@ -171,14 +171,7 @@ impl PopupWidget {
 
         // Calculate and clamp scroll to maximum
         let max_scroll = self.calculate_max_scroll(terminal_size);
-        let old_scroll = self.state.scroll;
         self.state.scroll = self.state.scroll.min(max_scroll);
-        if old_scroll != self.state.scroll {
-            eprintln!(
-                "DEBUG: Scroll clamped from {} to {} (max_scroll: {})",
-                old_scroll, self.state.scroll, max_scroll
-            );
-        }
 
         // Create the main block
         let block = self.create_block();
@@ -367,15 +360,6 @@ impl PopupWidget {
                 return; // No footer area allocated
             };
 
-            eprintln!(
-                "DEBUG: Rendering styled footer - area: {}x{}, lines: {}",
-                footer_area.width,
-                footer_area.height,
-                footer_lines.len()
-            );
-            for (i, line) in footer_lines.iter().enumerate() {
-                eprintln!("DEBUG: Footer line {}: {:?}", i, line);
-            }
             let footer_paragraph =
                 Paragraph::new(footer_lines.clone()).style(self.config.background_style);
             f.render_widget(footer_paragraph, footer_area);
@@ -480,15 +464,6 @@ impl PopupWidget {
                     return; // No footer area allocated
                 };
 
-                eprintln!(
-                    "DEBUG: Rendering styled footer (no tabs) - area: {}x{}, lines: {}",
-                    footer_area.width,
-                    footer_area.height,
-                    footer_lines.len()
-                );
-                for (i, line) in footer_lines.iter().enumerate() {
-                    eprintln!("DEBUG: Footer line {}: {:?}", i, line);
-                }
                 let footer_paragraph =
                     Paragraph::new(footer_lines.clone()).style(self.config.background_style);
                 f.render_widget(footer_paragraph, footer_area);
@@ -590,20 +565,16 @@ impl PopupWidget {
 
     /// Scroll up
     fn scroll_up(&mut self) {
-        eprintln!("DEBUG: scroll_up called - current: {}", self.state.scroll);
         if self.state.scroll > 0 {
             self.state.scroll -= 1;
-            eprintln!("DEBUG: scroll_up - new: {}", self.state.scroll);
         }
     }
 
     /// Scroll down
     fn scroll_down(&mut self) {
-        eprintln!("DEBUG: scroll_down called - current: {}", self.state.scroll);
         // We'll calculate max scroll in render method and store it in state
         // For now, just increment scroll - it will be clamped in render
         self.state.scroll += 1;
-        eprintln!("DEBUG: scroll_down - new: {}", self.state.scroll);
     }
 
     /// Page up
@@ -686,8 +657,7 @@ impl PopupWidget {
                     .unwrap_or(0);
                 fixed_height += 1 + footer_height; // Space before footer + footer lines
             }
-            let available = content_area.height.saturating_sub(fixed_height as u16) as usize;
-            available
+            content_area.height.saturating_sub(fixed_height as u16) as usize
         } else {
             // Calculate the same way as in render_without_tabs
             let mut fixed_height = 0;
@@ -703,8 +673,7 @@ impl PopupWidget {
                     .unwrap_or(0);
                 fixed_height += 1 + footer_height; // Space before footer + footer lines
             }
-            let available = content_area.height.saturating_sub(fixed_height as u16) as usize;
-            available
+            content_area.height.saturating_sub(fixed_height as u16) as usize
         };
 
         // Subtract fixed header lines from available height for scrollable content
@@ -714,16 +683,12 @@ impl PopupWidget {
         // Calculate the actual content height including text wrapping
         let content_height = if self.config.show_tabs && !self.config.tabs.is_empty() {
             if let Some(selected_tab) = self.config.tabs.get(self.state.selected_tab) {
-                let height = selected_tab.content.calculate_rendered_height();
-                eprintln!("DEBUG: Tab content height: {}", height);
-                height
+                selected_tab.content.calculate_rendered_height()
             } else {
                 0
             }
         } else if let Some(content) = &self.content {
-            let height = content.calculate_rendered_height();
-            eprintln!("DEBUG: Direct content height: {}", height);
-            height
+            content.calculate_rendered_height()
         } else {
             0
         };
@@ -734,28 +699,11 @@ impl PopupWidget {
 
         // Calculate max scroll: allow scrolling if content has more than 1 line
         // This enables scrolling even when there's extra space available
-        let max_scroll = if scrollable_content_height > 1 {
-            let scroll = if scrollable_content_height > scrollable_available_height {
-                // Content exceeds available space - normal scrolling
-                scrollable_content_height - scrollable_available_height
-            } else {
-                // Content fits in available space - no scrolling needed
-                0
-            };
-            eprintln!(
-                "DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}",
-                scrollable_content_height, scrollable_available_height, scroll
-            );
-            scroll
+        if scrollable_content_height > 1 {
+            scrollable_content_height.saturating_sub(scrollable_available_height)
         } else {
-            eprintln!(
-                "DEBUG: No scrolling - content: {}, available: {}",
-                scrollable_content_height, scrollable_available_height
-            );
             0
-        };
-
-        max_scroll
+        }
     }
 
     /// Switch to specific tab

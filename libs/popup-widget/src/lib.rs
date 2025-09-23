@@ -251,7 +251,7 @@ impl PopupConfig {
 }
 
 /// Internal state for the popup widget
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PopupState {
     /// Scroll position for the current tab
     pub scroll: usize,
@@ -259,16 +259,6 @@ pub struct PopupState {
     pub visible: bool,
     /// Selected tab index
     pub selected_tab: usize,
-}
-
-impl Default for PopupState {
-    fn default() -> Self {
-        Self {
-            scroll: 0,
-            visible: false,
-            selected_tab: 0,
-        }
-    }
 }
 
 /// Events that the popup can handle

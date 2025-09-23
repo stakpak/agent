@@ -128,24 +128,22 @@ pub fn update(
                     .approval_popup
                     .get_approved_tool_calls()
                     .into_iter()
-                    .map(|tool| tool.clone())
+                    .cloned()
                     .collect();
                 state.message_rejected_tools = state
                     .approval_popup
                     .get_rejected_tool_calls()
                     .into_iter()
-                    .map(|tool| tool.clone())
+                    .cloned()
                     .collect();
 
-                // Send all approved tool calls for execution
-                for approved_tool in &state.message_approved_tools {
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(approved_tool.clone()));
+                // Clear message_tool_calls to prevent further ShowConfirmationDialog calls
+                // This prevents the race condition where individual tool calls try to show dialogs
+                state.message_tool_calls = None;
+
+                if let Some(dialog_command) = &state.dialog_command {
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                 }
-
-                // Remove all approved and rejected tool calls from message_tool_calls
-                // Only pending tool calls should remain
-                update_message_tool_calls_to_pending_only(state);
-
                 state.approval_popup.escape();
                 return;
             }
@@ -314,6 +312,7 @@ pub fn update(
                     .push(Message::render_collapsed_message(tool_call.clone()));
             }
 
+            // Tool call is pending - create pending border block and check if we should show popup
             let message_id = Uuid::new_v4();
             state.messages.push(Message::render_pending_border_block(
                 tool_call.clone(),
@@ -322,27 +321,28 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
-            if is_auto_approved {
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-                state.is_dialog_open = false;
-                state.dialog_selected = 0;
-                state.dialog_command = None;
-                state.dialog_focused = false;
-                return;
-            }
-
-            // Check if this tool call is already approved (after popup interaction)
+            // Check if this tool call is already approved (after popup interaction or auto-approved)
             if is_auto_approved
                 || state
                     .message_approved_tools
                     .iter()
                     .any(|tool| tool.id == tool_call.id)
             {
+                // Remove from approved list to avoid processing it again
                 state
                     .message_approved_tools
                     .retain(|tool| tool.id != tool_call.id);
-                // Tool call is approved, execute it immediately
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+
+                // Send tool call with delay
+                let tool_call_clone = tool_call.clone();
+                let output_tx_clone = output_tx.clone();
+
+                tokio::spawn(async move {
+                    // Wait 500ms before sending the tool call
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
+                });
+
                 state.is_dialog_open = false;
                 state.dialog_selected = 0;
                 state.dialog_command = None;
@@ -356,9 +356,11 @@ pub fn update(
                 .iter()
                 .any(|tool| tool.id == tool_call.id)
             {
+                // Remove from rejected list to avoid processing it again
                 state
                     .message_rejected_tools
                     .retain(|tool| tool.id != tool_call.id);
+
                 // Tool call is rejected, cancel it
                 state.is_dialog_open = true;
                 handle_esc(state, output_tx, cancel_tx, input_tx, shell_tx);
@@ -366,14 +368,12 @@ pub fn update(
             }
 
             // Tool call is pending - check if we should show popup first
-            if let Some(ref message_tool_calls) = state.message_tool_calls {
-                if message_tool_calls.len() > 0 {
-                    state.approval_popup = PopupService::new_with_tool_calls(
-                        message_tool_calls.clone(),
-                        terminal_size,
-                    );
-                    return;
-                }
+            if let Some(ref message_tool_calls) = state.message_tool_calls
+                && message_tool_calls.len() > 1
+            {
+                state.approval_popup =
+                    PopupService::new_with_tool_calls(message_tool_calls.clone(), terminal_size);
+                return;
             }
 
             // Show confirmation dialog as usual for single tool call or non-prompt tools
@@ -402,7 +402,7 @@ pub fn update(
         InputEvent::HandleEsc => {
             if state.approval_popup.is_visible() {
                 state.approval_popup.escape();
-                return; // Event was consumed by popup
+                return; // TODO: either reject all or add a toggle event to toggle back the popup.
             }
             handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
         }
@@ -1019,12 +1019,6 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
-                "/popup" => {
-                    state.approval_popup.toggle();
-                    state.text_area.set_text("");
-                    state.show_helper_dropdown = false;
-                    return;
-                }
                 "/quit" => {
                     state.show_helper_dropdown = false;
                     state.text_area.set_text("");
@@ -1513,33 +1507,6 @@ fn list_auto_approved_tools(state: &mut AppState) {
         //     "",
         //     Color::Cyan,
         // );
-    }
-}
-
-/// Update message_tool_calls to only contain tool calls that are neither approved nor rejected
-/// This function filters out all approved and rejected tool calls, leaving only pending ones
-pub fn update_message_tool_calls_to_pending_only(state: &mut AppState) {
-    if let Some(ref mut tool_calls) = state.message_tool_calls {
-        // Get IDs of approved and rejected tool calls for efficient lookup
-        let approved_ids: std::collections::HashSet<String> = state
-            .message_approved_tools
-            .iter()
-            .map(|tool| tool.id.clone())
-            .collect();
-        let rejected_ids: std::collections::HashSet<String> = state
-            .message_rejected_tools
-            .iter()
-            .map(|tool| tool.id.clone())
-            .collect();
-
-        // Filter out approved and rejected tool calls, keeping only pending ones
-        tool_calls
-            .retain(|tool| !approved_ids.contains(&tool.id) && !rejected_ids.contains(&tool.id));
-
-        // If no pending tool calls remain, clear the message_tool_calls
-        if tool_calls.is_empty() {
-            state.message_tool_calls = None;
-        }
     }
 }
 

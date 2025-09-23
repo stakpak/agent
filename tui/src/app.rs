@@ -317,10 +317,6 @@ impl AppState {
                 description: "Toggle mouse capture on/off",
             },
             HelperCommand {
-                command: "/popup",
-                description: "Toggle popup",
-            },
-            HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
             },

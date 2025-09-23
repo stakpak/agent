@@ -63,6 +63,12 @@ pub struct PopupService {
     terminal_size: ratatui::layout::Rect,
 }
 
+impl Default for PopupService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PopupService {
     /// Create a new popup service
     pub fn new() -> Self {
@@ -132,7 +138,6 @@ impl PopupService {
         let _ = self.popup.handle_event(popup_widget::PopupEvent::PrevTab);
         // Update our selected index to match the popup's selected tab
         self.selected_index = self.popup.state().selected_tab;
-        eprintln!("prev_tab - selected_index: {}", self.selected_index);
     }
 
     /// Handle next tab
@@ -140,7 +145,6 @@ impl PopupService {
         let _ = self.popup.handle_event(popup_widget::PopupEvent::NextTab);
         // Update our selected index to match the popup's selected tab
         self.selected_index = self.popup.state().selected_tab;
-        eprintln!("next_tab - selected_index: {}", self.selected_index);
     }
 
     /// Handle escape
@@ -215,10 +219,9 @@ impl PopupService {
 
         // Calculate height based on tallest content (initial sizing)
         let mut max_content_height = 0;
-        for (i, tool_call_info) in tool_call_infos.iter().enumerate() {
+        for tool_call_info in tool_call_infos.iter() {
             let content = self.create_tool_call_content(&tool_call_info.tool_call, tool_call_info);
             let content_height = content.lines.len();
-            eprintln!("DEBUG: Tab {} content height: {}", i, content_height);
             max_content_height = max_content_height.max(content_height);
         }
 
@@ -235,17 +238,6 @@ impl PopupService {
         // Convert back to height percentage
         let height_percent = (final_height as f32 / safe_terminal_height as f32).min(0.9);
 
-        eprintln!("DEBUG: Dynamic sizing calculation:");
-        eprintln!(
-            "  - Terminal height: {} (safe: {})",
-            terminal_size.height, safe_terminal_height
-        );
-        eprintln!("  - Intended height (70% - tolerance): {}", intended_height);
-        eprintln!("  - Max content height: {}", max_content_height);
-        eprintln!("  - Content + tolerance: {}", content_with_tolerance);
-        eprintln!("  - Final height chosen: {}", final_height);
-        eprintln!("  - Final height percent: {:.2}", height_percent);
-
         let tabs: Vec<Tab> = tool_call_infos
             .iter()
             .enumerate()
@@ -260,11 +252,6 @@ impl PopupService {
                     ApprovalStatus::Pending => ("", Color::Gray),
                 };
 
-                eprintln!(
-                    "DEBUG: Tab {} - Status: {:?}, Symbol: '{}', Color: {:?}",
-                    index, tool_call_info.status, status_symbol, status_color
-                );
-
                 // Create styled title line with colored status symbol
                 let styled_title = if status_symbol.is_empty() {
                     // No status symbol, just the title
@@ -278,7 +265,7 @@ impl PopupService {
                 };
 
                 // Create content for this tab
-                let content = self.create_tool_call_content(tool_call, &tool_call_info);
+                let content = self.create_tool_call_content(tool_call, tool_call_info);
 
                 // Get the subheader for this tab
                 let subheader = subheaders.get(index).cloned();
@@ -298,7 +285,7 @@ impl PopupService {
             .collect();
 
         // Ensure height_percent is within reasonable bounds
-        let height_percent = height_percent.max(0.3).min(0.9); // Between 30% and 90%
+        let height_percent = height_percent.clamp(0.3, 0.9); // Between 30% and 90%
 
         // Create popup configuration with tabs
         let mut config = PopupConfig::new()
@@ -341,7 +328,7 @@ impl PopupService {
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
                 width_percent: 0.8,
-                height_percent: height_percent,
+                height_percent,
                 min_width: 30,
                 min_height: 30,
             });
@@ -378,7 +365,6 @@ impl PopupService {
 
         // Use the popup's inner width for text formatting
         let inner_width = self.inner_width();
-        eprintln!("inner_width: {}", inner_width);
         let rendered_lines = if tool_call.function.name == "str_replace" {
             let (_diff_lines, full_diff_lines) = render_file_diff_block(tool_call, inner_width);
             if !full_diff_lines.is_empty() {
@@ -442,22 +428,12 @@ impl PopupService {
 
     /// Toggle the approval status of the currently selected tool call
     pub fn toggle_approval_status(&mut self) {
-        eprintln!(
-            "toggle_approval_status - selected_index: {}",
-            self.selected_index
-        );
         if let Some(tool_call_info) = self.tool_calls.get_mut(self.selected_index) {
-            let old_status = tool_call_info.status.clone();
             tool_call_info.status = match tool_call_info.status {
                 ApprovalStatus::Approved => ApprovalStatus::Rejected,
                 ApprovalStatus::Rejected => ApprovalStatus::Approved,
                 ApprovalStatus::Pending => ApprovalStatus::Approved,
             };
-
-            eprintln!(
-                "DEBUG: Toggled tool call {} from {:?} to {:?}",
-                self.selected_index, old_status, tool_call_info.status
-            );
 
             // Recreate the popup with updated status and preserve selected tab
             self.popup = self.create_popup_with_tool_calls(&self.tool_calls, self.terminal_size);
@@ -465,15 +441,6 @@ impl PopupService {
             self.popup.set_selected_tab(self.selected_index);
             // Make sure the popup stays visible after recreation
             self.popup.show();
-
-            // Debug: Print approval lists
-            let approved = self.get_approved_tool_calls().len();
-            let rejected = self.get_rejected_tool_calls().len();
-            let pending = self.get_pending_tool_calls().len();
-            eprintln!(
-                "DEBUG: Approval counts - Approved: {}, Rejected: {}, Pending: {}",
-                approved, rejected, pending
-            );
         }
     }
 
@@ -520,14 +487,7 @@ impl PopupService {
         let result = self.popup.handle_event(event);
 
         // Update our selected index to match the popup's selected tab
-        let old_index = self.selected_index;
         self.selected_index = self.popup.config().selected_tab;
-        if old_index != self.selected_index {
-            eprintln!(
-                "handle_event - selected_index changed from {} to {}",
-                old_index, self.selected_index
-            );
-        }
 
         result
     }
