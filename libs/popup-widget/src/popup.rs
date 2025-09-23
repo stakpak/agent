@@ -514,12 +514,25 @@ impl PopupWidget {
             .borders(Borders::ALL)
             .style(self.config.border_style);
 
+        // Determine background color based on terminal support
+        let is_unsupported = if let Some(detector) = &self.config.terminal_detector {
+            detector()
+        } else {
+            Self::is_unsupported_terminal()
+        };
+
+        let background_style = if is_unsupported {
+            Style::default().bg(Color::Black)
+        } else {
+            self.config.popup_background_style
+        };
+
         // Render the message with the same border style as the popup
         let message_paragraph = Paragraph::new(Line::from(Span::styled(
             message,
             Style::default().fg(Color::White),
         )))
-        .style(self.config.popup_background_style)
+        .style(background_style)
         .block(message_block)
         .alignment(ratatui::layout::Alignment::Center);
 

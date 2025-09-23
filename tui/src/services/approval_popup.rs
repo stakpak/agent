@@ -401,7 +401,10 @@ impl PopupService {
             }
         }));
 
-        StyledLineContent::new(lines)
+        // Check if terminal is unsupported for background color
+        let is_unsupported =
+            detect_term::is_unsupported_terminal(&detect_term::detect_terminal().emulator);
+        StyledLineContent::new_with_terminal_detection(lines, is_unsupported)
     }
 
     /// Create an empty popup (used as placeholder)
@@ -639,7 +642,10 @@ impl popup_widget::traits::PopupContent for TabContent {
         Box::new(TabContent {
             title: self.title.clone(),
             id: self.id.clone(),
-            styled_content: StyledLineContent::new(self.styled_content.lines.clone()),
+            styled_content: StyledLineContent::new_with_terminal_detection(
+                self.styled_content.lines.clone(),
+                self.styled_content.is_unsupported_terminal,
+            ),
         })
     }
 
