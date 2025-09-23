@@ -1,9 +1,11 @@
 pub mod cert_utils;
+pub mod file_backup_manager;
 pub mod file_watcher;
 pub mod helper;
 pub mod local_store;
 pub mod models;
 pub mod remote_connection;
+pub mod remote_store;
 pub mod secret_manager;
 pub mod secrets;
 pub mod task_manager;

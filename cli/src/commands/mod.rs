@@ -45,7 +45,12 @@ pub enum Commands {
     Logout,
 
     /// Start Agent Client Protocol server (for editor integration)
-    Acp,
+    ///
+    Acp {
+        /// Read system prompt from file
+        #[arg(long = "system-prompt-file")]
+        system_prompt_file: Option<String>,
+    },
 
     /// Set configuration values
     Set {
@@ -184,7 +189,7 @@ impl Commands {
                 | Commands::Config(_)
                 | Commands::Version
                 | Commands::Update
-                | Commands::Acp
+                | Commands::Acp { .. }
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -260,6 +265,7 @@ impl Commands {
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         tool_mode,
+                        subagent_configs: None, // MCP standalone mode doesn't need subagent configs
                         bind_address,
                         certificate_chain: Arc::new(certificate_chain),
                     },
@@ -551,16 +557,39 @@ impl Commands {
             Commands::Update => {
                 auto_update::run_auto_update().await?;
             }
-            Commands::Acp => {
+            Commands::Acp { system_prompt_file } => {
+                let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {
+                    match std::fs::read_to_string(system_prompt_file_path) {
+                        Ok(content) => {
+                            println!(
+                                "📖 Reading system prompt from file: {}",
+                                system_prompt_file_path
+                            );
+                            Some(content.trim().to_string())
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Failed to read system prompt file '{}': {}",
+                                system_prompt_file_path, e
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
                 // Start ACP agent
                 let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-                let agent = match crate::commands::acp::StakpakAcpAgent::new(config, tx).await {
-                    Ok(agent) => agent,
-                    Err(e) => {
-                        eprintln!("Failed to create ACP agent: {}", e);
-                        std::process::exit(1);
-                    }
-                };
+                let agent =
+                    match crate::commands::acp::StakpakAcpAgent::new(config, tx, system_prompt)
+                        .await
+                    {
+                        Ok(agent) => agent,
+                        Err(e) => {
+                            eprintln!("Failed to create ACP agent: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
 
                 if let Err(e) = agent.run_stdio().await {
                     eprintln!("ACP agent failed: {}", e);
