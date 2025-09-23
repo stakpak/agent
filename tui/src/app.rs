@@ -11,6 +11,7 @@ use crate::services::shell_mode::run_background_shell_command;
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use crate::services::textarea::{TextArea, TextAreaState};
+use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -191,6 +192,7 @@ pub struct AppState {
     pub message_rejected_tools: Vec<ToolCall>,
 
     pub toggle_approved_message: bool,
+    pub terminal_size: Size,
 }
 
 #[derive(Debug)]
@@ -421,6 +423,10 @@ impl AppState {
             message_approved_tools: Vec::new(),
             message_rejected_tools: Vec::new(),
             toggle_approved_message: true,
+            terminal_size: Size {
+                width: 0,
+                height: 0,
+            },
         }
     }
 

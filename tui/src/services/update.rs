@@ -539,6 +539,17 @@ pub fn update(
         InputEvent::HandlePaste(text) => {
             handle_paste(state, text);
         }
+        InputEvent::Resized(width, height) => {
+            let old_terminal_size = state.terminal_size;
+            state.terminal_size = Size { width, height };
+
+            // Recreate the approval popup if it's visible and terminal size changed
+            if state.approval_popup.is_visible() && old_terminal_size != state.terminal_size {
+                state
+                    .approval_popup
+                    .recreate_with_terminal_size(state.terminal_size);
+            }
+        }
         InputEvent::InputCursorStart => {
             state.text_area.move_cursor_to_beginning_of_line(false);
         }
