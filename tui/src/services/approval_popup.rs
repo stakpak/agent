@@ -205,7 +205,7 @@ impl PopupService {
             .map(|tool_call_info| self.render_subheader(&tool_call_info.tool_call, tool_call_info))
             .collect();
 
-        let tolerance = 4;
+        let tolerance = 1;
 
         // Ensure minimum terminal height to prevent calculation issues
         let min_terminal_height = 20;
@@ -266,20 +266,33 @@ impl PopupService {
                     index, tool_call_info.status, status_symbol, status_color
                 );
 
+                // Create styled title line with colored status symbol
+                let styled_title = if status_symbol.is_empty() {
+                    // No status symbol, just the title
+                    Line::from(format!("{}.{}", index + 1, tool_name))
+                } else {
+                    // Title with colored status symbol
+                    Line::from(vec![
+                        Span::raw(format!("{}.{}", index + 1, tool_name)),
+                        Span::styled(status_symbol, Style::default().fg(status_color)),
+                    ])
+                };
+
                 // Create content for this tab
                 let content = self.create_tool_call_content(tool_call, &tool_call_info);
 
                 // Get the subheader for this tab
                 let subheader = subheaders.get(index).cloned();
 
-                Tab::new_with_subheader(
+                Tab::new_with_custom_title_and_subheader(
                     format!("tool_call_{}", index),
-                    format!("{}.{}{}", index + 1, tool_name, status_symbol),
+                    format!("{}.{}{}", index + 1, tool_name, status_symbol), // Keep plain title as fallback
                     TabContent::new(
                         format!("{}.{}{}", index + 1, tool_name, status_symbol),
                         format!("tool_call_{}", index),
                         content,
                     ),
+                    styled_title,
                     subheader,
                 )
             })
