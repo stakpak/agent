@@ -185,8 +185,10 @@ pub struct AppState {
     pub has_user_messages: bool,
 
     pub message_tool_calls: Option<Vec<ToolCall>>,
-    pub auto_approve_message: bool,
     pub approval_popup: PopupService,
+
+    pub message_approved_tools: Vec<ToolCall>,
+    pub message_rejected_tools: Vec<ToolCall>,
 }
 
 #[derive(Debug)]
@@ -417,8 +419,9 @@ impl AppState {
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
-            auto_approve_message: false,
             approval_popup: PopupService::new(),
+            message_approved_tools: Vec::new(),
+            message_rejected_tools: Vec::new(),
         }
     }
 
