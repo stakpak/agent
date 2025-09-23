@@ -28,9 +28,10 @@
 //! let approvals = popup_service.get_all_approvals();
 //! ```
 
-use crate::services::bash_block::format_text_content;
+use crate::services::bash_block::{format_text_content, preprocess_terminal_output};
 use crate::services::detect_term::{self, is_unsupported_terminal};
 use crate::services::file_diff::render_file_diff_block;
+use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{extract_full_command_arguments, get_command_type_name};
 use crate::services::message_pattern::spans_to_string;
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
@@ -288,10 +289,18 @@ impl PopupService {
         let mut lines = Vec::new();
 
         lines.push((Line::from(""), Style::default()));
-        let output = extract_full_command_arguments(tool_call);
+        let mut output = extract_full_command_arguments(tool_call);
 
-        // remove first line of output and return the rest
-        let output = output.lines().skip(1).collect::<Vec<_>>().join("\n");
+        output = output
+            .lines()
+            .map(|line| format!("  {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = if tool_call.function.name == "run_command" {
+            output.replace("command = ", "$ ")
+        } else {
+            output
+        };
 
         // Use the popup's inner width for text formatting
         let inner_width = self.inner_width();
@@ -303,6 +312,10 @@ impl PopupService {
             } else {
                 format_text_content(&output, inner_width - 2)
             }
+        } else if tool_call.function.name == "run_command" {
+            let processed_result = preprocess_terminal_output(&output);
+            let bash_text = format!("```bash\n{processed_result}\n```");
+            render_markdown_to_lines(&bash_text).unwrap_or_default()
         } else {
             format_text_content(&output, inner_width - 2)
         };
@@ -315,18 +328,6 @@ impl PopupService {
                 (line, Style::default())
             }
         }));
-
-        // add simulated dummy text in lines
-        for _ in 0..7 {
-            lines.push((
-                Line::from("I see the issue now! The padding is being applied to the entire content area (the widget/paragraph), but you want the padding to be applied to each individual line within the content. The current approach shifts the entire text block to the right, but the lines themselves are still left-aligned within that shifted block."),
-                Style::default().fg(Color::Gray),
-            ));
-        }
-        lines.push((
-            Line::from("This is a simulated THIS IS THE END OF DUMMY TEXT"),
-            Style::default().fg(Color::Gray),
-        ));
 
         StyledLineContent::new(lines)
     }

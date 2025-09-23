@@ -691,8 +691,8 @@ impl PopupWidget {
                 // Content exceeds available space - normal scrolling
                 scrollable_content_height - scrollable_available_height
             } else {
-                // Content fits but we still want to allow scrolling through all content
-                scrollable_content_height.saturating_sub(1)
+                // Content fits in available space - no scrolling needed
+                0
             };
             eprintln!(
                 "DEBUG: Scrolling enabled - content: {}, available: {}, max_scroll: {}",
