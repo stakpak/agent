@@ -123,6 +123,7 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if state.approval_popup.is_visible() {
+                // Update approved and rejected tool calls from popup
                 state.message_approved_tools = state
                     .approval_popup
                     .get_approved_tool_calls()
@@ -136,16 +137,14 @@ pub fn update(
                     .map(|tool| tool.clone())
                     .collect();
 
-                if let Some(dialog_command) = &state.dialog_command {
-                    if state.message_tool_calls.is_some() {
-                        state
-                            .message_tool_calls
-                            .as_mut()
-                            .unwrap()
-                            .retain(|tool| tool.id != dialog_command.id);
-                    }
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+                // Send all approved tool calls for execution
+                for approved_tool in &state.message_approved_tools {
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(approved_tool.clone()));
                 }
+
+                // Remove all approved and rejected tool calls from message_tool_calls
+                // Only pending tool calls should remain
+                update_message_tool_calls_to_pending_only(state);
 
                 state.approval_popup.escape();
                 return;
@@ -166,8 +165,8 @@ pub fn update(
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
-            state.message_approved_tools = Vec::new();
-            state.message_rejected_tools = Vec::new();
+            state.message_approved_tools.clear();
+            state.message_rejected_tools.clear();
             state.message_tool_calls = None;
         }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
@@ -300,7 +299,7 @@ pub fn update(
                 );
             }
         }
-      
+
         InputEvent::ShowConfirmationDialog(tool_call) => {
             // Store the latest tool call for potential retry (only for run_command)
             if tool_call.function.name == "run_command" {
@@ -323,46 +322,72 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
-            let prompt_tool_calls = state
-                .auto_approve_manager
-                .get_prompt_tool_calls(state.message_tool_calls.as_ref().unwrap());
+            if is_auto_approved {
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                state.is_dialog_open = false;
+                state.dialog_selected = 0;
+                state.dialog_command = None;
+                state.dialog_focused = false;
+                return;
+            }
 
-            if state.message_tool_calls.is_some() && prompt_tool_calls.len() > 0 {
-                // check if approved tools has dialog_command tool id
-                if state
+            // Check if this tool call is already approved (after popup interaction)
+            if is_auto_approved
+                || state
                     .message_approved_tools
                     .iter()
                     .any(|tool| tool.id == tool_call.id)
-                {
-                    // send accept tool event
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-                    return;
-                } else if state
+            {
+                state
+                    .message_approved_tools
+                    .retain(|tool| tool.id != tool_call.id);
+                // Tool call is approved, execute it immediately
+                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                state.is_dialog_open = false;
+                state.dialog_selected = 0;
+                state.dialog_command = None;
+                state.dialog_focused = false;
+                return;
+            }
+
+            // Check if this tool call is already rejected (after popup interaction)
+            if state
+                .message_rejected_tools
+                .iter()
+                .any(|tool| tool.id == tool_call.id)
+            {
+                state
                     .message_rejected_tools
-                    .iter()
-                    .any(|tool| tool.id == tool_call.id)
-                {
-                    state.is_dialog_open = true;
-                    // check if rejected tools has dialog_command tool id
-                    // send HandleEsc event
-                    let _ = input_tx.try_send(InputEvent::HandleEsc);
+                    .retain(|tool| tool.id != tool_call.id);
+                // Tool call is rejected, cancel it
+                state.is_dialog_open = true;
+                handle_esc(state, output_tx, cancel_tx, input_tx, shell_tx);
+                return;
+            }
+
+            // Tool call is pending - check if we should show popup first
+            if let Some(ref message_tool_calls) = state.message_tool_calls {
+                if message_tool_calls.len() > 0 {
+                    state.approval_popup = PopupService::new_with_tool_calls(
+                        message_tool_calls.clone(),
+                        terminal_size,
+                    );
                     return;
                 }
-                // get approved tool calls and
-                state.approval_popup =
-                    PopupService::new_with_tool_calls(prompt_tool_calls, terminal_size);
-                return;
-            } else {
-                // Show confirmation dialog as usual
-                state.dialog_command = Some(tool_call.clone());
-                state.is_dialog_open = true;
-                state.loading = false;
-                state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
             }
+
+            // Show confirmation dialog as usual for single tool call or non-prompt tools
+            state.dialog_command = Some(tool_call.clone());
+            state.is_dialog_open = true;
+            state.loading = false;
+            state.dialog_focused = false;
         }
 
         InputEvent::MessageToolCalls(tool_calls) => {
-            state.message_tool_calls = Some(tool_calls.clone());
+            let prompt_tool_calls = state
+                .auto_approve_manager
+                .get_prompt_tool_calls(&tool_calls);
+            state.message_tool_calls = Some(prompt_tool_calls.clone());
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
@@ -1488,6 +1513,33 @@ fn list_auto_approved_tools(state: &mut AppState) {
         //     "",
         //     Color::Cyan,
         // );
+    }
+}
+
+/// Update message_tool_calls to only contain tool calls that are neither approved nor rejected
+/// This function filters out all approved and rejected tool calls, leaving only pending ones
+pub fn update_message_tool_calls_to_pending_only(state: &mut AppState) {
+    if let Some(ref mut tool_calls) = state.message_tool_calls {
+        // Get IDs of approved and rejected tool calls for efficient lookup
+        let approved_ids: std::collections::HashSet<String> = state
+            .message_approved_tools
+            .iter()
+            .map(|tool| tool.id.clone())
+            .collect();
+        let rejected_ids: std::collections::HashSet<String> = state
+            .message_rejected_tools
+            .iter()
+            .map(|tool| tool.id.clone())
+            .collect();
+
+        // Filter out approved and rejected tool calls, keeping only pending ones
+        tool_calls
+            .retain(|tool| !approved_ids.contains(&tool.id) && !rejected_ids.contains(&tool.id));
+
+        // If no pending tool calls remain, clear the message_tool_calls
+        if tool_calls.is_empty() {
+            state.message_tool_calls = None;
+        }
     }
 }
 

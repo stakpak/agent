@@ -1,3 +1,0 @@
-This is a test file for approval testing
-Line 2: Some content
-Line 3: More content for testing
