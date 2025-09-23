@@ -30,6 +30,7 @@ pub struct StyledLineContent {
     pub lines: Vec<(Line<'static>, Style)>,
     pub width: usize,
     pub height: usize,
+    pub is_unsupported_terminal: bool,
 }
 
 impl StyledLineContent {
@@ -45,6 +46,26 @@ impl StyledLineContent {
             lines,
             width,
             height,
+            is_unsupported_terminal: false,
+        }
+    }
+
+    pub fn new_with_terminal_detection(
+        lines: Vec<(Line<'static>, Style)>,
+        is_unsupported_terminal: bool,
+    ) -> Self {
+        let height = lines.len();
+        let width = lines
+            .iter()
+            .map(|(line, _)| line.width())
+            .max()
+            .unwrap_or(0);
+
+        Self {
+            lines,
+            width,
+            height,
+            is_unsupported_terminal,
         }
     }
 }
@@ -58,8 +79,15 @@ impl PopupContent for StyledLineContent {
             .map(|(line, style)| line.clone().patch_style(*style))
             .collect();
 
+        // Use black background for unsupported terminals, otherwise use the default
+        let background_color = if self.is_unsupported_terminal {
+            ratatui::style::Color::Black
+        } else {
+            ratatui::style::Color::Rgb(24, 25, 36)
+        };
+
         let widget = Paragraph::new(styled_lines)
-            .style(ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(24, 25, 36)))
+            .style(ratatui::style::Style::default().bg(background_color))
             .wrap(ratatui::widgets::Wrap { trim: false });
 
         f.render_widget(widget, area);
