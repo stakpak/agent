@@ -59,6 +59,7 @@ pub struct PopupService {
     popup: PopupWidget,
     tool_calls: Vec<ToolCallInfo>,
     selected_index: usize,
+    terminal_size: ratatui::layout::Rect,
 }
 
 impl PopupService {
@@ -68,11 +69,15 @@ impl PopupService {
             popup: Self::create_empty_popup(),
             tool_calls: Vec::new(),
             selected_index: 0,
+            terminal_size: ratatui::layout::Rect::new(0, 0, 80, 24), // Default terminal size
         }
     }
 
     /// Create a new popup service with tool calls
-    pub fn new_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+    pub fn new_with_tool_calls(
+        tool_calls: Vec<ToolCall>,
+        terminal_size: ratatui::layout::Rect,
+    ) -> Self {
         let tool_call_infos: Vec<ToolCallInfo> = tool_calls
             .into_iter()
             .map(|tool_call| ToolCallInfo {
@@ -85,10 +90,11 @@ impl PopupService {
             popup: Self::create_empty_popup(),
             tool_calls: tool_call_infos.clone(),
             selected_index: 0,
+            terminal_size,
         };
 
         // Create the popup with the actual content
-        service.popup = service.create_popup_with_tool_calls(&tool_call_infos);
+        service.popup = service.create_popup_with_tool_calls(&tool_call_infos, terminal_size);
         service.popup.show();
         service
     }
@@ -184,7 +190,11 @@ impl PopupService {
     }
 
     /// Create popup with tool calls
-    fn create_popup_with_tool_calls(&self, tool_call_infos: &[ToolCallInfo]) -> PopupWidget {
+    fn create_popup_with_tool_calls(
+        &self,
+        tool_call_infos: &[ToolCallInfo],
+        terminal_size: ratatui::layout::Rect,
+    ) -> PopupWidget {
         if tool_call_infos.is_empty() {
             return Self::create_empty_popup();
         }
@@ -194,6 +204,48 @@ impl PopupService {
             .iter()
             .map(|tool_call_info| self.render_subheader(&tool_call_info.tool_call, tool_call_info))
             .collect();
+
+        let tolerance = 4;
+
+        // Ensure minimum terminal height to prevent calculation issues
+        let min_terminal_height = 20;
+        let safe_terminal_height = terminal_size.height.max(min_terminal_height);
+
+        // Calculate intended height (70% of terminal height for content area)
+        let intended_height = (safe_terminal_height as f32 * 0.7) as usize;
+
+        // Calculate height based on tallest content (initial sizing)
+        let mut max_content_height = 0;
+        for (i, tool_call_info) in tool_call_infos.iter().enumerate() {
+            let content = self.create_tool_call_content(&tool_call_info.tool_call, tool_call_info);
+            let content_height = content.lines.len();
+            eprintln!("DEBUG: Tab {} content height: {}", i, content_height);
+            max_content_height = max_content_height.max(content_height);
+        }
+
+        // Calculate content height with tolerance
+        let content_with_tolerance = max_content_height + tolerance;
+
+        // If content is small, use content height. If content is large, cap at intended height
+        let final_height = if content_with_tolerance < intended_height {
+            content_with_tolerance // Use smaller content-based height
+        } else {
+            intended_height // Cap at intended height
+        };
+
+        // Convert back to height percentage
+        let height_percent = (final_height as f32 / safe_terminal_height as f32).min(0.9);
+
+        eprintln!("DEBUG: Dynamic sizing calculation:");
+        eprintln!(
+            "  - Terminal height: {} (safe: {})",
+            terminal_size.height, safe_terminal_height
+        );
+        eprintln!("  - Intended height (70% - tolerance): {}", intended_height);
+        eprintln!("  - Max content height: {}", max_content_height);
+        eprintln!("  - Content + tolerance: {}", content_with_tolerance);
+        eprintln!("  - Final height chosen: {}", final_height);
+        eprintln!("  - Final height percent: {:.2}", height_percent);
 
         let tabs: Vec<Tab> = tool_call_infos
             .iter()
@@ -214,8 +266,6 @@ impl PopupService {
                     index, tool_call_info.status, status_symbol, status_color
                 );
 
-                // Note: tab_title_line was removed as it's no longer needed with subheaders
-
                 // Create content for this tab
                 let content = self.create_tool_call_content(tool_call, &tool_call_info);
 
@@ -234,6 +284,9 @@ impl PopupService {
                 )
             })
             .collect();
+
+        // Ensure height_percent is within reasonable bounds
+        let height_percent = height_percent.max(0.3).min(0.9); // Between 30% and 90%
 
         // Create popup configuration with tabs
         let mut config = PopupConfig::new()
@@ -271,14 +324,14 @@ impl PopupService {
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
                 Span::raw(" to scroll  "),
                 Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::raw(": exit"),
+                Span::raw(" exit"),
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
                 width_percent: 0.8,
-                height_percent: 0.7,
+                height_percent: height_percent,
                 min_width: 30,
-                min_height: 20,
+                min_height: 30,
             });
 
         // Add all tabs
@@ -395,7 +448,7 @@ impl PopupService {
             );
 
             // Recreate the popup with updated status and preserve selected tab
-            self.popup = self.create_popup_with_tool_calls(&self.tool_calls);
+            self.popup = self.create_popup_with_tool_calls(&self.tool_calls, self.terminal_size);
             // Set the selected tab to maintain the current selection
             self.popup.set_selected_tab(self.selected_index);
             // Make sure the popup stays visible after recreation
