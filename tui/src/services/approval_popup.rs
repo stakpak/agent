@@ -341,8 +341,8 @@ impl PopupService {
             .position(PopupPosition::Responsive {
                 width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
                 height_percent,
-                min_width: 30,
-                min_height: 30,
+                min_width: 80, // Temporarily high to test width check
+                min_height: 10,
             });
 
         // Add all tabs
@@ -432,7 +432,7 @@ impl PopupService {
                 width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
                 height_percent: 0.7,
                 min_width: 30,
-                min_height: 20,
+                min_height: 10,
             });
 
         PopupWidget::new(config)

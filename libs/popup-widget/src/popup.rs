@@ -512,7 +512,6 @@ impl PopupWidget {
         // Create a bordered block for the message
         let message_block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
             .style(self.config.border_style);
 
         // Render the message with the same border style as the popup
