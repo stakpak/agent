@@ -83,10 +83,7 @@ impl PopupContent for StyledLineContent {
     /// Calculate the actual rendered height with text wrapping
     fn calculate_rendered_height(&self) -> usize {
         // Simple approach: just use the raw line count without complex wrapping calculation
-        let raw_line_count = self.lines.len();
-
-        // Just use raw line count - no adjustments needed
-        raw_line_count
+        self.lines.len()
     }
 
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {
@@ -136,7 +133,7 @@ impl PopupContent for TextContent {
             .text
             .lines()
             .skip(scroll) // Skip lines based on scroll offset
-            .map(|line| Line::from(line))
+            .map(Line::from)
             .collect();
 
         let widget = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
@@ -159,10 +156,7 @@ impl PopupContent for TextContent {
     fn calculate_rendered_height(&self) -> usize {
         // Simple approach: just use the raw line count without complex wrapping calculation
         let lines: Vec<&str> = self.text.lines().collect();
-        let raw_line_count = lines.len();
-
-        // Just use raw line count - no adjustments needed
-        raw_line_count
+        lines.len()
     }
 
     fn clone_box(&self) -> Box<dyn PopupContent + Send + Sync> {

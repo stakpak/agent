@@ -231,6 +231,7 @@ impl Tab {
 }
 
 /// Custom tab rendering function that creates styled tab buttons
+#[allow(clippy::too_many_arguments)]
 pub fn render_custom_tabs(
     f: &mut Frame,
     area: Rect,
