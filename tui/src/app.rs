@@ -189,6 +189,8 @@ pub struct AppState {
 
     pub message_approved_tools: Vec<ToolCall>,
     pub message_rejected_tools: Vec<ToolCall>,
+
+    pub toggle_approved_message: bool,
 }
 
 #[derive(Debug)]
@@ -418,6 +420,7 @@ impl AppState {
             approval_popup: PopupService::new(),
             message_approved_tools: Vec::new(),
             message_rejected_tools: Vec::new(),
+            toggle_approved_message: true,
         }
     }
 

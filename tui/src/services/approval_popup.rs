@@ -323,7 +323,7 @@ impl PopupService {
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
                 Span::raw(" to scroll  "),
                 Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::raw(" exit"),
+                Span::raw(" exit and approve manually"),
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {

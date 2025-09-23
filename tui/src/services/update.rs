@@ -163,6 +163,7 @@ pub fn update(
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
+            state.toggle_approved_message = true;
             state.message_approved_tools.clear();
             state.message_rejected_tools.clear();
             state.message_tool_calls = None;
@@ -367,20 +368,20 @@ pub fn update(
                 return;
             }
 
+            state.dialog_command = Some(tool_call.clone());
+            state.is_dialog_open = true;
+            state.loading = false;
+            state.dialog_focused = false;
+
             // Tool call is pending - check if we should show popup first
             if let Some(ref message_tool_calls) = state.message_tool_calls
                 && message_tool_calls.len() > 1
+                && state.toggle_approved_message
             {
                 state.approval_popup =
                     PopupService::new_with_tool_calls(message_tool_calls.clone(), terminal_size);
                 return;
             }
-
-            // Show confirmation dialog as usual for single tool call or non-prompt tools
-            state.dialog_command = Some(tool_call.clone());
-            state.is_dialog_open = true;
-            state.loading = false;
-            state.dialog_focused = false;
         }
 
         InputEvent::MessageToolCalls(tool_calls) => {
@@ -402,6 +403,7 @@ pub fn update(
         InputEvent::HandleEsc => {
             if state.approval_popup.is_visible() {
                 state.approval_popup.escape();
+                state.toggle_approved_message = false;
                 return; // TODO: either reject all or add a toggle event to toggle back the popup.
             }
             handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
