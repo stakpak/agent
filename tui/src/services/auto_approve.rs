@@ -443,6 +443,37 @@ impl AutoApproveManager {
         &self.config
     }
 
+    /// Returns a filtered list of tool calls that require user approval (prompt)
+    /// This excludes tool calls that are auto-approved or should never be approved
+    pub fn get_prompt_tool_calls(&self, tool_calls: &[ToolCall]) -> Vec<ToolCall> {
+        tool_calls
+            .iter()
+            .filter(|tool_call| {
+                if !self.config.enabled {
+                    return true; // If auto-approve is disabled, all tools need prompting
+                }
+
+                let policy = self.get_policy_for_tool(tool_call);
+                match policy {
+                    AutoApprovePolicy::Auto => false,  // Skip auto-approved tools
+                    AutoApprovePolicy::Never => false, // Skip tools that should never be approved
+                    AutoApprovePolicy::Prompt => true, // Always prompt for these
+                    AutoApprovePolicy::Smart => !self.is_safe_command(tool_call), // Only prompt if not safe
+                }
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Returns a filtered list of tool calls that can be auto-approved
+    pub fn get_auto_approve_tool_calls(&self, tool_calls: &[ToolCall]) -> Vec<ToolCall> {
+        tool_calls
+            .iter()
+            .filter(|tool_call| self.should_auto_approve(tool_call))
+            .cloned()
+            .collect()
+    }
+
     fn save_config(&self) -> Result<(), String> {
         // Ensure directory exists
         if let Some(parent) = self.config_path.parent() {
