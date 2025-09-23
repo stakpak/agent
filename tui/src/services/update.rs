@@ -314,8 +314,13 @@ pub fn update(
                 .map(|tool_calls| tool_calls.len())
                 .unwrap_or(0);
 
-            if tool_call_count > 1 {
-                state.approval_popup.toggle();
+            let prompt_tool_calls = state
+                .auto_approve_manager
+                .get_prompt_tool_calls(&state.message_tool_calls.as_ref().unwrap());
+
+            if tool_call_count > 1 && prompt_tool_calls.len() > 0 {
+                state.approval_popup = PopupService::new_with_tool_calls(prompt_tool_calls);
+                // Popup is already visible after creation, no need to toggle
             }
 
             // Check if auto-approve should be used
@@ -335,12 +340,6 @@ pub fn update(
 
         InputEvent::MessageToolCalls(tool_calls) => {
             state.message_tool_calls = Some(tool_calls.clone());
-
-            // Update approval popup with tool calls if there are multiple
-            if tool_calls.len() > 1 {
-                state.approval_popup = PopupService::new_with_tool_calls(tool_calls);
-                state.approval_popup.toggle();
-            }
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
