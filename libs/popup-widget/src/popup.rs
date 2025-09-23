@@ -229,13 +229,15 @@ impl PopupWidget {
         }
 
         // Add footer constraint if footer is enabled
-        let has_footer = self.config.footer.is_some();
+        let has_footer = self.config.footer.is_some() || self.config.styled_footer.is_some();
         let footer_height = if has_footer {
-            self.config
-                .footer
-                .as_ref()
-                .map(|footer| footer.len())
-                .unwrap_or(0)
+            if let Some(styled_footer) = &self.config.styled_footer {
+                styled_footer.len()
+            } else if let Some(footer) = &self.config.footer {
+                footer.len()
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -352,7 +354,32 @@ impl PopupWidget {
         }
 
         // Render footer if present
-        if let Some(footer_lines) = &self.config.footer {
+        if let Some(footer_lines) = &self.config.styled_footer {
+            let footer_area = if has_footer {
+                // Calculate footer area index based on whether subheader is present
+                let footer_index = if has_subheader {
+                    chunk_index + 6 // Skip tab headers, space, subheader, space, content, and space
+                } else {
+                    chunk_index + 4 // Skip tab headers, space, content, and space
+                };
+                chunks[footer_index]
+            } else {
+                return; // No footer area allocated
+            };
+
+            eprintln!(
+                "DEBUG: Rendering styled footer - area: {}x{}, lines: {}",
+                footer_area.width,
+                footer_area.height,
+                footer_lines.len()
+            );
+            for (i, line) in footer_lines.iter().enumerate() {
+                eprintln!("DEBUG: Footer line {}: {:?}", i, line);
+            }
+            let footer_paragraph =
+                Paragraph::new(footer_lines.clone()).style(self.config.background_style);
+            f.render_widget(footer_paragraph, footer_area);
+        } else if let Some(footer_lines) = &self.config.footer {
             let footer_area = if has_footer {
                 // Calculate footer area index based on whether subheader is present
                 let footer_index = if has_subheader {
@@ -390,13 +417,15 @@ impl PopupWidget {
         }
 
         // Add footer constraint if footer is enabled
-        let has_footer = self.config.footer.is_some();
+        let has_footer = self.config.footer.is_some() || self.config.styled_footer.is_some();
         let footer_height = if has_footer {
-            self.config
-                .footer
-                .as_ref()
-                .map(|footer| footer.len())
-                .unwrap_or(0)
+            if let Some(styled_footer) = &self.config.styled_footer {
+                styled_footer.len()
+            } else if let Some(footer) = &self.config.footer {
+                footer.len()
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -444,7 +473,26 @@ impl PopupWidget {
             content.render(f, content_area, self.state.scroll);
 
             // Render footer if present
-            if let Some(footer_lines) = &self.config.footer {
+            if let Some(footer_lines) = &self.config.styled_footer {
+                let footer_area = if has_footer {
+                    chunks[chunk_index + 2] // Skip content and space
+                } else {
+                    return; // No footer area allocated
+                };
+
+                eprintln!(
+                    "DEBUG: Rendering styled footer (no tabs) - area: {}x{}, lines: {}",
+                    footer_area.width,
+                    footer_area.height,
+                    footer_lines.len()
+                );
+                for (i, line) in footer_lines.iter().enumerate() {
+                    eprintln!("DEBUG: Footer line {}: {:?}", i, line);
+                }
+                let footer_paragraph =
+                    Paragraph::new(footer_lines.clone()).style(self.config.background_style);
+                f.render_widget(footer_paragraph, footer_area);
+            } else if let Some(footer_lines) = &self.config.footer {
                 let footer_area = if has_footer {
                     chunks[chunk_index + 2] // Skip content and space
                 } else {
@@ -599,7 +647,7 @@ impl PopupWidget {
         let content_area = self.calculate_content_area(popup_area);
 
         // Check if footer is present
-        let has_footer = self.config.footer.is_some();
+        let has_footer = self.config.footer.is_some() || self.config.styled_footer.is_some();
 
         // Check if current tab has subheader
         let has_subheader = self

@@ -36,7 +36,7 @@ use crate::services::message::{extract_full_command_arguments, get_command_type_
 use crate::services::message_pattern::spans_to_string;
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 
 /// Tool call approval status
@@ -261,9 +261,18 @@ impl PopupService {
                 let terminal_info = detect_term::detect_terminal();
                 is_unsupported_terminal(&terminal_info.emulator)
             })
-            .footer(Some(vec![
-                "Enter submit    ←→ for action    Space toggle approve/reject   ↑↓ to scroll    Esc exit".to_string(),
-            ]))
+            .styled_footer(Some(vec![Line::from(vec![
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::raw(" submit  "),
+                Span::styled("←→", Style::default().fg(Color::Yellow)),
+                Span::raw(" for action  "),
+                Span::styled("Space", Style::default().fg(Color::Cyan)),
+                Span::raw(" toggle approve/reject  "),
+                Span::styled("↑↓", Style::default().fg(Color::Magenta)),
+                Span::raw(" to scroll  "),
+                Span::styled("Esc", Style::default().fg(Color::Red)),
+                Span::raw(": exit"),
+            ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
                 width_percent: 0.8,
