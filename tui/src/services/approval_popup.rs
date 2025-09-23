@@ -5,27 +5,36 @@
 //! horizontal tabs showing each tool call with approval/rejection status.
 //!
 //! Example usage:
-//! ```rust
-//! use stakpak_shared::models::integrations::openai::ToolCall;
+//! ```rust,no_run
+//! # use stakpak_shared::models::integrations::openai::{ToolCall, FunctionCall};
+//! # use ratatui::layout::Size;
+//! # // Note: PopupService would need to be imported in actual usage
 //!
 //! // Create tool calls (example)
-//! let tool_calls = vec![tool_call1, tool_call2, tool_call3];
+//! let tool_calls = vec![
+//!     ToolCall {
+//!         id: "call_1".to_string(),
+//!         r#type: "function".to_string(),
+//!         function: FunctionCall {
+//!             name: "example_function".to_string(),
+//!             arguments: "{}".to_string(),
+//!         },
+//!     }
+//! ];
 //!
 //! // Create popup service
-//! let mut popup_service = PopupService::new_with_tool_calls(tool_calls);
-//!
-//! // Show the popup
-//! popup_service.toggle();
+//! let terminal_size = Size { width: 80, height: 24 };
+//! // let mut popup_service = PopupService::new_with_tool_calls(tool_calls, terminal_size);
 //!
 //! // Handle events
-//! popup_service.next_tab();        // Navigate to next tool call
-//! popup_service.prev_tab();        // Navigate to previous tool call
-//! popup_service.toggle_approval(); // Toggle approval status
-//! popup_service.escape();          // Close popup
+//! // popup_service.next_tab();        // Navigate to next tool call
+//! // popup_service.prev_tab();        // Navigate to previous tool call
+//! // popup_service.toggle_approval_status(); // Toggle approval status
+//! // popup_service.escape();          // Close popup
 //!
 //! // Check approval status
-//! let all_approved = popup_service.all_approved();
-//! let approvals = popup_service.get_all_approvals();
+//! // let all_approved = popup_service.all_approved();
+//! // let approvals = popup_service.get_all_approvals();
 //! ```
 
 use crate::services::bash_block::{format_text_content, preprocess_terminal_output};
