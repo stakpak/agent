@@ -14,6 +14,7 @@ use crate::services::message::{
     get_wrapped_message_lines_cached,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
@@ -36,6 +37,7 @@ pub fn update(
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     shell_tx: &Sender<InputEvent>,
+    terminal_size: Size,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
@@ -107,20 +109,7 @@ pub fn update(
                 }
             }
         }
-        InputEvent::BulkAutoApproveMessage => {
-            state.auto_approve_message = true;
-            if let Some(dialog_command) = &state.dialog_command {
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-            }
-            state.is_dialog_open = false;
-            state.dialog_selected = 0;
-            state.dialog_command = None;
-            state.dialog_focused = false;
-            state.text_area.set_text("");
-        }
-        InputEvent::ResetAutoApproveMessage => {
-            state.auto_approve_message = false;
-        }
+
         InputEvent::InputChanged(c) => {
             if state.approval_popup.is_visible() {
                 if c == ' ' {
@@ -134,8 +123,31 @@ pub fn update(
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
             if state.approval_popup.is_visible() {
-                // TODO: Handle approval popup submission
-                state.approval_popup.escape(); // For now, just close
+                state.message_approved_tools = state
+                    .approval_popup
+                    .get_approved_tool_calls()
+                    .into_iter()
+                    .map(|tool| tool.clone())
+                    .collect();
+                state.message_rejected_tools = state
+                    .approval_popup
+                    .get_rejected_tool_calls()
+                    .into_iter()
+                    .map(|tool| tool.clone())
+                    .collect();
+
+                if let Some(dialog_command) = &state.dialog_command {
+                    if state.message_tool_calls.is_some() {
+                        state
+                            .message_tool_calls
+                            .as_mut()
+                            .unwrap()
+                            .retain(|tool| tool.id != dialog_command.id);
+                    }
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+                }
+
+                state.approval_popup.escape();
                 return;
             }
             if !state.is_pasting {
@@ -154,6 +166,9 @@ pub fn update(
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
+            state.message_approved_tools = Vec::new();
+            state.message_rejected_tools = Vec::new();
+            state.message_tool_calls = None;
         }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
@@ -285,7 +300,7 @@ pub fn update(
                 );
             }
         }
-
+      
         InputEvent::ShowConfirmationDialog(tool_call) => {
             // Store the latest tool call for potential retry (only for run_command)
             if tool_call.function.name == "run_command" {
@@ -308,34 +323,35 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
-            let tool_call_count = state
-                .message_tool_calls
-                .as_ref()
-                .map(|tool_calls| tool_calls.len())
-                .unwrap_or(0);
-
             let prompt_tool_calls = state
                 .auto_approve_manager
-                .get_prompt_tool_calls(&state.message_tool_calls.as_ref().unwrap());
+                .get_prompt_tool_calls(state.message_tool_calls.as_ref().unwrap());
 
-            if tool_call_count > 1 && prompt_tool_calls.len() > 0 {
-                // Create a terminal size rect from the available dimensions
-                let terminal_size = ratatui::layout::Rect::new(
-                    0,
-                    0,
-                    message_area_width as u16,
-                    message_area_height as u16,
-                );
+            if state.message_tool_calls.is_some() && prompt_tool_calls.len() > 0 {
+                // check if approved tools has dialog_command tool id
+                if state
+                    .message_approved_tools
+                    .iter()
+                    .any(|tool| tool.id == tool_call.id)
+                {
+                    // send accept tool event
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                    return;
+                } else if state
+                    .message_rejected_tools
+                    .iter()
+                    .any(|tool| tool.id == tool_call.id)
+                {
+                    state.is_dialog_open = true;
+                    // check if rejected tools has dialog_command tool id
+                    // send HandleEsc event
+                    let _ = input_tx.try_send(InputEvent::HandleEsc);
+                    return;
+                }
+                // get approved tool calls and
                 state.approval_popup =
                     PopupService::new_with_tool_calls(prompt_tool_calls, terminal_size);
-            }
-
-            // Check if auto-approve should be used
-            if state.auto_approve_manager.should_auto_approve(&tool_call)
-                || (tool_call_count > 0 && state.auto_approve_message)
-            {
-                // Auto-approve the tool call
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
+                return;
             } else {
                 // Show confirmation dialog as usual
                 state.dialog_command = Some(tool_call.clone());
@@ -782,9 +798,6 @@ fn handle_esc(
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
-    }
-    if state.auto_approve_message {
-        state.auto_approve_message = false;
     }
 
     state.is_streaming = false;
@@ -1391,10 +1404,6 @@ fn handle_retry_tool_call(
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
-    }
-
-    if state.auto_approve_message {
-        state.auto_approve_message = false;
     }
 
     if let Some(tool_call) = &state.latest_tool_call {

@@ -99,6 +99,8 @@ pub async fn run_tui(
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
+    let term_size = terminal.size()?;
+
     let mut state = AppState::new(
         latest_version,
         redact_secrets,
@@ -158,7 +160,7 @@ pub async fn run_tui(
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
 
-                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_autocomplete_results();
                        terminal.draw(|f| view::view(f, &mut state))?;
                        continue;
@@ -181,7 +183,6 @@ pub async fn run_tui(
 
                    if let InputEvent::Quit = event { should_quit = true; }
                    else {
-                       let term_size = terminal.size()?;
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
@@ -206,7 +207,7 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_autocomplete_results();
                    }
                }
@@ -246,7 +247,7 @@ pub async fn run_tui(
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx);
+                       services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.update_session_empty_status();
                        state.poll_autocomplete_results();
                    }

@@ -38,17 +38,8 @@ pub fn render_confirmation_dialog(f: &mut Frame, state: &mut AppState) {
         height: dialog_height,
     };
 
-    let tool_call_count = state
-        .message_tool_calls
-        .as_ref()
-        .map(|tool_calls| tool_calls.len())
-        .unwrap_or(0);
-
-    let mut message =
+    let message =
         "Press Enter to continue. '$' to run the command yourself or Esc to cancel and reprompt";
-    if tool_call_count > 1 {
-        message = "Press Enter to approve once. Ctrl+k to approve all. '$' to run the command yourself or Esc to cancel and reprompt.";
-    }
 
     let line = Line::from(vec![Span::styled(
         message,

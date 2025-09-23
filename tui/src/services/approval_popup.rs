@@ -35,6 +35,7 @@ use crate::services::markdown_renderer::render_markdown_to_lines;
 use crate::services::message::{extract_full_command_arguments, get_command_type_name};
 use crate::services::message_pattern::spans_to_string;
 use popup_widget::{PopupConfig, PopupPosition, PopupWidget, StyledLineContent, Tab};
+use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
@@ -74,10 +75,8 @@ impl PopupService {
     }
 
     /// Create a new popup service with tool calls
-    pub fn new_with_tool_calls(
-        tool_calls: Vec<ToolCall>,
-        terminal_size: ratatui::layout::Rect,
-    ) -> Self {
+    pub fn new_with_tool_calls(tool_calls: Vec<ToolCall>, terminal_size: Size) -> Self {
+        let term_rect = ratatui::layout::Rect::new(0, 0, terminal_size.width, terminal_size.height);
         let tool_call_infos: Vec<ToolCallInfo> = tool_calls
             .into_iter()
             .map(|tool_call| ToolCallInfo {
@@ -90,11 +89,11 @@ impl PopupService {
             popup: Self::create_empty_popup(),
             tool_calls: tool_call_infos.clone(),
             selected_index: 0,
-            terminal_size,
+            terminal_size: term_rect,
         };
 
         // Create the popup with the actual content
-        service.popup = service.create_popup_with_tool_calls(&tool_call_infos, terminal_size);
+        service.popup = service.create_popup_with_tool_calls(&tool_call_infos, term_rect);
         service.popup.show();
         service
     }
@@ -205,14 +204,14 @@ impl PopupService {
             .map(|tool_call_info| self.render_subheader(&tool_call_info.tool_call, tool_call_info))
             .collect();
 
-        let tolerance = 1;
+        let tolerance = 8;
 
         // Ensure minimum terminal height to prevent calculation issues
         let min_terminal_height = 20;
         let safe_terminal_height = terminal_size.height.max(min_terminal_height);
 
         // Calculate intended height (70% of terminal height for content area)
-        let intended_height = (safe_terminal_height as f32 * 0.7) as usize;
+        let intended_height = safe_terminal_height as usize;
 
         // Calculate height based on tallest content (initial sizing)
         let mut max_content_height = 0;
@@ -224,7 +223,7 @@ impl PopupService {
         }
 
         // Calculate content height with tolerance
-        let content_with_tolerance = max_content_height + tolerance;
+        let content_with_tolerance = max_content_height + tolerance + 6;
 
         // If content is small, use content height. If content is large, cap at intended height
         let final_height = if content_with_tolerance < intended_height {
@@ -331,7 +330,7 @@ impl PopupService {
                 Span::styled("Enter", Style::default().fg(Color::Green)),
                 Span::raw(" submit  "),
                 Span::styled("←→", Style::default().fg(Color::Yellow)),
-                Span::raw(" for action  "),
+                Span::raw(" select action  "),
                 Span::styled("Space", Style::default().fg(Color::Cyan)),
                 Span::raw(" toggle approve/reject  "),
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
@@ -577,12 +576,12 @@ impl PopupService {
         let tool_status_line = Line::from(vec![
             ratatui::text::Span::styled("Tool".to_string(), Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(
-                format!(" {}", tool_name),
+                format!(" {} ", tool_name),
                 Style::default().fg(Color::Gray),
             ),
-            ratatui::text::Span::styled("       ".to_string(), Style::default()),
-            ratatui::text::Span::styled("Status ", Style::default().fg(Color::DarkGray)),
+            ratatui::text::Span::styled("(", Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
+            ratatui::text::Span::styled(")", Style::default().fg(Color::DarkGray)),
         ]);
         lines.push((tool_status_line, Style::default()));
 
