@@ -210,6 +210,24 @@ impl Tab {
             subheader,
         }
     }
+
+    pub fn new_with_custom_title_and_subheader<C: TabContent + Send + Sync + 'static>(
+        id: String,
+        title: String,
+        content: C,
+        custom_title_line: Line<'static>,
+        subheader: Option<Vec<(Line<'static>, Style)>>,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            content: Box::new(content),
+            scroll: 0,
+            status_color: None,
+            custom_title_line: Some(custom_title_line),
+            subheader,
+        }
+    }
 }
 
 /// Custom tab rendering function that creates styled tab buttons
