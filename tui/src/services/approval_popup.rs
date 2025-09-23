@@ -49,6 +49,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
 
+/// Default width percentage for approval popup
+const APPROVAL_POPUP_WIDTH_PERCENT: f32 = 0.8;
+
 /// Tool call approval status
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalStatus {
@@ -336,7 +339,7 @@ impl PopupService {
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
-                width_percent: 0.8,
+                width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
                 height_percent,
                 min_width: 30,
                 min_height: 30,
@@ -426,7 +429,7 @@ impl PopupService {
             })
             .fixed_header_lines(0)
             .position(PopupPosition::Responsive {
-                width_percent: 0.8,
+                width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
                 height_percent: 0.7,
                 min_width: 30,
                 min_height: 20,
@@ -513,9 +516,34 @@ impl PopupService {
             .map(|info| &info.tool_call)
     }
 
+    /// Recreate the popup with new terminal size while preserving state
+    pub fn recreate_with_terminal_size(&mut self, new_terminal_size: Size) {
+        if self.tool_calls.is_empty() {
+            return;
+        }
+
+        // Store current state
+        let was_visible = self.is_visible();
+        let current_selected_index = self.selected_index;
+        let current_tool_calls = self.tool_calls.clone();
+
+        // Create new popup with updated terminal size
+        let term_rect =
+            ratatui::layout::Rect::new(0, 0, new_terminal_size.width, new_terminal_size.height);
+        self.terminal_size = term_rect;
+        self.popup = self.create_popup_with_tool_calls(&current_tool_calls, term_rect);
+
+        // Restore state
+        self.popup.set_selected_tab(current_selected_index);
+        if was_visible {
+            self.popup.show();
+        }
+    }
+
     /// Get the inner width of the popup
     pub fn inner_width(&self) -> usize {
-        self.popup.inner_width()
+        let term_width = self.terminal_size.width as usize;
+        (term_width as f32 * APPROVAL_POPUP_WIDTH_PERCENT) as usize
     }
 
     /// Render subheader for a tool call tab
