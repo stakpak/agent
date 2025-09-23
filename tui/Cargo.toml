@@ -23,6 +23,8 @@ console = "0.15"
 ansi-to-tui = "7.0.0"
 similar = { version = "2.7.0", features = ["inline"] }
 syntect = "5.2.0"
+nucleo-matcher = "0.3.1"
+ignore = "0.4.23"
 
 
 

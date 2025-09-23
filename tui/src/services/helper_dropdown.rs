@@ -74,7 +74,7 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
     }
 }
 
-pub fn render_autocomplete_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_file_search_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
     if !state.show_helper_dropdown {
         return;
     }
@@ -86,13 +86,13 @@ pub fn render_autocomplete_dropdown(f: &mut Frame, state: &AppState, area: Rect)
 }
 
 fn render_file_dropdown(f: &mut Frame, state: &AppState, area: Rect) {
-    let files = state.autocomplete.get_filtered_files();
+    let files = state.file_search.get_filtered_files();
     if files.is_empty() {
         return;
     }
 
     // Set title and styling based on trigger
-    let (title, title_color) = match state.autocomplete.trigger_char {
+    let (title, title_color) = match state.file_search.trigger_char {
         Some('@') => ("📁 Files (@)", Color::Cyan),
         None => ("📁 Files (Tab)", Color::Blue),
         _ => ("📁 Files", Color::Gray),

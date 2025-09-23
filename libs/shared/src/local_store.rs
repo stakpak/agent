@@ -1,13 +1,17 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 pub struct LocalStore {}
 
 impl LocalStore {
     pub fn get_local_session_store_path() -> PathBuf {
-        Path::new(".stakpak").join("session")
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(".stakpak")
+            .join("session")
+    }
+
+    pub fn get_backup_session_path(session_id: &str) -> PathBuf {
+        PathBuf::from("backups").join(session_id)
     }
 
     pub fn write_session_data(path: &str, data: &str) -> Result<String, String> {
@@ -17,10 +21,29 @@ impl LocalStore {
                 .map_err(|e| format!("Failed to create session directory: {}", e))?;
         }
 
-        let path = Self::get_local_session_store_path().join(path);
-        std::fs::write(&path, data)
-            .map_err(|e| format!("Failed to write session data to {}: {}", path.display(), e))?;
-        Ok(path.to_string_lossy().to_string())
+        let full_path = Self::get_local_session_store_path().join(path);
+
+        // Create parent directories if they don't exist
+        if let Some(parent_dir) = full_path.parent() {
+            if !parent_dir.exists() {
+                std::fs::create_dir_all(parent_dir).map_err(|e| {
+                    format!(
+                        "Failed to create parent directory {}: {}",
+                        parent_dir.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        std::fs::write(&full_path, data).map_err(|e| {
+            format!(
+                "Failed to write session data to {}: {}",
+                full_path.display(),
+                e
+            )
+        })?;
+        Ok(full_path.to_string_lossy().to_string())
     }
 
     pub fn read_session_data(path: &str) -> Result<String, String> {

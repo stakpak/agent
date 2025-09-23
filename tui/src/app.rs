@@ -1,7 +1,7 @@
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
-use crate::services::auto_complete::{AutoComplete, autocomplete_worker, find_at_trigger};
 use crate::services::detect_term::AdaptiveColors;
+use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
@@ -26,8 +26,8 @@ type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
 
 const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
-// --- NEW: Async autocomplete result struct ---
-pub struct AutoCompleteResult {
+// --- NEW: Async file_search result struct ---
+pub struct FileSearchResult {
     pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>,
     pub cursor_position: usize,
@@ -123,7 +123,7 @@ pub struct AppState {
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
     pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>, // NEW: for file autocomplete
+    pub filtered_files: Vec<String>, // NEW: for file file_search
     pub show_shortcuts: bool,
     pub is_dialog_open: bool,
     pub dialog_command: Option<ToolCall>,
@@ -149,16 +149,16 @@ pub struct AppState {
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
     pub dialog_message_id: Option<Uuid>,
-    pub autocomplete: AutoComplete,
+    pub file_search: FileSearch,
     pub secret_manager: SecretManager,
     pub latest_version: Option<String>,
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
     pub pasted_long_text: Option<String>,
     pub pasted_placeholder: Option<String>,
-    // --- NEW: autocomplete channels ---
-    pub autocomplete_tx: Option<mpsc::Sender<(String, usize)>>,
-    pub autocomplete_rx: Option<mpsc::Receiver<AutoCompleteResult>>,
+    // --- NEW: FileSearch channels ---
+    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
+    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
     pub is_streaming: bool,
     pub interactive_commands: Vec<String>,
     pub auto_approve_manager: AutoApproveManager,
@@ -332,16 +332,16 @@ impl AppState {
         allowed_tools: Option<&Vec<String>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
-        let (autocomplete_tx, autocomplete_rx) = mpsc::channel::<(String, usize)>(10);
-        let (result_tx, result_rx) = mpsc::channel::<AutoCompleteResult>(10);
+        let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
+        let (result_tx, result_rx) = mpsc::channel::<FileSearchResult>(10);
         let helpers_clone = helpers.clone();
-        let autocomplete_instance = AutoComplete::default();
-        // Spawn autocomplete worker from auto_complete.rs
-        tokio::spawn(autocomplete_worker(
-            autocomplete_rx,
+        let file_search_instance = FileSearch::default();
+        // Spawn file_search worker from file_search.rs
+        tokio::spawn(file_search_worker(
+            file_search_rx,
             result_tx,
             helpers_clone,
-            autocomplete_instance,
+            file_search_instance,
         ));
 
         AppState {
@@ -382,15 +382,15 @@ impl AppState {
             ondemand_shell_mode: false,
             shell_tool_calls: None,
             dialog_message_id: None,
-            autocomplete: AutoComplete::default(),
+            file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,
             pasted_long_text: None,
             pasted_placeholder: None,
-            autocomplete_tx: Some(autocomplete_tx),
-            autocomplete_rx: Some(result_rx),
+            file_search_tx: Some(file_search_tx),
+            file_search_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
@@ -506,19 +506,18 @@ impl AppState {
         });
     }
 
-    // --- NEW: Poll autocomplete results and update state ---
-    pub fn poll_autocomplete_results(&mut self) {
-        if let Some(rx) = &mut self.autocomplete_rx {
+    // --- NEW: Poll file_search results and update state ---
+    pub fn poll_file_search_results(&mut self) {
+        if let Some(rx) = &mut self.file_search_rx {
             while let Ok(result) = rx.try_recv() {
                 // Get input text before any mutable operations
                 let input_text = self.text_area.text().to_string();
 
                 let filtered_files = result.filtered_files.clone();
-                let is_files_empty = filtered_files.is_empty();
                 self.filtered_files = filtered_files;
-                self.autocomplete.filtered_files = self.filtered_files.clone();
-                self.autocomplete.is_file_mode = !self.filtered_files.is_empty();
-                self.autocomplete.trigger_char = if !self.filtered_files.is_empty() {
+                self.file_search.filtered_files = self.filtered_files.clone();
+                self.file_search.is_file_mode = !self.filtered_files.is_empty();
+                self.file_search.trigger_char = if !self.filtered_files.is_empty() {
                     Some('@')
                 } else {
                     None
@@ -539,7 +538,7 @@ impl AppState {
                     find_at_trigger(&result.input, result.cursor_position).is_some();
                 self.show_helper_dropdown = (input_text.trim().starts_with('/'))
                     || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
-                    || (has_at_trigger && !is_files_empty && !self.waiting_for_shell_input);
+                    || (has_at_trigger && !self.waiting_for_shell_input);
             }
         }
     }
