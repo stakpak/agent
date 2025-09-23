@@ -3,6 +3,8 @@ pub mod position;
 pub mod tab;
 pub mod traits;
 
+use ratatui::text::Line;
+
 pub use popup::PopupWidget;
 pub use position::PopupPosition;
 pub use tab::Tab;
@@ -56,7 +58,9 @@ pub struct PopupConfig {
     pub terminal_detector: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     /// Footer text (optional) - can be multiple lines
     pub footer: Option<Vec<String>>,
-    /// Footer style (color, modifiers, etc.)
+    /// Styled footer lines (optional) - takes precedence over footer if both are provided
+    pub styled_footer: Option<Vec<Line<'static>>>,
+    /// Footer style (color, modifiers, etc.) - applied to regular footer text
     pub footer_style: Option<Style>,
     /// Number of fixed lines at the top that should not scroll
     pub fixed_header_lines: usize,
@@ -92,6 +96,7 @@ impl Default for PopupConfig {
             use_fallback_colors: false,
             terminal_detector: None,
             footer: None,
+            styled_footer: None,
             footer_style: None,
             fixed_header_lines: 0,
             subheader_style: Style::default()
@@ -205,6 +210,12 @@ impl PopupConfig {
     /// Set the footer text (can be multiple lines)
     pub fn footer(mut self, footer: Option<Vec<String>>) -> Self {
         self.footer = footer;
+        self
+    }
+
+    /// Set the styled footer lines (takes precedence over regular footer)
+    pub fn styled_footer(mut self, styled_footer: Option<Vec<Line<'static>>>) -> Self {
+        self.styled_footer = styled_footer;
         self
     }
 
