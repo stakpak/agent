@@ -319,8 +319,15 @@ pub fn update(
                 .get_prompt_tool_calls(&state.message_tool_calls.as_ref().unwrap());
 
             if tool_call_count > 1 && prompt_tool_calls.len() > 0 {
-                state.approval_popup = PopupService::new_with_tool_calls(prompt_tool_calls);
-                // Popup is already visible after creation, no need to toggle
+                // Create a terminal size rect from the available dimensions
+                let terminal_size = ratatui::layout::Rect::new(
+                    0,
+                    0,
+                    message_area_width as u16,
+                    message_area_height as u16,
+                );
+                state.approval_popup =
+                    PopupService::new_with_tool_calls(prompt_tool_calls, terminal_size);
             }
 
             // Check if auto-approve should be used
