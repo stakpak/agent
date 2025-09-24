@@ -657,7 +657,8 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
-                let rendered_lines = if tool_call.function.name == "str_replace"
+                let rendered_lines = if (tool_call.function.name == "str_replace"
+                    || tool_call.function.name == "create")
                     && !render_file_diff(tool_call, width).is_empty()
                 {
                     render_file_diff(tool_call, width)

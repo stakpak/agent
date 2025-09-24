@@ -688,7 +688,7 @@ pub fn render_file_diff_full(
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    if tool_call.function.name == "str_replace" {
+    if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
         let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);

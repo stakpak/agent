@@ -12,9 +12,15 @@ pub fn preview_str_replace_editor_style(
     new_str: &str,
     replace_all: bool,
     terminal_width: usize,
+    diff_type: &str,
 ) -> Result<(Vec<Line<'static>>, usize, usize, usize), std::io::Error> {
     // Read the current file content
-    let original_content = fs::read_to_string(file_path)?;
+    let original_content = match diff_type {
+        "str_replace" => fs::read_to_string(file_path)?,
+        "remove" => "".to_string(),
+        "create" => "".to_string(),
+        _ => fs::read_to_string(file_path)?,
+    };
 
     // Create the new content with the replacement
     // TODO:: GET THE REAL VALUE OF REDACTED SECRETS FROM SECRETS MANAGER
@@ -435,14 +441,24 @@ pub fn render_file_diff_block(
         .unwrap_or_else(|_| serde_json::json!({}));
 
     let old_str = args["old_str"].as_str().unwrap_or("");
-    let new_str = args["new_str"].as_str().unwrap_or("");
+    let new_str = if tool_call.function.name == "create" {
+        args["file_text"].as_str().unwrap_or("")
+    } else {
+        args["new_str"].as_str().unwrap_or("")
+    };
     let path = args["path"].as_str().unwrap_or("");
     let replace_all = args["replace_all"].as_bool().unwrap_or(false);
 
     // Now you can use these variables with preview_str_replace_editor_style
-    let (diff_lines, deletions, insertions, first_change_index) =
-        preview_str_replace_editor_style(path, old_str, new_str, replace_all, terminal_width)
-            .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
+    let (diff_lines, deletions, insertions, first_change_index) = preview_str_replace_editor_style(
+        path,
+        old_str,
+        new_str,
+        replace_all,
+        terminal_width,
+        &tool_call.function.name,
+    )
+    .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
     let mut lines = Vec::new();
 
