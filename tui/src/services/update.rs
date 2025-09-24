@@ -410,6 +410,16 @@ pub fn update(
                 state.approval_popup.escape();
                 state.toggle_approved_message = false;
                 return; // TODO: either reject all or add a toggle event to toggle back the popup.
+            } else if !state.approval_popup.is_visible() {
+                // all approved tool calls should be rejected
+                state.message_rejected_tools = state
+                    .approval_popup
+                    .get_approved_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                state.message_approved_tools.clear();
+                state.message_tool_calls = None;
             }
             handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
         }
