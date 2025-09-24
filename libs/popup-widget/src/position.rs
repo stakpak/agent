@@ -100,8 +100,8 @@ impl PopupPosition {
             } => {
                 let width_too_small = terminal_size.width < *min_width;
                 let height_too_small = terminal_size.height < *min_height;
-                let too_small = width_too_small || height_too_small;
-                too_small
+                
+                width_too_small || height_too_small
             }
             _ => false, // Other position types don't have viewport size checks
         }
