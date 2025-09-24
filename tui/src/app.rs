@@ -66,6 +66,14 @@ pub enum LoadingOperation {
     CheckpointResume,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCallStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Executed,
+}
+
 #[derive(Debug)]
 pub struct LoadingStateManager {
     active_operations: std::collections::HashSet<LoadingOperation>,
@@ -193,6 +201,9 @@ pub struct AppState {
 
     pub toggle_approved_message: bool,
     pub terminal_size: Size,
+
+    // Session tool calls queue to track tool call status
+    pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
 }
 
 #[derive(Debug)]
@@ -428,6 +439,7 @@ impl AppState {
                 width: 0,
                 height: 0,
             },
+            session_tool_calls_queue: std::collections::HashMap::new(),
         }
     }
 

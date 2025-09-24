@@ -22,6 +22,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
 
+use crate::app::ToolCallStatus;
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::message::Message;
@@ -167,6 +168,7 @@ pub async fn run_tui(
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        services::update::clear_streaming_tool_results(&mut state);
+                       state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_call_result.call.function.name == "run_command" {
 
                             state.latest_tool_call = Some(tool_call_result.call.clone());
