@@ -313,8 +313,8 @@ impl PopupService {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )
-            .background_style(Style::default().bg(Color::Black))
-            .popup_background_style(Style::default().bg(Color::Black))
+            .background_style(Style::default().bg(Color::Reset))
+            .popup_background_style(Style::default().bg(Color::Reset))
             .show_tabs(true)
             .tab_alignment(popup_widget::Alignment::Left)
             .tab_style(Style::default().fg(Color::White).bg(Color::DarkGray))
@@ -577,7 +577,6 @@ impl PopupService {
 
         // Create a line with tool name and status on the same line
         let tool_status_line = Line::from(vec![
-            ratatui::text::Span::styled("Tool".to_string(), Style::default().fg(Color::DarkGray)),
             ratatui::text::Span::styled(
                 format!(" {} ", tool_name),
                 Style::default().fg(Color::Gray),
