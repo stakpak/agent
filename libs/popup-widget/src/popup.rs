@@ -709,15 +709,17 @@ impl PopupWidget {
 
         // Subtract fixed header lines from content height for scroll calculation
         let scrollable_content_height =
-            content_height.saturating_sub(self.config.fixed_header_lines);
+            content_height.saturating_sub(self.config.fixed_header_lines) + 3;
 
         // Calculate max scroll: allow scrolling if content has more than 1 line
         // This enables scrolling even when there's extra space available
+        // Add 1 to account for the difference between available height and actual rendering height
         if scrollable_content_height > 1 {
-            scrollable_content_height.saturating_sub(scrollable_available_height)
+            scrollable_content_height.saturating_sub(scrollable_available_height) + 1
         } else {
             0
         }
+
     }
 
     /// Switch to specific tab
