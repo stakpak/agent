@@ -368,11 +368,8 @@ pub fn update(
                 let tool_call_clone = tool_call.clone();
                 let output_tx_clone = output_tx.clone();
 
-                tokio::spawn(async move {
-                    // Wait 500ms before sending the tool call
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
-                });
+                let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
+
 
                 state.is_dialog_open = false;
                 state.dialog_selected = 0;
@@ -395,11 +392,8 @@ pub fn update(
                 // Tool call is rejected, cancel it
                 state.is_dialog_open = true;
                 let input_tx_clone = input_tx.clone();
-                tokio::spawn(async move {
-                    // Wait 500ms before sending the tool call
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    let _ = input_tx_clone.try_send(InputEvent::HandleReject);
-                });
+                let _ = input_tx_clone.try_send(InputEvent::HandleReject);
+
                 return;
             }
 
