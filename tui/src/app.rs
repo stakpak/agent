@@ -230,6 +230,7 @@ pub enum InputEvent {
     Down,
     Quit,
     HandleEsc,
+    HandleReject,
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,

@@ -299,6 +299,10 @@ pub fn update(
             }
         }
 
+        InputEvent::HandleReject => {
+            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
+        }
+
         InputEvent::ShowConfirmationDialog(tool_call) => {
             // Store the latest tool call for potential retry (only for run_command)
             if tool_call.function.name == "run_command" {
@@ -366,10 +370,10 @@ pub fn update(
                 state.is_dialog_open = true;
                 let input_tx_clone = input_tx.clone();
                 tokio::spawn(async move {
+                    // Wait 500ms before sending the tool call
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    let _ = input_tx_clone.try_send(InputEvent::HandleEsc);
+                    let _ = input_tx_clone.try_send(InputEvent::HandleReject);
                 });
-
                 return;
             }
 
@@ -410,8 +414,7 @@ pub fn update(
                 state.approval_popup.escape();
                 state.toggle_approved_message = false;
                 return; // TODO: either reject all or add a toggle event to toggle back the popup.
-            } else if !state.approval_popup.is_visible() {
-                // all approved tool calls should be rejected
+            } else {
                 state.message_rejected_tools = state
                     .approval_popup
                     .get_approved_tool_calls()
@@ -420,8 +423,8 @@ pub fn update(
                     .collect();
                 state.message_approved_tools.clear();
                 state.message_tool_calls = None;
+                handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
             }
-            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
         }
 
         InputEvent::GetStatus(account_info) => {

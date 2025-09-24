@@ -113,10 +113,15 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
     } else if state.is_dialog_open {
         let mut spans_vec = vec![];
-        if !state.approval_popup.is_visible() {
+        if !state.approval_popup.is_visible() && state.message_tool_calls.is_some() {
             spans_vec.push(Span::styled("Enter", Style::default().fg(Color::Cyan)));
             spans_vec.push(Span::styled(
-                " show approval popup  ",
+                " show approval popup . ",
+                Style::default().fg(Color::Reset),
+            ));
+            spans_vec.push(Span::styled("Esc", Style::default().fg(Color::Red)));
+            spans_vec.push(Span::styled(
+                " reject all . ",
                 Style::default().fg(Color::Reset),
             ));
         }
