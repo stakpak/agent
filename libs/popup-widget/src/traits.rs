@@ -81,7 +81,7 @@ impl PopupContent for StyledLineContent {
 
         // Use black background for unsupported terminals, otherwise use the default
         let background_color = if self.is_unsupported_terminal {
-            ratatui::style::Color::Black
+            ratatui::style::Color::Reset
         } else {
             ratatui::style::Color::Rgb(24, 25, 36)
         };

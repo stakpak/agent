@@ -327,15 +327,18 @@ impl PopupService {
             })
             .styled_footer(Some(vec![Line::from(vec![
                 Span::styled("Enter", Style::default().fg(Color::Green)),
-                Span::raw(" submit  "),
+                Span::styled(" submit  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("←→", Style::default().fg(Color::Yellow)),
-                Span::raw(" select action  "),
+                Span::styled(" select action  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("Space", Style::default().fg(Color::Cyan)),
-                Span::raw(" toggle approve/reject  "),
+                Span::styled(
+                    " toggle approve/reject  ",
+                    Style::default().fg(Color::Indexed(254)),
+                ),
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
-                Span::raw(" to scroll  "),
+                Span::styled(" to scroll  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::raw(" exit and approve manually"),
+                Span::styled(" exit", Style::default().fg(Color::Indexed(254))),
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
