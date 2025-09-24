@@ -364,7 +364,12 @@ pub fn update(
 
                 // Tool call is rejected, cancel it
                 state.is_dialog_open = true;
-                handle_esc(state, output_tx, cancel_tx, input_tx, shell_tx);
+                let input_tx_clone = input_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    let _ = input_tx_clone.try_send(InputEvent::HandleEsc);
+                });
+
                 return;
             }
 
@@ -973,12 +978,12 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        if let Some(dialog_command) = &state.dialog_command {
-            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-        }
-        state.is_dialog_open = false;
+        // if let Some(dialog_command) = &state.dialog_command {
+        //     let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+        // }
+        state.approval_popup.toggle();
+        state.is_dialog_open = true;
         state.dialog_selected = 0;
-        state.dialog_command = None;
         state.dialog_focused = false;
         state.text_area.set_text("");
     // Reset focus when dialog closes

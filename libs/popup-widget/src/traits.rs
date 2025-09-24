@@ -1,4 +1,10 @@
-use ratatui::{layout::Rect, style::Style, text::Line, widgets::Paragraph, Frame};
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+    Frame,
+};
 
 /// Trait for popup content that can be rendered
 pub trait PopupContent: std::fmt::Debug {
@@ -76,7 +82,16 @@ impl PopupContent for StyledLineContent {
             .lines
             .iter()
             .skip(scroll) // Skip lines based on scroll offset
-            .map(|(line, style)| line.clone().patch_style(*style))
+            .map(|(line, style)| {
+                let mut padded_line =
+                    Line::from(vec![Span::styled(" ", ratatui::style::Style::default())]);
+                padded_line.spans.extend(
+                    line.spans
+                        .iter()
+                        .map(|span| span.clone().patch_style(*style)),
+                );
+                padded_line
+            })
             .collect();
 
         // Use black background for unsupported terminals, otherwise use the default

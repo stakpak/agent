@@ -465,10 +465,17 @@ pub fn render_file_diff_block(
     if deletions == 0 && insertions == 0 {
         return (vec![], vec![]);
     }
+
+    let title = if tool_call.function.name == "create" {
+        "Create"
+    } else {
+        "Editing"
+    };
     // Add header
     lines.push(Line::from(vec![Span::styled(
         format!(
-            "Editing {} file",
+            "{} {} file",
+            title,
             if deletions > 0 || insertions > 0 {
                 "1"
             } else {

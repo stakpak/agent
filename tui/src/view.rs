@@ -1,5 +1,4 @@
 use crate::app::AppState;
-use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -117,7 +116,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
-        render_confirmation_dialog(f, state);
+        // render_confirmation_dialog(f, state);
     } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);

@@ -702,8 +702,12 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
         ]
         .concat();
 
+        let title = get_command_type_name(tool_call);
+
+        let formatted_title = format!(" {} ", title);
+
         let result =
-            render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
+            render_styled_header_and_borders(&formatted_title, diff_lines, None, terminal_width);
 
         let adjusted_result = [
             vec![spacing_marker.clone()],

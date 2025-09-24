@@ -112,13 +112,22 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         ));
         f.render_widget(hint, area);
     } else if state.is_dialog_open {
-        // Show focus information when dialog is open
-        let focus_text = "Ctrl+o: toggle auto-approve";
-        let hint = Paragraph::new(Span::styled(
-            focus_text,
+        let mut spans_vec = vec![];
+        if !state.approval_popup.is_visible() {
+            spans_vec.push(Span::styled("Enter", Style::default().fg(Color::Cyan)));
+            spans_vec.push(Span::styled(
+                " show approval popup  ",
+                Style::default().fg(Color::Reset),
+            ));
+        }
+        spans_vec.push(Span::styled("Ctrl+o", Style::default().fg(Color::DarkGray)));
+        spans_vec.push(Span::styled(
+            " toggle auto-approve",
             Style::default().fg(Color::DarkGray),
-        ))
-        .alignment(ratatui::layout::Alignment::Right);
+        ));
+        // Show focus information when dialog is open
+        let hint =
+            Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
         f.render_widget(hint, area);
     }
 }
