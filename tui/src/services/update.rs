@@ -370,7 +370,6 @@ pub fn update(
 
                 let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
 
-
                 state.is_dialog_open = false;
                 state.dialog_selected = 0;
                 state.dialog_command = None;
