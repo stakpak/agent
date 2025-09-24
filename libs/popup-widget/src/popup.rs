@@ -252,10 +252,17 @@ impl PopupWidget {
             0
         };
 
+        // Calculate how many lines the tabs need
+        let tab_lines_needed = crate::tab::calculate_tab_lines_needed(
+            &self.config.tabs,
+            content_area.width,
+            self.config.text_between_tabs.as_ref(),
+        );
+
         if has_footer {
             let mut constraint_list = vec![
-                Constraint::Length(1), // Tab headers
-                Constraint::Length(1), // Space after tabs
+                Constraint::Length(tab_lines_needed as u16), // Tab headers (may be multiple lines)
+                Constraint::Length(1),                       // Space after tabs
             ];
 
             if has_subheader {
@@ -272,8 +279,8 @@ impl PopupWidget {
             constraints.extend(constraint_list);
         } else {
             let mut constraint_list = vec![
-                Constraint::Length(1), // Tab headers
-                Constraint::Length(1), // Space after tabs
+                Constraint::Length(tab_lines_needed as u16), // Tab headers (may be multiple lines)
+                Constraint::Length(1),                       // Space after tabs
             ];
 
             if has_subheader {
@@ -317,6 +324,18 @@ impl PopupWidget {
 
         let tab_header_area = chunks[chunk_index];
 
+        // If tabs need multiple lines, we need to create a larger area
+        let actual_tab_area = if tab_lines_needed > 1 {
+            Rect {
+                x: tab_header_area.x,
+                y: tab_header_area.y,
+                width: tab_header_area.width,
+                height: tab_lines_needed as u16,
+            }
+        } else {
+            tab_header_area
+        };
+
         // Calculate content area index based on whether subheader is present
         let content_area_index = if has_subheader {
             chunk_index + 4 // Skip tab headers, space, subheader, and space
@@ -326,7 +345,7 @@ impl PopupWidget {
         let tab_content_area = chunks[content_area_index];
 
         // Render tab headers
-        self.render_tab_headers(f, tab_header_area);
+        self.render_tab_headers(f, actual_tab_area);
 
         // Render subheader if present
         if has_subheader {
@@ -658,7 +677,14 @@ impl PopupWidget {
             if self.config.show_title {
                 fixed_height += 2; // Title + space
             }
-            fixed_height += 2; // Tabs + space
+
+            // Calculate how many lines the tabs need
+            let tab_lines_needed = crate::tab::calculate_tab_lines_needed(
+                &self.config.tabs,
+                content_area.width,
+                self.config.text_between_tabs.as_ref(),
+            );
+            fixed_height += tab_lines_needed + 1; // Tabs + space
             if has_subheader {
                 fixed_height += subheader_height + 1; // Subheader lines + space after subheader
             }
