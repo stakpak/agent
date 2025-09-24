@@ -373,14 +373,8 @@ impl PopupService {
     ) -> StyledLineContent {
         let mut lines = Vec::new();
 
-        lines.push((Line::from(""), Style::default()));
-        let mut output = extract_full_command_arguments(tool_call);
-
-        output = output
-            .lines()
-            .map(|line| format!("  {}", line))
-            .collect::<Vec<_>>()
-            .join("\n");
+        // lines.push((Line::from(""), Style::default()));
+        let output = extract_full_command_arguments(tool_call);
         let output = if tool_call.function.name == "run_command" {
             output.replace("command = ", "$ ")
         } else {
@@ -388,21 +382,21 @@ impl PopupService {
         };
 
         // Use the popup's inner width for text formatting
-        let inner_width = self.inner_width();
+        let inner_width = self.inner_width() - 2;
         let rendered_lines =
             if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
                 let (_diff_lines, full_diff_lines) = render_file_diff_block(tool_call, inner_width);
                 if !full_diff_lines.is_empty() {
                     full_diff_lines
                 } else {
-                    format_text_content(&output, inner_width - 2)
+                    format_text_content(&output, inner_width)
                 }
             } else if tool_call.function.name == "run_command" {
                 let processed_result = preprocess_terminal_output(&output);
                 let bash_text = format!("```bash\n{processed_result}\n```");
                 render_markdown_to_lines(&bash_text).unwrap_or_default()
             } else {
-                format_text_content(&output, inner_width - 2)
+                format_text_content(&output, inner_width)
             };
 
         lines.extend(rendered_lines.into_iter().map(|line| {
