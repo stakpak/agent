@@ -4844,6 +4844,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "similar",
  "stakpak-api",
  "stakpak-shared",
  "tempfile",

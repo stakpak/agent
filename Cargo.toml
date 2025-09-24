@@ -61,6 +61,7 @@ time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
+similar = { version = "2.7.0", features = ["inline"] }
 
 # Required nightly
 [workspace.lints.clippy]
