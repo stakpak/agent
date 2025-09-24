@@ -268,10 +268,10 @@ fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
     if !compilation_errors.regex_errors.is_empty() {
         const ERROR_LOG_FILE: &str = ".stakpak_mcp_secret_detection_errors";
         // Write errors to log file
-        if let Ok(json) = serde_json::to_string(&compilation_errors) {
-            if let Err(e) = std::fs::write(ERROR_LOG_FILE, json) {
-                eprintln!("Failed to write errors to log file: {}", e);
-            }
+        if let Ok(json) = serde_json::to_string(&compilation_errors)
+            && let Err(e) = std::fs::write(ERROR_LOG_FILE, json)
+        {
+            eprintln!("Failed to write errors to log file: {}", e);
         }
     }
     config
@@ -440,10 +440,10 @@ pub fn should_allow_match(
     global_allowlist: &Option<Allowlist>,
 ) -> bool {
     // Check global allowlist first
-    if let Some(global) = global_allowlist {
-        if is_allowed_by_allowlist(input, match_text, start_pos, end_pos, global) {
-            return true;
-        }
+    if let Some(global) = global_allowlist
+        && is_allowed_by_allowlist(input, match_text, start_pos, end_pos, global)
+    {
+        return true;
     }
 
     // Check rule-specific allowlists
@@ -565,10 +565,10 @@ pub fn is_allowed_by_rule_allowlist(
     }
 
     // Check paths
-    if let Some(paths) = &allowlist.paths {
-        if let Some(path) = path {
-            checks.push(paths.iter().any(|p| path.contains(p)));
-        }
+    if let Some(paths) = &allowlist.paths
+        && let Some(path) = path
+    {
+        checks.push(paths.iter().any(|p| path.contains(p)));
     }
 
     // If no checks were added, this allowlist doesn't apply

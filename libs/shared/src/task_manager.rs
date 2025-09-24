@@ -331,10 +331,10 @@ impl TaskManager {
         // Wait for the process ID for local tasks only
         if !is_remote_task {
             // Local task - wait for process ID for proper cleanup
-            if let Ok(process_id) = process_rx.await {
-                if let Some(entry) = self.tasks.get_mut(&id) {
-                    entry.process_id = Some(process_id);
-                }
+            if let Ok(process_id) = process_rx.await
+                && let Some(entry) = self.tasks.get_mut(&id)
+            {
+                entry.process_id = Some(process_id);
             }
         }
         // Remote tasks don't have local process IDs, so we skip waiting
