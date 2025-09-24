@@ -719,7 +719,6 @@ impl PopupWidget {
         } else {
             0
         }
-
     }
 
     /// Switch to specific tab
