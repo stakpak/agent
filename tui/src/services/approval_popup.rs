@@ -204,6 +204,93 @@ impl PopupService {
         }
     }
 
+    /// Calculate dynamic popup size based on content and terminal size
+    fn calculate_dynamic_popup_size(
+        &self,
+        tool_call_infos: &[ToolCallInfo],
+        terminal_size: ratatui::layout::Rect,
+    ) -> (f32, f32) {
+        // Constants for size calculation
+        const MIN_HEIGHT_PERCENT: f32 = 0.4;
+        const MAX_HEIGHT_PERCENT: f32 = 0.85;
+        const WIDTH_PERCENT: f32 = APPROVAL_POPUP_WIDTH_PERCENT;
+
+        // UI component heights (in lines)
+        const BORDER_HEIGHT: usize = 2; // Top and bottom borders
+        const TITLE_HEIGHT: usize = 2; // Title + spacing
+        const TAB_HEADER_HEIGHT: usize = 2; // Tab headers + spacing
+        const FOOTER_HEIGHT: usize = 1; // Footer
+        const SUBHEADER_HEIGHT: usize = 4; // Average subheader + spacing
+        const SPACING_BUFFER: usize = 2; // Extra spacing buffer
+
+        let total_ui_overhead = BORDER_HEIGHT
+            + TITLE_HEIGHT
+            + TAB_HEADER_HEIGHT
+            + FOOTER_HEIGHT
+            + SUBHEADER_HEIGHT
+            + SPACING_BUFFER;
+
+        // Ensure minimum terminal height
+        let safe_terminal_height = terminal_size.height.max(32);
+
+        // Calculate available space for content
+        let max_popup_height_lines = (safe_terminal_height as f32 * MAX_HEIGHT_PERCENT) as usize;
+        let max_content_lines = max_popup_height_lines.saturating_sub(total_ui_overhead);
+
+        // Find the tallest content among all tool calls
+        let mut max_tool_content_height = 0;
+        for tool_call_info in tool_call_infos.iter() {
+            let content = self.create_tool_call_content(&tool_call_info.tool_call, tool_call_info);
+            let content_height = content.lines.len();
+            max_tool_content_height = max_tool_content_height.max(content_height);
+        }
+
+        // Determine optimal height based on content
+        let optimal_content_height = if max_tool_content_height <= max_content_lines {
+            // Content fits within max space - size to content
+            max_tool_content_height
+        } else {
+            // Content exceeds max space - use max and enable scrolling
+            max_content_lines
+        };
+
+        // Calculate total popup height needed
+        let required_popup_height = optimal_content_height + total_ui_overhead;
+
+        // Convert to percentage, ensuring it's within bounds
+        let height_percent = (required_popup_height as f32 / safe_terminal_height as f32)
+            .clamp(MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
+
+        (WIDTH_PERCENT, height_percent)
+    }
+
+    /// Update popup size when terminal is resized
+    pub fn update_terminal_size(&mut self, new_size: ratatui::layout::Rect) {
+        self.terminal_size = new_size;
+
+        // Recalculate popup size based on new terminal dimensions
+        let (width_percent, height_percent) =
+            self.calculate_dynamic_popup_size(&self.tool_calls, new_size);
+
+        // Update the popup's position configuration
+        self.popup.config_mut().position = PopupPosition::Responsive {
+            width_percent,
+            height_percent,
+            min_width: 80,
+            min_height: 15,
+        };
+    }
+
+    /// Get access to popup state for external updates
+    pub fn popup_state(&self) -> &popup_widget::PopupState {
+        self.popup.state()
+    }
+
+    /// Get mutable access to popup state for external updates  
+    pub fn popup_state_mut(&mut self) -> &mut popup_widget::PopupState {
+        self.popup.state_mut()
+    }
+
     /// Create popup with tool calls
     fn create_popup_with_tool_calls(
         &self,
@@ -220,35 +307,9 @@ impl PopupService {
             .map(|tool_call_info| self.render_subheader(&tool_call_info.tool_call, tool_call_info))
             .collect();
 
-        let tolerance = 8;
-
-        // Ensure minimum terminal height to prevent calculation issues
-        let min_terminal_height = 20;
-        let safe_terminal_height = terminal_size.height.max(min_terminal_height);
-
-        // Calculate intended height (70% of terminal height for content area)
-        let intended_height = safe_terminal_height as usize;
-
-        // Calculate height based on tallest content (initial sizing)
-        let mut max_content_height = 0;
-        for tool_call_info in tool_call_infos.iter() {
-            let content = self.create_tool_call_content(&tool_call_info.tool_call, tool_call_info);
-            let content_height = content.lines.len();
-            max_content_height = max_content_height.max(content_height);
-        }
-
-        // Calculate content height with tolerance
-        let content_with_tolerance = max_content_height + tolerance + 6;
-
-        // If content is small, use content height. If content is large, cap at intended height
-        let final_height = if content_with_tolerance < intended_height {
-            content_with_tolerance // Use smaller content-based height
-        } else {
-            intended_height // Cap at intended height
-        };
-
-        // Convert back to height percentage
-        let height_percent = (final_height as f32 / safe_terminal_height as f32).min(0.9);
+        // Use dynamic height calculation that adapts to content and terminal size
+        let (_width_percent, _height_percent) =
+            self.calculate_dynamic_popup_size(tool_call_infos, terminal_size);
 
         let tabs: Vec<Tab> = tool_call_infos
             .iter()
@@ -303,10 +364,9 @@ impl PopupService {
             })
             .collect();
 
-        // Ensure height_percent is within reasonable bounds
-        let height_percent = height_percent.clamp(0.3, 0.9); // Between 30% and 90%
+        // height_percent is already clamped in calculate_dynamic_popup_size
 
-        // Create popup configuration with tabs
+        // Create popup configuration with tabs using responsive positioning
         let mut config = PopupConfig::new()
             .title("Permission Required")
             .title_alignment(popup_widget::Alignment::Left)
@@ -350,9 +410,9 @@ impl PopupService {
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
                 width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
-                height_percent,
-                min_width: 80, // Temporarily high to test width check
-                min_height: 10,
+                height_percent: 0.7,
+                min_width: 80,
+                min_height: 15,
             })
             .text_between_tabs(Some("→".to_string()))
             .text_between_tabs_style(Style::default().fg(Color::Gray));
