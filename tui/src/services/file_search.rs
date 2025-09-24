@@ -124,16 +124,13 @@ impl FileSearch {
         walker.run(|| {
             let file_suggestions = file_suggestions_clone.clone();
             Box::new(move |entry_result| {
-                if let Ok(entry) = entry_result {
-                    if entry.file_type().is_some_and(|ft| ft.is_file()) {
-                        if let Ok(rel_path) = entry.path().strip_prefix(dir) {
-                            if let Some(path_str) = rel_path.to_str() {
-                                if let Ok(mut files) = file_suggestions.lock() {
-                                    files.push(path_str.to_string());
-                                }
-                            }
-                        }
-                    }
+                if let Ok(entry) = entry_result
+                    && entry.file_type().is_some_and(|ft| ft.is_file())
+                    && let Ok(rel_path) = entry.path().strip_prefix(dir)
+                    && let Some(path_str) = rel_path.to_str()
+                    && let Ok(mut files) = file_suggestions.lock()
+                {
+                    files.push(path_str.to_string());
                 }
                 ignore::WalkState::Continue
             })
@@ -290,10 +287,10 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     }
 
     // Load files if not already loaded
-    if state.file_search.file_suggestions.is_empty() {
-        if let Ok(current_dir) = std::env::current_dir() {
-            state.file_search.load_files_from_directory(&current_dir);
-        }
+    if state.file_search.file_suggestions.is_empty()
+        && let Ok(current_dir) = std::env::current_dir()
+    {
+        state.file_search.load_files_from_directory(&current_dir);
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
@@ -311,10 +308,10 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
 
 // Refactored: Handle @ trigger for file file_search - with debouncing
 pub fn handle_at_trigger(input: &str, cursor_pos: usize, file_search: &mut FileSearch) -> bool {
-    if file_search.file_suggestions.is_empty() {
-        if let Ok(current_dir) = std::env::current_dir() {
-            file_search.load_files_from_directory(&current_dir);
-        }
+    if file_search.file_suggestions.is_empty()
+        && let Ok(current_dir) = std::env::current_dir()
+    {
+        file_search.load_files_from_directory(&current_dir);
     }
     let current_word = get_current_word(input, cursor_pos, Some('@'));
     file_search.filter_files(&current_word);
