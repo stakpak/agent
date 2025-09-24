@@ -1,5 +1,5 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -137,6 +137,17 @@ pub fn update(
                     .cloned()
                     .collect();
 
+                for tool_call in &state.message_approved_tools {
+                    state
+                        .session_tool_calls_queue
+                        .insert(tool_call.id.clone(), ToolCallStatus::Approved);
+                }
+                for tool_call in &state.message_rejected_tools {
+                    state
+                        .session_tool_calls_queue
+                        .insert(tool_call.id.clone(), ToolCallStatus::Rejected);
+                }
+
                 // Create tools_status maintaining the original order from message_tool_calls
                 if let Some(tool_calls) = &state.message_tool_calls {
                     let tools_status: Vec<(ToolCall, bool)> = tool_calls
@@ -154,6 +165,9 @@ pub fn update(
                         if let Some(dialog_command) = &state.dialog_command
                             && first_tool == dialog_command
                         {
+                            state
+                                .session_tool_calls_queue
+                                .insert(dialog_command.id.clone(), ToolCallStatus::Executed);
                             if *is_approved {
                                 // Fire accept tool
                                 let _ = output_tx
@@ -330,6 +344,26 @@ pub fn update(
         }
 
         InputEvent::ShowConfirmationDialog(tool_call) => {
+            if state
+                .session_tool_calls_queue
+                .get(&tool_call.id)
+                .map(|status| status == &ToolCallStatus::Executed)
+                .unwrap_or(false)
+            {
+                let truncated_command = extract_truncated_command_arguments(&tool_call, None);
+                let title = get_command_type_name(&tool_call);
+                let rendered_lines = render_bash_block_rejected(
+                    &truncated_command,
+                    &title,
+                    Some("Tool call already executed".to_string()),
+                );
+                state.messages.push(Message {
+                    id: Uuid::new_v4(),
+                    content: MessageContent::StyledBlock(rendered_lines),
+                    is_collapsed: None,
+                });
+                return;
+            }
             // Store the latest tool call for potential retry (only for run_command)
             if tool_call.function.name == "run_command" {
                 state.latest_tool_call = Some(tool_call.clone());
@@ -369,7 +403,9 @@ pub fn update(
                 let output_tx_clone = output_tx.clone();
 
                 let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
-
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
                 state.is_dialog_open = false;
                 state.dialog_selected = 0;
                 state.dialog_command = None;
@@ -392,7 +428,9 @@ pub fn update(
                 state.is_dialog_open = true;
                 let input_tx_clone = input_tx.clone();
                 let _ = input_tx_clone.try_send(InputEvent::HandleReject);
-
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
                 return;
             }
 
@@ -416,9 +454,23 @@ pub fn update(
         }
 
         InputEvent::MessageToolCalls(tool_calls) => {
+            // execlude any tool call that is already executed
+            let rest_tool_calls = tool_calls
+                .into_iter()
+                .filter(|tool_call| {
+                    !state.session_tool_calls_queue.contains_key(&tool_call.id)
+                        || state
+                            .session_tool_calls_queue
+                            .get(&tool_call.id)
+                            .map(|status| status != &ToolCallStatus::Executed)
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<ToolCall>>();
+
             let prompt_tool_calls = state
                 .auto_approve_manager
-                .get_prompt_tool_calls(&tool_calls);
+                .get_prompt_tool_calls(&rest_tool_calls);
+
             state.message_tool_calls = Some(prompt_tool_calls.clone());
         }
         InputEvent::StartLoadingOperation(operation) => {
