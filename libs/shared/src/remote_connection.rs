@@ -401,6 +401,16 @@ impl RemoteConnection {
         self.sftp.metadata(path).await.is_ok()
     }
 
+    pub async fn file_size(&self, path: &str) -> Result<u64> {
+        let metadata = self
+            .sftp
+            .metadata(path)
+            .await
+            .map_err(|e| anyhow!("Failed to get metadata for {}: {}", path, e))?;
+
+        Ok(metadata.len())
+    }
+
     pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
         self.sftp
             .rename(old_path, new_path)
