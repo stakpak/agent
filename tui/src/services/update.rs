@@ -137,13 +137,39 @@ pub fn update(
                     .cloned()
                     .collect();
 
+                // Create tools_status maintaining the original order from message_tool_calls
+                if let Some(tool_calls) = &state.message_tool_calls {
+                    let tools_status: Vec<(ToolCall, bool)> = tool_calls
+                        .iter()
+                        .map(|tool_call| {
+                            let is_approved = state.message_approved_tools.contains(tool_call);
+                            let is_rejected = state.message_rejected_tools.contains(tool_call);
+                            (tool_call.clone(), is_approved && !is_rejected)
+                        })
+                        .collect();
+
+                    // Get the first tool from the ordered list
+                    if let Some((first_tool, is_approved)) = tools_status.first() {
+                        // Compare with dialog_command to determine action
+                        if let Some(dialog_command) = &state.dialog_command
+                            && first_tool == dialog_command
+                        {
+                            if *is_approved {
+                                // Fire accept tool
+                                let _ = output_tx
+                                    .try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+                            } else {
+                                // Fire handle reject
+                                let _ = input_tx.try_send(InputEvent::HandleReject);
+                            }
+                        }
+                    }
+                }
+
                 // Clear message_tool_calls to prevent further ShowConfirmationDialog calls
                 // This prevents the race condition where individual tool calls try to show dialogs
                 state.message_tool_calls = None;
 
-                if let Some(dialog_command) = &state.dialog_command {
-                    let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-                }
                 state.approval_popup.escape();
                 return;
             }
