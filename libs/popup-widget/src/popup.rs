@@ -554,6 +554,8 @@ impl PopupWidget {
             self.config.selected_tab_style,
             self.config.tab_borders,
             self.config.tab_alignment,
+            self.config.text_between_tabs.as_ref(),
+            self.config.text_between_tabs_style,
         );
     }
 
@@ -754,6 +756,8 @@ impl PopupWidget {
             selected_tab_style,
             show_borders,
             alignment,
+            self.config.text_between_tabs.as_ref(),
+            self.config.text_between_tabs_style,
         );
     }
 

@@ -259,19 +259,26 @@ impl PopupService {
 
                 // Create status symbol with color
                 let (status_symbol, status_color) = match tool_call_info.status {
-                    ApprovalStatus::Approved => (" ✓", Color::Green),
-                    ApprovalStatus::Rejected => (" ✗", Color::LightRed),
+                    ApprovalStatus::Approved => (" ✓", Color::Cyan),
+                    ApprovalStatus::Rejected => (" ✗", Color::Red),
                     ApprovalStatus::Pending => ("", Color::Gray),
                 };
 
-                // Create styled title line with colored status symbol
+                // Create styled title line with colored status symbol and strikethrough for rejected
                 let styled_title = if status_symbol.is_empty() {
                     // No status symbol, just the title
                     Line::from(format!("{}.{}", index + 1, tool_name))
                 } else {
                     // Title with colored status symbol
+                    let mut title_style = Style::default();
+                    if tool_call_info.status == ApprovalStatus::Rejected {
+                        title_style = title_style
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::CROSSED_OUT);
+                    }
+
                     Line::from(vec![
-                        Span::raw(format!("{}.{}", index + 1, tool_name)),
+                        Span::styled(format!("{}.{}", index + 1, tool_name), title_style),
                         Span::styled(status_symbol, Style::default().fg(status_color)),
                     ])
                 };
@@ -317,8 +324,8 @@ impl PopupService {
             .popup_background_style(Style::default().bg(Color::Reset))
             .show_tabs(true)
             .tab_alignment(popup_widget::Alignment::Left)
-            .tab_style(Style::default().fg(Color::White).bg(Color::DarkGray))
-            .selected_tab_style(Style::default().fg(Color::White).bg(Color::Cyan))
+            .tab_style(Style::default().fg(Color::White).bg(Color::Indexed(235)))
+            .selected_tab_style(Style::default().fg(Color::Black).bg(Color::Cyan))
             .tab_borders(false)
             .use_fallback_colors(true)
             .terminal_detector(|| {
@@ -346,7 +353,9 @@ impl PopupService {
                 height_percent,
                 min_width: 80, // Temporarily high to test width check
                 min_height: 10,
-            });
+            })
+            .text_between_tabs(Some("→".to_string()))
+            .text_between_tabs_style(Style::default().fg(Color::Gray));
 
         // Add all tabs
         for tab in tabs {
@@ -429,6 +438,8 @@ impl PopupService {
             .popup_background_style(Style::default().bg(Color::Rgb(25, 26, 38)))
             .show_tabs(false)
             .use_fallback_colors(true)
+            .text_between_tabs(Some("→".to_string()))
+            .text_between_tabs_style(Style::default().fg(Color::Gray))
             .terminal_detector(|| {
                 let terminal_info = detect_term::detect_terminal();
                 is_unsupported_terminal(&terminal_info.emulator)

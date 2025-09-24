@@ -112,11 +112,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render loading indicator in dedicated area
     render_loading_indicator(f, state, loading_area);
 
-    // Render popup if visible
-    if state.approval_popup.is_visible() {
-        state.approval_popup.render(f, f.area());
-    }
-
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
     } else if state.show_sessions_dialog {
@@ -131,6 +126,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render hint/shortcuts if not hiding for dropdown and not showing collapsed messages (unless dialog is open)
     if !state.show_helper_dropdown && !state.show_collapsed_messages {
         render_hint_or_shortcuts(f, state, hint_area);
+    }
+
+    // Render approval popup LAST to ensure it appears on top of everything
+    if state.approval_popup.is_visible() {
+        state.approval_popup.render(f, f.area());
     }
 }
 

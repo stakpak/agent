@@ -66,6 +66,10 @@ pub struct PopupConfig {
     pub fixed_header_lines: usize,
     /// Subheader style (color, modifiers, etc.) for tab subheaders
     pub subheader_style: Style,
+    /// Text to display between tabs (e.g., "→")
+    pub text_between_tabs: Option<String>,
+    /// Style for text between tabs
+    pub text_between_tabs_style: Style,
 }
 
 impl Default for PopupConfig {
@@ -102,6 +106,8 @@ impl Default for PopupConfig {
             subheader_style: Style::default()
                 .fg(Color::Gray)
                 .add_modifier(ratatui::style::Modifier::DIM),
+            text_between_tabs: None,
+            text_between_tabs_style: Style::default().fg(Color::Gray),
         }
     }
 }
@@ -240,6 +246,18 @@ impl PopupConfig {
     /// Set the number of fixed header lines that should not scroll
     pub fn fixed_header_lines(mut self, lines: usize) -> Self {
         self.fixed_header_lines = lines;
+        self
+    }
+
+    /// Set text to display between tabs (e.g., "→")
+    pub fn text_between_tabs(mut self, text: Option<String>) -> Self {
+        self.text_between_tabs = text;
+        self
+    }
+
+    /// Set the style for text between tabs
+    pub fn text_between_tabs_style(mut self, style: Style) -> Self {
+        self.text_between_tabs_style = style;
         self
     }
 
