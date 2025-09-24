@@ -241,16 +241,33 @@ pub fn render_custom_tabs(
     selected_tab_style: Style,
     show_borders: bool,
     alignment: crate::Alignment,
+    text_between_tabs: Option<&String>,
+    text_between_tabs_style: Style,
 ) {
     if tabs.is_empty() {
         return;
     }
 
     // Calculate total width needed for all tabs with spacing
-    let tab_spacing = 1; // 1 space between tabs
+    let tab_spacing = if text_between_tabs.is_some() { 0 } else { 1 }; // 1 space between tabs
+    let between_tabs_width = if let Some(text) = text_between_tabs {
+        text.len() as u16
+    } else {
+        0
+    };
+
     let total_tab_width: u16 = tabs
         .iter()
-        .map(|tab| tab.title.len() as u16 + 2) // text + 1 space padding on each side
+        .enumerate()
+        .map(|(i, tab)| {
+            let tab_width = tab.title.len() as u16 + 2; // text + 1 space padding on each side
+            let after_text_width = if i < tabs.len() - 1 {
+                between_tabs_width
+            } else {
+                0
+            };
+            tab_width + after_text_width
+        })
         .sum::<u16>()
         + (tabs.len() as u16 - 1) * tab_spacing;
 
@@ -265,6 +282,9 @@ pub fn render_custom_tabs(
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
+                    if between_tabs_width > 0 {
+                        constraints.push(Constraint::Length(between_tabs_width));
+                    }
                 }
             }
             // Add remaining space to fill the area
@@ -283,6 +303,9 @@ pub fn render_custom_tabs(
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
+                    if between_tabs_width > 0 {
+                        constraints.push(Constraint::Length(between_tabs_width));
+                    }
                 }
             }
             // Add remaining space to fill the area
@@ -301,6 +324,9 @@ pub fn render_custom_tabs(
                 constraints.push(Constraint::Length(tab_width));
                 if i < tabs.len() - 1 {
                     constraints.push(Constraint::Length(tab_spacing));
+                    if between_tabs_width > 0 {
+                        constraints.push(Constraint::Length(between_tabs_width));
+                    }
                 }
             }
         }
@@ -387,6 +413,56 @@ pub fn render_custom_tabs(
         f.render_widget(tab_paragraph, tab_area);
 
         // Move to next area (skip spacing areas)
-        area_index += if i < tabs.len() - 1 { 2 } else { 1 };
+        area_index += if i < tabs.len() - 1 {
+            if between_tabs_width > 0 {
+                3 // tab + spacing + arrow
+            } else {
+                2 // tab + spacing
+            }
+        } else {
+            1 // just the tab
+        };
+    }
+
+    // Render arrows between tabs in a separate pass
+    if let Some(text) = text_between_tabs {
+        let mut arrow_index = match alignment {
+            crate::Alignment::Left => 0,
+            crate::Alignment::Center => {
+                if total_tab_width < area.width {
+                    1
+                } else {
+                    0
+                }
+            }
+            crate::Alignment::Right => {
+                if total_tab_width < area.width {
+                    1
+                } else {
+                    0
+                }
+            }
+        };
+
+        for _i in 0..tabs.len() - 1 {
+            // Skip to tab area
+            arrow_index += 1;
+            // Skip to spacing area
+            arrow_index += 1;
+            // Now we're at the arrow area
+            if arrow_index < tab_areas.len() {
+                let arrow_area = tab_areas[arrow_index];
+                // Add minimal padding around the arrow for better spacing
+                let arrow_text = text.to_string();
+                let arrow_paragraph = Paragraph::new(Line::from(Span::styled(
+                    arrow_text,
+                    text_between_tabs_style,
+                )))
+                .alignment(ratatui::layout::Alignment::Center);
+                f.render_widget(arrow_paragraph, arrow_area);
+            }
+            // Move to next tab
+            arrow_index += 1;
+        }
     }
 }
