@@ -307,7 +307,7 @@ pub fn update(
             state.dialog_command = Some(tool_call.clone());
             let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
-            if tool_call.function.name == "str_replace" {
+            if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
                 state
                     .messages
                     .push(Message::render_collapsed_message(tool_call.clone()));
