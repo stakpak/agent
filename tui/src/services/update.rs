@@ -401,13 +401,16 @@ pub fn update(
             state.loading = false;
             state.dialog_focused = false;
 
+            let tool_calls = if let Some(tool_calls) = state.message_tool_calls.clone() {
+                tool_calls.clone()
+            } else {
+                vec![tool_call.clone()]
+            };
+
             // Tool call is pending - check if we should show popup first
-            if let Some(ref message_tool_calls) = state.message_tool_calls
-                && message_tool_calls.len() > 1
-                && state.toggle_approved_message
-            {
+            if !tool_calls.is_empty() && state.toggle_approved_message {
                 state.approval_popup =
-                    PopupService::new_with_tool_calls(message_tool_calls.clone(), terminal_size);
+                    PopupService::new_with_tool_calls(tool_calls.clone(), terminal_size);
                 return;
             }
         }
