@@ -1637,20 +1637,21 @@ SAFETY NOTES:
         // Create parent directories if needed
         if let Some(parent) = std::path::Path::new(remote_path).parent() {
             let parent_str = parent.to_string_lossy().to_string();
-            if !parent_str.is_empty() && !conn.exists(&parent_str).await {
-                if let Err(e) = conn.create_directories(&parent_str).await {
-                    error!(
+            if !parent_str.is_empty()
+                && !conn.exists(&parent_str).await
+                && let Err(e) = conn.create_directories(&parent_str).await
+            {
+                error!(
+                    "Failed to create remote parent directories '{}': {}",
+                    parent_str, e
+                );
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CREATE_DIR_ERROR"),
+                    Content::text(format!(
                         "Failed to create remote parent directories '{}': {}",
                         parent_str, e
-                    );
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("CREATE_DIR_ERROR"),
-                        Content::text(format!(
-                            "Failed to create remote parent directories '{}': {}",
-                            parent_str, e
-                        )),
-                    ]));
-                }
+                    )),
+                ]));
             }
         }
 
@@ -1693,15 +1694,14 @@ SAFETY NOTES:
         }
 
         // Create parent directories if they don't exist
-        if let Some(parent) = path_obj.parent() {
-            if !parent.exists() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("CREATE_DIR_ERROR"),
-                        Content::text(format!("Cannot create parent directories: {}", e)),
-                    ]));
-                }
-            }
+        if let Some(parent) = path_obj.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return Ok(CallToolResult::error(vec![
+                Content::text("CREATE_DIR_ERROR"),
+                Content::text(format!("Cannot create parent directories: {}", e)),
+            ]));
         }
 
         // Restore secrets in the file content before writing
