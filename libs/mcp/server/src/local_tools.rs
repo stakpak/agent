@@ -225,6 +225,25 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     .get_secret_manager()
                     .redact_and_store_secrets(&result, None);
 
+                let exit_code = if let Some(start) = result.rfind("Command exited with code ") {
+                    if let Some(end) = result[start + 25..].find('\n') {
+                        result[start + 25..start + 25 + end]
+                            .parse::<i32>()
+                            .unwrap_or(-1)
+                    } else {
+                        result[start + 25..].trim().parse::<i32>().unwrap_or(-1)
+                    }
+                } else {
+                    -1
+                };
+
+                if result.contains("Command exited with code") && exit_code != 0 {
+                    // Extract the exit code from the output
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("COMMAND_FAILED"),
+                        Content::text(redacted_output),
+                    ]));
+                }
                 Ok(CallToolResult::success(vec![Content::text(
                     &redacted_output,
                 )]))
