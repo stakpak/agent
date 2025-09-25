@@ -516,23 +516,15 @@ This tool searches through the locally indexed code blocks using text matching a
         }): Parameters<LocalCodeSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         // First check indexing status
-        match LocalStore::read_session_data("indexing_status.json") {
-            Ok(status_str) => {
-                if !status_str.is_empty() {
-                    match serde_json::from_str::<IndexingStatus>(&status_str) {
-                        Ok(status) => {
-                            if !status.indexed {
-                                return Ok(CallToolResult::success(vec![Content::text(format!(
-                                    "❌ Local code search is not available: {}\n\nTo enable local code search for large projects, restart the CLI with the --index-big-project flag:\n\nstakpak --index-big-project",
-                                    status.reason
-                                ))]));
-                            }
-                        }
-                        Err(_) => {} // Continue with normal flow if we can't parse status
-                    }
-                }
-            }
-            Err(_) => {} // Continue with normal flow if no status file
+        if let Ok(status_str) = LocalStore::read_session_data("indexing_status.json")
+            && !status_str.is_empty()
+            && let Ok(status) = serde_json::from_str::<IndexingStatus>(&status_str)
+            && !status.indexed
+        {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "❌ Local code search is not available: {}\n\nTo enable local code search for large projects, restart the CLI with the --index-big-project flag:\n\nstakpak --index-big-project",
+                status.reason
+            ))]));
         }
 
         let index_str = match LocalStore::read_session_data("code_index.json") {
@@ -584,19 +576,19 @@ This tool searches through the locally indexed code blocks using text matching a
                 let mut keyword_matched = false;
 
                 // Check name match
-                if let Some(name) = &block.name {
-                    if name.to_lowercase().contains(keyword) {
-                        score += 10;
-                        keyword_matched = true;
-                    }
+                if let Some(name) = &block.name
+                    && name.to_lowercase().contains(keyword)
+                {
+                    score += 10;
+                    keyword_matched = true;
                 }
 
                 // Check type match
-                if let Some(type_name) = &block.r#type {
-                    if type_name.to_lowercase().contains(keyword) {
-                        score += 8;
-                        keyword_matched = true;
-                    }
+                if let Some(type_name) = &block.r#type
+                    && type_name.to_lowercase().contains(keyword)
+                {
+                    score += 8;
+                    keyword_matched = true;
                 }
 
                 // Check kind match

@@ -135,30 +135,29 @@ The subagent runs asynchronously in the background. This tool returns immediatel
             command.push_str(&format!(" -t {}", tool));
         }
 
-        if let Some(warden) = &subagent_config.warden {
-            if warden.enabled {
-                let stakpak_image = format!(
-                    "ghcr.io/stakpak/agent-warden:v{}",
-                    env!("CARGO_PKG_VERSION")
-                );
+        if let Some(warden) = &subagent_config.warden
+            && warden.enabled
+        {
+            let stakpak_image = format!(
+                "ghcr.io/stakpak/agent-warden:v{}",
+                env!("CARGO_PKG_VERSION")
+            );
 
-                let mut warden_command = format!("stakpak warden run --image {}", stakpak_image);
+            let mut warden_command = format!("stakpak warden run --image {}", stakpak_image);
 
-                let warden_prompt_path = format!("/tmp/{}", prompt_filename);
+            let warden_prompt_path = format!("/tmp/{}", prompt_filename);
 
-                warden_command
-                    .push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
+            warden_command.push_str(&format!(" -v {}:{}", prompt_file_path, warden_prompt_path));
 
-                for volume in &warden.volumes {
-                    warden_command.push_str(&format!(" -v {}", volume));
-                }
-
-                command = format!(
-                    "{} '{}'",
-                    warden_command,
-                    command.replace(&prompt_file_path, &warden_prompt_path)
-                );
+            for volume in &warden.volumes {
+                warden_command.push_str(&format!(" -v {}", volume));
             }
+
+            command = format!(
+                "{} '{}'",
+                warden_command,
+                command.replace(&prompt_file_path, &warden_prompt_path)
+            );
         }
 
         Ok(command)
