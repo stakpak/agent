@@ -90,13 +90,11 @@ fn append_stakpak_to_gitignore(gitignore_path: &Path) -> Result<(), String> {
     }
 
     // Add a blank line for separation (if file has content)
-    if gitignore_path.exists() {
-        if let Ok(metadata) = std::fs::metadata(gitignore_path) {
-            if metadata.len() > 0 {
-                writeln!(file)
-                    .map_err(|e| format!("Failed to write blank line to .gitignore: {}", e))?;
-            }
-        }
+    if gitignore_path.exists()
+        && let Ok(metadata) = std::fs::metadata(gitignore_path)
+        && metadata.len() > 0
+    {
+        writeln!(file).map_err(|e| format!("Failed to write blank line to .gitignore: {}", e))?;
     }
 
     // Add comment and .stakpak entry

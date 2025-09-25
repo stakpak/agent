@@ -114,20 +114,19 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         if let Some(last_message) = checkpoint_messages.iter_mut().rev().find(|message| {
             message.role != stakpak_shared::models::integrations::openai::Role::User
                 && message.role != stakpak_shared::models::integrations::openai::Role::Tool
-        }) {
-            if last_message.role == stakpak_shared::models::integrations::openai::Role::Assistant {
-                last_message.content = Some(
-                    stakpak_shared::models::integrations::openai::MessageContent::String(format!(
-                        "{}\n<checkpoint_id>{}</checkpoint_id>",
-                        last_message.content.as_ref().unwrap_or(
-                            &stakpak_shared::models::integrations::openai::MessageContent::String(
-                                String::new()
-                            )
-                        ),
-                        checkpoint_id
-                    )),
-                );
-            }
+        }) && last_message.role == stakpak_shared::models::integrations::openai::Role::Assistant
+        {
+            last_message.content = Some(
+                stakpak_shared::models::integrations::openai::MessageContent::String(format!(
+                    "{}\n<checkpoint_id>{}</checkpoint_id>",
+                    last_message.content.as_ref().unwrap_or(
+                        &stakpak_shared::models::integrations::openai::MessageContent::String(
+                            String::new()
+                        )
+                    ),
+                    checkpoint_id
+                )),
+            );
         }
         chat_messages.extend(checkpoint_messages);
         print!(
@@ -185,16 +184,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
         chat_messages.push(response.choices[0].message.clone());
 
-        if current_session_id.is_none() {
-            if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages) {
-                if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
-                    if let Ok(checkpoint_with_session) =
-                        client.get_agent_checkpoint(checkpoint_uuid).await
-                    {
-                        current_session_id = Some(checkpoint_with_session.session.id);
-                    }
-                }
-            }
+        if current_session_id.is_none()
+            && let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&chat_messages)
+            && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
+            && let Ok(checkpoint_with_session) = client.get_agent_checkpoint(checkpoint_uuid).await
+        {
+            current_session_id = Some(checkpoint_with_session.session.id);
         }
 
         let tool_calls = response.choices[0].message.tool_calls.as_ref();

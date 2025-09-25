@@ -470,12 +470,12 @@ impl StakpakAcpAgent {
     fn extract_todos_from_xml(&self, message: &str) -> Option<String> {
         // Look for <todo>...</todo> pattern using case-insensitive matching
         let message_lower = message.to_lowercase();
-        if let Some(start) = message_lower.find("<todo>") {
-            if let Some(end) = message_lower[start..].find("</todo>") {
-                let todo_start = start + 6; // Length of "<todo>"
-                let todo_end = start + end;
-                return Some(message[todo_start..todo_end].trim().to_string());
-            }
+        if let Some(start) = message_lower.find("<todo>")
+            && let Some(end) = message_lower[start..].find("</todo>")
+        {
+            let todo_start = start + 6; // Length of "<todo>"
+            let todo_end = start + end;
+            return Some(message[todo_start..todo_end].trim().to_string());
         }
 
         None
@@ -1142,11 +1142,11 @@ impl StakpakAcpAgent {
                             message.clone()
                         };
                         let plan_entries = self.extract_todos_as_plan_entries(&current_message);
-                        if !plan_entries.is_empty() {
-                            if let Err(e) = self.send_agent_plan(session_id, plan_entries).await {
-                                log::warn!("Failed to send agent plan during streaming: {}", e);
-                                // Don't fail the streaming if plan sending fails
-                            }
+                        if !plan_entries.is_empty()
+                            && let Err(e) = self.send_agent_plan(session_id, plan_entries).await
+                        {
+                            log::warn!("Failed to send agent plan during streaming: {}", e);
+                            // Don't fail the streaming if plan sending fails
                         }
 
                         // Process streaming content with buffering for partial XML tags
@@ -1691,31 +1691,31 @@ impl acp::Agent for StakpakAcpAgent {
         let mut tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
         while has_tool_calls {
-            if let Some(ref mut cancel_rx) = tool_cancel_rx {
-                if cancel_rx.try_recv().is_ok() {
-                    log::info!("Tool call processing cancelled by user");
-                    // Add cancellation messages for any active tool calls
-                    let active_tool_calls = {
-                        let mut active_tool_calls = self.active_tool_calls.lock().await;
-                        let tool_calls = active_tool_calls.clone();
-                        active_tool_calls.clear();
-                        tool_calls
-                    };
+            if let Some(ref mut cancel_rx) = tool_cancel_rx
+                && cancel_rx.try_recv().is_ok()
+            {
+                log::info!("Tool call processing cancelled by user");
+                // Add cancellation messages for any active tool calls
+                let active_tool_calls = {
+                    let mut active_tool_calls = self.active_tool_calls.lock().await;
+                    let tool_calls = active_tool_calls.clone();
+                    active_tool_calls.clear();
+                    tool_calls
+                };
 
-                    for tool_call in active_tool_calls {
-                        {
-                            let mut messages = self.messages.lock().await;
-                            messages.push(crate::commands::agent::run::helpers::tool_result(
-                                tool_call.id.clone(),
-                                "TOOL_CALL_CANCELLED".to_string(),
-                            ));
-                        }
+                for tool_call in active_tool_calls {
+                    {
+                        let mut messages = self.messages.lock().await;
+                        messages.push(crate::commands::agent::run::helpers::tool_result(
+                            tool_call.id.clone(),
+                            "TOOL_CALL_CANCELLED".to_string(),
+                        ));
                     }
-
-                    return Ok(acp::PromptResponse {
-                        stop_reason: acp::StopReason::Cancelled,
-                    });
                 }
+
+                return Ok(acp::PromptResponse {
+                    stop_reason: acp::StopReason::Cancelled,
+                });
             }
             // Get the latest message from the conversation
             let latest_message = match current_messages.last() {
@@ -1753,13 +1753,13 @@ impl acp::Agent for StakpakAcpAgent {
                 }
 
                 // Check for cancellation after tool call processing
-                if let Some(ref mut cancel_rx) = tool_cancel_rx {
-                    if cancel_rx.try_recv().is_ok() {
-                        log::info!("Tool call processing cancelled after tool execution");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
+                if let Some(ref mut cancel_rx) = tool_cancel_rx
+                    && cancel_rx.try_recv().is_ok()
+                {
+                    log::info!("Tool call processing cancelled after tool execution");
+                    return Ok(acp::PromptResponse {
+                        stop_reason: acp::StopReason::Cancelled,
+                    });
                 }
                 // Get the latest message from the conversation
                 let latest_message = match current_messages.last() {
@@ -1796,13 +1796,13 @@ impl acp::Agent for StakpakAcpAgent {
                         messages.extend(tool_results);
                     }
                     // Check for cancellation after tool call processing
-                    if let Some(ref mut cancel_rx) = tool_cancel_rx {
-                        if cancel_rx.try_recv().is_ok() {
-                            log::info!("Tool call processing cancelled after tool execution");
-                            return Ok(acp::PromptResponse {
-                                stop_reason: acp::StopReason::Cancelled,
-                            });
-                        }
+                    if let Some(ref mut cancel_rx) = tool_cancel_rx
+                        && cancel_rx.try_recv().is_ok()
+                    {
+                        log::info!("Tool call processing cancelled after tool execution");
+                        return Ok(acp::PromptResponse {
+                            stop_reason: acp::StopReason::Cancelled,
+                        });
                     }
 
                     // Check if any tool calls were cancelled

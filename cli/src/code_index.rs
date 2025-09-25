@@ -696,17 +696,16 @@ async fn execute_code_index_update(
             for block in &mut existing_index.index.blocks {
                 if block.document_uri != file_uri_normalized {
                     for dep in &mut block.dependencies {
-                        if dep.satisfied {
-                            if let Some(dep_key) = &dep.key {
-                                if deleted_block_keys.contains(dep_key) {
-                                    dep.satisfied = false;
-                                    unsatisfied_count += 1;
-                                    debug!(
-                                        "Marked dependency {} -> {} as unsatisfied",
-                                        block.key, dep_key
-                                    );
-                                }
-                            }
+                        if dep.satisfied
+                            && let Some(dep_key) = &dep.key
+                            && deleted_block_keys.contains(dep_key)
+                        {
+                            dep.satisfied = false;
+                            unsatisfied_count += 1;
+                            debug!(
+                                "Marked dependency {} -> {} as unsatisfied",
+                                block.key, dep_key
+                            );
                         }
                     }
                 }
