@@ -68,10 +68,10 @@ pub enum LoadingOperation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolCallStatus {
-    Pending,
     Approved,
     Rejected,
     Executed,
+    Skipped,
 }
 
 #[derive(Debug)]
@@ -204,6 +204,7 @@ pub struct AppState {
 
     // Session tool calls queue to track tool call status
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
+    pub tool_call_execution_order: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -241,7 +242,7 @@ pub enum InputEvent {
     Down,
     Quit,
     HandleEsc,
-    HandleReject,
+    HandleReject(Option<String>),
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -440,6 +441,7 @@ impl AppState {
                 height: 0,
             },
             session_tool_calls_queue: std::collections::HashMap::new(),
+            tool_call_execution_order: Vec::new(),
         }
     }
 
