@@ -191,10 +191,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     let mut user_input = user_input.clone();
 
                     // Add user shell history to the user input
-                    if let Some(tool_call_results) = &tool_calls_results {
-                        if let Some(history_str) = tool_call_history_string(tool_call_results) {
-                            user_input = format!("{}\n\n{}", history_str, user_input);
-                        }
+                    if let Some(tool_call_results) = &tool_calls_results
+                        && let Some(history_str) = tool_call_history_string(tool_call_results)
+                    {
+                        user_input = format!("{}\n\n{}", history_str, user_input);
                     }
 
                     // Add local context to the user input
@@ -534,17 +534,13 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 Ok(response) => {
                     messages.push(response.choices[0].message.clone());
 
-                    if current_session_id.is_none() {
-                        if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
-                        {
-                            if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
-                                if let Ok(checkpoint_with_session) =
-                                    client.get_agent_checkpoint(checkpoint_uuid).await
-                                {
-                                    current_session_id = Some(checkpoint_with_session.session.id);
-                                }
-                            }
-                        }
+                    if current_session_id.is_none()
+                        && let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
+                        && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
+                        && let Ok(checkpoint_with_session) =
+                            client.get_agent_checkpoint(checkpoint_uuid).await
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
                     }
 
                     // Send tool calls to TUI if present

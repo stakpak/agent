@@ -271,41 +271,39 @@ impl RulebookConfig {
         let mut filtered = rulebooks;
 
         // Apply include patterns first (if specified)
-        if let Some(include_patterns) = &self.include {
-            if !include_patterns.is_empty() {
-                filtered.retain(|rulebook| {
-                    include_patterns
-                        .iter()
-                        .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
-                });
-            }
+        if let Some(include_patterns) = &self.include
+            && !include_patterns.is_empty()
+        {
+            filtered.retain(|rulebook| {
+                include_patterns
+                    .iter()
+                    .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
+            });
         }
 
         // Apply exclude patterns (if specified)
-        if let Some(exclude_patterns) = &self.exclude {
-            if !exclude_patterns.is_empty() {
-                filtered.retain(|rulebook| {
-                    !exclude_patterns
-                        .iter()
-                        .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
-                });
-            }
+        if let Some(exclude_patterns) = &self.exclude
+            && !exclude_patterns.is_empty()
+        {
+            filtered.retain(|rulebook| {
+                !exclude_patterns
+                    .iter()
+                    .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
+            });
         }
 
         // Apply include tags (if specified)
-        if let Some(include_tags) = &self.include_tags {
-            if !include_tags.is_empty() {
-                filtered
-                    .retain(|rulebook| include_tags.iter().any(|tag| rulebook.tags.contains(tag)));
-            }
+        if let Some(include_tags) = &self.include_tags
+            && !include_tags.is_empty()
+        {
+            filtered.retain(|rulebook| include_tags.iter().any(|tag| rulebook.tags.contains(tag)));
         }
 
         // Apply exclude tags (if specified)
-        if let Some(exclude_tags) = &self.exclude_tags {
-            if !exclude_tags.is_empty() {
-                filtered
-                    .retain(|rulebook| !exclude_tags.iter().any(|tag| rulebook.tags.contains(tag)));
-            }
+        if let Some(exclude_tags) = &self.exclude_tags
+            && !exclude_tags.is_empty()
+        {
+            filtered.retain(|rulebook| !exclude_tags.iter().any(|tag| rulebook.tags.contains(tag)));
         }
 
         filtered
