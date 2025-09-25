@@ -507,6 +507,7 @@ pub fn update(
                     .collect();
                 state.message_approved_tools.clear();
                 state.message_tool_calls = None;
+                state.tool_call_execution_order.clear();
                 handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, None);
             }
         }
