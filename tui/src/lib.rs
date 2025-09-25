@@ -169,6 +169,7 @@ pub async fn run_tui(
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        services::update::clear_streaming_tool_results(&mut state);
                        state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+                       services::update::update_session_tool_calls_queue(&mut state, tool_call_result);
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_call_result.call.function.name == "run_command" {
 
                             state.latest_tool_call = Some(tool_call_result.call.clone());

@@ -137,17 +137,6 @@ pub fn update(
                     .cloned()
                     .collect();
 
-                for tool_call in &state.message_approved_tools {
-                    state
-                        .session_tool_calls_queue
-                        .insert(tool_call.id.clone(), ToolCallStatus::Approved);
-                }
-                for tool_call in &state.message_rejected_tools {
-                    state
-                        .session_tool_calls_queue
-                        .insert(tool_call.id.clone(), ToolCallStatus::Rejected);
-                }
-
                 // Create tools_status maintaining the original order from message_tool_calls
                 if let Some(tool_calls) = &state.message_tool_calls {
                     let tools_status: Vec<(ToolCall, bool)> = tool_calls
@@ -155,6 +144,15 @@ pub fn update(
                         .map(|tool_call| {
                             let is_approved = state.message_approved_tools.contains(tool_call);
                             let is_rejected = state.message_rejected_tools.contains(tool_call);
+                            let status = if is_approved {
+                                ToolCallStatus::Approved
+                            } else {
+                                ToolCallStatus::Rejected
+                            };
+                            state.tool_call_execution_order.push(tool_call.id.clone());
+                            state
+                                .session_tool_calls_queue
+                                .insert(tool_call.id.clone(), status);
                             (tool_call.clone(), is_approved && !is_rejected)
                         })
                         .collect();
@@ -174,7 +172,7 @@ pub fn update(
                                     .try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                             } else {
                                 // Fire handle reject
-                                let _ = input_tx.try_send(InputEvent::HandleReject);
+                                let _ = input_tx.try_send(InputEvent::HandleReject(None));
                             }
                         }
                     }
@@ -339,8 +337,8 @@ pub fn update(
             }
         }
 
-        InputEvent::HandleReject => {
-            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
+        InputEvent::HandleReject(message) => {
+            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, message);
         }
 
         InputEvent::ShowConfirmationDialog(tool_call) => {
@@ -386,6 +384,39 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
+            // check if its skipped
+            let is_skipped =
+                state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
+
+            // Check if this tool call is already rejected (after popup interaction) or skipped
+            if state
+                .message_rejected_tools
+                .iter()
+                .any(|tool| tool.id == tool_call.id)
+                || is_skipped
+            {
+                if !is_skipped {
+                    // Remove from rejected list to avoid processing it again
+                    state
+                        .message_rejected_tools
+                        .retain(|tool| tool.id != tool_call.id);
+                }
+                // Tool call is rejected, cancel it
+                state.is_dialog_open = true;
+                let input_tx_clone = input_tx.clone();
+                let message = if is_skipped {
+                    "Tool call skipped due to sequential execution failure"
+                } else {
+                    "Tool call rejected"
+                };
+                let _ =
+                    input_tx_clone.try_send(InputEvent::HandleReject(Some(message.to_string())));
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
+                return;
+            }
+
             // Check if this tool call is already approved (after popup interaction or auto-approved)
             if is_auto_approved
                 || state
@@ -410,27 +441,6 @@ pub fn update(
                 state.dialog_selected = 0;
                 state.dialog_command = None;
                 state.dialog_focused = false;
-                return;
-            }
-
-            // Check if this tool call is already rejected (after popup interaction)
-            if state
-                .message_rejected_tools
-                .iter()
-                .any(|tool| tool.id == tool_call.id)
-            {
-                // Remove from rejected list to avoid processing it again
-                state
-                    .message_rejected_tools
-                    .retain(|tool| tool.id != tool_call.id);
-
-                // Tool call is rejected, cancel it
-                state.is_dialog_open = true;
-                let input_tx_clone = input_tx.clone();
-                let _ = input_tx_clone.try_send(InputEvent::HandleReject);
-                state
-                    .session_tool_calls_queue
-                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
                 return;
             }
 
@@ -497,7 +507,7 @@ pub fn update(
                     .collect();
                 state.message_approved_tools.clear();
                 state.message_tool_calls = None;
-                handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx);
+                handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, None);
             }
         }
 
@@ -925,6 +935,7 @@ fn handle_esc(
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    message: Option<String>,
 ) {
     let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
 
@@ -945,7 +956,8 @@ fn handle_esc(
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
             let truncated_command = extract_truncated_command_arguments(tool_call, None);
             let title = get_command_type_name(tool_call);
-            let rendered_lines = render_bash_block_rejected(&truncated_command, &title, None);
+            let rendered_lines =
+                render_bash_block_rejected(&truncated_command, &title, message.clone());
             state.messages.push(Message {
                 id: Uuid::new_v4(),
                 content: MessageContent::StyledBlock(rendered_lines),
@@ -1632,4 +1644,19 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     }
 
     true
+}
+
+pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
+    if tool_call_result.status == ToolCallResultStatus::Error
+        && let Some(failed_idx) = state
+            .tool_call_execution_order
+            .iter()
+            .position(|id| id == &tool_call_result.call.id)
+    {
+        for id in state.tool_call_execution_order.iter().skip(failed_idx + 1) {
+            state
+                .session_tool_calls_queue
+                .insert(id.clone(), ToolCallStatus::Skipped);
+        }
+    }
 }
