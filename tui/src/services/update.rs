@@ -181,6 +181,7 @@ pub fn update(
                 // Clear message_tool_calls to prevent further ShowConfirmationDialog calls
                 // This prevents the race condition where individual tool calls try to show dialogs
                 state.message_tool_calls = None;
+                state.is_dialog_open = false;
 
                 state.approval_popup.escape();
                 return;
@@ -205,6 +206,8 @@ pub fn update(
             state.message_approved_tools.clear();
             state.message_rejected_tools.clear();
             state.message_tool_calls = None;
+            state.tool_call_execution_order.clear();
+            state.is_dialog_open = false;
         }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
@@ -360,6 +363,8 @@ pub fn update(
                     content: MessageContent::StyledBlock(rendered_lines),
                     is_collapsed: None,
                 });
+                state.is_dialog_open = false;
+                state.dialog_command = None;
                 return;
             }
             // Store the latest tool call for potential retry (only for run_command)
@@ -384,6 +389,11 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
+            state.dialog_command = Some(tool_call.clone());
+            state.is_dialog_open = true;
+            state.loading = false;
+            state.dialog_focused = false;
+
             // check if its skipped
             let is_skipped =
                 state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
@@ -401,8 +411,7 @@ pub fn update(
                         .message_rejected_tools
                         .retain(|tool| tool.id != tool_call.id);
                 }
-                // Tool call is rejected, cancel it
-                state.is_dialog_open = true;
+
                 let input_tx_clone = input_tx.clone();
                 let message = if is_skipped {
                     "Tool call skipped due to sequential execution failure"
@@ -443,11 +452,6 @@ pub fn update(
                 state.dialog_focused = false;
                 return;
             }
-
-            state.dialog_command = Some(tool_call.clone());
-            state.is_dialog_open = true;
-            state.loading = false;
-            state.dialog_focused = false;
 
             let tool_calls = if let Some(tool_calls) = state.message_tool_calls.clone() {
                 tool_calls.clone()
