@@ -985,6 +985,11 @@ fn handle_esc(
     } else {
         state.text_area.set_text("");
     }
+
+    state.messages.retain(|m| {
+        m.id != state.streaming_tool_result_id.unwrap_or_default()
+            && m.id != state.pending_bash_message_id.unwrap_or_default()
+    });
 }
 
 fn handle_input_submitted(
