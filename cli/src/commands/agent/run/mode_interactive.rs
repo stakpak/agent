@@ -243,7 +243,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         let result_content = if result.get_status() == ToolCallResultStatus::Error
                             && content_parts.len() >= 2
                         {
-                            format!("[{}] {}", content_parts[0], content_parts[1..].join(": "))
+                            // For error cases, split by newlines and add proper spacing
+                            let error_message = content_parts[1..].join(": ");
+                            let formatted_error = error_message
+                                .split('\n')
+                                .filter(|s| !s.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(". ");
+                            format!("[{}] {}", content_parts[0], formatted_error)
                         } else {
                             content_parts.join("\n")
                         };
