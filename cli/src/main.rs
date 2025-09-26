@@ -127,10 +127,12 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    if !matches!(cli.command, Some(Commands::Acp { .. })) && !cli.r#async && !cli.print {
-        if let Err(e) = auto_update().await {
-            eprintln!("Auto-update failed: {}", e);
-        }
+    if !matches!(cli.command, Some(Commands::Acp { .. }))
+        && !cli.r#async
+        && !cli.print
+        && let Err(e) = auto_update().await
+    {
+        eprintln!("Auto-update failed: {}", e);
     }
 
     if let Some(workdir) = cli.workdir {

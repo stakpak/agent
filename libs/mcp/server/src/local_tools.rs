@@ -46,6 +46,12 @@ pub struct RunCommandRequest {
     pub private_key_path: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct CommandResult {
+    pub output: String,
+    pub exit_code: i32,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct TaskStatusRequest {
     #[schemars(description = "The task ID to get status for")]
@@ -206,25 +212,32 @@ If the command's output exceeds 300 lines the result will be truncated and the f
             .execute_command_unified(&command, timeout, remote, password, private_key_path, &ctx)
             .await
         {
-            Ok(mut result) => {
-                result = match handle_large_output(&result, "command.output") {
-                    Ok(result) => result,
-                    Err(e) => {
-                        return Ok(CallToolResult::error(vec![
-                            Content::text("OUTPUT_HANDLING_ERROR"),
-                            Content::text(format!("Failed to handle command output: {}", e)),
-                        ]));
-                    }
-                };
+            Ok(mut command_result) => {
+                command_result.output =
+                    match handle_large_output(&command_result.output, "command.output") {
+                        Ok(result) => result,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![
+                                Content::text("OUTPUT_HANDLING_ERROR"),
+                                Content::text(format!("Failed to handle command output: {}", e)),
+                            ]));
+                        }
+                    };
 
-                if result.is_empty() {
+                if command_result.output.is_empty() {
                     return Ok(CallToolResult::success(vec![Content::text("No output")]));
                 }
 
                 let redacted_output = self
                     .get_secret_manager()
-                    .redact_and_store_secrets(&result, None);
+                    .redact_and_store_secrets(&command_result.output, None);
 
+                if command_result.exit_code != 0 {
+                    return Ok(CallToolResult::error(vec![
+                        Content::text("COMMAND_FAILED"),
+                        Content::text(redacted_output),
+                    ]));
+                }
                 Ok(CallToolResult::success(vec![Content::text(
                     &redacted_output,
                 )]))
@@ -1041,7 +1054,7 @@ SAFETY NOTES:
         password: Option<String>,
         private_key_path: Option<String>,
         ctx: &RequestContext<RoleServer>,
-    ) -> Result<String, CallToolResult> {
+    ) -> Result<CommandResult, CallToolResult> {
         let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
 
         if let Some(remote_str) = &remote {
@@ -1081,7 +1094,10 @@ SAFETY NOTES:
                 result.push_str(&format!("\nCommand exited with code {}", exit_code));
             }
 
-            Ok(result)
+            Ok(CommandResult {
+                output: result,
+                exit_code,
+            })
         } else {
             // Local execution - existing logic
             self.execute_local_command(&actual_command, timeout, ctx)
@@ -1095,7 +1111,7 @@ SAFETY NOTES:
         actual_command: &str,
         timeout: Option<u64>,
         ctx: &RequestContext<RoleServer>,
-    ) -> Result<String, CallToolResult> {
+    ) -> Result<CommandResult, CallToolResult> {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
             .arg(actual_command)
@@ -1237,7 +1253,10 @@ SAFETY NOTES:
             result.push_str(&format!("Command exited with code {}\n", exit_code));
         }
 
-        Ok(result)
+        Ok(CommandResult {
+            output: result,
+            exit_code,
+        })
     }
 
     /// View the contents of a local file or directory
@@ -1637,20 +1656,21 @@ SAFETY NOTES:
         // Create parent directories if needed
         if let Some(parent) = std::path::Path::new(remote_path).parent() {
             let parent_str = parent.to_string_lossy().to_string();
-            if !parent_str.is_empty() && !conn.exists(&parent_str).await {
-                if let Err(e) = conn.create_directories(&parent_str).await {
-                    error!(
+            if !parent_str.is_empty()
+                && !conn.exists(&parent_str).await
+                && let Err(e) = conn.create_directories(&parent_str).await
+            {
+                error!(
+                    "Failed to create remote parent directories '{}': {}",
+                    parent_str, e
+                );
+                return Ok(CallToolResult::error(vec![
+                    Content::text("CREATE_DIR_ERROR"),
+                    Content::text(format!(
                         "Failed to create remote parent directories '{}': {}",
                         parent_str, e
-                    );
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("CREATE_DIR_ERROR"),
-                        Content::text(format!(
-                            "Failed to create remote parent directories '{}': {}",
-                            parent_str, e
-                        )),
-                    ]));
-                }
+                    )),
+                ]));
             }
         }
 
@@ -1693,15 +1713,14 @@ SAFETY NOTES:
         }
 
         // Create parent directories if they don't exist
-        if let Some(parent) = path_obj.parent() {
-            if !parent.exists() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    return Ok(CallToolResult::error(vec![
-                        Content::text("CREATE_DIR_ERROR"),
-                        Content::text(format!("Cannot create parent directories: {}", e)),
-                    ]));
-                }
-            }
+        if let Some(parent) = path_obj.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return Ok(CallToolResult::error(vec![
+                Content::text("CREATE_DIR_ERROR"),
+                Content::text(format!("Cannot create parent directories: {}", e)),
+            ]));
         }
 
         // Restore secrets in the file content before writing

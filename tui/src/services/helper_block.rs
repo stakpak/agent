@@ -256,10 +256,10 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
     let mut flag = "[Error] ".to_string();
-    if let Some(remove_flag) = remove_flag {
-        if remove_flag {
-            flag = " ".repeat(flag.len());
-        }
+    if let Some(remove_flag) = remove_flag
+        && remove_flag
+    {
+        flag = " ".repeat(flag.len());
     }
     let lines = vec![
         Line::from(vec![
@@ -289,7 +289,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
     });
 }
 
-pub fn render_loading_spinner(state: &'_ AppState) -> Line<'_> {
+pub fn render_loading_spinner(state: &AppState) -> Line<'_> {
     let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
     let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
     let spinner_text = if state.loading_type == LoadingType::Sessions {
@@ -436,9 +436,9 @@ pub fn handle_errors(error: String) -> String {
         let start = 9; // length of "Unknown(\""
         let end = error.len() - 2; // remove ")" and "\""
         if start < end {
-            return error[start..end].to_string();
+            error[start..end].to_string()
         } else {
-            return format!("{:?}", error);
+            format!("{:?}", error)
         }
     } else {
         format!("{:?}", error)

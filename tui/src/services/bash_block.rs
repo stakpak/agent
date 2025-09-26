@@ -651,13 +651,17 @@ pub fn render_styled_header_and_borders(
     result
 }
 
-pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
+pub fn render_file_diff_full(
+    tool_call: &ToolCall,
+    terminal_width: usize,
+    do_show: Option<bool>,
+) -> Vec<Line<'static>> {
     let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
     let path = args["path"].as_str().unwrap_or("");
 
-    if full_diff_lines.is_empty() {
+    if full_diff_lines.is_empty() && !do_show.unwrap_or(false) {
         return Vec::new();
     }
     // render header dot
@@ -684,7 +688,7 @@ pub fn render_file_diff_full(tool_call: &ToolCall, terminal_width: usize) -> Vec
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    if tool_call.function.name == "str_replace" {
+    if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
         let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
@@ -698,8 +702,12 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
         ]
         .concat();
 
+        let title = get_command_type_name(tool_call);
+
+        let formatted_title = format!(" {} ", title);
+
         let result =
-            render_styled_header_and_borders(" Str Replace ", diff_lines, None, terminal_width);
+            render_styled_header_and_borders(&formatted_title, diff_lines, None, terminal_width);
 
         let adjusted_result = [
             vec![spacing_marker.clone()],
@@ -775,7 +783,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let tool_call_status = tool_call_result.status.clone();
 
     let title: String = get_command_type_name(&tool_call);
-    let command_args = extract_truncated_command_arguments(&tool_call);
+    let command_args = extract_truncated_command_arguments(&tool_call, None);
 
     let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
@@ -984,15 +992,14 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         }
 
         // Close the parentheses on the last line
-        if let Some(last_line) = lines.last_mut() {
-            if let Some(last_content_span) = last_line
+        if let Some(last_line) = lines.last_mut()
+            && let Some(last_content_span) = last_line
                 .spans
                 .iter_mut()
                 .rev()
                 .find(|span| span.style.fg == Some(Color::White) && !span.content.contains("│"))
-            {
-                last_content_span.content = format!("{}", last_content_span.content).into();
-            }
+        {
+            last_content_span.content = format!("{}", last_content_span.content).into();
         }
     }
     if is_collapsed {
@@ -1262,15 +1269,12 @@ pub fn render_styled_lines(
         }
 
         // Close the parentheses on the last line if we had multiple lines
-        if wrapped_args.len() > 1 {
-            if let Some(last_line) = lines.last_mut() {
-                if let Some(last_content_span) = last_line.spans.last_mut() {
-                    if last_content_span.style.fg == Some(Color::Gray) {
-                        last_content_span.content =
-                            format!("{})", last_content_span.content).into();
-                    }
-                }
-            }
+        if wrapped_args.len() > 1
+            && let Some(last_line) = lines.last_mut()
+            && let Some(last_content_span) = last_line.spans.last_mut()
+            && last_content_span.style.fg == Some(Color::Gray)
+        {
+            last_content_span.content = format!("{})", last_content_span.content).into();
         }
     }
 
@@ -1312,7 +1316,7 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
     let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
         && tool_call_result.result.lines().count() > 3;
     let result = tool_call_result.result.clone();
-    let command_args = extract_truncated_command_arguments(&tool_call_result.call);
+    let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
     let title = get_command_type_name(&tool_call_result.call);
     if is_collapsed {
         let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());

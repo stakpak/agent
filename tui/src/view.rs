@@ -1,5 +1,4 @@
 use crate::app::AppState;
-use crate::services::confirmation_dialog::render_confirmation_dialog;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -117,7 +116,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
-        render_confirmation_dialog(f, state);
     } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
@@ -126,6 +124,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render hint/shortcuts if not hiding for dropdown and not showing collapsed messages (unless dialog is open)
     if !state.show_helper_dropdown && !state.show_collapsed_messages {
         render_hint_or_shortcuts(f, state, hint_area);
+    }
+
+    // Render approval popup LAST to ensure it appears on top of everything
+    if state.approval_popup.is_visible() {
+        state.approval_popup.render(f, f.area());
     }
 }
 

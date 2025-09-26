@@ -53,16 +53,16 @@ pub async fn get_plugin_path(config: PluginConfig) -> String {
     }
 
     // Check if plugin already exists in plugins directory
-    if let Ok(existing_path) = get_existing_plugin_path(&config.name) {
-        if let Ok(current_version) = get_version_from_command(&existing_path, &config.name) {
-            if is_same_version(&current_version, &target_version) {
-                return existing_path;
-            } else {
-                println!(
-                    "{} {} is outdated (target: v{}), updating...",
-                    config.name, current_version, target_version
-                );
-            }
+    if let Ok(existing_path) = get_existing_plugin_path(&config.name)
+        && let Ok(current_version) = get_version_from_command(&existing_path, &config.name)
+    {
+        if is_same_version(&current_version, &target_version) {
+            return existing_path;
+        } else {
+            println!(
+                "{} {} is outdated (target: v{}), updating...",
+                config.name, current_version, target_version
+            );
         }
     }
 
@@ -369,12 +369,12 @@ pub fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> 
             fs::create_dir_all(&outpath)
                 .map_err(|e| format!("Failed to create directory {}: {}", outpath.display(), e))?;
         } else {
-            if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(p).map_err(|e| {
-                        format!("Failed to create parent directory {}: {}", p.display(), e)
-                    })?;
-                }
+            if let Some(p) = outpath.parent()
+                && !p.exists()
+            {
+                fs::create_dir_all(p).map_err(|e| {
+                    format!("Failed to create parent directory {}: {}", p.display(), e)
+                })?;
             }
             let mut outfile = fs::File::create(&outpath)
                 .map_err(|e| format!("Failed to create file {}: {}", outpath.display(), e))?;

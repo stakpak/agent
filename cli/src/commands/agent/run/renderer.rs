@@ -260,12 +260,11 @@ impl OutputRenderer {
                 // Show final assistant message
                 if let Some(final_message) = messages.iter().rev().find(|m| {
                     m.role == stakpak_shared::models::integrations::openai::Role::Assistant
-                }) {
-                    if let Some(content) = &final_message.content {
-                        let content_str = self.extract_content_string(content);
-                        if !content_str.trim().is_empty() {
-                            output.push_str(&self.format_final_assistant_message(&content_str));
-                        }
+                }) && let Some(content) = &final_message.content
+                {
+                    let content_str = self.extract_content_string(content);
+                    if !content_str.trim().is_empty() {
+                        output.push_str(&self.format_final_assistant_message(&content_str));
                     }
                 }
                 output

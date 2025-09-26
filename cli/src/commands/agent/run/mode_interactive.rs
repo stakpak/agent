@@ -168,6 +168,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             tools_queue.extend(tool_calls.clone());
 
             if !tools_queue.is_empty() {
+                send_input_event(&input_tx, InputEvent::MessageToolCalls(tools_queue.clone()))
+                    .await?;
                 let initial_tool_call = tools_queue.remove(0);
                 send_tool_call(&input_tx, &initial_tool_call).await?;
             }
@@ -189,10 +191,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     let mut user_input = user_input.clone();
 
                     // Add user shell history to the user input
-                    if let Some(tool_call_results) = &tool_calls_results {
-                        if let Some(history_str) = tool_call_history_string(tool_call_results) {
-                            user_input = format!("{}\n\n{}", history_str, user_input);
-                        }
+                    if let Some(tool_call_results) = &tool_calls_results
+                        && let Some(history_str) = tool_call_history_string(tool_call_results)
+                    {
+                        user_input = format!("{}\n\n{}", history_str, user_input);
                     }
 
                     // Add local context to the user input
@@ -207,6 +209,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         add_subagents(&messages, &user_input, &config.subagent_configs);
 
                     send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                    send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
@@ -240,7 +243,14 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         let result_content = if result.get_status() == ToolCallResultStatus::Error
                             && content_parts.len() >= 2
                         {
-                            format!("[{}] {}", content_parts[0], content_parts[1..].join(": "))
+                            // For error cases, split by newlines and add proper spacing
+                            let error_message = content_parts[1..].join(": ");
+                            let formatted_error = error_message
+                                .split('\n')
+                                .filter(|s| !s.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(". ");
+                            format!("[{}] {}", content_parts[0], formatted_error)
                         } else {
                             content_parts.join("\n")
                         };
@@ -274,6 +284,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Process next tool in queue if available
                     if !tools_queue.is_empty() {
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::MessageToolCalls(tools_queue.clone()),
+                        )
+                        .await?;
                         let next_tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &next_tool_call).await?;
                         continue;
@@ -526,30 +541,31 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 Ok(response) => {
                     messages.push(response.choices[0].message.clone());
 
-                    if current_session_id.is_none() {
-                        if let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
-                        {
-                            if let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id) {
-                                if let Ok(checkpoint_with_session) =
-                                    client.get_agent_checkpoint(checkpoint_uuid).await
-                                {
-                                    current_session_id = Some(checkpoint_with_session.session.id);
-                                }
-                            }
-                        }
+                    if current_session_id.is_none()
+                        && let Some(checkpoint_id) = extract_checkpoint_id_from_messages(&messages)
+                        && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
+                        && let Ok(checkpoint_with_session) =
+                            client.get_agent_checkpoint(checkpoint_uuid).await
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
                     }
 
                     // Send tool calls to TUI if present
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
                         tools_queue.extend(tool_calls.clone());
                         if !tools_queue.is_empty() {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::MessageToolCalls(tools_queue.clone()),
+                            )
+                            .await?;
                             let tool_call = tools_queue.remove(0);
                             send_tool_call(&input_tx, &tool_call).await?;
                             continue;
                         }
                     }
 
-                    // Stream processing handles loading state automatically
+                    send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                 }
                 Err(_) => {
                     continue;

@@ -117,48 +117,46 @@ fn detect_terminal_emulator() -> String {
         if let Ok(output) = Command::new("ps")
             .args(["-p", &current_pid, "-o", "ppid="])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let ppid = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if let Ok(parent_output) = Command::new("ps")
-                    .args(["-p", &ppid, "-o", "comm="])
-                    .output()
-                {
-                    if parent_output.status.success() {
-                        let parent_comm = String::from_utf8_lossy(&parent_output.stdout)
-                            .trim()
-                            .to_string();
+            let ppid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Ok(parent_output) = Command::new("ps")
+                .args(["-p", &ppid, "-o", "comm="])
+                .output()
+                && parent_output.status.success()
+            {
+                let parent_comm = String::from_utf8_lossy(&parent_output.stdout)
+                    .trim()
+                    .to_string();
 
-                        // Check for common terminal emulators
-                        match parent_comm.as_str() {
-                            "Terminal" => return "Terminal.app".to_string(),
-                            "iTerm2" => return "iTerm2".to_string(),
-                            "kitty" => return "Kitty".to_string(),
-                            "alacritty" => return "Alacritty".to_string(),
-                            "wezterm" => return "WezTerm".to_string(),
-                            "hyper" => return "Hyper".to_string(),
-                            "gnome-terminal" => return "GNOME Terminal".to_string(),
-                            "xfce4-terminal" => return "XFCE Terminal".to_string(),
-                            "konsole" => return "Konsole".to_string(),
-                            "mate-terminal" => return "MATE Terminal".to_string(),
-                            "lxterminal" => return "LXTerminal".to_string(),
-                            "terminator" => return "Terminator".to_string(),
-                            "tilix" => return "Tilix".to_string(),
-                            "guake" => return "Guake".to_string(),
-                            "yakuake" => return "Yakuake".to_string(),
-                            "terminology" => return "Terminology".to_string(),
-                            "cool-retro-term" => return "Cool Retro Term".to_string(),
-                            "sakura" => return "Sakura".to_string(),
-                            "roxterm" => return "Roxterm".to_string(),
-                            "pantheon-terminal" => return "Pantheon Terminal".to_string(),
-                            "deepin-terminal" => return "Deepin Terminal".to_string(),
-                            "qterminal" => return "QTerminal".to_string(),
-                            "st" => return "st (suckless terminal)".to_string(),
-                            "urxvt" | "rxvt-unicode" => return "URxvt".to_string(),
-                            "xterm" => return "xterm".to_string(),
-                            _ => {}
-                        }
-                    }
+                // Check for common terminal emulators
+                match parent_comm.as_str() {
+                    "Terminal" => return "Terminal.app".to_string(),
+                    "iTerm2" => return "iTerm2".to_string(),
+                    "kitty" => return "Kitty".to_string(),
+                    "alacritty" => return "Alacritty".to_string(),
+                    "wezterm" => return "WezTerm".to_string(),
+                    "hyper" => return "Hyper".to_string(),
+                    "gnome-terminal" => return "GNOME Terminal".to_string(),
+                    "xfce4-terminal" => return "XFCE Terminal".to_string(),
+                    "konsole" => return "Konsole".to_string(),
+                    "mate-terminal" => return "MATE Terminal".to_string(),
+                    "lxterminal" => return "LXTerminal".to_string(),
+                    "terminator" => return "Terminator".to_string(),
+                    "tilix" => return "Tilix".to_string(),
+                    "guake" => return "Guake".to_string(),
+                    "yakuake" => return "Yakuake".to_string(),
+                    "terminology" => return "Terminology".to_string(),
+                    "cool-retro-term" => return "Cool Retro Term".to_string(),
+                    "sakura" => return "Sakura".to_string(),
+                    "roxterm" => return "Roxterm".to_string(),
+                    "pantheon-terminal" => return "Pantheon Terminal".to_string(),
+                    "deepin-terminal" => return "Deepin Terminal".to_string(),
+                    "qterminal" => return "QTerminal".to_string(),
+                    "st" => return "st (suckless terminal)".to_string(),
+                    "urxvt" | "rxvt-unicode" => return "URxvt".to_string(),
+                    "xterm" => return "xterm".to_string(),
+                    _ => {}
                 }
             }
         }
