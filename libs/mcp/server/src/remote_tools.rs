@@ -81,9 +81,7 @@ pub struct LocalCodeSearchRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReadSlackMessages {
-    #[schemars(
-        description = "Slack channel identifier. Accepts channel ID (e.g., 'C12345678'), channel name (e.g., '#devops' or 'devops'), or a channel URL. The server will resolve this to a channel ID."
-    )]
+    #[schemars(description = "Slack channel identifier. Accepts channel ID (e.g., 'C12345678').")]
     pub channel: String,
     #[schemars(
         description = "Maximum number of messages to return (default: 10, max: 100). Returns most recent messages first."
