@@ -47,17 +47,16 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         .iter_mut()
         .rev()
         .find(|message| message.role != Role::User && message.role != Role::Tool)
+        && last_message.role == Role::Assistant
     {
-        if last_message.role == Role::Assistant {
-            last_message.content = Some(MessageContent::String(format!(
-                "{}\n<checkpoint_id>{}</checkpoint_id>",
-                last_message
-                    .content
-                    .as_ref()
-                    .unwrap_or(&MessageContent::String(String::new())),
-                checkpoint_id
-            )));
-        }
+        last_message.content = Some(MessageContent::String(format!(
+            "{}\n<checkpoint_id>{}</checkpoint_id>",
+            last_message
+                .content
+                .as_ref()
+                .unwrap_or(&MessageContent::String(String::new())),
+            checkpoint_id
+        )));
     }
 
     for message in &*checkpoint_messages {
@@ -136,7 +135,7 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
 }
 
 pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
-    let checkpoint_id = messages
+    messages
         .last()
         .and_then(|msg| msg.content.as_ref())
         .as_ref()
@@ -155,20 +154,17 @@ pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<S
             }
             MessageContent::Array(items) => {
                 for item in items {
-                    if let Some(text) = &item.text {
-                        if let Some(start) = text.find("<checkpoint_id>") {
-                            if let Some(end) = text.find("</checkpoint_id>") {
-                                let start_pos = start + "<checkpoint_id>".len();
-                                return Some(text[start_pos..end].to_string());
-                            }
-                        }
+                    if let Some(text) = &item.text
+                        && let Some(start) = text.find("<checkpoint_id>")
+                        && let Some(end) = text.find("</checkpoint_id>")
+                    {
+                        let start_pos = start + "<checkpoint_id>".len();
+                        return Some(text[start_pos..end].to_string());
                     }
                 }
                 None
             }
-        });
-
-    checkpoint_id
+        })
 }
 
 /// Resumes a session from a checkpoint, loading messages and tool calls

@@ -1,3 +1,4 @@
+use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
@@ -10,6 +11,7 @@ use crate::services::shell_mode::run_background_shell_command;
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use crate::services::textarea::{TextArea, TextAreaState};
+use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_shared::models::integrations::openai::{
@@ -62,6 +64,14 @@ pub enum LoadingOperation {
     LocalContext,
     Rulebooks,
     CheckpointResume,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCallStatus {
+    Approved,
+    Rejected,
+    Executed,
+    Skipped,
 }
 
 #[derive(Debug)]
@@ -182,6 +192,19 @@ pub struct AppState {
     pub mouse_capture_enabled: bool,
     pub loading_manager: LoadingStateManager,
     pub has_user_messages: bool,
+
+    pub message_tool_calls: Option<Vec<ToolCall>>,
+    pub approval_popup: PopupService,
+
+    pub message_approved_tools: Vec<ToolCall>,
+    pub message_rejected_tools: Vec<ToolCall>,
+
+    pub toggle_approved_message: bool,
+    pub terminal_size: Size,
+
+    // Session tool calls queue to track tool call status
+    pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
+    pub tool_call_execution_order: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -204,6 +227,9 @@ pub enum InputEvent {
     InputSubmitted,
     InputSubmittedWith(String),
     InputSubmittedWithColor(String, Color),
+    MessageToolCalls(Vec<ToolCall>),
+    BulkAutoApproveMessage,
+    ResetAutoApproveMessage,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -216,6 +242,7 @@ pub enum InputEvent {
     Down,
     Quit,
     HandleEsc,
+    HandleReject(Option<String>),
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -225,6 +252,7 @@ pub enum InputEvent {
     DialogCancel,
     HasUserMessage,
     Tab,
+    ToggleApprovalStatus,
     ShellOutput(String),
     ShellError(String),
     ShellWaitingForInput,
@@ -246,6 +274,12 @@ pub enum InputEvent {
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
     EmergencyClearTerminal,
     ToggleMouseCapture, // Toggle mouse capture on/off
+    // Approval popup events
+    ApprovalPopupNextTab,
+    ApprovalPopupPrevTab,
+    ApprovalPopupToggleApproval,
+    ApprovalPopupSubmit,
+    ApprovalPopupEscape,
 }
 
 #[derive(Debug)]
@@ -397,6 +431,17 @@ impl AppState {
             ), // Start with mouse capture enabled only for supported terminals
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
+            message_tool_calls: None,
+            approval_popup: PopupService::new(),
+            message_approved_tools: Vec::new(),
+            message_rejected_tools: Vec::new(),
+            toggle_approved_message: true,
+            terminal_size: Size {
+                width: 0,
+                height: 0,
+            },
+            session_tool_calls_queue: std::collections::HashMap::new(),
+            tool_call_execution_order: Vec::new(),
         }
     }
 

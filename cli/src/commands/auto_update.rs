@@ -223,10 +223,10 @@ fn search_for_binary(dir: &PathBuf, binary_name: &str) -> Result<Option<PathBuf>
             if file_name == binary_name {
                 return Ok(Some(path));
             }
-        } else if path.is_dir() {
-            if let Ok(Some(found)) = search_for_binary(&path, binary_name) {
-                return Ok(Some(found));
-            }
+        } else if path.is_dir()
+            && let Ok(Some(found)) = search_for_binary(&path, binary_name)
+        {
+            return Ok(Some(found));
         }
     }
 

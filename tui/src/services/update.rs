@@ -1,5 +1,6 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
+use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
@@ -13,6 +14,7 @@ use crate::services::message::{
     get_wrapped_message_lines_cached,
 };
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use ratatui::layout::Size;
 use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
@@ -35,10 +37,15 @@ pub fn update(
     output_tx: &Sender<OutputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     shell_tx: &Sender<InputEvent>,
+    terminal_size: Size,
 ) {
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
+            if state.approval_popup.is_visible() {
+                state.approval_popup.scroll_up();
+                return; // Event was consumed by popup
+            }
             if state.show_sessions_dialog {
                 if state.session_selected > 0 {
                     state.session_selected -= 1;
@@ -58,6 +65,10 @@ pub fn update(
             }
         }
         InputEvent::Down => {
+            if state.approval_popup.is_visible() {
+                state.approval_popup.scroll_down();
+                return; // Event was consumed by popup
+            }
             if state.show_sessions_dialog {
                 if state.session_selected + 1 < state.sessions.len() {
                     state.session_selected += 1;
@@ -98,9 +109,83 @@ pub fn update(
                 }
             }
         }
-        InputEvent::InputChanged(c) => handle_input_changed(state, c),
+
+        InputEvent::InputChanged(c) => {
+            if state.approval_popup.is_visible() {
+                if c == ' ' {
+                    state.approval_popup.toggle_approval_status();
+                    return;
+                }
+                return; // Consume all input when popup is visible
+            }
+            handle_input_changed(state, c);
+        }
         InputEvent::InputBackspace => handle_input_backspace(state),
         InputEvent::InputSubmitted => {
+            if state.approval_popup.is_visible() {
+                // Update approved and rejected tool calls from popup
+                state.message_approved_tools = state
+                    .approval_popup
+                    .get_approved_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                state.message_rejected_tools = state
+                    .approval_popup
+                    .get_rejected_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+
+                // Create tools_status maintaining the original order from message_tool_calls
+                if let Some(tool_calls) = &state.message_tool_calls {
+                    let tools_status: Vec<(ToolCall, bool)> = tool_calls
+                        .iter()
+                        .map(|tool_call| {
+                            let is_approved = state.message_approved_tools.contains(tool_call);
+                            let is_rejected = state.message_rejected_tools.contains(tool_call);
+                            let status = if is_approved {
+                                ToolCallStatus::Approved
+                            } else {
+                                ToolCallStatus::Rejected
+                            };
+                            state.tool_call_execution_order.push(tool_call.id.clone());
+                            state
+                                .session_tool_calls_queue
+                                .insert(tool_call.id.clone(), status);
+                            (tool_call.clone(), is_approved && !is_rejected)
+                        })
+                        .collect();
+
+                    // Get the first tool from the ordered list
+                    if let Some((first_tool, is_approved)) = tools_status.first() {
+                        // Compare with dialog_command to determine action
+                        if let Some(dialog_command) = &state.dialog_command
+                            && first_tool == dialog_command
+                        {
+                            state
+                                .session_tool_calls_queue
+                                .insert(dialog_command.id.clone(), ToolCallStatus::Executed);
+                            if *is_approved {
+                                // Fire accept tool
+                                let _ = output_tx
+                                    .try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+                            } else {
+                                // Fire handle reject
+                                let _ = input_tx.try_send(InputEvent::HandleReject(None));
+                            }
+                        }
+                    }
+                }
+
+                // Clear message_tool_calls to prevent further ShowConfirmationDialog calls
+                // This prevents the race condition where individual tool calls try to show dialogs
+                state.message_tool_calls = None;
+                state.is_dialog_open = false;
+
+                state.approval_popup.escape();
+                return;
+            }
             if !state.is_pasting {
                 handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
             }
@@ -117,6 +202,12 @@ pub fn update(
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
+            state.toggle_approved_message = true;
+            state.message_approved_tools.clear();
+            state.message_rejected_tools.clear();
+            state.message_tool_calls = None;
+            state.tool_call_execution_order.clear();
+            state.is_dialog_open = false;
         }
         InputEvent::StreamToolResult(progress) => handle_stream_tool_result(state, progress),
         InputEvent::AddUserMessage(s) => {
@@ -185,9 +276,17 @@ pub fn update(
             adjust_scroll(state, message_area_height, message_area_width);
         }
         InputEvent::CursorLeft => {
+            if state.approval_popup.is_visible() {
+                state.approval_popup.prev_tab();
+                return; // Event was consumed by popup
+            }
             state.text_area.move_cursor_left();
         }
         InputEvent::CursorRight => {
+            if state.approval_popup.is_visible() {
+                state.approval_popup.next_tab();
+                return; // Event was consumed by popup
+            }
             state.text_area.move_cursor_right();
         }
         InputEvent::ToggleCursorVisible => state.cursor_visible = !state.cursor_visible,
@@ -241,7 +340,33 @@ pub fn update(
             }
         }
 
+        InputEvent::HandleReject(message) => {
+            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, message);
+        }
+
         InputEvent::ShowConfirmationDialog(tool_call) => {
+            if state
+                .session_tool_calls_queue
+                .get(&tool_call.id)
+                .map(|status| status == &ToolCallStatus::Executed)
+                .unwrap_or(false)
+            {
+                let truncated_command = extract_truncated_command_arguments(&tool_call, None);
+                let title = get_command_type_name(&tool_call);
+                let rendered_lines = render_bash_block_rejected(
+                    &truncated_command,
+                    &title,
+                    Some("Tool call already executed".to_string()),
+                );
+                state.messages.push(Message {
+                    id: Uuid::new_v4(),
+                    content: MessageContent::StyledBlock(rendered_lines),
+                    is_collapsed: None,
+                });
+                state.is_dialog_open = false;
+                state.dialog_command = None;
+                return;
+            }
             // Store the latest tool call for potential retry (only for run_command)
             if tool_call.function.name == "run_command" {
                 state.latest_tool_call = Some(tool_call.clone());
@@ -249,12 +374,13 @@ pub fn update(
             state.dialog_command = Some(tool_call.clone());
             let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
-            if tool_call.function.name == "str_replace" {
+            if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
                 state
                     .messages
                     .push(Message::render_collapsed_message(tool_call.clone()));
             }
 
+            // Tool call is pending - create pending border block and check if we should show popup
             let message_id = Uuid::new_v4();
             state.messages.push(Message::render_pending_border_block(
                 tool_call.clone(),
@@ -263,17 +389,103 @@ pub fn update(
             ));
             state.pending_bash_message_id = Some(message_id);
 
-            // Check if auto-approve should be used
-            if state.auto_approve_manager.should_auto_approve(&tool_call) {
-                // Auto-approve the tool call
-                let _ = output_tx.try_send(OutputEvent::AcceptTool(tool_call.clone()));
-            } else {
-                // Show confirmation dialog as usual
-                state.dialog_command = Some(tool_call.clone());
-                state.is_dialog_open = true;
-                state.loading = false;
-                state.dialog_focused = false; //Should be if we have multiple options, Default to dialog focused when dialog opens
+            state.dialog_command = Some(tool_call.clone());
+            state.is_dialog_open = true;
+            state.loading = false;
+            state.dialog_focused = false;
+
+            // check if its skipped
+            let is_skipped =
+                state.session_tool_calls_queue.get(&tool_call.id) == Some(&ToolCallStatus::Skipped);
+
+            // Check if this tool call is already rejected (after popup interaction) or skipped
+            if state
+                .message_rejected_tools
+                .iter()
+                .any(|tool| tool.id == tool_call.id)
+                || is_skipped
+            {
+                if !is_skipped {
+                    // Remove from rejected list to avoid processing it again
+                    state
+                        .message_rejected_tools
+                        .retain(|tool| tool.id != tool_call.id);
+                }
+
+                let input_tx_clone = input_tx.clone();
+                let message = if is_skipped {
+                    "Tool call skipped due to sequential execution failure"
+                } else {
+                    "Tool call rejected"
+                };
+                let _ =
+                    input_tx_clone.try_send(InputEvent::HandleReject(Some(message.to_string())));
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
+                return;
             }
+
+            // Check if this tool call is already approved (after popup interaction or auto-approved)
+            if is_auto_approved
+                || state
+                    .message_approved_tools
+                    .iter()
+                    .any(|tool| tool.id == tool_call.id)
+            {
+                // Remove from approved list to avoid processing it again
+                state
+                    .message_approved_tools
+                    .retain(|tool| tool.id != tool_call.id);
+
+                // Send tool call with delay
+                let tool_call_clone = tool_call.clone();
+                let output_tx_clone = output_tx.clone();
+
+                let _ = output_tx_clone.try_send(OutputEvent::AcceptTool(tool_call_clone));
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), ToolCallStatus::Executed);
+                state.is_dialog_open = false;
+                state.dialog_selected = 0;
+                state.dialog_command = None;
+                state.dialog_focused = false;
+                return;
+            }
+
+            let tool_calls = if let Some(tool_calls) = state.message_tool_calls.clone() {
+                tool_calls.clone()
+            } else {
+                vec![tool_call.clone()]
+            };
+
+            // Tool call is pending - check if we should show popup first
+            if !tool_calls.is_empty() && state.toggle_approved_message {
+                state.approval_popup =
+                    PopupService::new_with_tool_calls(tool_calls.clone(), terminal_size);
+                return;
+            }
+        }
+
+        InputEvent::MessageToolCalls(tool_calls) => {
+            // execlude any tool call that is already executed
+            let rest_tool_calls = tool_calls
+                .into_iter()
+                .filter(|tool_call| {
+                    !state.session_tool_calls_queue.contains_key(&tool_call.id)
+                        || state
+                            .session_tool_calls_queue
+                            .get(&tool_call.id)
+                            .map(|status| status != &ToolCallStatus::Executed)
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<ToolCall>>();
+
+            let prompt_tool_calls = state
+                .auto_approve_manager
+                .get_prompt_tool_calls(&rest_tool_calls);
+
+            state.message_tool_calls = Some(prompt_tool_calls.clone());
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
@@ -285,7 +497,24 @@ pub fn update(
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();
         }
-        InputEvent::HandleEsc => handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx),
+        InputEvent::HandleEsc => {
+            if state.approval_popup.is_visible() {
+                state.approval_popup.escape();
+                state.toggle_approved_message = false;
+                return; // TODO: either reject all or add a toggle event to toggle back the popup.
+            } else {
+                state.message_rejected_tools = state
+                    .approval_popup
+                    .get_approved_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                state.message_approved_tools.clear();
+                state.message_tool_calls = None;
+                state.tool_call_execution_order.clear();
+                handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, None);
+            }
+        }
 
         InputEvent::GetStatus(account_info) => {
             state.account_info = account_info;
@@ -296,6 +525,9 @@ pub fn update(
             } else {
                 handle_tab(state);
             }
+        }
+        InputEvent::ToggleApprovalStatus => {
+            state.approval_popup.toggle_approval_status();
         }
         InputEvent::SetSessions(sessions) => {
             state.sessions = sessions;
@@ -337,12 +569,11 @@ pub fn update(
             if state.dialog_command.is_some() {
                 let result = shell_command_to_tool_call_result(state);
                 let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
-                if let Some(dialog_command) = &state.dialog_command {
-                    if let Some(latest_tool_call) = &state.latest_tool_call {
-                        if dialog_command.id == latest_tool_call.id {
-                            state.latest_tool_call = None;
-                        }
-                    }
+                if let Some(dialog_command) = &state.dialog_command
+                    && let Some(latest_tool_call) = &state.latest_tool_call
+                    && dialog_command.id == latest_tool_call.id
+                {
+                    state.latest_tool_call = None;
                 }
                 state.show_shell_mode = false;
                 state.dialog_command = None;
@@ -402,9 +633,9 @@ pub fn update(
         }
         InputEvent::ShellKill => {
             // Kill the running command if there is one
-            if let Some(cmd) = &state.active_shell_command {
-                if let Err(_e) = cmd.kill() {}
-            }
+            if let Some(cmd) = &state.active_shell_command
+                && let Err(_e) = cmd.kill()
+            {}
             // Reset shell state
             state.active_shell_command = None;
             state.active_shell_command_output = None;
@@ -414,6 +645,17 @@ pub fn update(
         }
         InputEvent::HandlePaste(text) => {
             handle_paste(state, text);
+        }
+        InputEvent::Resized(width, height) => {
+            let old_terminal_size = state.terminal_size;
+            state.terminal_size = Size { width, height };
+
+            // Recreate the approval popup if it's visible and terminal size changed
+            if state.approval_popup.is_visible() && old_terminal_size != state.terminal_size {
+                state
+                    .approval_popup
+                    .recreate_with_terminal_size(state.terminal_size);
+            }
         }
         InputEvent::InputCursorStart => {
             state.text_area.move_cursor_to_beginning_of_line(false);
@@ -541,12 +783,11 @@ fn handle_shell_mode(state: &mut AppState) {
     }
     if !state.show_shell_mode && state.dialog_command.is_some() {
         // only show dialog if id of latest tool call is not the same as dialog_command id
-        if let Some(latest_tool_call) = &state.latest_tool_call {
-            if let Some(dialog_command) = &state.dialog_command {
-                if latest_tool_call.id != dialog_command.id {
-                    state.is_dialog_open = true;
-                }
-            }
+        if let Some(latest_tool_call) = &state.latest_tool_call
+            && let Some(dialog_command) = &state.dialog_command
+            && latest_tool_call.id != dialog_command.id
+        {
+            state.is_dialog_open = true;
         }
         state.ondemand_shell_mode = false;
     }
@@ -632,11 +873,11 @@ fn handle_input_changed(state: &mut AppState, c: char) {
     state.text_area.insert_str(&c.to_string());
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input().contains(placeholder) {
-            state.pasted_long_text = None;
-            state.pasted_placeholder = None;
-        }
+    if let Some(placeholder) = &state.pasted_placeholder
+        && !state.input().contains(placeholder)
+    {
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
     }
 
     if state.input().starts_with('/') {
@@ -663,11 +904,11 @@ fn handle_input_backspace(state: &mut AppState) {
     state.text_area.delete_backward(1);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
-    if let Some(placeholder) = &state.pasted_placeholder {
-        if !state.input().contains(placeholder) {
-            state.pasted_long_text = None;
-            state.pasted_placeholder = None;
-        }
+    if let Some(placeholder) = &state.pasted_placeholder
+        && !state.input().contains(placeholder)
+    {
+        state.pasted_long_text = None;
+        state.pasted_placeholder = None;
     }
 
     // Send input to file_search worker (async, non-blocking)
@@ -699,6 +940,7 @@ fn handle_esc(
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    message: Option<String>,
 ) {
     let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
 
@@ -717,9 +959,10 @@ fn handle_esc(
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
             let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
-            let truncated_command = extract_truncated_command_arguments(tool_call);
+            let truncated_command = extract_truncated_command_arguments(tool_call, None);
             let title = get_command_type_name(tool_call);
-            let rendered_lines = render_bash_block_rejected(&truncated_command, &title, None);
+            let rendered_lines =
+                render_bash_block_rejected(&truncated_command, &title, message.clone());
             state.messages.push(Message {
                 id: Uuid::new_v4(),
                 content: MessageContent::StyledBlock(rendered_lines),
@@ -742,6 +985,11 @@ fn handle_esc(
     } else {
         state.text_area.set_text("");
     }
+
+    state.messages.retain(|m| {
+        m.id != state.streaming_tool_result_id.unwrap_or_default()
+            && m.id != state.pending_bash_message_id.unwrap_or_default()
+    });
 }
 
 fn handle_input_submitted(
@@ -839,12 +1087,12 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        if let Some(dialog_command) = &state.dialog_command {
-            let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-        }
-        state.is_dialog_open = false;
+        // if let Some(dialog_command) = &state.dialog_command {
+        //     let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
+        // }
+        state.approval_popup.toggle();
+        state.is_dialog_open = true;
         state.dialog_selected = 0;
-        state.dialog_command = None;
         state.dialog_focused = false;
         state.text_area.set_text("");
     // Reset focus when dialog closes
@@ -867,7 +1115,6 @@ fn handle_input_submitted(
                     let _ = output_tx.try_send(OutputEvent::ListSessions);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/resume" => {
                     state.messages.clear();
@@ -880,31 +1127,26 @@ fn handle_input_submitted(
 
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
 
                 "/clear" => {
                     push_clear_message(state);
-                    return;
                 }
                 "/memorize" => {
                     push_memorize_message(state);
                     let _ = output_tx.try_send(OutputEvent::Memorize);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/help" => {
                     push_help_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/status" => {
                     push_status_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/quit" => {
                     state.show_helper_dropdown = false;
@@ -916,13 +1158,11 @@ fn handle_input_submitted(
                     state.text_area.set_text(&input);
                     state.text_area.set_cursor(input.len());
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/list_approved_tools" => {
                     list_auto_approved_tools(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
                 "/mouse_capture" => {
                     // Toggle mouse capture using shared function
@@ -930,7 +1170,6 @@ fn handle_input_submitted(
 
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
-                    return;
                 }
 
                 _ => {}
@@ -959,11 +1198,10 @@ fn handle_input_submitted(
         // Also handle the existing pasted_placeholder system
         if let (Some(placeholder), Some(long_text)) =
             (&state.pasted_placeholder, &state.pasted_long_text)
+            && final_input.contains(placeholder)
         {
-            if final_input.contains(placeholder) {
-                final_input = final_input.replace(placeholder, long_text);
-                state.text_area.set_text(&final_input);
-            }
+            final_input = final_input.replace(placeholder, long_text);
+            state.text_area.set_text(&final_input);
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
@@ -1359,10 +1597,10 @@ fn list_auto_approved_tools(state: &mut AppState) {
         .collect();
 
     // Filter by allowed_tools if configured
-    if let Some(allowed_tools) = &state.allowed_tools {
-        if !allowed_tools.is_empty() {
-            auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
-        }
+    if let Some(allowed_tools) = &state.allowed_tools
+        && !allowed_tools.is_empty()
+    {
+        auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
     }
 
     if auto_approved_tools.is_empty() {
@@ -1416,4 +1654,19 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     }
 
     true
+}
+
+pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
+    if tool_call_result.status == ToolCallResultStatus::Error
+        && let Some(failed_idx) = state
+            .tool_call_execution_order
+            .iter()
+            .position(|id| id == &tool_call_result.call.id)
+    {
+        for id in state.tool_call_execution_order.iter().skip(failed_idx + 1) {
+            state
+                .session_tool_calls_queue
+                .insert(id.clone(), ToolCallStatus::Skipped);
+        }
+    }
 }

@@ -25,15 +25,15 @@ impl ClientHandler for LocalClientHandler {
         progress: rmcp::model::ProgressNotificationParam,
         _ctx: rmcp::service::NotificationContext<rmcp::RoleClient>,
     ) {
-        if let Some(progress_tx) = self.progress_tx.clone() {
-            if let Some(message) = progress.message {
-                match serde_json::from_str::<ToolCallResultProgress>(&message) {
-                    Ok(tool_call_progress) => {
-                        let _ = progress_tx.send(tool_call_progress).await;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to deserialize ToolCallProgress: {}", e);
-                    }
+        if let Some(progress_tx) = self.progress_tx.clone()
+            && let Some(message) = progress.message
+        {
+            match serde_json::from_str::<ToolCallResultProgress>(&message) {
+                Ok(tool_call_progress) => {
+                    let _ = progress_tx.send(tool_call_progress).await;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to deserialize ToolCallProgress: {}", e);
                 }
             }
         }

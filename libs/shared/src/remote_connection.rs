@@ -471,23 +471,21 @@ impl RemoteConnection {
                         let text = String::from_utf8_lossy(&data).to_string();
 
                         // Extract PID from the output using regex for non-simple commands
-                        if let Some(ref regex) = pid_regex {
-                            if remote_pid.is_none() {
-                                if let Some(captures) = regex.captures(&text) {
-                                    if let Some(pid_match) = captures.get(1) {
-                                        remote_pid = Some(pid_match.as_str().to_string());
-                                        // Remove the PID line from output
-                                        let cleaned_text = regex.replace_all(&text, "").to_string();
-                                        if !cleaned_text.trim().is_empty() {
-                                            output.push_str(&cleaned_text);
-                                            if let Some(ref callback) = progress_callback {
-                                                callback(cleaned_text);
-                                            }
-                                        }
-                                        continue;
-                                    }
+                        if let Some(ref regex) = pid_regex
+                            && remote_pid.is_none()
+                            && let Some(captures) = regex.captures(&text)
+                            && let Some(pid_match) = captures.get(1)
+                        {
+                            remote_pid = Some(pid_match.as_str().to_string());
+                            // Remove the PID line from output
+                            let cleaned_text = regex.replace_all(&text, "").to_string();
+                            if !cleaned_text.trim().is_empty() {
+                                output.push_str(&cleaned_text);
+                                if let Some(ref callback) = progress_callback {
+                                    callback(cleaned_text);
                                 }
                             }
+                            continue;
                         }
 
                         // Normal output processing
@@ -497,9 +495,11 @@ impl RemoteConnection {
                         }
 
                         // Send MCP progress notification if context is provided
-                        if let Some(ctx) = &ctx {
-                            if options.with_progress && !text.trim().is_empty() {
-                                let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
+                        if let Some(ctx) = &ctx
+                            && options.with_progress
+                            && !text.trim().is_empty()
+                        {
+                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
                                     progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
                                     progress: 50,
                                     total: Some(100),
@@ -508,7 +508,6 @@ impl RemoteConnection {
                                         message: text,
                                     }).unwrap_or_default()),
                                 }).await;
-                            }
                         }
                     }
                     russh::ChannelMsg::ExtendedData { data, ext: _ } => {
@@ -519,9 +518,11 @@ impl RemoteConnection {
                         }
 
                         // Send MCP progress notification for stderr if context is provided
-                        if let Some(ctx) = &ctx {
-                            if options.with_progress && !text.trim().is_empty() {
-                                let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
+                        if let Some(ctx) = &ctx
+                            && options.with_progress
+                            && !text.trim().is_empty()
+                        {
+                            let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
                                     progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
                                     progress: 50,
                                     total: Some(100),
@@ -530,7 +531,6 @@ impl RemoteConnection {
                                         message: text,
                                     }).unwrap_or_default()),
                                 }).await;
-                            }
                         }
                     }
                     russh::ChannelMsg::ExitStatus { exit_status } => {
@@ -777,19 +777,19 @@ impl PathLocation {
             }
         } else if path_str.contains('@') && path_str.contains(':') {
             // Format: user@host:/path (traditional SCP format)
-            if let Some((connection_part, path_part)) = path_str.split_once(':') {
-                if path_part.starts_with('/') {
-                    let connection_info = RemoteConnectionInfo {
-                        connection_string: connection_part.to_string(),
-                        password: None,
-                        private_key_path: None,
-                    };
+            if let Some((connection_part, path_part)) = path_str.split_once(':')
+                && path_part.starts_with('/')
+            {
+                let connection_info = RemoteConnectionInfo {
+                    connection_string: connection_part.to_string(),
+                    password: None,
+                    private_key_path: None,
+                };
 
-                    return Ok(PathLocation::Remote {
-                        connection: connection_info,
-                        path: path_part.to_string(),
-                    });
-                }
+                return Ok(PathLocation::Remote {
+                    connection: connection_info,
+                    path: path_part.to_string(),
+                });
             }
         }
 

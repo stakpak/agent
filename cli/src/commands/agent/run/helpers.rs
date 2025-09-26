@@ -16,10 +16,11 @@ pub fn convert_tools_map_with_filter(
                 let tool_name = tool.name.as_ref();
 
                 // Filter tools based on allowed_tools if specified
-                if let Some(allowed) = allowed_tools {
-                    if !allowed.is_empty() && !allowed.contains(&tool_name.to_string()) {
-                        return None;
-                    }
+                if let Some(allowed) = allowed_tools
+                    && !allowed.is_empty()
+                    && !allowed.contains(&tool_name.to_string())
+                {
+                    return None;
                 }
 
                 Some(Tool {

@@ -1,6 +1,6 @@
+pub mod approval_popup;
 pub mod auto_approve;
 pub mod bash_block;
-pub mod confirmation_dialog;
 pub mod detect_term;
 pub mod file_diff;
 pub mod file_search;
