@@ -92,7 +92,7 @@ pub struct ReadSlackMessages {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReadSlackReplies {
     #[schemars(
-        description = "Slack channel identifier that contains the thread (channel ID like 'C12345678' or channel name like '#devops')."
+        description = "Slack channel identifier that contains the thread (channel ID like 'C12345678')."
     )]
     pub channel: String,
     #[schemars(
@@ -104,7 +104,7 @@ pub struct ReadSlackReplies {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SendSlackMessage {
     #[schemars(
-        description = "Target Slack channel identifier. Accepts channel ID (e.g., 'C12345678') or channel name (e.g., '#announcements')."
+        description = "Target Slack channel identifier. Accepts channel ID (e.g., 'C12345678')."
     )]
     pub channel: String,
     #[schemars(
