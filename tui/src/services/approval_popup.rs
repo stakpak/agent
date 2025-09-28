@@ -73,6 +73,7 @@ pub struct PopupService {
     tool_calls: Vec<ToolCallInfo>,
     selected_index: usize,
     terminal_size: ratatui::layout::Rect,
+    is_maximized: bool,
 }
 
 impl Default for PopupService {
@@ -89,6 +90,7 @@ impl PopupService {
             tool_calls: Vec::new(),
             selected_index: 0,
             terminal_size: ratatui::layout::Rect::new(0, 0, 80, 24), // Default terminal size
+            is_maximized: false,
         }
     }
 
@@ -108,6 +110,7 @@ impl PopupService {
             tool_calls: tool_call_infos.clone(),
             selected_index: 0,
             terminal_size: term_rect,
+            is_maximized: false,
         };
 
         // Create the popup with the actual content
@@ -241,7 +244,7 @@ impl PopupService {
         let mut max_tool_content_height = 0;
         for tool_call_info in tool_call_infos.iter() {
             let content = self.create_tool_call_content(&tool_call_info.tool_call, tool_call_info);
-            let content_height = content.lines.len();
+            let content_height = content.lines.len() + 2;
             max_tool_content_height = max_tool_content_height.max(content_height);
         }
 
@@ -308,8 +311,11 @@ impl PopupService {
             .collect();
 
         // Use dynamic height calculation that adapts to content and terminal size
-        let (_width_percent, _height_percent) =
-            self.calculate_dynamic_popup_size(tool_call_infos, terminal_size);
+        let (width_percent, height_percent) = if self.is_maximized {
+            (1.0, 1.0) // Full screen when maximized
+        } else {
+            self.calculate_dynamic_popup_size(tool_call_infos, terminal_size)
+        };
 
         let tabs: Vec<Tab> = tool_call_infos
             .iter()
@@ -402,6 +408,11 @@ impl PopupService {
                     " toggle approve/reject  ",
                     Style::default().fg(Color::Indexed(254)),
                 ),
+                Span::styled("Ctrl+T", Style::default().fg(Color::Blue)),
+                Span::styled(
+                    " maximize/minimize  ",
+                    Style::default().fg(Color::Indexed(254)),
+                ),
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
                 Span::styled(" to scroll  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("Esc", Style::default().fg(Color::Red)),
@@ -409,8 +420,8 @@ impl PopupService {
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {
-                width_percent: APPROVAL_POPUP_WIDTH_PERCENT,
-                height_percent: 0.7,
+                width_percent,
+                height_percent,
                 min_width: 80,
                 min_height: 15,
             })
@@ -615,7 +626,35 @@ impl PopupService {
     /// Get the inner width of the popup
     pub fn inner_width(&self) -> usize {
         let term_width = self.terminal_size.width as usize;
-        (term_width as f32 * APPROVAL_POPUP_WIDTH_PERCENT) as usize
+        if self.is_maximized {
+            term_width
+        } else {
+            (term_width as f32 * APPROVAL_POPUP_WIDTH_PERCENT) as usize
+        }
+    }
+
+    /// Toggle maximize/minimize state of the popup
+    pub fn toggle_maximize(&mut self) {
+        self.is_maximized = !self.is_maximized;
+
+        // Recreate the popup with the new size
+        if !self.tool_calls.is_empty() {
+            let was_visible = self.is_visible();
+            let current_selected_index = self.selected_index;
+            let current_tool_calls = self.tool_calls.clone();
+
+            self.popup = self.create_popup_with_tool_calls(&current_tool_calls, self.terminal_size);
+            self.popup.set_selected_tab(current_selected_index);
+
+            if was_visible {
+                self.popup.show();
+            }
+        }
+    }
+
+    /// Check if the popup is maximized
+    pub fn is_maximized(&self) -> bool {
+        self.is_maximized
     }
 
     /// Render subheader for a tool call tab

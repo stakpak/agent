@@ -685,6 +685,13 @@ pub fn update(
             handle_retry_tool_call(state, input_tx, cancel_tx);
         }
         InputEvent::ToggleCollapsedMessages => {
+            // If approval popup is visible, toggle its maximize state instead
+            if state.approval_popup.is_visible() {
+                state.approval_popup.toggle_maximize();
+                return;
+            }
+
+            // Otherwise, handle collapsed messages popup as usual
             state.show_collapsed_messages = !state.show_collapsed_messages;
             if state.show_collapsed_messages {
                 // Calculate scroll position to show the top of the last message
