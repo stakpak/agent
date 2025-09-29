@@ -439,7 +439,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     continue;
                 }
-                OutputEvent::SendToolResult(tool_call_result) => {
+                OutputEvent::SendToolResult(tool_call_result, should_stop, pending_tool_calls) => {
                     send_input_event(
                         &input_tx,
                         InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
@@ -456,7 +456,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     )
                     .await?;
 
+                    if should_stop && !pending_tool_calls.is_empty() {
+                        tools_queue.extend(pending_tool_calls.clone());
+                    }
+
                     if !tools_queue.is_empty() {
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::MessageToolCalls(tools_queue.clone()),
+                        )
+                        .await?;
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
                         continue;
