@@ -19,7 +19,7 @@ use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
@@ -43,6 +43,7 @@ pub struct RunInteractiveConfig {
     pub system_prompt: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
+    pub enabled_tools: EnabledToolsConfig,
 }
 
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
@@ -81,6 +82,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 },
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
+                enabled_tools: config.enabled_tools.clone(),
                 tool_mode: ToolMode::Combined,
                 subagent_configs,
                 bind_address,

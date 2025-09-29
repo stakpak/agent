@@ -13,7 +13,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::ChatMessage;
@@ -36,6 +36,7 @@ pub struct RunAsyncConfig {
     pub allowed_tools: Option<Vec<String>>,
     pub enable_mtls: bool,
     pub system_prompt: Option<String>,
+    pub enabled_tools: EnabledToolsConfig,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -76,6 +77,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 },
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
+                enabled_tools: config.enabled_tools.clone(),
                 tool_mode: ToolMode::Combined,
                 subagent_configs,
                 bind_address,
