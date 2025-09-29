@@ -1,3 +1,4 @@
+use super::EnabledToolsConfig;
 use rmcp::tool_handler;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
@@ -17,6 +18,7 @@ pub struct ToolContainer {
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
     pub subagent_configs: Option<SubagentConfigs>,
+    pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
 }
 
@@ -26,6 +28,7 @@ impl ToolContainer {
         api_config: Option<ClientConfig>,
         redact_secrets: bool,
         privacy_mode: bool,
+        enabled_tools: EnabledToolsConfig,
         task_manager: Arc<TaskManagerHandle>,
         subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
@@ -42,6 +45,7 @@ impl ToolContainer {
             task_manager,
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
             subagent_configs,
+            enabled_tools,
             tool_router,
         })
     }
