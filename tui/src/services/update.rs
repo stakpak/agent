@@ -1090,6 +1090,12 @@ fn handle_input_submitted(
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
         let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
+        state.message_tool_calls = None;
+        state.message_approved_tools.clear();
+        state.message_rejected_tools.clear();
+        state.tool_call_execution_order.clear();
+        state.session_tool_calls_queue.clear();
+        state.toggle_approved_message = true;
         state.messages.clear();
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
@@ -1124,6 +1130,13 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                 }
                 "/resume" => {
+                    state.message_tool_calls = None;
+                    state.message_approved_tools.clear();
+                    state.message_rejected_tools.clear();
+                    state.tool_call_execution_order.clear();
+                    state.session_tool_calls_queue.clear();
+                    state.toggle_approved_message = true;
+
                     state.messages.clear();
                     state
                         .messages
