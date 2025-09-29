@@ -486,6 +486,7 @@ pub fn update(
                 .get_prompt_tool_calls(&rest_tool_calls);
 
             state.message_tool_calls = Some(prompt_tool_calls.clone());
+            state.last_message_tool_calls = prompt_tool_calls.clone();
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
@@ -566,9 +567,50 @@ pub fn update(
             // Command completed, reset active command state
             state.waiting_for_shell_input = false;
 
-            if state.dialog_command.is_some() {
+            if let Some(dialog_command) = &state.dialog_command {
+                let dialog_command_id = dialog_command.id.clone();
                 let result = shell_command_to_tool_call_result(state);
-                let _ = output_tx.try_send(OutputEvent::SendToolResult(result));
+
+                // check the index of dialog_command in tool_calls_execution_order
+
+                let index = state
+                    .last_message_tool_calls
+                    .iter()
+                    .position(|tool_call| tool_call.id == dialog_command_id);
+
+                let should_stop = if let Some(index) = index {
+                    index != state.last_message_tool_calls.len() - 1
+                } else {
+                    false
+                };
+
+                // get the ids of the tool calls after that id
+                let tool_calls_after_index = if let Some(index) = index {
+                    state
+                        .last_message_tool_calls
+                        .iter()
+                        .skip(index + 1)
+                        .cloned()
+                        .collect::<Vec<ToolCall>>()
+                } else {
+                    Vec::new()
+                };
+
+                // move those rejected tool calls to message_tool_calls and remove them from session_tool_calls_queue and rejected_tool_calls and tool_call_execution_order
+                if !tool_calls_after_index.is_empty() {
+                    for tool_call in tool_calls_after_index.iter() {
+                        state
+                            .session_tool_calls_queue
+                            .insert(tool_call.id.clone(), ToolCallStatus::Pending);
+                    }
+                }
+
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(
+                    result,
+                    should_stop,
+                    tool_calls_after_index.clone(),
+                ));
+
                 if let Some(dialog_command) = &state.dialog_command
                     && let Some(latest_tool_call) = &state.latest_tool_call
                     && dialog_command.id == latest_tool_call.id
@@ -577,6 +619,7 @@ pub fn update(
                 }
                 state.show_shell_mode = false;
                 state.dialog_command = None;
+                state.toggle_approved_message = true;
             }
             if state.ondemand_shell_mode {
                 let new_tool_call_result = shell_command_to_tool_call_result(state);
@@ -987,7 +1030,7 @@ fn handle_esc(
         state.show_shell_mode = false;
         state.text_area.set_text("");
         if state.dialog_command.is_some() {
-            state.is_dialog_open = true;
+            state.dialog_command = None;
         }
     } else {
         state.text_area.set_text("");

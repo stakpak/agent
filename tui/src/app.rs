@@ -72,6 +72,7 @@ pub enum ToolCallStatus {
     Rejected,
     Executed,
     Skipped,
+    Pending,
 }
 
 #[derive(Debug)]
@@ -205,6 +206,7 @@ pub struct AppState {
     // Session tool calls queue to track tool call status
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
     pub tool_call_execution_order: Vec<String>,
+    pub last_message_tool_calls: Vec<ToolCall>,
 }
 
 #[derive(Debug)]
@@ -290,7 +292,7 @@ pub enum OutputEvent {
     ListSessions,
     SwitchToSession(String),
     Memorize,
-    SendToolResult(ToolCallResult),
+    SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
 }
 
@@ -442,6 +444,7 @@ impl AppState {
             },
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
+            last_message_tool_calls: Vec::new(),
         }
     }
 
