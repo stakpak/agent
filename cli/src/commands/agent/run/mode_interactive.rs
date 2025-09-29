@@ -362,6 +362,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 tools_queue.extend(tool_calls.clone());
 
                                 if !tools_queue.is_empty() {
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::MessageToolCalls(tools_queue.clone()),
+                                    )
+                                    .await?;
                                     let initial_tool_call = tools_queue.remove(0);
                                     send_tool_call(&input_tx, &initial_tool_call).await?;
                                 }
@@ -409,6 +414,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             tools_queue.extend(tool_calls.clone());
 
                             if !tools_queue.is_empty() {
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::MessageToolCalls(tools_queue.clone()),
+                                )
+                                .await?;
                                 let initial_tool_call = tools_queue.remove(0);
                                 send_tool_call(&input_tx, &initial_tool_call).await?;
                             }

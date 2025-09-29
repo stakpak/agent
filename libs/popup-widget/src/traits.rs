@@ -78,7 +78,7 @@ impl StyledLineContent {
 
 impl PopupContent for StyledLineContent {
     fn render(&self, f: &mut Frame, area: Rect, scroll: usize) {
-        let mut styled_lines: Vec<Line> = self
+        let styled_lines: Vec<Line> = self
             .lines
             .iter()
             .skip(scroll) // Skip lines based on scroll offset
@@ -95,11 +95,11 @@ impl PopupContent for StyledLineContent {
             .collect();
 
         // Add very subtle padding - just a single character line at top and bottom
-        if !styled_lines.is_empty() {
-            let padding_line = Line::from(vec![Span::styled("", ratatui::style::Style::default())]);
-            styled_lines.insert(0, padding_line.clone()); // Add one character line at top
-            styled_lines.push(padding_line); // Add one character line at bottom
-        }
+        // if !styled_lines.is_empty() {
+        //     let padding_line = Line::from(vec![Span::styled("", ratatui::style::Style::default())]);
+        //     styled_lines.insert(0, padding_line.clone()); // Add one character line at top
+        //     styled_lines.push(padding_line); // Add one character line at bottom
+        // }
 
         // Use black background for unsupported terminals, otherwise use the default
         let background_color = if self.is_unsupported_terminal {
