@@ -2,6 +2,7 @@ use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{Client, ClientConfig};
+use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::{env, path::Path};
 
@@ -78,6 +79,10 @@ struct Cli {
     /// Allow indexing of large projects (more than 500 supported files)
     #[arg(long = "index-big-project", default_value_t = false)]
     index_big_project: bool,
+
+    /// Enable Slack tools (experimental)
+    #[arg(long = "enable-slack-tools", default_value_t = false)]
+    enable_slack_tools: bool,
 
     /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
     #[arg(long = "disable-mcp-mtls", default_value_t = false)]
@@ -345,6 +350,9 @@ async fn main() {
                                 enable_mtls: !cli.disable_mcp_mtls,
                                 allowed_tools,
                                 system_prompt,
+                                enabled_tools: EnabledToolsConfig {
+                                    slack: cli.enable_slack_tools,
+                                },
                             },
                         )
                         .await
@@ -372,6 +380,10 @@ async fn main() {
                                 system_prompt,
                                 allowed_tools,
                                 auto_approve,
+                                enabled_tools: EnabledToolsConfig {
+                                    slack: cli.enable_slack_tools,
+                                    ..EnabledToolsConfig::default()
+                                },
                             },
                         )
                         .await

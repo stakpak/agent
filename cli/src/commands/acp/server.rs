@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
@@ -997,6 +997,7 @@ impl StakpakAcpAgent {
                     api: api_config,
                     redact_secrets: true,
                     privacy_mode: false,
+                    enabled_tools: EnabledToolsConfig { slack: false },
                     tool_mode: ToolMode::Combined,
                     bind_address,
                     certificate_chain: certificate_chain_for_server,
