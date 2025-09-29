@@ -13,7 +13,7 @@ use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::TaskManager;
 
-pub mod integration;
+pub mod integrations;
 pub mod local_tools;
 pub mod remote_tools;
 pub mod subagent_tools;
