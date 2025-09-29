@@ -543,24 +543,5 @@ pub fn render_file_diff_block(
     truncated_diff_lines = [lines.clone(), truncated_diff_lines].concat();
     full_diff_lines = [lines, full_diff_lines].concat();
 
-    // Add summary to both versions
-    truncated_diff_lines.push(Line::from(""));
-    truncated_diff_lines.push(Line::from(vec![Span::styled(
-        format!(
-            "Total changes: {} additions, {} deletions",
-            insertions, deletions
-        ),
-        Style::default().fg(Color::Cyan),
-    )]));
-
-    full_diff_lines.push(Line::from(""));
-    full_diff_lines.push(Line::from(vec![Span::styled(
-        format!(
-            "Total changes: {} additions, {} deletions",
-            insertions, deletions
-        ),
-        Style::default().fg(Color::Cyan),
-    )]));
-
     (truncated_diff_lines, full_diff_lines)
 }
