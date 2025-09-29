@@ -65,7 +65,7 @@ impl ToolContainer {
 
         let response = match client
             .call_mcp_tool(&ToolsCallParams {
-                name: "read_slack_messages".to_string(),
+                name: "slack_read_messages".to_string(),
                 arguments: json!({
                     "channel": channel,
                     "limit": limit,
@@ -76,7 +76,7 @@ impl ToolContainer {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
-                    Content::text("READ_SLACK_MESSAGES_ERROR"),
+                    Content::text("SLACK_READ_MESSAGES_ERROR"),
                     Content::text(format!("Failed to read Slack messages: {}", e)),
                 ]));
             }
@@ -104,7 +104,7 @@ impl ToolContainer {
 
         let response = match client
             .call_mcp_tool(&ToolsCallParams {
-                name: "read_slack_replies".to_string(),
+                name: "slack_read_replies".to_string(),
                 arguments: json!({
                     "channel": channel,
                     "ts": ts,
@@ -115,7 +115,7 @@ impl ToolContainer {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
-                    Content::text("READ_SLACK_REPLIES_ERROR"),
+                    Content::text("SLACK_READ_REPLIES_ERROR"),
                     Content::text(format!("Failed to read Slack replies: {}", e)),
                 ]));
             }
@@ -147,7 +147,7 @@ impl ToolContainer {
 
         let response = match client
             .call_mcp_tool(&ToolsCallParams {
-                name: "send_slack_message".to_string(),
+                name: "slack_send_message".to_string(),
                 arguments: json!({
                     "channel": channel,
                     "markdown_text": markdown_text,
