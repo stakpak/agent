@@ -17,6 +17,9 @@
 - **Real-time Progress Streaming** - Long-running processes (Docker builds, deployments) stream progress updates in real-time
 - **Infrastructure Code Indexing** - Automatic local indexing and semantic search for Terraform, Kubernetes, Dockerfile, and GitHub Actions
 - **Documentation Research Agent** - Built-in web search for technical documentation, cloud providers, and development frameworks
+- **Subagents** - Specialized research agents for code exploration and sandboxed analysis with different tool access levels (enabled with `--enable-subagents` flag)
+- **Bulk Message Approval** - Approve multiple tool calls at once for efficient workflow execution
+- **Reversible File Operations** - All file modifications are automatically backed up with recovery capabilities
 
 ## 🧠 Adaptive Intelligence
 
