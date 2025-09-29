@@ -80,7 +80,7 @@ pub struct LocalCodeSearchRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ReadSlackMessages {
+pub struct SlackReadMessages {
     #[schemars(description = "Slack channel identifier. Accepts channel ID (e.g., 'C12345678').")]
     pub channel: String,
     #[schemars(
@@ -90,7 +90,7 @@ pub struct ReadSlackMessages {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ReadSlackReplies {
+pub struct SlackReadReplies {
     #[schemars(
         description = "Slack channel identifier that contains the thread (channel ID like 'C12345678')."
     )]
@@ -102,7 +102,7 @@ pub struct ReadSlackReplies {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SendSlackMessage {
+pub struct SlackSendMessage {
     #[schemars(
         description = "Target Slack channel identifier. Accepts channel ID (e.g., 'C12345678')."
     )]
@@ -779,9 +779,9 @@ This tool searches through the locally indexed code blocks using text matching a
     #[tool(
         description = "Read and retrieve the contents of a Slack channel. This tool allows you to access and read messages from a Slack channel."
     )]
-    pub async fn read_slack_messages(
+    pub async fn slack_read_messages(
         &self,
-        Parameters(ReadSlackMessages { channel, limit }): Parameters<ReadSlackMessages>,
+        Parameters(SlackReadMessages { channel, limit }): Parameters<SlackReadMessages>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
@@ -818,9 +818,9 @@ This tool searches through the locally indexed code blocks using text matching a
     #[tool(
         description = "Read and retrieve the contents of a Slack thread. This tool allows you to access and read replies from a Slack thread."
     )]
-    pub async fn read_slack_replies(
+    pub async fn slack_read_replies(
         &self,
-        Parameters(ReadSlackReplies { channel, ts }): Parameters<ReadSlackReplies>,
+        Parameters(SlackReadReplies { channel, ts }): Parameters<SlackReadReplies>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
@@ -857,13 +857,13 @@ This tool searches through the locally indexed code blocks using text matching a
     #[tool(
         description = "Send a message to a Slack channel. This tool allows you to send messages to a Slack channel."
     )]
-    pub async fn send_slack_message(
+    pub async fn slack_send_message(
         &self,
-        Parameters(SendSlackMessage {
+        Parameters(SlackSendMessage {
             channel,
             markdown_text,
             thread_ts,
-        }): Parameters<SendSlackMessage>,
+        }): Parameters<SlackSendMessage>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
