@@ -345,6 +345,9 @@ pub fn update(
         }
 
         InputEvent::ShowConfirmationDialog(tool_call) => {
+            if state.latest_tool_call.is_some() && state.show_shell_mode {
+                return;
+            }
             if state
                 .session_tool_calls_queue
                 .get(&tool_call.id)
@@ -369,6 +372,9 @@ pub fn update(
             }
 
             state.dialog_command = Some(tool_call.clone());
+            if tool_call.function.name == "run_command" {
+                state.latest_tool_call = Some(tool_call.clone());
+            }
             let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
             if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
@@ -570,7 +576,7 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             // Command completed, reset active command state
             state.waiting_for_shell_input = false;
-
+            state.text_area.set_shell_mode(false);
             if let Some(dialog_command) = &state.dialog_command {
                 let dialog_command_id = dialog_command.id.clone();
                 let result = shell_command_to_tool_call_result(state);
@@ -635,6 +641,7 @@ pub fn update(
             state.active_shell_command = None;
             state.active_shell_command_output = None;
             state.text_area.set_text("");
+            state.text_area.set_shell_mode(false);
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -1032,6 +1039,7 @@ fn handle_esc(
             let _ = shell_tx.try_send(InputEvent::ShellKill);
         }
         state.show_shell_mode = false;
+        state.text_area.set_shell_mode(false);
         state.text_area.set_text("");
         if state.dialog_command.is_some() {
             state.dialog_command = None;
@@ -1615,6 +1623,9 @@ fn handle_retry_tool_call(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
+    if state.latest_tool_call.is_none() {
+        return;
+    }
     let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
 
     if let Some(cancel_tx) = cancel_tx {
@@ -1647,8 +1658,8 @@ fn handle_retry_tool_call(
         state.active_shell_command = None;
         state.active_shell_command_output = None;
         state.waiting_for_shell_input = false;
-        // Reset textarea shell mode
-        state.text_area.set_shell_mode(false);
+        // Set textarea shell mode to match app state
+        state.text_area.set_shell_mode(true);
     }
 }
 
