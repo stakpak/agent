@@ -678,7 +678,7 @@ impl PopupService {
         };
 
         // push empty line
-        lines.push((Line::from(""), Style::default()));
+        // lines.push((Line::from(""), Style::default()));
 
         // Create a line with tool name and status on the same line
         let tool_status_line = Line::from(vec![
