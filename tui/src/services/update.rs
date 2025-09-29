@@ -367,10 +367,7 @@ pub fn update(
                 state.dialog_command = None;
                 return;
             }
-            // Store the latest tool call for potential retry (only for run_command)
-            if tool_call.function.name == "run_command" {
-                state.latest_tool_call = Some(tool_call.clone());
-            }
+
             state.dialog_command = Some(tool_call.clone());
             let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
@@ -513,6 +510,13 @@ pub fn update(
                 state.message_approved_tools.clear();
                 state.message_tool_calls = None;
                 state.tool_call_execution_order.clear();
+                // Store the latest tool call for potential retry (only for run_command)
+                if let Some(tool_call) = &state.dialog_command
+                    && tool_call.function.name == "run_command"
+                {
+                    state.latest_tool_call = Some(tool_call.clone());
+                }
+
                 handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, None);
             }
         }
