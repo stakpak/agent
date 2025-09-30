@@ -12,6 +12,7 @@ use stakpak_shared::remote_connection::{
 use html2md;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
+use similar::TextDiff;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
@@ -1502,6 +1503,23 @@ SAFETY NOTES:
         Ok(result)
     }
 
+    fn create_unified_diff(
+        &self,
+        original: &str,
+        modified: &str,
+        from_file: &str,
+        to_file: &str,
+    ) -> String {
+        let text_diff = TextDiff::from_lines(original, modified);
+        format!(
+            "{}",
+            text_diff
+                .unified_diff()
+                .context_radius(0)
+                .header(from_file, to_file)
+        )
+    }
+
     /// Replace a specific string in a remote file
     async fn str_replace_remote(
         &self,
@@ -1564,11 +1582,21 @@ SAFETY NOTES:
             ]));
         }
 
+        let unified_diff =
+            self.create_unified_diff(&content, &new_content, original_path, original_path);
+
         let output = format!(
-            "Successfully replaced {} occurrences of text in {} (remote)\n",
-            replaced_count, original_path
+            "Successfully replaced {} occurrences of text (remote)\n\n```diff\n{}\n```",
+            replaced_count, unified_diff
         );
-        Ok(CallToolResult::success(vec![Content::text(output)]))
+
+        let redacted_output = self
+            .get_secret_manager()
+            .redact_and_store_secrets(&output, Some(original_path));
+
+        Ok(CallToolResult::success(vec![Content::text(
+            redacted_output,
+        )]))
     }
 
     /// Replace a specific string in a local file
@@ -1591,7 +1619,7 @@ SAFETY NOTES:
             ]));
         }
 
-        let content = match fs::read_to_string(path) {
+        let original_content = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(e) => {
                 error!("Failed to read local file for str_replace: {}", e);
@@ -1602,7 +1630,7 @@ SAFETY NOTES:
             }
         };
 
-        if !content.contains(&actual_old_str) {
+        if !original_content.contains(&actual_old_str) {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
@@ -1610,18 +1638,20 @@ SAFETY NOTES:
         }
 
         let new_content = if replace_all.unwrap_or(false) {
-            content.replace(&actual_old_str, &actual_new_str)
+            original_content.replace(&actual_old_str, &actual_new_str)
         } else {
-            content.replacen(&actual_old_str, &actual_new_str, 1)
+            original_content.replacen(&actual_old_str, &actual_new_str, 1)
         };
 
         let replaced_count = if replace_all.unwrap_or(false) {
-            content.matches(&actual_old_str).count()
-        } else if content.contains(&actual_old_str) {
+            original_content.matches(&actual_old_str).count()
+        } else if original_content.contains(&actual_old_str) {
             1
         } else {
             0
         };
+
+        let unified_diff = self.create_unified_diff(&original_content, &new_content, path, path);
 
         if let Err(e) = fs::write(path, &new_content) {
             error!("Failed to write local file for str_replace: {}", e);
@@ -1632,10 +1662,17 @@ SAFETY NOTES:
         }
 
         let output = format!(
-            "Successfully replaced {} occurrences of text in {} (local)\n",
-            replaced_count, path
+            "Successfully replaced {} occurrences of text (local)\n\n```diff\n{}\n```",
+            replaced_count, unified_diff
         );
-        Ok(CallToolResult::success(vec![Content::text(output)]))
+
+        let redacted_output = self
+            .get_secret_manager()
+            .redact_and_store_secrets(&output, Some(path));
+
+        Ok(CallToolResult::success(vec![Content::text(
+            redacted_output,
+        )]))
     }
 
     /// Create a remote file with the specified content

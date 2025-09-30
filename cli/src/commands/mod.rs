@@ -12,7 +12,7 @@ use stakpak_api::{
     Client, ClientConfig,
     models::{Document, ProvisionerType, TranspileTargetProvisionerType},
 };
-use stakpak_mcp_server::{MCPServerConfig, ToolMode, start_server};
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use termimad::MadSkin;
 use walkdir::WalkDir;
 
@@ -151,6 +151,10 @@ pub enum Commands {
         #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
         tool_mode: ToolMode,
 
+        /// Enable Slack tools (experimental)
+        #[arg(long = "enable-slack-tools", default_value_t = false)]
+        enable_slack_tools: bool,
+
         /// Allow indexing of large projects (more than 500 supported files)
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
@@ -198,6 +202,7 @@ impl Commands {
                 disable_secret_redaction,
                 privacy_mode,
                 tool_mode,
+                enable_slack_tools,
                 index_big_project,
                 disable_mcp_mtls,
             } => {
@@ -264,6 +269,9 @@ impl Commands {
                         api: config.into(),
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
+                        enabled_tools: EnabledToolsConfig {
+                            slack: enable_slack_tools,
+                        },
                         tool_mode,
                         subagent_configs: None, // MCP standalone mode doesn't need subagent configs
                         bind_address,

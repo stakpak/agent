@@ -13,10 +13,22 @@ use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::TaskManager;
 
+pub mod integrations;
 pub mod local_tools;
 pub mod remote_tools;
 pub mod subagent_tools;
 pub mod tool_container;
+
+#[derive(Clone, Debug, Default)]
+pub struct EnabledToolsConfig {
+    pub slack: bool,
+}
+
+impl EnabledToolsConfig {
+    pub fn with_slack(slack: bool) -> Self {
+        Self { slack }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMode {
@@ -75,6 +87,7 @@ pub struct MCPServerConfig {
     pub bind_address: String,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
+    pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
     pub certificate_chain: Arc<Option<CertificateChain>>,
@@ -193,21 +206,34 @@ async fn start_server_internal(
             None,
             config.redact_secrets,
             config.privacy_mode,
+            config.enabled_tools.clone(),
             task_manager_handle.clone(),
             config.subagent_configs.clone(),
             ToolContainer::tool_router_local(),
         ),
-        ToolMode::RemoteOnly => ToolContainer::new(
-            Some(config.api),
-            config.redact_secrets,
-            config.privacy_mode,
-            task_manager_handle.clone(),
-            config.subagent_configs.clone(),
-            ToolContainer::tool_router_remote(),
-        ),
+        ToolMode::RemoteOnly => {
+            let mut tool_router = ToolContainer::tool_router_remote();
+            if config.enabled_tools.slack {
+                tool_router += ToolContainer::tool_router_slack();
+            }
+
+            ToolContainer::new(
+                Some(config.api),
+                config.redact_secrets,
+                config.privacy_mode,
+                config.enabled_tools.clone(),
+                task_manager_handle.clone(),
+                config.subagent_configs.clone(),
+                tool_router,
+            )
+        }
         ToolMode::Combined => {
             let mut tool_router =
                 ToolContainer::tool_router_local() + ToolContainer::tool_router_remote();
+
+            if config.enabled_tools.slack {
+                tool_router += ToolContainer::tool_router_slack();
+            }
 
             if config.subagent_configs.is_some() {
                 tool_router += ToolContainer::tool_router_subagent();
@@ -217,6 +243,7 @@ async fn start_server_internal(
                 Some(config.api),
                 config.redact_secrets,
                 config.privacy_mode,
+                config.enabled_tools.clone(),
                 task_manager_handle.clone(),
                 config.subagent_configs.clone(),
                 tool_router,
