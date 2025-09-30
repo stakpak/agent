@@ -244,7 +244,7 @@ pub enum InputEvent {
     Down,
     Quit,
     HandleEsc,
-    HandleReject(Option<String>),
+    HandleReject(Option<String>, bool, Option<Color>),
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -288,7 +288,7 @@ pub enum InputEvent {
 pub enum OutputEvent {
     UserMessage(String, Option<Vec<ToolCallResult>>),
     AcceptTool(ToolCall),
-    RejectTool(ToolCall),
+    RejectTool(ToolCall, bool),
     ListSessions,
     SwitchToSession(String),
     Memorize,
