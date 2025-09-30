@@ -489,7 +489,12 @@ pub fn update(
                 .get_prompt_tool_calls(&rest_tool_calls);
 
             state.message_tool_calls = Some(prompt_tool_calls.clone());
-            state.last_message_tool_calls = prompt_tool_calls.clone();
+
+            // Only update last_message_tool_calls if we're not in a retry scenario
+            // During retry, we want to preserve the original sequence for ShellCompleted
+            if !state.show_shell_mode || state.dialog_command.is_none() {
+                state.last_message_tool_calls = prompt_tool_calls.clone();
+            }
         }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
