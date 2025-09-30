@@ -466,25 +466,25 @@ pub fn render_file_diff_block(
         return (vec![], vec![]);
     }
 
-    let title = if tool_call.function.name == "create" {
-        "Create"
-    } else {
-        "Editing"
-    };
-    // Add header
-    lines.push(Line::from(vec![Span::styled(
-        format!(
-            "{} {} file",
-            title,
-            if deletions > 0 || insertions > 0 {
-                "1"
-            } else {
-                "0"
-            }
-        )
-        .to_string(),
-        Style::default().fg(AdaptiveColors::text()),
-    )]));
+    // let title = if tool_call.function.name == "create" {
+    //     "Create"
+    // } else {
+    //     "Editing"
+    // };
+    // // Add header
+    // lines.push(Line::from(vec![Span::styled(
+    //     format!(
+    //         "{} {} file",
+    //         title,
+    //         if deletions > 0 || insertions > 0 {
+    //             "1"
+    //         } else {
+    //             "0"
+    //         }
+    //     )
+    //     .to_string(),
+    //     Style::default().fg(AdaptiveColors::text()),
+    // )]));
 
     // Add file path with changes summary
     lines.push(Line::from(vec![
@@ -508,7 +508,7 @@ pub fn render_file_diff_block(
         ),
     ]));
 
-    lines.push(Line::from("")); // Empty line
+    // lines.push(Line::from("")); // Empty line
 
     let mut truncated_diff_lines;
     let mut full_diff_lines = diff_lines.clone();
@@ -532,7 +532,7 @@ pub fn render_file_diff_block(
 
         // Combine change lines + truncation message for truncated version
         truncated_diff_lines = change_lines;
-        truncated_diff_lines.push(Line::from(""));
+        // truncated_diff_lines.push(Line::from(""));
         truncated_diff_lines.push(truncation_line);
     } else {
         // Show all change lines
@@ -542,25 +542,6 @@ pub fn render_file_diff_block(
 
     truncated_diff_lines = [lines.clone(), truncated_diff_lines].concat();
     full_diff_lines = [lines, full_diff_lines].concat();
-
-    // Add summary to both versions
-    truncated_diff_lines.push(Line::from(""));
-    truncated_diff_lines.push(Line::from(vec![Span::styled(
-        format!(
-            "Total changes: {} additions, {} deletions",
-            insertions, deletions
-        ),
-        Style::default().fg(Color::Cyan),
-    )]));
-
-    full_diff_lines.push(Line::from(""));
-    full_diff_lines.push(Line::from(vec![Span::styled(
-        format!(
-            "Total changes: {} additions, {} deletions",
-            insertions, deletions
-        ),
-        Style::default().fg(Color::Cyan),
-    )]));
 
     (truncated_diff_lines, full_diff_lines)
 }
