@@ -72,6 +72,7 @@ pub enum ToolCallStatus {
     Rejected,
     Executed,
     Skipped,
+    Pending,
 }
 
 #[derive(Debug)]
@@ -205,6 +206,7 @@ pub struct AppState {
     // Session tool calls queue to track tool call status
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
     pub tool_call_execution_order: Vec<String>,
+    pub last_message_tool_calls: Vec<ToolCall>,
 }
 
 #[derive(Debug)]
@@ -242,7 +244,7 @@ pub enum InputEvent {
     Down,
     Quit,
     HandleEsc,
-    HandleReject(Option<String>),
+    HandleReject(Option<String>, bool, Option<Color>),
     CursorLeft,
     CursorRight,
     ToggleCursorVisible,
@@ -286,11 +288,11 @@ pub enum InputEvent {
 pub enum OutputEvent {
     UserMessage(String, Option<Vec<ToolCallResult>>),
     AcceptTool(ToolCall),
-    RejectTool(ToolCall),
+    RejectTool(ToolCall, bool),
     ListSessions,
     SwitchToSession(String),
     Memorize,
-    SendToolResult(ToolCallResult),
+    SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
 }
 
@@ -442,6 +444,7 @@ impl AppState {
             },
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
+            last_message_tool_calls: Vec::new(),
         }
     }
 

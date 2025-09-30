@@ -788,13 +788,14 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
 
     if tool_call_status == ToolCallResultStatus::Error {
-        return render_bash_block_rejected(&command_args, &title, Some(result.to_string()));
+        return render_bash_block_rejected(&command_args, &title, Some(result.to_string()), None);
     }
     if tool_call_status == ToolCallResultStatus::Cancelled {
         return render_bash_block_rejected(
             &command_args,
             &title,
             Some("Interrupted by user".to_string()),
+            None,
         );
     }
 
@@ -1156,8 +1157,15 @@ pub fn render_bash_block_rejected(
     command_name: &str,
     title: &str,
     message: Option<String>,
+    color: Option<Color>,
 ) -> Vec<Line<'static>> {
-    render_styled_lines(command_name, title, message, None)
+    let colors = color.map(|c| LinesColors {
+        dot: c,
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
+        message: c,
+    });
+    render_styled_lines(command_name, title, message, colors)
 }
 
 #[derive(Clone)]
