@@ -27,6 +27,13 @@ use uuid::Uuid;
 const SCROLL_LINES: usize = 1;
 const MAX_PASTE_CHAR_COUNT: usize = 1000;
 
+/// Groups related event channel senders together to reduce function parameter counts
+struct EventChannels<'a> {
+    output_tx: &'a Sender<OutputEvent>,
+    input_tx: &'a Sender<InputEvent>,
+    shell_tx: &'a Sender<InputEvent>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     state: &mut AppState,
@@ -172,7 +179,8 @@ pub fn update(
                                     .try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                             } else {
                                 // Fire handle reject
-                                let _ = input_tx.try_send(InputEvent::HandleReject(None));
+                                let _ =
+                                    input_tx.try_send(InputEvent::HandleReject(None, true, None));
                             }
                         }
                     }
@@ -234,7 +242,7 @@ pub fn update(
             }
             if err == "STREAM_CANCELLED" {
                 let rendered_lines =
-                    render_bash_block_rejected("Interrupted by user", "System", None);
+                    render_bash_block_rejected("Interrupted by user", "System", None, None);
                 state.messages.push(Message {
                     id: Uuid::new_v4(),
                     content: MessageContent::StyledBlock(rendered_lines),
@@ -340,8 +348,13 @@ pub fn update(
             }
         }
 
-        InputEvent::HandleReject(message) => {
-            handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, message);
+        InputEvent::HandleReject(message, should_stop, color) => {
+            let channels = EventChannels {
+                output_tx,
+                input_tx,
+                shell_tx,
+            };
+            handle_esc(state, &channels, cancel_tx, message, should_stop, color);
         }
 
         InputEvent::ShowConfirmationDialog(tool_call) => {
@@ -360,6 +373,7 @@ pub fn update(
                     &truncated_command,
                     &title,
                     Some("Tool call already executed".to_string()),
+                    None,
                 );
                 state.messages.push(Message {
                     id: Uuid::new_v4(),
@@ -421,8 +435,19 @@ pub fn update(
                 } else {
                     "Tool call rejected"
                 };
-                let _ =
-                    input_tx_clone.try_send(InputEvent::HandleReject(Some(message.to_string())));
+
+                let color = if is_skipped {
+                    Some(Color::Yellow)
+                } else {
+                    None
+                };
+
+                let _ = input_tx_clone.try_send(InputEvent::HandleReject(
+                    Some(message.to_string()),
+                    !is_skipped,
+                    color,
+                ));
+
                 state
                     .session_tool_calls_queue
                     .insert(tool_call.id.clone(), ToolCallStatus::Executed);
@@ -528,7 +553,12 @@ pub fn update(
                     state.latest_tool_call = Some(tool_call.clone());
                 }
 
-                handle_esc(state, output_tx, cancel_tx, shell_tx, input_tx, None);
+                let channels = EventChannels {
+                    output_tx,
+                    input_tx,
+                    shell_tx,
+                };
+                handle_esc(state, &channels, cancel_tx, None, true, None);
             }
         }
 
@@ -1002,13 +1032,15 @@ fn handle_input_backspace(state: &mut AppState) {
 
 fn handle_esc(
     state: &mut AppState,
-    output_tx: &Sender<OutputEvent>,
+    channels: &EventChannels,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
-    input_tx: &Sender<InputEvent>,
-    shell_tx: &Sender<InputEvent>,
     message: Option<String>,
+    should_stop: bool,
+    color: Option<Color>,
 ) {
-    let _ = input_tx.try_send(InputEvent::EmergencyClearTerminal);
+    let _ = channels
+        .input_tx
+        .try_send(InputEvent::EmergencyClearTerminal);
 
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
@@ -1024,11 +1056,13 @@ fn handle_esc(
     } else if state.is_dialog_open {
         let tool_call_opt = state.dialog_command.clone();
         if let Some(tool_call) = &tool_call_opt {
-            let _ = output_tx.try_send(OutputEvent::RejectTool(tool_call.clone()));
+            let _ = channels
+                .output_tx
+                .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
             let truncated_command = extract_truncated_command_arguments(tool_call, None);
             let title = get_command_type_name(tool_call);
             let rendered_lines =
-                render_bash_block_rejected(&truncated_command, &title, message.clone());
+                render_bash_block_rejected(&truncated_command, &title, message.clone(), color);
             state.messages.push(Message {
                 id: Uuid::new_v4(),
                 content: MessageContent::StyledBlock(rendered_lines),
@@ -1041,7 +1075,7 @@ fn handle_esc(
         state.text_area.set_text("");
     } else if state.show_shell_mode {
         if state.active_shell_command.is_some() {
-            let _ = shell_tx.try_send(InputEvent::ShellKill);
+            let _ = channels.shell_tx.try_send(InputEvent::ShellKill);
         }
         state.show_shell_mode = false;
         state.text_area.set_shell_mode(false);

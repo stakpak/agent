@@ -301,7 +301,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         continue;
                     }
                 }
-                OutputEvent::RejectTool(tool_call) => {
+                OutputEvent::RejectTool(tool_call, should_stop) => {
                     messages.push(tool_result(
                         tool_call.id.clone(),
                         "TOOL_CALL_REJECTED".to_string(),
@@ -309,8 +309,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     if !tools_queue.is_empty() {
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
+                        continue;
                     }
-                    continue;
+                    if should_stop {
+                        continue;
+                    }
                 }
                 OutputEvent::ListSessions => {
                     send_input_event(
