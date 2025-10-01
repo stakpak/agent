@@ -212,6 +212,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                     send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
+                    tools_queue.clear();
                     messages.push(user_message(user_input));
                 }
                 OutputEvent::AcceptTool(tool_call) => {
@@ -286,11 +287,8 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Process next tool in queue if available
                     if !tools_queue.is_empty() {
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::MessageToolCalls(tools_queue.clone()),
-                        )
-                        .await?;
+                        // Don't re-send MessageToolCalls - tools were already sent when AI returned them
+                        // Just send the next individual tool call to process
                         let next_tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &next_tool_call).await?;
                         continue;
@@ -466,11 +464,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
 
                     if !tools_queue.is_empty() {
-                        send_input_event(
-                            &input_tx,
-                            InputEvent::MessageToolCalls(tools_queue.clone()),
-                        )
-                        .await?;
+                        // Don't re-send MessageToolCalls - just process next tool
                         let tool_call = tools_queue.remove(0);
                         send_tool_call(&input_tx, &tool_call).await?;
                         continue;
@@ -576,13 +570,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Send tool calls to TUI if present
                     if let Some(tool_calls) = &response.choices[0].message.tool_calls {
+                        // Send MessageToolCalls only once with all new tools from AI
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::MessageToolCalls(tool_calls.clone()),
+                        )
+                        .await?;
+
+                        // Add to queue for sequential processing
                         tools_queue.extend(tool_calls.clone());
+
+                        // Send the first tool call to show in UI
                         if !tools_queue.is_empty() {
-                            send_input_event(
-                                &input_tx,
-                                InputEvent::MessageToolCalls(tools_queue.clone()),
-                            )
-                            .await?;
                             let tool_call = tools_queue.remove(0);
                             send_tool_call(&input_tx, &tool_call).await?;
                             continue;
