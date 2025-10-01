@@ -49,50 +49,10 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
-            if state.approval_popup.is_visible() {
-                state.approval_popup.scroll_up();
-                return; // Event was consumed by popup
-            }
-            if state.show_sessions_dialog {
-                if state.session_selected > 0 {
-                    state.session_selected -= 1;
-                }
-            } else if state.show_helper_dropdown {
-                handle_dropdown_up(state);
-            } else if state.is_dialog_open && state.dialog_focused {
-                // Handle dialog navigation only when dialog is focused
-                if state.dialog_selected > 0 {
-                    state.dialog_selected -= 1;
-                } else {
-                    // Wrap to the last option
-                    state.dialog_selected = 2;
-                }
-            } else {
-                handle_scroll_up(state);
-            }
+            handle_up_navigation(state);
         }
         InputEvent::Down => {
-            if state.approval_popup.is_visible() {
-                state.approval_popup.scroll_down();
-                return; // Event was consumed by popup
-            }
-            if state.show_sessions_dialog {
-                if state.session_selected + 1 < state.sessions.len() {
-                    state.session_selected += 1;
-                }
-            } else if state.show_helper_dropdown {
-                handle_dropdown_down(state);
-            } else if state.is_dialog_open && state.dialog_focused {
-                // Handle dialog navigation only when dialog is focused
-                if state.dialog_selected < 2 {
-                    state.dialog_selected += 1;
-                } else {
-                    // Wrap to the first option
-                    state.dialog_selected = 0;
-                }
-            } else {
-                handle_scroll_down(state, message_area_height, message_area_width);
-            }
+            handle_down_navigation(state, message_area_height, message_area_width);
         }
         InputEvent::DropdownUp => handle_dropdown_up(state),
         InputEvent::DropdownDown => handle_dropdown_down(state),
@@ -230,6 +190,10 @@ pub fn update(
             // Invalidate cache since messages changed
             crate::services::message::invalidate_message_lines_cache(state);
         }
+        InputEvent::ScrollUp => handle_up_navigation(state),
+        InputEvent::ScrollDown => {
+            handle_down_navigation(state, message_area_height, message_area_width)
+        }
         InputEvent::Error(err) => {
             if err.contains("FREE_PLAN") {
                 push_error_message(state, "Free plan limit reached.", None);
@@ -268,10 +232,6 @@ pub fn update(
             }
 
             push_error_message(state, &error_message, None);
-        }
-        InputEvent::ScrollUp => handle_scroll_up(state),
-        InputEvent::ScrollDown => {
-            handle_scroll_down(state, message_area_height, message_area_width)
         }
         InputEvent::PageUp => {
             state.stay_at_bottom = false; // unlock from bottom
@@ -532,6 +492,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
+            if state.show_collapsed_messages {
+                state.show_collapsed_messages = false;
+                return;
+            }
             if state.approval_popup.is_visible() {
                 state.approval_popup.escape();
                 state.toggle_approved_message = false;
@@ -1086,7 +1050,7 @@ fn handle_esc(
     } else {
         state.text_area.set_text("");
     }
-
+    eprintln!("is_dialog_open: {}", state.is_dialog_open);
     state.messages.retain(|m| {
         m.id != state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.pending_bash_message_id.unwrap_or_default()
@@ -1448,6 +1412,66 @@ fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgr
         Some(tool_call_id),
     ));
     crate::services::message::invalidate_message_lines_cache(state);
+}
+
+/// Handles upward navigation with approval popup check
+fn handle_up_navigation(state: &mut AppState) {
+    // Check if approval popup is visible and should consume the event
+    if state.approval_popup.is_visible() {
+        state.approval_popup.scroll_up();
+        return; // Event was consumed by popup
+    }
+
+    // Handle different UI states
+    if state.show_sessions_dialog {
+        if state.session_selected > 0 {
+            state.session_selected -= 1;
+        }
+    } else if state.show_helper_dropdown {
+        handle_dropdown_up(state);
+    } else if state.is_dialog_open && state.dialog_focused {
+        // Handle dialog navigation only when dialog is focused
+        if state.dialog_selected > 0 {
+            state.dialog_selected -= 1;
+        } else {
+            // Wrap to the last option
+            state.dialog_selected = 2;
+        }
+    } else {
+        handle_scroll_up(state);
+    }
+}
+
+/// Handles downward navigation with approval popup check
+fn handle_down_navigation(
+    state: &mut AppState,
+    message_area_height: usize,
+    message_area_width: usize,
+) {
+    // Check if approval popup is visible and should consume the event
+    if state.approval_popup.is_visible() {
+        state.approval_popup.scroll_down();
+        return; // Event was consumed by popup
+    }
+
+    // Handle different UI states
+    if state.show_sessions_dialog {
+        if state.session_selected + 1 < state.sessions.len() {
+            state.session_selected += 1;
+        }
+    } else if state.show_helper_dropdown {
+        handle_dropdown_down(state);
+    } else if state.is_dialog_open && state.dialog_focused {
+        // Handle dialog navigation only when dialog is focused
+        if state.dialog_selected < 2 {
+            state.dialog_selected += 1;
+        } else {
+            // Wrap to the first option
+            state.dialog_selected = 0;
+        }
+    } else {
+        handle_scroll_down(state, message_area_height, message_area_width);
+    }
 }
 
 fn handle_scroll_up(state: &mut AppState) {
