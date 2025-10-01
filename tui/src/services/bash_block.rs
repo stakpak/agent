@@ -1288,12 +1288,17 @@ pub fn render_styled_lines(
 
     let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
     let message = preprocess_terminal_output(&message);
-    lines.push(Line::from(vec![Span::styled(
-        format!("  L {}", message),
-        Style::default()
-            .fg(colors.message)
-            .add_modifier(Modifier::BOLD),
-    )]));
+
+    // Handle multi-line error messages
+    for (i, line) in message.lines().enumerate() {
+        let prefix = if i == 0 { "  L " } else { "    " };
+        lines.push(Line::from(vec![Span::styled(
+            format!("{}{}", prefix, line),
+            Style::default()
+                .fg(colors.message)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    }
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
