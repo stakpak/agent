@@ -824,8 +824,8 @@ fn handle_shell_mode(state: &mut AppState) {
         if let Some(dialog_command) = &state.dialog_command {
             let command = match extract_command_from_tool_call(dialog_command) {
                 Ok(command) => command,
-                Err(e) => {
-                    eprintln!("Error extracting command: {}", e);
+                Err(_e) => {
+                    // eprintln!("Error extracting command: {}", e);
                     return;
                 }
             };
@@ -1158,9 +1158,7 @@ fn handle_input_submitted(
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
-        // if let Some(dialog_command) = &state.dialog_command {
-        //     let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-        // }
+        state.toggle_approved_message = true;
         state.approval_popup.toggle();
         state.is_dialog_open = true;
         state.dialog_selected = 0;
@@ -1699,8 +1697,8 @@ fn handle_retry_tool_call(
         // Extract the command from the tool call
         let command = match extract_command_from_tool_call(tool_call) {
             Ok(command) => command,
-            Err(e) => {
-                eprintln!("Error extracting command: {}", e);
+            Err(_e) => {
+                // eprintln!("Error extracting command: {}", e);
                 return;
             }
         };
