@@ -49,6 +49,8 @@ pub struct RunInteractiveConfig {
 pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
     let mut messages: Vec<ChatMessage> = Vec::new();
     let mut tools_queue: Vec<ToolCall> = Vec::new();
+    #[allow(unused_assignments)]
+    let mut should_update_rulebooks_on_next_message = false;
 
     // Store API config for later use
     let api_key = ctx.api_key.clone();
@@ -205,7 +207,16 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                             .await
                             .map_err(|e| format!("Failed to format local context: {}", e))?;
 
-                    let (user_input, _) = add_rulebooks(&messages, &user_input, &config.rulebooks);
+                    // Add rulebooks if this is the first message OR if we just resumed a session
+                    let (user_input, _) = if should_update_rulebooks_on_next_message {
+                        // Force add rulebooks for resumed session (ignore messages.is_empty() check)
+                        let (user_input_with_rulebooks, _) =
+                            add_rulebooks(&[], &user_input, &config.rulebooks);
+                        should_update_rulebooks_on_next_message = false; // Reset the flag
+                        (user_input_with_rulebooks, None)
+                    } else {
+                        add_rulebooks(&messages, &user_input, &config.rulebooks)
+                    };
 
                     let (user_input, _) =
                         add_subagents(&messages, &user_input, &config.subagent_configs);
@@ -356,6 +367,9 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
 
+                                // Mark that we need to update rulebooks on the next user message
+                                should_update_rulebooks_on_next_message = true;
+
                                 messages.extend(chat_messages);
                                 tools_queue.extend(tool_calls.clone());
 
@@ -407,6 +421,9 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                         Ok((chat_messages, tool_calls, session_id_uuid)) => {
                             // Track the current session ID
                             current_session_id = Some(session_id_uuid);
+
+                            // Mark that we need to update rulebooks on the next user message
+                            should_update_rulebooks_on_next_message = true;
 
                             messages.extend(chat_messages);
                             tools_queue.extend(tool_calls.clone());
