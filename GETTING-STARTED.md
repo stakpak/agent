@@ -155,21 +155,6 @@ stakpak config sample
 stakpak set --machine-name "my-dev-machine"
 ```
 
-### Flow Management
-```bash
-# List your flows
-stakpak list
-
-# Clone a flow
-stakpak clone owner/flow-name
-
-# Push configurations to a flow
-stakpak push owner/flow-name --create
-
-# Query configurations
-stakpak query "Find all Kubernetes deployments"
-```
-
 ## 📋 Configuration
 
 ### Profile-Based Configuration
