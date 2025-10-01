@@ -1050,7 +1050,7 @@ fn handle_esc(
     } else {
         state.text_area.set_text("");
     }
-    eprintln!("is_dialog_open: {}", state.is_dialog_open);
+
     state.messages.retain(|m| {
         m.id != state.streaming_tool_result_id.unwrap_or_default()
             && m.id != state.pending_bash_message_id.unwrap_or_default()
