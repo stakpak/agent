@@ -1287,6 +1287,7 @@ pub fn render_styled_lines(
     }
 
     let message = message.unwrap_or("No (tell Stakpak what to do differently)".to_string());
+    let message = preprocess_terminal_output(&message);
     lines.push(Line::from(vec![Span::styled(
         format!("  L {}", message),
         Style::default()
