@@ -63,11 +63,32 @@ pub fn preview_str_replace_editor_style(
 
             // Look for a space within the last 20% of the available width
             let search_start = (available_width as f32 * 0.8) as usize;
-            if let Some(space_pos) = remaining[search_start..available_width.min(remaining.len())]
-                .rfind(char::is_whitespace)
+
+            // Ensure indices are on character boundaries
+            let search_start = remaining
+                .char_indices()
+                .find(|(idx, _)| *idx >= search_start)
+                .map(|(idx, _)| idx)
+                .unwrap_or(remaining.len());
+
+            let end_idx = remaining
+                .char_indices()
+                .find(|(idx, _)| *idx >= available_width)
+                .map(|(idx, _)| idx)
+                .unwrap_or(remaining.len());
+
+            if search_start < end_idx
+                && let Some(space_pos) = remaining[search_start..end_idx].rfind(char::is_whitespace)
             {
                 break_point = search_start + space_pos;
             }
+
+            // Ensure break_point is on a character boundary
+            let break_point = remaining
+                .char_indices()
+                .find(|(idx, _)| *idx >= break_point)
+                .map(|(idx, _)| idx)
+                .unwrap_or(remaining.len());
 
             let chunk = &remaining[..break_point];
             wrapped_lines.push(chunk.to_string());
