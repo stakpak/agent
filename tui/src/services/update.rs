@@ -65,7 +65,7 @@ pub fn update(
             }
         }
     }
-    
+
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
@@ -820,95 +820,84 @@ pub fn update(
                 let _ = input_tx.try_send(InputEvent::Quit);
             }
         }
-        
+
         // Profile switcher events
         InputEvent::ProfilesLoaded(profiles, _current_profile) => {
-            eprintln!("ProfilesLoaded event - profiles: {:?}, state.current_profile_name (unchanged): {}", 
-                profiles, state.current_profile_name);
-            
             // Only update the available profiles list
             // Do NOT update current_profile_name - it's already set correctly when TUI starts
             state.available_profiles = profiles;
         }
-        
+
         InputEvent::ShowProfileSwitcher => {
             // Don't show profile switcher if input is blocked or dialog is open
-            if state.profile_switching_in_progress || state.is_dialog_open || state.approval_popup.is_visible() {
+            if state.profile_switching_in_progress
+                || state.is_dialog_open
+                || state.approval_popup.is_visible()
+            {
                 return;
             }
-            
+
             state.show_profile_switcher = true;
             state.profile_switcher_selected = 0;
-            
+
             // Pre-select current profile
-            if let Some(idx) = state.available_profiles.iter()
-                .position(|p| p == &state.current_profile_name) {
+            if let Some(idx) = state
+                .available_profiles
+                .iter()
+                .position(|p| p == &state.current_profile_name)
+            {
                 state.profile_switcher_selected = idx;
             }
         }
-    
+
         InputEvent::ProfileSwitcherSelect => {
-            eprintln!("ProfileSwitcherSelect event received - show_profile_switcher: {}, switching_in_progress: {}, available_profiles: {:?}, selected: {}, current: {}", 
-                state.show_profile_switcher,
-                state.profile_switching_in_progress,
-                state.available_profiles,
-                state.profile_switcher_selected,
-                state.current_profile_name
-            );
-            
             // Don't process if switching is already in progress
             if state.profile_switching_in_progress {
-                eprintln!("Profile switch already in progress, ignoring select");
                 return;
             }
-            
+
             if state.show_profile_switcher && !state.available_profiles.is_empty() {
-                let selected_profile = state.available_profiles[state.profile_switcher_selected].clone();
-                
-                eprintln!("Attempting to switch from '{}' to '{}'", state.current_profile_name, selected_profile);
-                
+                let selected_profile =
+                    state.available_profiles[state.profile_switcher_selected].clone();
+
                 // Don't switch if already on this profile
                 if selected_profile == state.current_profile_name {
-                    eprintln!("Already on profile '{}', closing switcher", selected_profile);
                     state.show_profile_switcher = false;
                     return;
                 }
-                
+
                 // Send request to switch profile
-                eprintln!("Sending RequestProfileSwitch('{}')", selected_profile);
                 let _ = output_tx.try_send(OutputEvent::RequestProfileSwitch(selected_profile));
             }
         }
-        
+
         InputEvent::ProfileSwitcherCancel => {
             state.show_profile_switcher = false;
         }
-        
+
         InputEvent::ProfileSwitchRequested(ref profile) => {
-            eprintln!("ProfileSwitchRequested handler - locking TUI for switch to: {}", profile);
             state.profile_switching_in_progress = true;
             state.show_profile_switcher = false;
-            
+
             // Clear profile switcher state immediately to prevent stray selects
             state.available_profiles.clear();
             state.profile_switcher_selected = 0;
-            
-            state.profile_switch_status_message = Some(format!("🔄 Switching to profile: {}", profile));
-            
+
+            state.profile_switch_status_message =
+                Some(format!("🔄 Switching to profile: {}", profile));
+
             state.messages.push(Message::info(
                 format!("🔄 Switching to profile: {}", profile),
-                None
+                None,
             ));
         }
-        
+
         InputEvent::ProfileSwitchProgress(ref message) => {
             state.profile_switch_status_message = Some(message.clone());
             state.messages.push(Message::info(message.clone(), None));
         }
-        
+
         InputEvent::ProfileSwitchComplete(ref profile) => {
-            eprintln!("ProfileSwitchComplete handler - switching to: {}", profile);
-            
             // Clear EVERYTHING
             state.messages.clear();
             state.session_tool_calls_queue.clear();
@@ -925,7 +914,7 @@ pub fn update(
             state.stay_at_bottom = true;
             state.tool_call_execution_order.clear();
             state.last_message_tool_calls.clear();
-            
+
             // Clear shell mode state
             state.show_shell_mode = false;
             state.shell_mode_input.clear();
@@ -933,10 +922,10 @@ pub fn update(
             state.active_shell_command_output = None;
             state.is_tool_call_shell_command = false;
             state.ondemand_shell_mode = false;
-            
+
             // Clear file search
             state.filtered_files.clear();
-            
+
             // Clear dialog state
             state.is_dialog_open = false;
             state.dialog_command = None;
@@ -944,50 +933,47 @@ pub fn update(
             state.show_shortcuts = false;
             state.show_collapsed_messages = false;
             state.approval_popup = PopupService::new();
-            
+
             // Clear retry state
             state.retry_attempts = 0;
             state.last_user_message_for_retry = None;
             state.is_retrying = false;
-            
+
             // CRITICAL: Close profile switcher to prevent stray selects
             state.show_profile_switcher = false;
             state.available_profiles.clear();
             state.profile_switcher_selected = 0;
-            
+
             // Update profile info
             state.current_profile_name = profile.clone();
             state.profile_switching_in_progress = false;
             state.profile_switch_status_message = None;
-            
+
             // Show success and welcome messages
             state.messages.push(Message::info(
                 format!("✅ Successfully switched to profile: {}", profile),
-                Some(Style::default().fg(AdaptiveColors::green()))
+                Some(Style::default().fg(AdaptiveColors::green())),
             ));
-            
-            let welcome_msg = welcome_messages(
-                state.latest_version.clone(),
-                state
-            );
+
+            let welcome_msg = welcome_messages(state.latest_version.clone(), state);
             state.messages.extend(welcome_msg);
-            
+
             // Invalidate all caches
             crate::services::message::invalidate_message_lines_cache(state);
         }
-        
+
         InputEvent::ProfileSwitchFailed(ref error) => {
             state.profile_switching_in_progress = false;
             state.profile_switch_status_message = None;
             state.show_profile_switcher = false;
-            
+
             state.messages.push(Message::info(
                 format!("❌ Profile switch failed: {}", error),
-                Some(Style::default().fg(AdaptiveColors::red()))
+                Some(Style::default().fg(AdaptiveColors::red())),
             ));
             state.messages.push(Message::info(
                 "Staying in current profile. Press Ctrl+P to try again.",
-                None
+                None,
             ));
         }
 
@@ -1022,8 +1008,7 @@ fn handle_shell_mode(state: &mut AppState) {
         if let Some(dialog_command) = &state.dialog_command {
             let command = match extract_command_from_tool_call(dialog_command) {
                 Ok(command) => command,
-                Err(_e) => {
-                    // eprintln!("Error extracting command: {}", e);
+                Err(_) => {
                     return;
                 }
             };
@@ -1910,8 +1895,7 @@ fn handle_retry_tool_call(
         // Extract the command from the tool call
         let command = match extract_command_from_tool_call(tool_call) {
             Ok(command) => command,
-            Err(_e) => {
-                // eprintln!("Error extracting command: {}", e);
+            Err(_) => {
                 return;
             }
         };

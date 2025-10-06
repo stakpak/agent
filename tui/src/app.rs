@@ -207,7 +207,7 @@ pub struct AppState {
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
     pub tool_call_execution_order: Vec<String>,
     pub last_message_tool_calls: Vec<ToolCall>,
-    
+
     // Profile switcher state
     pub show_profile_switcher: bool,
     pub available_profiles: Vec<String>,
@@ -464,7 +464,7 @@ impl AppState {
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
             last_message_tool_calls: Vec::new(),
-            
+
             // Profile switcher initialization
             show_profile_switcher: false,
             available_profiles: Vec::new(),
@@ -510,7 +510,7 @@ impl AppState {
     pub fn clear_input(&mut self) {
         self.text_area.set_text("");
     }
-    
+
     /// Check if user input should be blocked (during profile switch)
     pub fn is_input_blocked(&self) -> bool {
         self.profile_switching_in_progress
