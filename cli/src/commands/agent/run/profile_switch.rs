@@ -16,7 +16,7 @@ pub async fn validate_profile_switch(
     // 1. Try to load the new profile config
     let mut new_config = AppConfig::load(new_profile, config_path)
         .map_err(|e| format!("Failed to load profile '{}': {}", new_profile, e))?;
-    
+
     // 2. Handle API key - inherit from default if not present
     if new_config.api_key.is_none() {
         if let Some(default_key) = default_api_key {
@@ -28,11 +28,11 @@ pub async fn validate_profile_switch(
             ));
         }
     }
-    
+
     // 3. Test API key with retry logic
     let client = Client::new(&new_config.clone().into())
         .map_err(|e| format!("Failed to create API client: {}", e))?;
-    
+
     let mut last_error = String::new();
     for attempt in 1..=MAX_RETRIES {
         match client.get_my_account().await {
@@ -49,10 +49,9 @@ pub async fn validate_profile_switch(
             }
         }
     }
-    
+
     Err(format!(
         "API validation failed after {} attempts: {}",
         MAX_RETRIES, last_error
     ))
 }
-
