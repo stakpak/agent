@@ -48,7 +48,7 @@ pub struct RunInteractiveConfig {
 
 pub async fn run_interactive(
     mut ctx: AppConfig,
-    config: RunInteractiveConfig,
+    mut config: RunInteractiveConfig,
 ) -> Result<(), String> {
     // Outer loop for profile switching
     'profile_switch_loop: loop {
@@ -754,13 +754,33 @@ pub async fn run_interactive(
 
         // Check if profile switch was requested
         if let Some(new_config) = profile_switch_config {
-            // Profile switch requested - update config and restart loop
+            // Profile switch requested - update config and restart
 
             // All tasks have already exited from try_join
             // Give a moment for cleanup
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-            // Update config and restart
+            // Fetch and filter rulebooks for the new profile
+            let client = Client::new(&ClientConfig {
+                api_key: new_config.api_key.clone(),
+                api_endpoint: new_config.api_endpoint.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+            
+            let new_rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
+                if let Some(rulebook_config) = &new_config.rulebooks {
+                    rulebook_config.filter_rulebooks(rulebooks)
+                } else {
+                    rulebooks
+                }
+            });
+
+            // Update config with new rulebooks
+            config.rulebooks = new_rulebooks;
+            config.allowed_tools = new_config.allowed_tools.clone();
+            config.auto_approve = new_config.auto_approve.clone();
+            
+            // Update ctx and restart
             ctx = new_config;
             continue 'profile_switch_loop;
         }
