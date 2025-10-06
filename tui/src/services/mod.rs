@@ -11,6 +11,7 @@ pub mod markdown_renderer;
 pub mod message;
 pub mod message_pattern;
 pub mod placeholder_prompts;
+pub mod profile_switcher;
 pub mod sessions_dialog;
 pub mod shell_mode;
 pub mod syntax_highlighter;

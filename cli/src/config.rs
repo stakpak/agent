@@ -59,6 +59,15 @@ pub struct AppConfig {
     pub rulebooks: Option<RulebookConfig>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProfileInfo {
+    pub name: String,
+    pub has_api_key: bool,
+    pub allowed_tools_count: usize,
+    pub auto_approve_count: usize,
+    pub is_restricted: bool,
+}
+
 impl From<AppConfig> for ClientConfig {
     fn from(config: AppConfig) -> Self {
         ClientConfig {
@@ -217,6 +226,49 @@ impl AppConfig {
             allowed_tools,
             auto_approve,
             rulebooks,
+        })
+    }
+
+    /// List all available profiles from config file
+    pub fn list_available_profiles(custom_config_path: Option<&str>) -> Result<Vec<String>, String> {
+        let config_path = get_config_path(custom_config_path);
+        
+        if !Path::new(&config_path).exists() {
+            return Err("Config file not found".to_string());
+        }
+        
+        let content = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config file: {}", e))?;
+        
+        let config_file: ConfigFile = toml::from_str(&content)
+            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+        
+        let mut profiles: Vec<String> = config_file
+            .profiles
+            .keys()
+            .filter(|name| name.as_str() != "all") // Skip the "all" meta-profile
+            .cloned()
+            .collect();
+        
+        if profiles.is_empty() {
+            return Err("No profiles found in config file".to_string());
+        }
+        
+        profiles.sort();
+        Ok(profiles)
+    }
+    
+    /// Get profile display info
+    pub fn get_profile_info(profile_name: &str, custom_config_path: Option<&str>) -> Result<ProfileInfo, String> {
+        let config = Self::load(profile_name, custom_config_path)
+            .map_err(|e| e.to_string())?;
+        
+        Ok(ProfileInfo {
+            name: profile_name.to_string(),
+            has_api_key: config.api_key.is_some(),
+            allowed_tools_count: config.allowed_tools.as_ref().map(|t| t.len()).unwrap_or(0),
+            auto_approve_count: config.auto_approve.as_ref().map(|t| t.len()).unwrap_or(0),
+            is_restricted: config.allowed_tools.as_ref().map(|t| t.len() < 5).unwrap_or(false),
         })
     }
 

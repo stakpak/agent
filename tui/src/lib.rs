@@ -22,6 +22,15 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
 
+// Rulebook config struct (re-defined here to avoid circular dependency)
+#[derive(Clone, Debug)]
+pub struct RulebookConfig {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+    pub include_tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
+}
+
 use crate::app::ToolCallStatus;
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
@@ -78,19 +87,28 @@ pub async fn run_tui(
     is_git_repo: bool,
     auto_approve_tools: Option<&Vec<String>>,
     allowed_tools: Option<&Vec<String>>,
+    current_profile_name: String,
+    rulebook_config: Option<RulebookConfig>,
 ) -> io::Result<()> {
+    eprintln!("run_tui called, initializing terminal...");
     let _guard = TerminalGuard;
+    
+    eprintln!("Enabling raw mode...");
     crossterm::terminal::enable_raw_mode()?;
 
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
     let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
 
-    execute!(
+    eprintln!("Entering alternate screen...");
+    if let Err(e) = execute!(
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste
-    )?;
+    ) {
+        eprintln!("ERROR entering alternate screen: {:?}", e);
+        return Err(e);
+    }
 
     if enable_mouse_capture {
         execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -98,7 +116,9 @@ pub async fn run_tui(
         execute!(std::io::stdout(), DisableMouseCapture)?;
     }
 
+    eprintln!("Creating terminal backend...");
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
+    eprintln!("Terminal created successfully");
 
     let term_size = terminal.size()?;
 
@@ -110,6 +130,10 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
     );
+    
+    // Set the current profile name and rulebook config
+    state.current_profile_name = current_profile_name;
+    state.rulebook_config = rulebook_config;
 
     // Add welcome messages after state is created
     let welcome_msg =
@@ -120,14 +144,17 @@ pub async fn run_tui(
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let internal_tx_thread = internal_tx.clone();
     std::thread::spawn(move || {
+        eprintln!("Crossterm event reader thread started");
         loop {
             if let Ok(event) = crossterm::event::read()
                 && let Some(event) = crate::event::map_crossterm_event_to_input_event(event)
                 && internal_tx_thread.blocking_send(event).is_err()
             {
+                eprintln!("Crossterm event reader thread exiting (channel closed)");
                 break;
             }
         }
+        eprintln!("Crossterm event reader thread terminated");
     });
 
     let shell_event_tx = internal_tx.clone();
@@ -135,9 +162,15 @@ pub async fn run_tui(
     let mut spinner_interval = interval(Duration::from_millis(100));
 
     // Main async update/view loop
+    eprintln!("TUI entering main event loop...");
     terminal.draw(|f| view::view(f, &mut state))?;
     let mut should_quit = false;
+    let mut loop_iteration = 0;
     loop {
+        loop_iteration += 1;
+        if loop_iteration % 100 == 0 {
+            eprintln!("TUI loop iteration: {}", loop_iteration);
+        }
         // Check if double Ctrl+C timer expired
         if state.ctrl_c_pressed_once
             && let Some(timer) = state.ctrl_c_timer
@@ -148,7 +181,14 @@ pub async fn run_tui(
         }
         tokio::select! {
 
-               Some(event) = input_rx.recv() => {
+               event_option = input_rx.recv() => {
+                   if event_option.is_none() {
+                       eprintln!("TUI: input_rx channel closed!");
+                       should_quit = true;
+                       continue;
+                   }
+                   let event = event_option.unwrap();
+                   eprintln!("TUI received event from input_rx: {:?}", std::mem::discriminant(&event));
                    if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
                    InputEvent::ShellWaitingForInput | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
             // These are shell events, forward them to the shell channel
@@ -184,7 +224,10 @@ pub async fn run_tui(
                        continue;
                    }
 
-                   if let InputEvent::Quit = event { should_quit = true; }
+                   if let InputEvent::Quit = event { 
+                       eprintln!("TUI received Quit event from input_rx");
+                       should_quit = true; 
+                   }
                    else {
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                        let input_height = 3;
@@ -214,12 +257,22 @@ pub async fn run_tui(
                        state.poll_file_search_results();
                    }
                }
-               Some(event) = internal_rx.recv() => {
+               event_option = internal_rx.recv() => {
+                   if event_option.is_none() {
+                       eprintln!("TUI: internal_rx channel closed!");
+                       should_quit = true;
+                       continue;
+                   }
+                   let event = event_option.unwrap();
+                   eprintln!("TUI received event from internal_rx: {:?}", std::mem::discriminant(&event));
                 if let InputEvent::ToggleMouseCapture = event {
                     toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                     continue;
                 }
-                if let InputEvent::Quit = event { should_quit = true; }
+                if let InputEvent::Quit = event { 
+                    eprintln!("TUI received Quit event from internal_rx");
+                    should_quit = true; 
+                }
                    else {
                        let term_size = terminal.size()?;
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
@@ -256,6 +309,9 @@ pub async fn run_tui(
                    }
                }
                _ = spinner_interval.tick() => {
+                   if loop_iteration == 1 {
+                       eprintln!("TUI: First spinner tick received");
+                   }
                    // Also check double Ctrl+C timer expiry on every tick
                    if state.ctrl_c_pressed_once
                        && let Some(timer) = state.ctrl_c_timer
@@ -269,6 +325,7 @@ pub async fn run_tui(
                }
            }
         if should_quit {
+            eprintln!("TUI breaking loop due to should_quit flag");
             break;
         }
         state.poll_file_search_results();
@@ -276,7 +333,7 @@ pub async fn run_tui(
         terminal.draw(|f| view::view(f, &mut state))?;
     }
 
-    println!("Quitting...");
+    eprintln!("TUI exited main loop, sending shutdown signal and cleaning up...");
     let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(

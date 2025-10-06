@@ -28,7 +28,7 @@ use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
-type ClientTaskResult = Result<(Vec<ChatMessage>, Option<Uuid>), String>;
+type ClientTaskResult = Result<(Vec<ChatMessage>, Option<Uuid>, Option<AppConfig>), String>;
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
@@ -46,15 +46,37 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
 }
 
-pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
-    let mut messages: Vec<ChatMessage> = Vec::new();
-    let mut tools_queue: Vec<ToolCall> = Vec::new();
-    #[allow(unused_assignments)]
-    let mut should_update_rulebooks_on_next_message = false;
+pub async fn run_interactive(mut ctx: AppConfig, config: RunInteractiveConfig) -> Result<(), String> {
+    // Outer loop for profile switching
+    'profile_switch_loop: loop {
+        eprintln!("Starting agent with profile: {}", ctx.profile_name);
+        
+        let mut messages: Vec<ChatMessage> = Vec::new();
+        let mut tools_queue: Vec<ToolCall> = Vec::new();
+        #[allow(unused_assignments)]
+        let mut should_update_rulebooks_on_next_message = false;
 
-    // Store API config for later use
-    let api_key = ctx.api_key.clone();
-    let api_endpoint = ctx.api_endpoint.clone();
+        // Clone config values for this iteration
+        let api_key = ctx.api_key.clone();
+        let api_endpoint = ctx.api_endpoint.clone();
+        let config_path = ctx.config_path.clone();
+        let mcp_server_host = ctx.mcp_server_host.clone();
+        let local_context = config.local_context.clone();
+        let rulebooks = config.rulebooks.clone();
+        let system_prompt = config.system_prompt.clone();
+        let subagent_configs = config.subagent_configs.clone();
+        let checkpoint_id = config.checkpoint_id.clone();
+        let allowed_tools = config.allowed_tools.clone();
+        let auto_approve = config.auto_approve.clone();
+        let enabled_tools = config.enabled_tools.clone();
+        let redact_secrets = config.redact_secrets;
+        let privacy_mode = config.privacy_mode;
+        let enable_mtls = config.enable_mtls;
+        let is_git_repo = config.is_git_repo;
+        let study_mode = config.study_mode;
+        
+    // Create fresh channels for this iteration
+    eprintln!("Creating fresh channels for this iteration...");
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
     let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
@@ -64,17 +86,17 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
     // Generate certificates if mTLS is enabled
-    let certificate_chain = Arc::new(if config.enable_mtls {
+    let certificate_chain = Arc::new(if enable_mtls {
         Some(CertificateChain::generate().map_err(|e| e.to_string())?)
     } else {
         None
     });
 
-    let protocol = if config.enable_mtls { "https" } else { "http" };
+    let protocol = if enable_mtls { "https" } else { "http" };
     let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
     let certificate_chain_for_server = certificate_chain.clone();
-    let subagent_configs = config.subagent_configs.clone();
+    let subagent_configs_for_server = subagent_configs.clone();
     let mcp_handle = tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
@@ -82,11 +104,11 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     api_key: ctx_clone.api_key.clone(),
                     api_endpoint: ctx_clone.api_endpoint.clone(),
                 },
-                redact_secrets: config.redact_secrets,
-                privacy_mode: config.privacy_mode,
-                enabled_tools: config.enabled_tools.clone(),
+                redact_secrets,
+                privacy_mode,
+                enabled_tools,
                 tool_mode: ToolMode::Combined,
-                subagent_configs,
+                subagent_configs: subagent_configs_for_server,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
             },
@@ -97,33 +119,50 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
     });
 
     // Initialize clients and tools
+    eprintln!("Initializing MCP client manager...");
     let clients = ClientManager::new(
-        ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
+        mcp_server_host.unwrap_or(local_mcp_server_host.clone()),
         Some(mcp_progress_tx),
         certificate_chain,
     )
     .await
     .map_err(|e| e.to_string())?;
+    eprintln!("Loading tools from MCP server...");
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
+    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools.as_ref());
+    eprintln!("Loaded {} tools", tools.len());
 
     // Spawn TUI task
+    let shutdown_tx_for_tui = shutdown_tx.clone();
+    let current_profile_for_tui = ctx.profile_name.clone();
+    let rulebook_config_for_tui = ctx.rulebooks.clone().map(|rb| stakpak_tui::RulebookConfig {
+        include: rb.include,
+        exclude: rb.exclude,
+        include_tags: rb.include_tags,
+        exclude_tags: rb.exclude_tags,
+    });
     let tui_handle = tokio::spawn(async move {
+        eprintln!("TUI task spawned, fetching latest version...");
         let latest_version = get_latest_cli_version().await;
-        let _ = stakpak_tui::run_tui(
+        eprintln!("Starting TUI with profile: {}", current_profile_for_tui);
+        let result = stakpak_tui::run_tui(
             input_rx,
             output_tx,
             Some(cancel_tx.clone()),
-            shutdown_tx,
+            shutdown_tx_for_tui,
             latest_version.ok(),
-            config.redact_secrets,
-            config.privacy_mode,
-            config.is_git_repo,
-            config.auto_approve.as_ref(),
-            config.allowed_tools.as_ref(),
+            redact_secrets,
+            privacy_mode,
+            is_git_repo,
+            auto_approve.as_ref(),
+            allowed_tools.as_ref(),
+            current_profile_for_tui,
+            rulebook_config_for_tui,
         )
         .await
         .map_err(|e| e.to_string());
+        eprintln!("TUI task exited with result: {:?}", result.as_ref().err());
+        result
     });
 
     let input_tx_clone = input_tx.clone();
@@ -132,25 +171,44 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             let _ = send_input_event(&input_tx_clone, InputEvent::StreamToolResult(progress)).await;
         }
     });
+    
+    // Load available profiles and send to TUI
+    let current_profile_name = ctx.profile_name.clone();
+    let profiles_config_path = ctx.config_path.clone();
+    let input_tx_profiles = input_tx.clone();
+    tokio::spawn(async move {
+        match AppConfig::list_available_profiles(Some(&profiles_config_path)) {
+            Ok(profiles) => {
+                let _ = input_tx_profiles.send(InputEvent::ProfilesLoaded(profiles, current_profile_name)).await;
+            }
+            Err(e) => {
+                eprintln!("Failed to load profiles: {}", e);
+            }
+        }
+    });
 
     // Spawn client task
+    let api_key_for_client = api_key.clone();
+    let api_endpoint_for_client = api_endpoint.clone();
+    let shutdown_tx_for_client = shutdown_tx.clone();
     let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
+        eprintln!("Client task started, waiting for user messages...");
         let mut current_session_id: Option<Uuid> = None;
         let client = Client::new(&ClientConfig {
-            api_key: ctx.api_key.clone(),
-            api_endpoint: ctx.api_endpoint.clone(),
+            api_key: api_key_for_client.clone(),
+            api_endpoint: api_endpoint_for_client.clone(),
         })
         .map_err(|e| e.to_string())?;
 
         let data = client.get_my_account().await?;
         send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
-        if let Some(checkpoint_id) = config.checkpoint_id {
+        if let Some(checkpoint_id_str) = checkpoint_id {
             // Try to get session ID from checkpoint
-            let checkpoint_uuid = Uuid::parse_str(&checkpoint_id).map_err(|_| {
+            let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str).map_err(|_| {
                 format!(
                     "Invalid checkpoint ID '{}' - must be a valid UUID",
-                    checkpoint_id
+                    checkpoint_id_str
                 )
             })?;
 
@@ -160,10 +218,10 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                 current_session_id = Some(checkpoint_with_session.session.id);
             }
 
-            let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+            let checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id_str).await?;
 
             let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
-                &checkpoint_id,
+                &checkpoint_id_str,
                 &input_tx,
                 checkpoint_messages,
             )
@@ -181,16 +239,18 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             messages.extend(chat_messages);
         }
 
-        if let Some(system_prompt) = config.system_prompt {
-            messages.insert(0, system_message(system_prompt));
+        if let Some(system_prompt_text) = system_prompt {
+            messages.insert(0, system_message(system_prompt_text));
         }
 
         let mut retry_attempts = 0;
         const MAX_RETRY_ATTEMPTS: u32 = 2;
 
         while let Some(output_event) = output_rx.recv().await {
+            eprintln!("Client task received output event: {:?}", std::mem::discriminant(&output_event));
             match output_event {
                 OutputEvent::UserMessage(user_input, tool_calls_results) => {
+                    eprintln!("Received user message: {}", user_input.chars().take(50).collect::<String>());
                     // Loading will be managed by stream processing
                     let mut user_input = user_input.clone();
 
@@ -203,7 +263,7 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
 
                     // Add local context to the user input
                     let (user_input, _) =
-                        add_local_context(&messages, &user_input, &config.local_context)
+                        add_local_context(&messages, &user_input, &local_context)
                             .await
                             .map_err(|e| format!("Failed to format local context: {}", e))?;
 
@@ -211,15 +271,15 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     let (user_input, _) = if should_update_rulebooks_on_next_message {
                         // Force add rulebooks for resumed session (ignore messages.is_empty() check)
                         let (user_input_with_rulebooks, _) =
-                            add_rulebooks(&[], &user_input, &config.rulebooks);
+                            add_rulebooks(&[], &user_input, &rulebooks);
                         should_update_rulebooks_on_next_message = false; // Reset the flag
                         (user_input_with_rulebooks, None)
                     } else {
-                        add_rulebooks(&messages, &user_input, &config.rulebooks)
+                        add_rulebooks(&messages, &user_input, &rulebooks)
                     };
 
                     let (user_input, _) =
-                        add_subagents(&messages, &user_input, &config.subagent_configs);
+                        add_subagents(&messages, &user_input, &subagent_configs);
 
                     send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                     send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
@@ -494,9 +554,66 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
                     }
                     continue;
                 }
+                OutputEvent::RequestProfileSwitch(new_profile) => {
+                    eprintln!("Profile switch requested to: {}", new_profile);
+                    
+                    // Send progress event
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ProfileSwitchRequested(new_profile.clone())
+                    ).await?;
+                    
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ProfileSwitchProgress("Validating API key...".to_string())
+                    ).await?;
+                    
+                    // Validate new profile with API key inheritance
+                    let default_api_key = api_key_for_client.clone();
+                    let new_config = match super::profile_switch::validate_profile_switch(
+                        &new_profile,
+                        Some(&config_path),
+                        default_api_key
+                    ).await {
+                        Ok(config) => config,
+                        Err(e) => {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::ProfileSwitchFailed(e)
+                            ).await?;
+                            continue; // Stay in current profile
+                        }
+                    };
+                    
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ProfileSwitchProgress("✓ API key validated".to_string())
+                    ).await?;
+                    
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ProfileSwitchProgress("Shutting down current session...".to_string())
+                    ).await?;
+                    
+                    // Signal completion
+                    send_input_event(
+                        &input_tx,
+                        InputEvent::ProfileSwitchComplete(new_profile.clone())
+                    ).await?;
+                    
+                    // Minimal delay to display completion message
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    
+                    // Send shutdown to exit tasks quickly
+                    eprintln!("Sending shutdown signal for fast restart...");
+                    let _ = shutdown_tx_for_client.send(());
+                    
+                    // Return new config to trigger outer loop restart
+                    return Ok((messages, current_session_id, Some(new_config)));
+                }
             }
 
-            let headers = if config.study_mode {
+            let headers = if study_mode {
                 let mut headers = HeaderMap::new();
                 #[allow(clippy::unwrap_used)]
                 headers.insert("x-system-prompt-key", "agent_study_mode".parse().unwrap());
@@ -608,19 +725,49 @@ pub async fn run_interactive(ctx: AppConfig, config: RunInteractiveConfig) -> Re
             }
         }
 
-        Ok((messages, current_session_id))
+        eprintln!("Client task exiting message loop (normal exit - no more output events)");
+        Ok((messages, current_session_id, None))
     });
 
     // Wait for all tasks to finish
-    let (client_res, _, _, _) =
+    let (client_res, tui_res, mcp_res, progress_res) =
         tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                eprintln!("ERROR in try_join!: {}", e);
+                e.to_string()
+            })?;
 
-    let (final_messages, final_session_id) = client_res?;
-
+    eprintln!("All tasks completed via try_join!");
+    eprintln!("TUI result: {:?}", tui_res.as_ref().err());
+    eprintln!("MCP result: {:?}", mcp_res);
+    eprintln!("Progress result: {:?}", progress_res);
+    
+    let (final_messages, final_session_id, profile_switch_config) = client_res?;
+    
+    eprintln!("Client task returned - profile_switch_config: {:?}", profile_switch_config.as_ref().map(|c| c.profile_name.as_str()));
+    
+    // Check if profile switch was requested
+    if let Some(new_config) = profile_switch_config {
+        // Profile switch requested - update config and restart loop
+        eprintln!("✓ Profile switch detected! Switching from '{}' to '{}'", ctx.profile_name, new_config.profile_name);
+        
+        // All tasks have already exited from try_join
+        // Give a moment for cleanup
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        
+        // Update config and restart
+        let old_profile = ctx.profile_name.clone();
+        ctx = new_config;
+        eprintln!("✓ Config updated from '{}' to '{}', restarting loop...", old_profile, ctx.profile_name);
+        continue 'profile_switch_loop;
+    }
+    
+    // Normal exit - no profile switch requested
+    eprintln!("Normal exit detected (current profile: {}) - breaking loop", ctx.profile_name);
+    // Display final stats and session info
     let client = Client::new(&ClientConfig {
-        api_key,
-        api_endpoint,
+        api_key: ctx.api_key.clone(),
+        api_endpoint: ctx.api_endpoint.clone(),
     })
     .map_err(|e| e.to_string())?;
 
@@ -674,6 +821,11 @@ https://stakpak.dev/{}/agent-sessions/{}",
         "\x1b[35mFeedback or bug report?\x1b[0m \x1b[38;5;214mJoin our Discord:\x1b[0m \x1b[38;5;214mhttps://discord.gg/c4HUkDD45d\x1b[0m"
     );
     println!();
+    
+    break; // Exit the loop after displaying stats
+    
+    } // End of 'profile_switch_loop
 
+    eprintln!("Exiting run_interactive function");
     Ok(())
 }

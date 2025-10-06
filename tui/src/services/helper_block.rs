@@ -408,8 +408,69 @@ pub fn welcome_messages(
             ),
             None,
         ),
-        Message::info("SPACING_MARKER", None),
+        Message::info(
+            format!("profile: {}", state.current_profile_name),
+            Some(Style::default().fg(ratatui::style::Color::Yellow)),
+        ),
     ];
+    
+    // Show allowed tools for debugging
+    if let Some(tools) = &state.allowed_tools {
+        if tools.is_empty() {
+            messages.push(Message::info(
+                "allowed_tools: [] (empty - all tools allowed)",
+                Some(Style::default().fg(ratatui::style::Color::Gray)),
+            ));
+        } else {
+            messages.push(Message::info(
+                format!("allowed_tools: {} configured", tools.len()),
+                Some(Style::default().fg(ratatui::style::Color::Gray)),
+            ));
+        }
+    } else {
+        messages.push(Message::info(
+            "allowed_tools: all tools allowed",
+            Some(Style::default().fg(ratatui::style::Color::Gray)),
+        ));
+    }
+    
+    // Show rulebook configuration
+    if let Some(rb_config) = &state.rulebook_config {
+        if let Some(include) = &rb_config.include {
+            if !include.is_empty() {
+                messages.push(Message::info(
+                    format!("rulebooks.include: {:?}", include),
+                    Some(Style::default().fg(ratatui::style::Color::DarkGray)),
+                ));
+            }
+        }
+        if let Some(exclude) = &rb_config.exclude {
+            if !exclude.is_empty() {
+                messages.push(Message::info(
+                    format!("rulebooks.exclude: {:?}", exclude),
+                    Some(Style::default().fg(ratatui::style::Color::DarkGray)),
+                ));
+            }
+        }
+        if let Some(include_tags) = &rb_config.include_tags {
+            if !include_tags.is_empty() {
+                messages.push(Message::info(
+                    format!("rulebooks.include_tags: {:?}", include_tags),
+                    Some(Style::default().fg(ratatui::style::Color::DarkGray)),
+                ));
+            }
+        }
+        if let Some(exclude_tags) = &rb_config.exclude_tags {
+            if !exclude_tags.is_empty() {
+                messages.push(Message::info(
+                    format!("rulebooks.exclude_tags: {:?}", exclude_tags),
+                    Some(Style::default().fg(ratatui::style::Color::DarkGray)),
+                ));
+            }
+        }
+    }
+    
+    messages.push(Message::info("SPACING_MARKER", None));
 
     if state.mouse_capture_enabled {
         messages.push(mouse_capture_hint_message(state));
