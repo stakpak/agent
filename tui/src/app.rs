@@ -355,6 +355,10 @@ impl AppState {
                 description: "Toggle mouse capture on/off",
             },
             HelperCommand {
+                command: "/switch_profile",
+                description: "Switch to a different profile",
+            },
+            HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
             },
