@@ -1418,6 +1418,11 @@ fn handle_input_submitted(
                     state.text_area.set_cursor(input.len());
                     state.show_helper_dropdown = false;
                 }
+                "/switch_profile" => {
+                    state.show_profile_switcher = true;
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
                 "/list_approved_tools" => {
                     list_auto_approved_tools(state);
                     state.text_area.set_text("");
