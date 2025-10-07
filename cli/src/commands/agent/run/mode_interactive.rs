@@ -166,18 +166,6 @@ pub async fn run_interactive(
             }
         });
 
-        // Load available profiles and send to TUI
-        let current_profile_name = ctx.profile_name.clone();
-        let profiles_config_path = ctx.config_path.clone();
-        let input_tx_profiles = input_tx.clone();
-        tokio::spawn(async move {
-            if let Ok(profiles) = AppConfig::list_available_profiles(Some(&profiles_config_path)) {
-                let _ = input_tx_profiles
-                    .send(InputEvent::ProfilesLoaded(profiles, current_profile_name))
-                    .await;
-            }
-        });
-
         // Spawn client task
         let api_key_for_client = api_key.clone();
         let api_endpoint_for_client = api_endpoint.clone();
@@ -192,6 +180,16 @@ pub async fn run_interactive(
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+            // Load available profiles and send to TUI
+            let profiles_config_path = ctx.config_path.clone();
+            let current_profile_name = ctx.profile_name.clone();
+            if let Ok(profiles) = AppConfig::list_available_profiles(Some(&profiles_config_path)) {
+                let _ = send_input_event(
+                    &input_tx,
+                    InputEvent::ProfilesLoaded(profiles, current_profile_name),
+                )
+                .await;
+            }
 
             if let Some(checkpoint_id_str) = checkpoint_id {
                 // Try to get session ID from checkpoint
@@ -766,7 +764,7 @@ pub async fn run_interactive(
                 api_endpoint: new_config.api_endpoint.clone(),
             })
             .map_err(|e| e.to_string())?;
-            
+
             let new_rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                 if let Some(rulebook_config) = &new_config.rulebooks {
                     rulebook_config.filter_rulebooks(rulebooks)
@@ -779,7 +777,7 @@ pub async fn run_interactive(
             config.rulebooks = new_rulebooks;
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
-            
+
             // Update ctx and restart
             ctx = new_config;
             continue 'profile_switch_loop;
