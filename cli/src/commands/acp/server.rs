@@ -1722,8 +1722,8 @@ impl acp::Agent for StakpakAcpAgent {
             "🔧 DEBUG: Initial response has tool calls: {}",
             has_tool_calls
         );
-        if has_tool_calls {
-            let tool_calls = response.choices[0].message.tool_calls.as_ref().unwrap();
+        if has_tool_calls && let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref()
+        {
             log::info!("🔧 DEBUG: Initial tool calls count: {}", tool_calls.len());
             for (i, tool_call) in tool_calls.iter().enumerate() {
                 log::info!(
