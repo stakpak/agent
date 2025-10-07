@@ -654,6 +654,19 @@ impl StakpakAcpAgent {
         session_id: &acp::SessionId,
         tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
     ) -> Result<Vec<stakpak_shared::models::integrations::openai::ChatMessage>, acp::Error> {
+        log::info!(
+            "🔧 DEBUG: Starting tool call processing with {} tool calls",
+            tool_calls.len()
+        );
+        for (i, tool_call) in tool_calls.iter().enumerate() {
+            log::info!(
+                "🔧 DEBUG: Tool call {}: {} (id: {})",
+                i,
+                tool_call.function.name,
+                tool_call.id
+            );
+        }
+
         let mut tool_calls_queue = tool_calls;
         let mut results = Vec::new();
 
@@ -679,6 +692,13 @@ impl StakpakAcpAgent {
 
             let tool_call = tool_calls_queue.remove(0);
             let tool_call_id = self.generate_tool_call_id();
+
+            log::info!(
+                "🔧 DEBUG: Processing tool call: {} (original_id: {}, new_id: {})",
+                tool_call.function.name,
+                tool_call.id,
+                tool_call_id
+            );
 
             // Track active tool call for cancellation
             {
@@ -812,6 +832,11 @@ impl StakpakAcpAgent {
 
             // Execute tool call
             if let Some(ref clients) = self.clients {
+                log::info!(
+                    "🔧 DEBUG: Executing tool call: {} with clients",
+                    tool_call.function.name
+                );
+
                 // Create cancellation receiver for this tool call
                 let tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
@@ -824,6 +849,11 @@ impl StakpakAcpAgent {
                 )
                 .await
                 .map_err(|_| acp::Error::internal_error())?;
+
+                log::info!(
+                    "🔧 DEBUG: Tool call execution completed for: {}",
+                    tool_call.function.name
+                );
 
                 if let Some(tool_result) = result {
                     // Check if the tool call was cancelled
@@ -1688,10 +1718,29 @@ impl acp::Agent for StakpakAcpAgent {
             .map(|tc| !tc.is_empty())
             .unwrap_or(false);
 
+        log::info!(
+            "🔧 DEBUG: Initial response has tool calls: {}",
+            has_tool_calls
+        );
+        if has_tool_calls {
+            let tool_calls = response.choices[0].message.tool_calls.as_ref().unwrap();
+            log::info!("🔧 DEBUG: Initial tool calls count: {}", tool_calls.len());
+            for (i, tool_call) in tool_calls.iter().enumerate() {
+                log::info!(
+                    "🔧 DEBUG: Initial tool call {}: {} (id: {})",
+                    i,
+                    tool_call.function.name,
+                    tool_call.id
+                );
+            }
+        }
+
         // Create cancellation receiver for tool call processing
         let mut tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
         while has_tool_calls {
+            log::info!("🔧 DEBUG: Starting tool call processing loop iteration");
+
             if let Some(ref mut cancel_rx) = tool_cancel_rx
                 && cancel_rx.try_recv().is_ok()
             {
@@ -1762,55 +1811,12 @@ impl acp::Agent for StakpakAcpAgent {
                         stop_reason: acp::StopReason::Cancelled,
                     });
                 }
-                // Get the latest message from the conversation
-                let latest_message = match current_messages.last() {
-                    Some(message) => message,
-                    None => {
-                        log::error!("No messages in conversation history");
-                        break;
-                    }
-                };
 
-                if let Some(tool_calls) = latest_message.tool_calls.as_ref() {
-                    if tool_calls.is_empty() {
-                        break; // No more tool calls, exit loop
-                    }
-
-                    log::info!("Processing {} tool calls", tool_calls.len());
-
-                    // Process tool calls with cancellation support
-                    let tool_results = self
-                        .process_tool_calls_with_cancellation(
-                            tool_calls.clone(),
-                            &arguments.session_id,
-                            &tools_map,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Tool call processing failed: {}", e);
-                            e
-                        })?;
-
-                    // Add tool results to conversation history
-                    {
-                        let mut messages = self.messages.lock().await;
-                        messages.extend(tool_results);
-                    }
-                    // Check for cancellation after tool call processing
-                    if let Some(ref mut cancel_rx) = tool_cancel_rx
-                        && cancel_rx.try_recv().is_ok()
-                    {
-                        log::info!("Tool call processing cancelled after tool execution");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
-
-                    // Check if any tool calls were cancelled
-                    let has_cancelled_tool_calls = {
-                        let messages = self.messages.lock().await;
-                        messages.iter().any(|msg| {
-                            if let Some(
+                // Check if any tool calls were cancelled
+                let has_cancelled_tool_calls = {
+                    let messages = self.messages.lock().await;
+                    messages.iter().any(|msg| {
+                        if let Some(
                             stakpak_shared::models::integrations::openai::MessageContent::String(
                                 text,
                             ),
@@ -1820,77 +1826,72 @@ impl acp::Agent for StakpakAcpAgent {
                         } else {
                             false
                         }
-                        })
-                    };
+                    })
+                };
 
-                    if has_cancelled_tool_calls {
-                        log::info!("Tool calls were cancelled, stopping turn");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
-
-                    // Make follow-up chat completion request after tool calls
-                    current_messages = {
-                        let messages = self.messages.lock().await;
-                        messages.clone()
-                    };
-
-                    let (follow_up_stream, _request_id) = self
-                        .client
-                        .chat_completion_stream(
-                            current_messages.clone(),
-                            tools_option.clone(),
-                            None,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Follow-up chat completion stream failed: {}", e);
-                            acp::Error::internal_error()
-                        })?;
-
-                    let follow_up_response = match self
-                        .process_acp_streaming_response_with_cancellation(
-                            follow_up_stream,
-                            &arguments.session_id,
-                        )
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(e) => {
-                            if e == "STREAM_CANCELLED" {
-                                log::info!("Follow-up stream was cancelled by user");
-                                return Ok(acp::PromptResponse {
-                                    stop_reason: acp::StopReason::Cancelled,
-                                });
-                            }
-                            log::error!("Follow-up stream processing failed: {}", e);
-                            return Err(acp::Error::internal_error());
-                        }
-                    };
-
-                    // Add follow-up response to conversation history
-                    {
-                        let mut messages = self.messages.lock().await;
-                        messages.push(follow_up_response.choices[0].message.clone());
-                    }
-
-                    // Update current_messages for the next iteration
-                    current_messages.push(follow_up_response.choices[0].message.clone());
-
-                    // Check if the follow-up response has more tool calls
-                    has_tool_calls = follow_up_response.choices[0]
-                        .message
-                        .tool_calls
-                        .as_ref()
-                        .map(|tc| !tc.is_empty())
-                        .unwrap_or(false);
-
-                    log::info!("Follow-up response has tool calls: {}", has_tool_calls);
-                } else {
-                    // No tool calls in the latest message, exit the loop
-                    break;
+                if has_cancelled_tool_calls {
+                    log::info!("Tool calls were cancelled, stopping turn");
+                    return Ok(acp::PromptResponse {
+                        stop_reason: acp::StopReason::Cancelled,
+                    });
                 }
+
+                // Make follow-up chat completion request after tool calls
+                current_messages = {
+                    let messages = self.messages.lock().await;
+                    messages.clone()
+                };
+
+                let (follow_up_stream, _request_id) = self
+                    .client
+                    .chat_completion_stream(current_messages.clone(), tools_option.clone(), None)
+                    .await
+                    .map_err(|e| {
+                        log::error!("Follow-up chat completion stream failed: {}", e);
+                        acp::Error::internal_error()
+                    })?;
+
+                let follow_up_response = match self
+                    .process_acp_streaming_response_with_cancellation(
+                        follow_up_stream,
+                        &arguments.session_id,
+                    )
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        if e == "STREAM_CANCELLED" {
+                            log::info!("Follow-up stream was cancelled by user");
+                            return Ok(acp::PromptResponse {
+                                stop_reason: acp::StopReason::Cancelled,
+                            });
+                        }
+                        log::error!("Follow-up stream processing failed: {}", e);
+                        return Err(acp::Error::internal_error());
+                    }
+                };
+
+                // Add follow-up response to conversation history
+                {
+                    let mut messages = self.messages.lock().await;
+                    messages.push(follow_up_response.choices[0].message.clone());
+                }
+
+                // Update current_messages for the next iteration
+                current_messages.push(follow_up_response.choices[0].message.clone());
+
+                // Check if the follow-up response has more tool calls
+                has_tool_calls = follow_up_response.choices[0]
+                    .message
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| !tc.is_empty())
+                    .unwrap_or(false);
+
+                log::info!("Follow-up response has tool calls: {}", has_tool_calls);
+            } else {
+                // No tool calls in the latest message, exit the loop
+                break;
             }
         }
 
