@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::syntax_highlighter;
+use crossterm;
 
 // Simplified component enum with all the variants you mentioned
 #[derive(Debug, Clone)]
@@ -164,9 +165,9 @@ impl MarkdownStyle {
             text_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Light gray
             separator_style: Style::default().fg(Color::Rgb(120, 120, 120)), // Medium gray
             table_header_style: Style::default()
-                .fg(Color::Rgb(100, 255, 255)) // Bright cyan
+                .fg(Color::Reset) // Reset to terminal default
                 .add_modifier(Modifier::BOLD),
-            table_cell_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Light gray
+            table_cell_style: Style::default().fg(Color::Reset), // Reset to terminal default
         }
     }
 
@@ -216,9 +217,9 @@ impl MarkdownStyle {
             text_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
             separator_style: Style::default().fg(Color::DarkGray), // Dark gray separators
             table_header_style: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Reset) // Reset to terminal default
                 .add_modifier(Modifier::BOLD),
-            table_cell_style: Style::default().fg(Color::Reset), // Reset to terminal default for better compatibility
+            table_cell_style: Style::default().fg(Color::Reset), // Reset to terminal default
         }
     }
 }
@@ -417,6 +418,14 @@ impl MarkdownRenderer {
         // Callouts
         if let Some(callout) = self.parse_callout(line) {
             return Some(callout);
+        }
+
+        // Tables - check for table pattern (|...|...|)
+        if line.contains('|')
+            && line.starts_with('|')
+            && let Some(table) = self.parse_table_safe(all_lines, index)
+        {
+            return Some(table);
         }
 
         // Check for inline formatting (optimized)
@@ -768,6 +777,118 @@ impl MarkdownRenderer {
         None
     }
 
+    fn get_terminal_width(&self) -> Option<usize> {
+        // Try to get terminal size using crossterm or similar
+        // This is a safe fallback that works in most terminals
+        if let Ok((width, _)) = crossterm::terminal::size() {
+            Some(width as usize)
+        } else {
+            None
+        }
+    }
+
+    fn wrap_text(&self, text: &str, width: usize) -> Vec<String> {
+        if text.len() <= width {
+            return vec![text.to_string()];
+        }
+
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+
+        for word in words {
+            if current_line.is_empty() {
+                current_line = word.to_string();
+            } else if current_line.len() + 1 + word.len() <= width {
+                current_line.push(' ');
+                current_line.push_str(word);
+            } else {
+                lines.push(current_line);
+                current_line = word.to_string();
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+
+        lines
+    }
+
+    fn parse_table_safe(&self, all_lines: &[&str], index: &mut usize) -> Option<MarkdownComponent> {
+        let stripped_start_line = self.strip_line_number(all_lines[*index]);
+        let start_line = stripped_start_line.trim();
+
+        // Check if this is a valid table header line (starts and ends with |)
+        if !start_line.starts_with('|') || !start_line.ends_with('|') {
+            return None;
+        }
+
+        // Parse headers from the first line
+        let headers: Vec<String> = start_line
+            .trim_start_matches('|')
+            .trim_end_matches('|')
+            .split('|')
+            .map(|s| s.trim().to_string())
+            .collect();
+
+        if headers.is_empty() {
+            return None;
+        }
+
+        // Check if the next line is a separator line (|----|----| etc.)
+        if *index + 1 >= all_lines.len() {
+            return None;
+        }
+
+        let stripped_separator_line = self.strip_line_number(all_lines[*index + 1]);
+        let separator_line = stripped_separator_line.trim();
+
+        // Validate separator line
+        if !separator_line.starts_with('|')
+            || !separator_line.ends_with('|')
+            || !separator_line.contains('-')
+        {
+            return None;
+        }
+
+        // Skip the separator line
+        *index += 1;
+
+        // Parse table rows
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut j = *index + 1;
+        let max_table_rows = 100; // Limit table size
+
+        while j < all_lines.len() && rows.len() < max_table_rows {
+            let stripped_row_line = self.strip_line_number(all_lines[j]);
+            let row_line = stripped_row_line.trim();
+
+            // Check if this is still a table row
+            if !row_line.starts_with('|') || !row_line.ends_with('|') {
+                break;
+            }
+
+            // Parse the row cells
+            let cells: Vec<String> = row_line
+                .trim_start_matches('|')
+                .trim_end_matches('|')
+                .split('|')
+                .map(|s| s.trim().to_string())
+                .collect();
+
+            if !cells.is_empty() {
+                rows.push(cells);
+            }
+
+            j += 1;
+        }
+
+        *index = j - 1; // Adjust index to skip processed lines
+
+        Some(MarkdownComponent::Table { headers, rows })
+    }
+
     // Convert components to styled lines for ratatui with limits
     pub fn render_to_lines(&self, components: Vec<MarkdownComponent>) -> Vec<Line<'static>> {
         let mut lines = Vec::with_capacity(components.len() * 2);
@@ -937,45 +1058,177 @@ impl MarkdownRenderer {
             MarkdownComponent::Table { headers, rows } => {
                 let mut table_lines = Vec::new();
 
-                // Render headers
-                if !headers.is_empty() {
-                    let header_line = headers
-                        .iter()
-                        .take(10) // Limit columns
-                        .map(|h| format!("│ {} ", h))
-                        .collect::<String>()
-                        + "│";
+                if headers.is_empty() {
+                    return table_lines;
+                }
+
+                // Limit columns and rows for performance
+                let max_columns = 10;
+                let max_rows = 50;
+                let limited_headers: Vec<String> =
+                    headers.iter().take(max_columns).cloned().collect();
+                let limited_rows: Vec<Vec<String>> = rows
+                    .into_iter()
+                    .take(max_rows)
+                    .map(|row| row.iter().take(max_columns).cloned().collect())
+                    .collect();
+
+                // Calculate maximum width for each column
+                let mut column_widths: Vec<usize> =
+                    limited_headers.iter().map(|h| h.len()).collect();
+
+                for row in &limited_rows {
+                    for (col_idx, cell) in row.iter().enumerate() {
+                        if col_idx < column_widths.len() {
+                            column_widths[col_idx] = column_widths[col_idx].max(cell.len());
+                        }
+                    }
+                }
+
+                // Limit each column width to a reasonable maximum
+                for width in &mut column_widths {
+                    *width = (*width).min(40);
+                }
+
+                // Calculate total table width
+                // Each column has: width + 2 spaces padding + 1 separator (│)
+                // Plus 1 for the starting │
+                let table_width: usize =
+                    column_widths.iter().sum::<usize>() + (column_widths.len() * 3) + 1;
+
+                // Get terminal width, default to 80 if unavailable
+                let terminal_width = self.get_terminal_width().unwrap_or(80);
+
+                // If table is too wide for terminal, render as plain text
+                if table_width > terminal_width {
+                    // Render header as plain text
                     table_lines.push(Line::from(vec![Span::styled(
-                        header_line,
+                        limited_headers.join(" | "),
                         self.style.table_header_style,
                     )]));
 
-                    // Header separator
-                    let separator = headers
+                    // Simple separator
+                    table_lines.push(Line::from(vec![Span::styled(
+                        "-".repeat(terminal_width.min(80)),
+                        self.style.table_header_style,
+                    )]));
+
+                    // Render rows as plain text
+                    for row in limited_rows {
+                        let row_text = row.join(" | ");
+                        table_lines.push(Line::from(vec![Span::styled(
+                            row_text,
+                            self.style.table_cell_style,
+                        )]));
+                    }
+
+                    return table_lines;
+                }
+
+                // Otherwise, render with beautiful box-drawing characters
+
+                // Create top border
+                let top_border = format!(
+                    "┌{}┐",
+                    column_widths
                         .iter()
-                        .take(10)
-                        .map(|h| "─".repeat(h.len().min(20) + 2))
+                        .map(|w| "─".repeat(w + 2))
                         .collect::<Vec<_>>()
-                        .join("┼");
-                    table_lines.push(Line::from(vec![Span::styled(
-                        format!("├{}┤", separator),
-                        self.style.table_header_style,
-                    )]));
+                        .join("┬")
+                );
+                table_lines.push(Line::from(vec![Span::styled(
+                    top_border,
+                    self.style.table_header_style,
+                )]));
+
+                // Render headers with proper alignment
+                let header_line = format!(
+                    "│ {} │",
+                    limited_headers
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, h)| {
+                            let width = column_widths[idx];
+                            format!("{:width$}", h, width = width)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" │ ")
+                );
+                table_lines.push(Line::from(vec![Span::styled(
+                    header_line,
+                    self.style.table_header_style,
+                )]));
+
+                // Header separator
+                let separator = format!(
+                    "├{}┤",
+                    column_widths
+                        .iter()
+                        .map(|w| "─".repeat(w + 2))
+                        .collect::<Vec<_>>()
+                        .join("┼")
+                );
+                table_lines.push(Line::from(vec![Span::styled(
+                    separator,
+                    self.style.table_header_style,
+                )]));
+
+                // Render rows with proper alignment and text wrapping
+                for row in limited_rows {
+                    // Wrap each cell content to fit column width
+                    let mut wrapped_cells: Vec<Vec<String>> = Vec::new();
+                    let mut max_lines = 1;
+
+                    for (col_idx, cell) in row.iter().enumerate() {
+                        if col_idx < column_widths.len() {
+                            let width = column_widths[col_idx];
+                            let wrapped = self.wrap_text(cell, width);
+                            max_lines = max_lines.max(wrapped.len());
+                            wrapped_cells.push(wrapped);
+                        }
+                    }
+
+                    // Fill in missing cells with empty spaces
+                    while wrapped_cells.len() < column_widths.len() {
+                        let width = column_widths[wrapped_cells.len()];
+                        wrapped_cells.push(vec![" ".repeat(width)]);
+                    }
+
+                    // Render each line of the row
+                    for line_idx in 0..max_lines {
+                        let mut padded_cells: Vec<String> = Vec::new();
+
+                        for (col_idx, cell_lines) in wrapped_cells.iter().enumerate() {
+                            let width = column_widths[col_idx];
+                            let cell_content = if line_idx < cell_lines.len() {
+                                cell_lines[line_idx].as_str()
+                            } else {
+                                ""
+                            };
+                            padded_cells.push(format!("{:width$}", cell_content, width = width));
+                        }
+
+                        let row_line = format!("│ {} │", padded_cells.join(" │ "));
+                        table_lines.push(Line::from(vec![Span::styled(
+                            row_line,
+                            self.style.table_cell_style,
+                        )]));
+                    }
                 }
 
-                // Render rows (limit for performance)
-                for row in rows.into_iter().take(50) {
-                    let row_line = row
+                // Create bottom border
+                let bottom_border = format!(
+                    "└{}┘",
+                    column_widths
                         .iter()
-                        .take(10)
-                        .map(|cell| format!("│ {} ", cell))
-                        .collect::<String>()
-                        + "│";
-                    table_lines.push(Line::from(vec![Span::styled(
-                        row_line,
-                        self.style.table_cell_style,
-                    )]));
-                }
+                        .map(|w| "─".repeat(w + 2))
+                        .collect::<Vec<_>>()
+                        .join("┴")
+                );
+                table_lines.push(Line::from(vec![Span::styled(
+                    bottom_border,
+                    self.style.table_header_style,
+                )]));
 
                 table_lines
             }
