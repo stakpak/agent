@@ -880,7 +880,6 @@ pub fn update(
             state.show_profile_switcher = false;
 
             // Clear profile switcher state immediately to prevent stray selects
-            state.available_profiles.clear();
             state.profile_switcher_selected = 0;
 
             state.profile_switch_status_message =
@@ -941,7 +940,6 @@ pub fn update(
 
             // CRITICAL: Close profile switcher to prevent stray selects
             state.show_profile_switcher = false;
-            state.available_profiles.clear();
             state.profile_switcher_selected = 0;
 
             // Update profile info
