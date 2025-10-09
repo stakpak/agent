@@ -42,7 +42,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
             ),
             Line::from(format!(
-                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry",
+                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry    ctrl + p to switch profile",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
@@ -80,13 +80,31 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 ""
             };
-            let hint = Paragraph::new(Span::styled(
-                format!(
-                    "? for shortcuts . @ for files . / for commands{}",
-                    select_hint
+
+            // Create spans for left and right alignment
+            let left_text = format!(
+                "? for shortcuts . @ for files . / for commands{}",
+                select_hint
+            );
+            let right_text = format!("profile {}", state.current_profile_name);
+
+            // Calculate spacing to align profile info to the right
+            let total_width = area.width as usize;
+            let left_len = left_text.len();
+            let right_len = right_text.len();
+            let spacing = total_width.saturating_sub(left_len + right_len);
+
+            let spans = vec![
+                Span::styled(left_text, Style::default().fg(Color::Cyan)),
+                Span::styled(" ".repeat(spacing), Style::default()),
+                Span::styled("profile ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    state.current_profile_name.clone(),
+                    Style::default().fg(Color::Reset),
                 ),
-                Style::default().fg(Color::Cyan),
-            ));
+            ];
+
+            let hint = Paragraph::new(Line::from(spans));
             f.render_widget(hint, area);
         }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {

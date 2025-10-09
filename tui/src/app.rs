@@ -207,6 +207,15 @@ pub struct AppState {
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
     pub tool_call_execution_order: Vec<String>,
     pub last_message_tool_calls: Vec<ToolCall>,
+
+    // Profile switcher state
+    pub show_profile_switcher: bool,
+    pub available_profiles: Vec<String>,
+    pub profile_switcher_selected: usize,
+    pub current_profile_name: String,
+    pub profile_switching_in_progress: bool,
+    pub profile_switch_status_message: Option<String>,
+    pub rulebook_config: Option<crate::RulebookConfig>,
 }
 
 #[derive(Debug)]
@@ -282,6 +291,15 @@ pub enum InputEvent {
     ApprovalPopupToggleApproval,
     ApprovalPopupSubmit,
     ApprovalPopupEscape,
+    // Profile switcher events
+    ShowProfileSwitcher,
+    ProfilesLoaded(Vec<String>, String), // (available_profiles, current_profile_name)
+    ProfileSwitchRequested(String),
+    ProfileSwitchProgress(String),
+    ProfileSwitchComplete(String),
+    ProfileSwitchFailed(String),
+    ProfileSwitcherSelect,
+    ProfileSwitcherCancel,
 }
 
 #[derive(Debug)]
@@ -294,6 +312,7 @@ pub enum OutputEvent {
     Memorize,
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
+    RequestProfileSwitch(String),
 }
 
 impl AppState {
@@ -334,6 +353,10 @@ impl AppState {
             HelperCommand {
                 command: "/mouse_capture",
                 description: "Toggle mouse capture on/off",
+            },
+            HelperCommand {
+                command: "/switch_profile",
+                description: "Switch to a different profile",
             },
             HelperCommand {
                 command: "/quit",
@@ -445,6 +468,15 @@ impl AppState {
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
             last_message_tool_calls: Vec::new(),
+
+            // Profile switcher initialization
+            show_profile_switcher: false,
+            available_profiles: Vec::new(),
+            profile_switcher_selected: 0,
+            current_profile_name: "default".to_string(),
+            profile_switching_in_progress: false,
+            profile_switch_status_message: None,
+            rulebook_config: None,
         }
     }
 
@@ -481,6 +513,11 @@ impl AppState {
 
     pub fn clear_input(&mut self) {
         self.text_area.set_text("");
+    }
+
+    /// Check if user input should be blocked (during profile switch)
+    pub fn is_input_blocked(&self) -> bool {
+        self.profile_switching_in_progress
     }
 
     pub fn run_shell_command(&mut self, command: String, input_tx: &mpsc::Sender<InputEvent>) {

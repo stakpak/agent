@@ -22,6 +22,15 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
 
+// Rulebook config struct (re-defined here to avoid circular dependency)
+#[derive(Clone, Debug)]
+pub struct RulebookConfig {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+    pub include_tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
+}
+
 use crate::app::ToolCallStatus;
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
@@ -78,8 +87,11 @@ pub async fn run_tui(
     is_git_repo: bool,
     auto_approve_tools: Option<&Vec<String>>,
     allowed_tools: Option<&Vec<String>>,
+    current_profile_name: String,
+    rulebook_config: Option<RulebookConfig>,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
+
     crossterm::terminal::enable_raw_mode()?;
 
     // Detect terminal support for mouse capture
@@ -110,6 +122,10 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
     );
+
+    // Set the current profile name and rulebook config
+    state.current_profile_name = current_profile_name;
+    state.rulebook_config = rulebook_config;
 
     // Add welcome messages after state is created
     let welcome_msg =
@@ -148,7 +164,11 @@ pub async fn run_tui(
         }
         tokio::select! {
 
-               Some(event) = input_rx.recv() => {
+               event = input_rx.recv() => {
+                let Some(event) = event else {
+                    should_quit = true;
+                    continue;
+                };
                    if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
                    InputEvent::ShellWaitingForInput | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
             // These are shell events, forward them to the shell channel
@@ -184,7 +204,9 @@ pub async fn run_tui(
                        continue;
                    }
 
-                   if let InputEvent::Quit = event { should_quit = true; }
+                   if let InputEvent::Quit = event {
+                       should_quit = true;
+                   }
                    else {
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                        let input_height = 3;
@@ -214,12 +236,20 @@ pub async fn run_tui(
                        state.poll_file_search_results();
                    }
                }
-               Some(event) = internal_rx.recv() => {
+               event = internal_rx.recv() => {
+
+                let Some(event) = event else {
+                    should_quit = true;
+                    continue;
+                };
+
                 if let InputEvent::ToggleMouseCapture = event {
                     toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                     continue;
                 }
-                if let InputEvent::Quit = event { should_quit = true; }
+                if let InputEvent::Quit = event {
+                    should_quit = true;
+                }
                    else {
                        let term_size = terminal.size()?;
                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
@@ -276,7 +306,6 @@ pub async fn run_tui(
         terminal.draw(|f| view::view(f, &mut state))?;
     }
 
-    println!("Quitting...");
     let _ = shutdown_tx.send(());
     crossterm::terminal::disable_raw_mode()?;
     execute!(

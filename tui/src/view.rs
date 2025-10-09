@@ -130,6 +130,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.approval_popup.is_visible() {
         state.approval_popup.render(f, f.area());
     }
+
+    // Render profile switcher
+    if state.show_profile_switcher {
+        crate::services::profile_switcher::render_profile_switcher_popup(f, state);
+    }
+
+    // Render profile switch overlay
+    if state.profile_switching_in_progress {
+        crate::services::profile_switcher::render_profile_switch_overlay(f, state);
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped
