@@ -35,9 +35,13 @@ pub struct SlackSendMessage {
     )]
     pub channel: String,
     #[schemars(
-        description = "Message text in markdown. Supports basic formatting, code blocks, and links. Use plain text if unsure."
+        description = "Message text using Slack mrkdwn (Slack's Markdown-like subset).\n\
+                       Supported: *bold*, _italic_, ~strikethrough~, `inline code`, ```code blocks```, \
+                       > blockquotes, bullet/numbered lists, links (<https://example.com|label>), mentions, emojis.\n\
+                       Not supported: HTML, Markdown tables, headings, underline, multi-column layouts. \
+                       For table-like output, use aligned monospace text in a code block. Use plain text if unsure."
     )]
-    pub markdown_text: String,
+    pub mrkdwn_text: String,
     #[schemars(
         description = "Optional Slack thread 'ts'. When provided, posts the message as a reply in that thread; otherwise posts a new top-level message."
     )]
@@ -131,7 +135,7 @@ impl ToolContainer {
         &self,
         Parameters(SlackSendMessage {
             channel,
-            markdown_text,
+            mrkdwn_text,
             thread_ts,
         }): Parameters<SlackSendMessage>,
     ) -> Result<CallToolResult, McpError> {
@@ -150,7 +154,7 @@ impl ToolContainer {
                 name: "slack_send_message".to_string(),
                 arguments: json!({
                     "channel": channel,
-                    "markdown_text": markdown_text,
+                    "markdown_text": mrkdwn_text,
                     "thread_ts": thread_ts,
                 }),
             })
