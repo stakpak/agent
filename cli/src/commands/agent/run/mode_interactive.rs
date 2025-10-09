@@ -54,7 +54,6 @@ pub async fn run_interactive(
     'profile_switch_loop: loop {
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
-        #[allow(unused_assignments)]
         let mut should_update_rulebooks_on_next_message = false;
 
         // Clone config values for this iteration
@@ -63,7 +62,7 @@ pub async fn run_interactive(
         let config_path = ctx.config_path.clone();
         let mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
-        let rulebooks = config.rulebooks.clone();
+        let mut rulebooks = config.rulebooks.clone();
         let system_prompt = config.system_prompt.clone();
         let subagent_configs = config.subagent_configs.clone();
         let checkpoint_id = config.checkpoint_id.clone();
@@ -189,6 +188,12 @@ pub async fn run_interactive(
                     InputEvent::ProfilesLoaded(profiles, current_profile_name),
                 )
                 .await;
+            }
+
+            // Load available rulebooks and send to TUI
+            if let Ok(all_rulebooks) = client.list_rulebooks().await {
+                let _ =
+                    send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
             }
 
             if let Some(checkpoint_id_str) = checkpoint_id {
@@ -617,6 +622,36 @@ pub async fn run_interactive(
 
                         // Return new config to trigger outer loop restart
                         return Ok((messages, current_session_id, Some(new_config)));
+                    }
+                    OutputEvent::RequestRulebookUpdate(selected_uris) => {
+                        // Update the rulebooks list based on selected URIs
+                        if let Some(all_rulebooks) = &rulebooks {
+                            let filtered_rulebooks: Vec<_> = all_rulebooks
+                                .iter()
+                                .filter(|rb| selected_uris.contains(&rb.uri))
+                                .cloned()
+                                .collect();
+
+                            // Update the rulebooks with the filtered list
+                            rulebooks = Some(filtered_rulebooks);
+
+                            // Set flag to update rulebooks on next message
+                            should_update_rulebooks_on_next_message = true;
+                        }
+                    }
+                    OutputEvent::RequestCurrentRulebooks => {
+                        // Send currently active rulebook URIs to TUI
+                        if let Some(current_rulebooks) = &rulebooks {
+                            let current_uris: Vec<String> =
+                                current_rulebooks.iter().map(|rb| rb.uri.clone()).collect();
+
+                            let _ = send_input_event(
+                                &input_tx,
+                                InputEvent::CurrentRulebooksLoaded(current_uris),
+                            )
+                            .await;
+                        }
+                        continue;
                     }
                 }
 

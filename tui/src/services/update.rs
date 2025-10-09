@@ -55,6 +55,8 @@ pub fn update(
             | InputEvent::ProfileSwitchProgress(_)
             | InputEvent::ProfileSwitchComplete(_)
             | InputEvent::ProfileSwitchFailed(_)
+            | InputEvent::RulebooksLoaded(_)
+            | InputEvent::CurrentRulebooksLoaded(_)
             | InputEvent::Quit
             | InputEvent::AttemptQuit => {
                 // Allow these events through
@@ -105,12 +107,44 @@ pub fn update(
                 }
                 return; // Consume all input when popup is visible
             }
+            if state.show_rulebook_switcher {
+                if c == ' ' {
+                    let _ = input_tx.try_send(InputEvent::RulebookSwitcherToggle);
+                    return;
+                }
+                return; // Consume all input when popup is visible
+            }
             handle_input_changed(state, c);
         }
         InputEvent::InputBackspace => handle_input_backspace(state),
+
+        // Handle rulebook switcher first to avoid race conditions
+        InputEvent::ShowRulebookSwitcher => {
+            // Don't show rulebook switcher if input is blocked or dialog is open
+            if state.profile_switching_in_progress
+                || state.is_dialog_open
+                || state.approval_popup.is_visible()
+            {
+                return;
+            }
+
+            // Clear any pending input to prevent empty message submission
+            state.text_area.set_text("");
+
+            // Request current active rulebooks to pre-select them
+            let _ = output_tx.try_send(OutputEvent::RequestCurrentRulebooks);
+
+            state.show_rulebook_switcher = true;
+            state.rulebook_switcher_selected = 0;
+        }
+
         InputEvent::InputSubmitted => {
             if state.show_profile_switcher {
                 let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
+                return;
+            }
+            if state.show_rulebook_switcher {
+                let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
                 return;
             }
             if state.approval_popup.is_visible() {
@@ -516,6 +550,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
+            if state.show_rulebook_switcher {
+                state.show_rulebook_switcher = false;
+                return;
+            }
             if state.show_profile_switcher {
                 state.show_profile_switcher = false;
                 return;
@@ -973,6 +1011,76 @@ pub fn update(
                 "Staying in current profile. Press Ctrl+P to try again.",
                 None,
             ));
+        }
+
+        // Rulebook switcher events
+        InputEvent::RulebooksLoaded(rulebooks) => {
+            state.available_rulebooks = rulebooks;
+        }
+
+        InputEvent::CurrentRulebooksLoaded(current_uris) => {
+            // Set the currently active rulebooks as selected
+            state.selected_rulebooks = current_uris.into_iter().collect();
+        }
+
+        InputEvent::RulebookSwitcherSelect => {
+            if state.show_rulebook_switcher && !state.available_rulebooks.is_empty() {
+                let selected_rulebook =
+                    &state.available_rulebooks[state.rulebook_switcher_selected];
+
+                // Toggle selection
+                if state.selected_rulebooks.contains(&selected_rulebook.uri) {
+                    state.selected_rulebooks.remove(&selected_rulebook.uri);
+                } else {
+                    state
+                        .selected_rulebooks
+                        .insert(selected_rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherToggle => {
+            if state.show_rulebook_switcher && !state.available_rulebooks.is_empty() {
+                let selected_rulebook =
+                    &state.available_rulebooks[state.rulebook_switcher_selected];
+
+                // Toggle selection
+                if state.selected_rulebooks.contains(&selected_rulebook.uri) {
+                    state.selected_rulebooks.remove(&selected_rulebook.uri);
+                } else {
+                    state
+                        .selected_rulebooks
+                        .insert(selected_rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherCancel => {
+            state.show_rulebook_switcher = false;
+        }
+
+        InputEvent::RulebookSwitcherConfirm => {
+            if state.show_rulebook_switcher {
+                // Send the selected rulebooks to the CLI
+                let selected_uris: Vec<String> = state.selected_rulebooks.iter().cloned().collect();
+                let _ = output_tx.try_send(OutputEvent::RequestRulebookUpdate(selected_uris));
+
+                // Set flag to update rulebooks on next message
+                state.should_update_rulebooks_on_next_message = true;
+
+                // Close the switcher
+                state.show_rulebook_switcher = false;
+
+                // Show confirmation message
+                let count = state.selected_rulebooks.len();
+                state.messages.push(Message::info(
+                    format!(
+                        "✅ Selected {} rulebook(s). They will be applied to your next message.",
+                        count
+                    ),
+                    Some(Style::default().fg(AdaptiveColors::green())),
+                ));
+            }
         }
 
         _ => {}
@@ -1608,6 +1716,14 @@ fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
+    if state.show_rulebook_switcher {
+        if state.rulebook_switcher_selected > 0 {
+            state.rulebook_switcher_selected -= 1;
+        } else {
+            state.rulebook_switcher_selected = state.available_rulebooks.len().saturating_sub(1);
+        }
+        return;
+    }
     // Check if approval popup is visible and should consume the event
     if state.approval_popup.is_visible() {
         state.approval_popup.scroll_up();
@@ -1645,6 +1761,13 @@ fn handle_down_navigation(
             state.profile_switcher_selected += 1;
         } else {
             state.profile_switcher_selected = 0;
+        }
+    }
+    if state.show_rulebook_switcher {
+        if state.rulebook_switcher_selected < state.available_rulebooks.len().saturating_sub(1) {
+            state.rulebook_switcher_selected += 1;
+        } else {
+            state.rulebook_switcher_selected = 0;
         }
     }
     // Check if approval popup is visible and should consume the event
