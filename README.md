@@ -46,6 +46,14 @@ brew update
 brew upgrade stakpak
 ```
 
+### AUR (Arch Linux)
+
+`stakpak-bin` is available on Arch User's Repository, AUR helpers could be used to install stakpak,
+an example using [yay](https://github.com/Jguer/yay):
+```sh
+yay -S stakpak-bin
+```
+
 ### Binary Release
 
 Download the latest binary for your platform from our [GitHub Releases](https://github.com/stakpak/agent/releases).
