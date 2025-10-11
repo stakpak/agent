@@ -5,7 +5,7 @@ COPY . .
 RUN cargo build --release --target-dir /usr/src/app/target
 RUN strip /usr/src/app/target/release/stakpak
 
-FROM debian:bookworm-slim
+FROM python:3.13-slim-bookworm
 LABEL org.opencontainers.image.source="https://github.com/stakpak/agent" \
     org.opencontainers.image.description="Stakpak Agent" \
     maintainer="contact@stakpak.dev"
