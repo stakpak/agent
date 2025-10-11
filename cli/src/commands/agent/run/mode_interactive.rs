@@ -638,6 +638,7 @@ pub async fn run_interactive(
                             // Set flag to update rulebooks on next message
                             should_update_rulebooks_on_next_message = true;
                         }
+                        continue;
                     }
                     OutputEvent::RequestCurrentRulebooks => {
                         // Send currently active rulebook URIs to TUI
