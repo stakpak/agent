@@ -1065,9 +1065,6 @@ pub fn update(
                 let selected_uris: Vec<String> = state.selected_rulebooks.iter().cloned().collect();
                 let _ = output_tx.try_send(OutputEvent::RequestRulebookUpdate(selected_uris));
 
-                // Set flag to update rulebooks on next message
-                state.should_update_rulebooks_on_next_message = true;
-
                 // Close the switcher
                 state.show_rulebook_switcher = false;
 
@@ -1080,6 +1077,23 @@ pub fn update(
                     ),
                     Some(Style::default().fg(AdaptiveColors::green())),
                 ));
+            }
+        }
+
+        InputEvent::RulebookSwitcherSelectAll => {
+            if state.show_rulebook_switcher {
+                // Select all available rulebooks
+                state.selected_rulebooks.clear();
+                for rulebook in &state.available_rulebooks {
+                    state.selected_rulebooks.insert(rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherDeselectAll => {
+            if state.show_rulebook_switcher {
+                // Deselect all rulebooks
+                state.selected_rulebooks.clear();
             }
         }
 

@@ -26,6 +26,12 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ShowProfileSwitcher)
                 }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::RulebookSwitcherDeselectAll)
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::RulebookSwitcherSelectAll)
+                }
                 KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputChangedNewline)
                 }
