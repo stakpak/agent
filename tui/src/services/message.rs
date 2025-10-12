@@ -434,7 +434,14 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
 }
 
 /// Invalidate the message lines cache when messages change
+/// Smart invalidation: Skip when user has scrolled up to avoid jitter during streaming
 pub fn invalidate_message_lines_cache(state: &mut AppState) {
+    // If user has scrolled up (reading old messages), don't invalidate cache
+    // This prevents jitter when new streaming chunks arrive while scrolled up
+    if !state.stay_at_bottom && state.is_streaming {
+        return;
+    }
+
     state.message_lines_cache = None;
     state.collapsed_message_lines_cache = None;
 }

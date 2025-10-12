@@ -49,6 +49,8 @@ pub struct StakpakAcpAgent {
     current_streaming_message: Arc<tokio::sync::Mutex<String>>,
     // Buffer for handling partial XML tags during streaming
     streaming_buffer: Arc<tokio::sync::Mutex<String>>,
+    // Channel for native ACP filesystem operations
+    fs_operation_tx: Option<mpsc::UnboundedSender<crate::commands::acp::fs_handler::FsOperation>>,
 }
 
 impl StakpakAcpAgent {
@@ -107,6 +109,7 @@ impl StakpakAcpAgent {
             active_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
             streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
+            fs_operation_tx: None,
         })
     }
 
@@ -654,6 +657,19 @@ impl StakpakAcpAgent {
         session_id: &acp::SessionId,
         tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
     ) -> Result<Vec<stakpak_shared::models::integrations::openai::ChatMessage>, acp::Error> {
+        log::info!(
+            "🔧 DEBUG: Starting tool call processing with {} tool calls",
+            tool_calls.len()
+        );
+        for (i, tool_call) in tool_calls.iter().enumerate() {
+            log::info!(
+                "🔧 DEBUG: Tool call {}: {} (id: {})",
+                i,
+                tool_call.function.name,
+                tool_call.id
+            );
+        }
+
         let mut tool_calls_queue = tool_calls;
         let mut results = Vec::new();
 
@@ -679,6 +695,13 @@ impl StakpakAcpAgent {
 
             let tool_call = tool_calls_queue.remove(0);
             let tool_call_id = self.generate_tool_call_id();
+
+            log::info!(
+                "🔧 DEBUG: Processing tool call: {} (original_id: {}, new_id: {})",
+                tool_call.function.name,
+                tool_call.id,
+                tool_call_id
+            );
 
             // Track active tool call for cancellation
             {
@@ -810,12 +833,39 @@ impl StakpakAcpAgent {
             )
             .await?;
 
-            // Execute tool call
-            if let Some(ref clients) = self.clients {
+            // Check if this is a filesystem tool that should use native ACP
+            let is_fs_tool = matches!(
+                tool_call.function.name.as_str(),
+                "view" | "create" | "str_replace"
+            );
+
+            let result = if is_fs_tool && self.fs_operation_tx.is_some() {
+                log::info!(
+                    "🔧 DEBUG: Executing filesystem tool via native ACP: {}",
+                    tool_call.function.name
+                );
+
+                // Execute using native ACP filesystem protocol
+                let fs_tx = self
+                    .fs_operation_tx
+                    .as_ref()
+                    .ok_or_else(acp::Error::internal_error)?;
+                crate::commands::acp::fs_handler::execute_acp_fs_tool(fs_tx, &tool_call, session_id)
+                    .await
+                    .map_err(|e| {
+                        log::error!("ACP filesystem tool execution failed: {}", e);
+                        acp::Error::internal_error()
+                    })?
+            } else if let Some(ref clients) = self.clients {
+                log::info!(
+                    "🔧 DEBUG: Executing tool call: {} with MCP clients",
+                    tool_call.function.name
+                );
+
                 // Create cancellation receiver for this tool call
                 let tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
-                let result = crate::commands::agent::run::tooling::run_tool_call(
+                crate::commands::agent::run::tooling::run_tool_call(
                     clients,
                     tools_map,
                     &tool_call,
@@ -823,90 +873,102 @@ impl StakpakAcpAgent {
                     self.current_session_id.get(),
                 )
                 .await
-                .map_err(|_| acp::Error::internal_error())?;
+                .map_err(|_| acp::Error::internal_error())?
+            } else {
+                log::error!(
+                    "No execution method available for tool: {}",
+                    tool_call.function.name
+                );
+                return Err(acp::Error::internal_error());
+            };
 
-                if let Some(tool_result) = result {
-                    // Check if the tool call was cancelled
-                    if CallToolResultExt::get_status(&tool_result) == stakpak_shared::models::integrations::openai::ToolCallResultStatus::Cancelled {
-                        // Send cancellation notification
-                        self.send_tool_call_update(
-                            session_id,
-                            tool_call_id.clone(),
-                            acp::ToolCallStatus::Failed,
-                            Some(vec![acp::ToolCallContent::Content {
-                                content: acp::ContentBlock::Text(acp::TextContent {
-                                    text: "Tool call cancelled by user".to_string(),
-                                    annotations: None,
-                                }),
-                            }]),
-                            Some(serde_json::json!({
-                                "success": false,
-                                "cancelled": true
-                            })),
-                        )
-                        .await?;
+            log::info!(
+                "🔧 DEBUG: Tool call execution completed for: {}",
+                tool_call.function.name
+            );
 
-                        // Add cancellation message to conversation history
-                        results.push(crate::commands::agent::run::helpers::tool_result(
-                            tool_call.id.clone(),
-                            "TOOL_CALL_CANCELLED".to_string(),
-                        ));
-
-                        // Remove cancelled tool call from active list
-                        {
-                            let mut active_tool_calls = self.active_tool_calls.lock().await;
-                            active_tool_calls.retain(|tc| tc.id != tool_call.id);
-                        }
-
-                        // Stop processing remaining tool calls
-                        return Ok(results);
-                    }
-
-                    let result_content: String = tool_result
-                        .content
-                        .iter()
-                        .map(|c| match c.raw.as_text() {
-                            Some(text) => text.text.clone(),
-                            None => String::new(),
-                        })
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                        .join("\n");
-
-                    // Send completion notification
-                    let completion_content =
-                        if self.should_use_diff_content(&tool_call.function.name) {
-                            // For diff tools, we already sent the diff in the initial notification
-                            // Just send a simple completion without additional content
-                            None
-                        } else {
-                            // For non-diff tools, send the result content
-                            Some(vec![acp::ToolCallContent::Content {
-                                content: acp::ContentBlock::Text(acp::TextContent {
-                                    text: result_content.clone(),
-                                    annotations: None,
-                                }),
-                            }])
-                        };
-
+            if let Some(tool_result) = result {
+                // Check if the tool call was cancelled
+                if CallToolResultExt::get_status(&tool_result)
+                    == stakpak_shared::models::integrations::openai::ToolCallResultStatus::Cancelled
+                {
+                    // Send cancellation notification
                     self.send_tool_call_update(
                         session_id,
                         tool_call_id.clone(),
-                        acp::ToolCallStatus::Completed,
-                        completion_content,
+                        acp::ToolCallStatus::Failed,
+                        Some(vec![acp::ToolCallContent::Content {
+                            content: acp::ContentBlock::Text(acp::TextContent {
+                                text: "Tool call cancelled by user".to_string(),
+                                annotations: None,
+                            }),
+                        }]),
                         Some(serde_json::json!({
-                            "result": result_content,
-                            "success": true
+                            "success": false,
+                            "cancelled": true
                         })),
                     )
                     .await?;
 
-                    // Add tool result to conversation history
+                    // Add cancellation message to conversation history
                     results.push(crate::commands::agent::run::helpers::tool_result(
                         tool_call.id.clone(),
-                        result_content,
+                        "TOOL_CALL_CANCELLED".to_string(),
                     ));
+
+                    // Remove cancelled tool call from active list
+                    {
+                        let mut active_tool_calls = self.active_tool_calls.lock().await;
+                        active_tool_calls.retain(|tc| tc.id != tool_call.id);
+                    }
+
+                    // Stop processing remaining tool calls
+                    return Ok(results);
                 }
+
+                let result_content: String = tool_result
+                    .content
+                    .iter()
+                    .map(|c| match c.raw.as_text() {
+                        Some(text) => text.text.clone(),
+                        None => String::new(),
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Send completion notification
+                let completion_content = if self.should_use_diff_content(&tool_call.function.name) {
+                    // For diff tools, we already sent the diff in the initial notification
+                    // Just send a simple completion without additional content
+                    None
+                } else {
+                    // For non-diff tools, send the result content
+                    Some(vec![acp::ToolCallContent::Content {
+                        content: acp::ContentBlock::Text(acp::TextContent {
+                            text: result_content.clone(),
+                            annotations: None,
+                        }),
+                    }])
+                };
+
+                self.send_tool_call_update(
+                    session_id,
+                    tool_call_id.clone(),
+                    acp::ToolCallStatus::Completed,
+                    completion_content,
+                    Some(serde_json::json!({
+                        "result": result_content,
+                        "success": true
+                    })),
+                )
+                .await?;
+
+                // Add tool result to conversation history
+                results.push(crate::commands::agent::run::helpers::tool_result(
+                    tool_call.id.clone(),
+                    result_content,
+                ));
 
                 // Remove completed tool call from active list
                 {
@@ -1333,6 +1395,9 @@ impl StakpakAcpAgent {
                 // Create permission request channel
                 let (permission_tx, mut permission_rx) = mpsc::unbounded_channel::<(acp::RequestPermissionRequest, oneshot::Sender<acp::RequestPermissionResponse>)>();
 
+                // Create filesystem operation channel for native ACP filesystem operations
+                let (fs_operation_tx, fs_operation_rx) = mpsc::unbounded_channel::<crate::commands::acp::fs_handler::FsOperation>();
+
                 // Create a new agent with the proper channel
                 let agent = StakpakAcpAgent {
                     config: self.config.clone(),
@@ -1351,6 +1416,7 @@ impl StakpakAcpAgent {
                     active_tool_calls: self.active_tool_calls.clone(),
                     current_streaming_message: self.current_streaming_message.clone(),
                     streaming_buffer: self.streaming_buffer.clone(),
+                    fs_operation_tx: Some(fs_operation_tx),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -1361,6 +1427,9 @@ impl StakpakAcpAgent {
 
                 // Wrap connection in Arc for sharing
                 let conn_arc = Arc::new(conn);
+
+                // Spawn filesystem handler for native ACP filesystem operations
+                crate::commands::acp::fs_handler::spawn_fs_handler(conn_arc.clone(), fs_operation_rx);
 
                 // Start a background task to send session notifications to the client
                 let conn_for_notifications = conn_arc.clone();
@@ -1462,6 +1531,7 @@ impl Clone for StakpakAcpAgent {
             active_tool_calls: self.active_tool_calls.clone(),
             current_streaming_message: self.current_streaming_message.clone(),
             streaming_buffer: self.streaming_buffer.clone(),
+            fs_operation_tx: self.fs_operation_tx.clone(),
         }
     }
 }
@@ -1688,10 +1758,29 @@ impl acp::Agent for StakpakAcpAgent {
             .map(|tc| !tc.is_empty())
             .unwrap_or(false);
 
+        log::info!(
+            "🔧 DEBUG: Initial response has tool calls: {}",
+            has_tool_calls
+        );
+        if has_tool_calls && let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref()
+        {
+            log::info!("🔧 DEBUG: Initial tool calls count: {}", tool_calls.len());
+            for (i, tool_call) in tool_calls.iter().enumerate() {
+                log::info!(
+                    "🔧 DEBUG: Initial tool call {}: {} (id: {})",
+                    i,
+                    tool_call.function.name,
+                    tool_call.id
+                );
+            }
+        }
+
         // Create cancellation receiver for tool call processing
         let mut tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
         while has_tool_calls {
+            log::info!("🔧 DEBUG: Starting tool call processing loop iteration");
+
             if let Some(ref mut cancel_rx) = tool_cancel_rx
                 && cancel_rx.try_recv().is_ok()
             {
@@ -1762,55 +1851,12 @@ impl acp::Agent for StakpakAcpAgent {
                         stop_reason: acp::StopReason::Cancelled,
                     });
                 }
-                // Get the latest message from the conversation
-                let latest_message = match current_messages.last() {
-                    Some(message) => message,
-                    None => {
-                        log::error!("No messages in conversation history");
-                        break;
-                    }
-                };
 
-                if let Some(tool_calls) = latest_message.tool_calls.as_ref() {
-                    if tool_calls.is_empty() {
-                        break; // No more tool calls, exit loop
-                    }
-
-                    log::info!("Processing {} tool calls", tool_calls.len());
-
-                    // Process tool calls with cancellation support
-                    let tool_results = self
-                        .process_tool_calls_with_cancellation(
-                            tool_calls.clone(),
-                            &arguments.session_id,
-                            &tools_map,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Tool call processing failed: {}", e);
-                            e
-                        })?;
-
-                    // Add tool results to conversation history
-                    {
-                        let mut messages = self.messages.lock().await;
-                        messages.extend(tool_results);
-                    }
-                    // Check for cancellation after tool call processing
-                    if let Some(ref mut cancel_rx) = tool_cancel_rx
-                        && cancel_rx.try_recv().is_ok()
-                    {
-                        log::info!("Tool call processing cancelled after tool execution");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
-
-                    // Check if any tool calls were cancelled
-                    let has_cancelled_tool_calls = {
-                        let messages = self.messages.lock().await;
-                        messages.iter().any(|msg| {
-                            if let Some(
+                // Check if any tool calls were cancelled
+                let has_cancelled_tool_calls = {
+                    let messages = self.messages.lock().await;
+                    messages.iter().any(|msg| {
+                        if let Some(
                             stakpak_shared::models::integrations::openai::MessageContent::String(
                                 text,
                             ),
@@ -1820,77 +1866,72 @@ impl acp::Agent for StakpakAcpAgent {
                         } else {
                             false
                         }
-                        })
-                    };
+                    })
+                };
 
-                    if has_cancelled_tool_calls {
-                        log::info!("Tool calls were cancelled, stopping turn");
-                        return Ok(acp::PromptResponse {
-                            stop_reason: acp::StopReason::Cancelled,
-                        });
-                    }
-
-                    // Make follow-up chat completion request after tool calls
-                    current_messages = {
-                        let messages = self.messages.lock().await;
-                        messages.clone()
-                    };
-
-                    let (follow_up_stream, _request_id) = self
-                        .client
-                        .chat_completion_stream(
-                            current_messages.clone(),
-                            tools_option.clone(),
-                            None,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Follow-up chat completion stream failed: {}", e);
-                            acp::Error::internal_error()
-                        })?;
-
-                    let follow_up_response = match self
-                        .process_acp_streaming_response_with_cancellation(
-                            follow_up_stream,
-                            &arguments.session_id,
-                        )
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(e) => {
-                            if e == "STREAM_CANCELLED" {
-                                log::info!("Follow-up stream was cancelled by user");
-                                return Ok(acp::PromptResponse {
-                                    stop_reason: acp::StopReason::Cancelled,
-                                });
-                            }
-                            log::error!("Follow-up stream processing failed: {}", e);
-                            return Err(acp::Error::internal_error());
-                        }
-                    };
-
-                    // Add follow-up response to conversation history
-                    {
-                        let mut messages = self.messages.lock().await;
-                        messages.push(follow_up_response.choices[0].message.clone());
-                    }
-
-                    // Update current_messages for the next iteration
-                    current_messages.push(follow_up_response.choices[0].message.clone());
-
-                    // Check if the follow-up response has more tool calls
-                    has_tool_calls = follow_up_response.choices[0]
-                        .message
-                        .tool_calls
-                        .as_ref()
-                        .map(|tc| !tc.is_empty())
-                        .unwrap_or(false);
-
-                    log::info!("Follow-up response has tool calls: {}", has_tool_calls);
-                } else {
-                    // No tool calls in the latest message, exit the loop
-                    break;
+                if has_cancelled_tool_calls {
+                    log::info!("Tool calls were cancelled, stopping turn");
+                    return Ok(acp::PromptResponse {
+                        stop_reason: acp::StopReason::Cancelled,
+                    });
                 }
+
+                // Make follow-up chat completion request after tool calls
+                current_messages = {
+                    let messages = self.messages.lock().await;
+                    messages.clone()
+                };
+
+                let (follow_up_stream, _request_id) = self
+                    .client
+                    .chat_completion_stream(current_messages.clone(), tools_option.clone(), None)
+                    .await
+                    .map_err(|e| {
+                        log::error!("Follow-up chat completion stream failed: {}", e);
+                        acp::Error::internal_error()
+                    })?;
+
+                let follow_up_response = match self
+                    .process_acp_streaming_response_with_cancellation(
+                        follow_up_stream,
+                        &arguments.session_id,
+                    )
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        if e == "STREAM_CANCELLED" {
+                            log::info!("Follow-up stream was cancelled by user");
+                            return Ok(acp::PromptResponse {
+                                stop_reason: acp::StopReason::Cancelled,
+                            });
+                        }
+                        log::error!("Follow-up stream processing failed: {}", e);
+                        return Err(acp::Error::internal_error());
+                    }
+                };
+
+                // Add follow-up response to conversation history
+                {
+                    let mut messages = self.messages.lock().await;
+                    messages.push(follow_up_response.choices[0].message.clone());
+                }
+
+                // Update current_messages for the next iteration
+                current_messages.push(follow_up_response.choices[0].message.clone());
+
+                // Check if the follow-up response has more tool calls
+                has_tool_calls = follow_up_response.choices[0]
+                    .message
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| !tc.is_empty())
+                    .unwrap_or(false);
+
+                log::info!("Follow-up response has tool calls: {}", has_tool_calls);
+            } else {
+                // No tool calls in the latest message, exit the loop
+                break;
             }
         }
 
