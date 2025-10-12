@@ -4,8 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
-    tool_call_history_string, tool_result, user_message,
+    add_local_context, add_rulebooks, add_rulebooks_with_force, add_subagents,
+    convert_tools_map_with_filter, tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -63,6 +63,7 @@ pub async fn run_interactive(
         let mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
         let mut rulebooks = config.rulebooks.clone();
+        let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let subagent_configs = config.subagent_configs.clone();
         let checkpoint_id = config.checkpoint_id.clone();
@@ -192,6 +193,7 @@ pub async fn run_interactive(
 
             // Load available rulebooks and send to TUI
             if let Ok(all_rulebooks) = client.list_rulebooks().await {
+                all_available_rulebooks = Some(all_rulebooks.clone());
                 let _ =
                     send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
             }
@@ -262,9 +264,9 @@ pub async fn run_interactive(
 
                         // Add rulebooks if this is the first message OR if we just resumed a session
                         let (user_input, _) = if should_update_rulebooks_on_next_message {
-                            // Force add rulebooks for resumed session (ignore messages.is_empty() check)
+                            // Force add rulebooks for resumed session or rulebook update (ignore messages.is_empty() check)
                             let (user_input_with_rulebooks, _) =
-                                add_rulebooks(&[], &user_input, &rulebooks);
+                                add_rulebooks_with_force(&messages, &user_input, &rulebooks, true);
                             should_update_rulebooks_on_next_message = false; // Reset the flag
                             (user_input_with_rulebooks, None)
                         } else {
@@ -625,7 +627,7 @@ pub async fn run_interactive(
                     }
                     OutputEvent::RequestRulebookUpdate(selected_uris) => {
                         // Update the rulebooks list based on selected URIs
-                        if let Some(all_rulebooks) = &rulebooks {
+                        if let Some(all_rulebooks) = &all_available_rulebooks {
                             let filtered_rulebooks: Vec<_> = all_rulebooks
                                 .iter()
                                 .filter(|rb| selected_uris.contains(&rb.uri))
