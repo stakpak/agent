@@ -86,12 +86,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 "? for shortcuts . @ for files . / for commands{}",
                 select_hint
             );
-            let right_text = format!("profile {} | Ctrl+K: rulebooks", state.current_profile_name);
+            let profile_text = format!("profile {}", state.current_profile_name);
+            let rulebooks_text = " | Ctrl+K: rulebooks";
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
             let left_len = left_text.len();
-            let right_len = right_text.len();
+            let right_len = profile_text.len() + rulebooks_text.len();
             let spacing = total_width.saturating_sub(left_len + right_len);
 
             let spans = vec![
@@ -102,6 +103,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                     state.current_profile_name.clone(),
                     Style::default().fg(Color::Reset),
                 ),
+                Span::styled(rulebooks_text, Style::default().fg(Color::DarkGray)),
             ];
 
             let hint = Paragraph::new(Line::from(spans));

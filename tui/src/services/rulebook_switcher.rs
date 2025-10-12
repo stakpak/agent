@@ -248,21 +248,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             Style::default().fg(Color::Green),
         )]));
 
-        // Created/Updated dates if available
-        if let Some(created_at) = &selected_rulebook.created_at {
-            detail_lines.push(Line::from(""));
-            detail_lines.push(Line::from(vec![Span::styled(
-                "Created:",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            detail_lines.push(Line::from(vec![Span::styled(
-                format!("  {}", created_at.format("%Y-%m-%d %H:%M")),
-                Style::default().fg(Color::DarkGray),
-            )]));
-        }
-
+        // Updated dates if available
         if let Some(updated_at) = &selected_rulebook.updated_at {
             detail_lines.push(Line::from(vec![Span::styled(
                 "Updated:",

@@ -1072,7 +1072,7 @@ pub fn update(
                 let count = state.selected_rulebooks.len();
                 state.messages.push(Message::info(
                     format!(
-                        "✅ Selected {} rulebook(s). They will be applied to your next message.",
+                        "Selected {} rulebook(s). They will be applied to your next message.",
                         count
                     ),
                     Some(Style::default().fg(AdaptiveColors::green())),
