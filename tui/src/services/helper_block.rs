@@ -371,6 +371,7 @@ pub fn welcome_messages(
         version_message(latest_version),
         Message::info("SPACING_MARKER", None),
         Message::info(format!("profile: {}", state.current_profile_name), None),
+        Message::info("SPACING_MARKER", None),
         Message::info(
             format!(
                 "cwd: {}",
