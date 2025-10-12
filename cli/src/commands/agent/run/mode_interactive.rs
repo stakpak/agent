@@ -4,8 +4,8 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_rulebooks_with_force, add_subagents,
-    convert_tools_map_with_filter, tool_call_history_string, tool_result, user_message,
+    add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
+    tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
@@ -262,16 +262,20 @@ pub async fn run_interactive(
                                 .await
                                 .map_err(|e| format!("Failed to format local context: {}", e))?;
 
-                        // Add rulebooks if this is the first message OR if we just resumed a session
-                        let (user_input, _) = if should_update_rulebooks_on_next_message {
-                            // Force add rulebooks for resumed session or rulebook update (ignore messages.is_empty() check)
-                            let (user_input_with_rulebooks, _) =
-                                add_rulebooks_with_force(&messages, &user_input, &rulebooks, true);
-                            should_update_rulebooks_on_next_message = false; // Reset the flag
-                            (user_input_with_rulebooks, None)
-                        } else {
-                            add_rulebooks(&messages, &user_input, &rulebooks)
-                        };
+                        // Add rulebooks only in specific cases:
+                        // 1. First message of new session (messages.is_empty())
+                        // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
+                        let (user_input, _) =
+                            if messages.is_empty() || should_update_rulebooks_on_next_message {
+                                // Force add rulebooks for first message, resumed session, or rulebook update
+                                let (user_input_with_rulebooks, _) =
+                                    add_rulebooks_with_force(&user_input, &rulebooks, true);
+                                should_update_rulebooks_on_next_message = false; // Reset the flag
+                                (user_input_with_rulebooks, None::<String>)
+                            } else {
+                                // Don't add rulebooks for regular messages
+                                (user_input.to_string(), None::<String>)
+                            };
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
