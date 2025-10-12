@@ -98,11 +98,11 @@ pub fn add_rulebooks(
     user_input: &str,
     rulebooks: &Option<Vec<ListRuleBook>>,
 ) -> (String, Option<String>) {
-    add_rulebooks_with_force(messages, user_input, rulebooks, false)
+    let force = messages.is_empty();
+    add_rulebooks_with_force(user_input, rulebooks, force)
 }
 
 pub fn add_rulebooks_with_force(
-    messages: &[ChatMessage],
     user_input: &str,
     rulebooks: &Option<Vec<ListRuleBook>>,
     force_add: bool,
@@ -132,8 +132,8 @@ pub fn add_rulebooks_with_force(
             "# No Rule Books Available".to_string()
         };
 
-        // Add rulebooks if this is the first message OR if force_add is true
-        if messages.is_empty() || force_add {
+        // Add rulebooks only if explicitly requested via force_add
+        if force_add {
             let formatted_input = format!(
                 "{}\n\n<rulebooks>\n{}\n</rulebooks>",
                 user_input, rulebooks_text
