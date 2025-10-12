@@ -338,47 +338,19 @@ pub fn version_message(latest_version: Option<String>) -> Message {
             if version != format!("v{}", env!("CARGO_PKG_VERSION")) {
                 Message::info(
                     format!(
-                        "🚀 Update available!  v{}  →  {} ✨   ",
+                        "🚀 update available!  v{}  →  {} ✨   ",
                         env!("CARGO_PKG_VERSION"),
                         version
                     ),
                     Some(Style::default().fg(ratatui::style::Color::Yellow)),
                 )
             } else {
-                Message::info(
-                    format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
-                    None,
-                )
+                Message::info(format!("version: {}", env!("CARGO_PKG_VERSION")), None)
             }
         }
-        None => Message::info(
-            format!("Current Version: {}", env!("CARGO_PKG_VERSION")),
-            None,
-        ),
+        None => Message::info(format!("version: {}", env!("CARGO_PKG_VERSION")), None),
     }
 }
-
-// pub fn welcome_messages(latest_version: Option<String>) -> Vec<Message> {
-//     vec![
-//         Message::info(
-//             r"
-//  ▗▄▄▖▗▄▄▄▖▗▄▖ ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖ ▗▖     ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
-// ▐▌     █ ▐▌ ▐▌▐▌▗▞▘▐▌ ▐▌▐▌ ▐▌▐▌▗▞▘    ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █
-//  ▝▀▚▖  █ ▐▛▀▜▌▐▛▚▖ ▐▛▀▘ ▐▛▀▜▌▐▛▚▖     ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █
-// ▗▄▄▞▘  █ ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ",
-//             Some(Style::default().fg(ratatui::style::Color::Cyan)),
-//         ),
-//         version_message(latest_version),
-//         Message::info("/help for help, /status for your current setup", None),
-//         Message::info(
-//             format!(
-//                 "cwd: {}",
-//                 std::env::current_dir().unwrap_or_default().display()
-//             ),
-//             None,
-//         ),
-//     ]
-// }
 
 pub fn welcome_messages(
     latest_version: Option<String>,
@@ -392,14 +364,13 @@ pub fn welcome_messages(
   ╔╝█████╚╗   ███████╗  ██║   ███████║█████╔╝ ██████╔╝███████║█████╔╝ 
 >═║███████║═< ╚════██║  ██║   ██╔══██║██╔═██╗ ██╔═══╝ ██╔══██║██╔═██╗ 
 >═║███████║═< ███████║  ██║   ██║  ██║██║  ██╗██║     ██║  ██║██║  ██╗ 
-  ╚═══════╝   ╚══════╝  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝ 
-   ",
+  ╚═══════╝   ╚══════╝  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝ ",
             Some(Style::default().fg(ratatui::style::Color::Cyan)),
         ),
         Message::info("SPACING_MARKER", None),
         version_message(latest_version),
         Message::info("SPACING_MARKER", None),
-        Message::info("/help for help, /status for your current setup", None),
+        Message::info(format!("profile: {}", state.current_profile_name), None),
         Message::info("SPACING_MARKER", None),
         Message::info(
             format!(
@@ -408,7 +379,8 @@ pub fn welcome_messages(
             ),
             None,
         ),
-        Message::info(format!("profile: {}", state.current_profile_name), None),
+        Message::info("SPACING_MARKER", None),
+        Message::info("/help for help, ctrl+p to switch profiles", None),
     ];
 
     // Show allowed tools for debugging
