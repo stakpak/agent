@@ -316,8 +316,8 @@ pub enum InputEvent {
     RulebookSwitcherToggle,
     RulebookSwitcherCancel,
     RulebookSwitcherConfirm,
-    RulebookSwitcherSelectAll,    // Ctrl+D to select all rulebooks
-    RulebookSwitcherDeselectAll,  // Ctrl+S to deselect all rulebooks
+    RulebookSwitcherSelectAll,   // Ctrl+D to select all rulebooks
+    RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
 }
 
 #[derive(Debug)]
