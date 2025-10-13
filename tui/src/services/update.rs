@@ -1506,6 +1506,12 @@ fn handle_input_submitted_with(
     ));
     // Loading will be managed by stream processing
     state.text_area.set_text("");
+
+    // If content changed while user is scrolled up, mark it
+    if !was_at_bottom {
+        state.content_changed_while_scrolled_up = true;
+    }
+
     let total_lines = state.messages.len() * 2;
     let max_scroll = total_lines.saturating_sub(max_visible_lines);
     if was_at_bottom {
@@ -1525,6 +1531,11 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
             text.push_str(&s);
         }
         crate::services::message::invalidate_message_lines_cache(state);
+
+        // If content changed while user is scrolled up, mark it
+        if !state.stay_at_bottom {
+            state.content_changed_while_scrolled_up = true;
+        }
 
         // During streaming, only adjust scroll if we're staying at bottom
         if state.stay_at_bottom {
@@ -1546,6 +1557,12 @@ fn handle_stream_message(state: &mut AppState, id: Uuid, s: String, message_area
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
         state.text_area.set_text("");
+
+        // If content changed while user is scrolled up, mark it
+        if !was_at_bottom {
+            state.content_changed_while_scrolled_up = true;
+        }
+
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
@@ -1597,6 +1614,11 @@ fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgr
         Some(tool_call_id),
     ));
     crate::services::message::invalidate_message_lines_cache(state);
+
+    // If content changed while user is scrolled up, mark it
+    if !state.stay_at_bottom {
+        state.content_changed_while_scrolled_up = true;
+    }
 }
 
 /// Handles upward navigation with approval popup check
@@ -1722,14 +1744,14 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
             state.scroll += SCROLL_LINES;
             state.stay_at_bottom = false;
         } else {
-            let was_not_at_bottom = !state.stay_at_bottom;
             state.scroll = max_scroll;
             state.stay_at_bottom = true;
 
-            // If user just scrolled back to bottom during streaming, invalidate cache once
+            // If content changed while we were scrolled up, invalidate cache once
             // to catch up with new content that arrived while scrolled up
-            if was_not_at_bottom {
+            if state.content_changed_while_scrolled_up {
                 crate::services::message::invalidate_message_lines_cache(state);
+                state.content_changed_while_scrolled_up = false;
             }
         }
     }
@@ -1758,14 +1780,14 @@ fn handle_page_down(state: &mut AppState, message_area_height: usize, message_ar
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
     if state.scroll < max_scroll {
-        let was_not_at_bottom = !state.stay_at_bottom;
         state.scroll = (state.scroll + page).min(max_scroll);
         if state.scroll == max_scroll {
             state.stay_at_bottom = true;
 
-            // If user just scrolled back to bottom during streaming, invalidate cache once
-            if was_not_at_bottom && state.is_streaming {
+            // If content changed while we were scrolled up, invalidate cache once
+            if state.content_changed_while_scrolled_up {
                 crate::services::message::invalidate_message_lines_cache(state);
+                state.content_changed_while_scrolled_up = false;
             }
         }
     } else {
