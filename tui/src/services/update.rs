@@ -1722,15 +1722,8 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
             state.scroll += SCROLL_LINES;
             state.stay_at_bottom = false;
         } else {
-            let was_not_at_bottom = !state.stay_at_bottom;
             state.scroll = max_scroll;
             state.stay_at_bottom = true;
-
-            // If user just scrolled back to bottom during streaming, invalidate cache once
-            // to catch up with new content that arrived while scrolled up
-            if was_not_at_bottom {
-                crate::services::message::invalidate_message_lines_cache(state);
-            }
         }
     }
 }
@@ -1758,15 +1751,9 @@ fn handle_page_down(state: &mut AppState, message_area_height: usize, message_ar
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
     if state.scroll < max_scroll {
-        let was_not_at_bottom = !state.stay_at_bottom;
         state.scroll = (state.scroll + page).min(max_scroll);
         if state.scroll == max_scroll {
             state.stay_at_bottom = true;
-
-            // If user just scrolled back to bottom during streaming, invalidate cache once
-            if was_not_at_bottom && state.is_streaming {
-                crate::services::message::invalidate_message_lines_cache(state);
-            }
         }
     } else {
         state.stay_at_bottom = true;
