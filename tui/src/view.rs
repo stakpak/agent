@@ -37,18 +37,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else {
         0
     };
-    let hint_height = if state.show_helper_dropdown && !state.is_dialog_open {
+    let hint_height = if state.show_helper_dropdown {
         0
     } else {
         margin_height
     };
 
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
-    let dialog_margin = if state.show_sessions_dialog || state.is_dialog_open {
-        2
-    } else {
-        0
-    };
+    let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
     // Layout: [messages][loading_line][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
