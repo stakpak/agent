@@ -217,7 +217,7 @@ pub struct AppState {
     pub profile_switching_in_progress: bool,
     pub profile_switch_status_message: Option<String>,
     pub rulebook_config: Option<crate::RulebookConfig>,
-    
+
     // Shortcuts popup state
     pub show_shortcuts_popup: bool,
     pub shortcuts_scroll: usize,
@@ -371,7 +371,7 @@ impl AppState {
                 description: "Quit the application",
             },
             HelperCommand {
-                command: "Ctrl+S",
+                command: "/shortcuts",
                 description: "Show keyboard shortcuts",
             },
         ]
@@ -490,7 +490,7 @@ impl AppState {
             profile_switching_in_progress: false,
             profile_switch_status_message: None,
             rulebook_config: None,
-            
+
             // Shortcuts popup initialization
             show_shortcuts_popup: false,
             shortcuts_scroll: 0,
