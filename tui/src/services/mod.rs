@@ -14,6 +14,7 @@ pub mod placeholder_prompts;
 pub mod profile_switcher;
 pub mod sessions_dialog;
 pub mod shell_mode;
+pub mod shortcuts_popup;
 pub mod syntax_highlighter;
 pub mod textarea;
 pub mod update;
