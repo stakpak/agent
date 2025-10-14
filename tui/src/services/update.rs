@@ -520,6 +520,10 @@ pub fn update(
                 state.show_profile_switcher = false;
                 return;
             }
+            if state.show_shortcuts_popup {
+                state.show_shortcuts_popup = false;
+                return;
+            }
             if state.show_collapsed_messages {
                 state.show_collapsed_messages = false;
                 return;
@@ -850,6 +854,19 @@ pub fn update(
             }
         }
 
+        InputEvent::ShowShortcuts => {
+            // Don't show shortcuts popup if input is blocked or dialog is open
+            if state.profile_switching_in_progress
+                || state.is_dialog_open
+                || state.approval_popup.is_visible()
+                || state.show_profile_switcher
+            {
+                return;
+            }
+
+            state.show_shortcuts_popup = true;
+        }
+
         InputEvent::ProfileSwitcherSelect => {
             // Don't process if switching is already in progress
             if state.profile_switching_in_progress {
@@ -873,6 +890,10 @@ pub fn update(
 
         InputEvent::ProfileSwitcherCancel => {
             state.show_profile_switcher = false;
+        }
+
+        InputEvent::ShortcutsCancel => {
+            state.show_shortcuts_popup = false;
         }
 
         InputEvent::ProfileSwitchRequested(ref profile) => {
@@ -1631,6 +1652,16 @@ fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
+    
+    if state.show_shortcuts_popup {
+        // Handle scrolling up in shortcuts popup (like collapsed messages)
+        if state.shortcuts_scroll >= SCROLL_LINES {
+            state.shortcuts_scroll -= SCROLL_LINES;
+        } else {
+            state.shortcuts_scroll = 0;
+        }
+        return;
+    }
     // Check if approval popup is visible and should consume the event
     if state.approval_popup.is_visible() {
         state.approval_popup.scroll_up();
@@ -1669,6 +1700,21 @@ fn handle_down_navigation(
         } else {
             state.profile_switcher_selected = 0;
         }
+        return;
+    }
+    
+    if state.show_shortcuts_popup {
+        // Handle scrolling down in shortcuts popup (like collapsed messages)
+        let all_lines = crate::services::shortcuts_popup::get_cached_shortcuts_content(None);
+        let total_lines = all_lines.len();
+        let max_scroll = total_lines;
+        
+        if state.shortcuts_scroll + SCROLL_LINES < max_scroll {
+            state.shortcuts_scroll += SCROLL_LINES;
+        } else {
+            state.shortcuts_scroll = max_scroll;
+        }
+        return;
     }
     // Check if approval popup is visible and should consume the event
     if state.approval_popup.is_visible() {

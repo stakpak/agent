@@ -132,6 +132,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
     }
 
+    // Render shortcuts popup
+    if state.show_shortcuts_popup {
+        crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
