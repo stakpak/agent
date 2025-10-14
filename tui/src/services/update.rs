@@ -1454,6 +1454,11 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
+                "/shortcuts" => {
+                    state.show_shortcuts_popup = true;
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
 
                 _ => {}
             }
@@ -1652,7 +1657,7 @@ fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
-    
+
     if state.show_shortcuts_popup {
         // Handle scrolling up in shortcuts popup (like collapsed messages)
         if state.shortcuts_scroll >= SCROLL_LINES {
@@ -1702,13 +1707,13 @@ fn handle_down_navigation(
         }
         return;
     }
-    
+
     if state.show_shortcuts_popup {
         // Handle scrolling down in shortcuts popup (like collapsed messages)
         let all_lines = crate::services::shortcuts_popup::get_cached_shortcuts_content(None);
         let total_lines = all_lines.len();
         let max_scroll = total_lines;
-        
+
         if state.shortcuts_scroll + SCROLL_LINES < max_scroll {
             state.shortcuts_scroll += SCROLL_LINES;
         } else {
