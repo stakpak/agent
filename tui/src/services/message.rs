@@ -52,6 +52,59 @@ fn term_color(color: Color) -> Color {
     }
 }
 
+// Strip markdown code block delimiters from content (for session resume)
+fn strip_markdown_delimiters(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Only process if this looks like a markdown code block (contains ```markdown or ```md)
+    if !result.contains("```markdown") && !result.contains("```md") {
+        return result; // Return unchanged if no markdown delimiters found
+    }
+
+    // Remove opening markdown delimiters from anywhere in the text
+    if let Some(pos) = result.find("```markdown") {
+        // Remove everything from the start up to and including the delimiter
+        let after_delimiter = &result[pos + "```markdown".len()..];
+        // Remove any leading newline after the delimiter
+        result = if let Some(stripped) = after_delimiter.strip_prefix('\n') {
+            stripped
+        } else {
+            after_delimiter
+        }
+        .to_string();
+    } else if let Some(pos) = result.find("```md") {
+        // Remove everything from the start up to and including the delimiter
+        let after_delimiter = &result[pos + "```md".len()..];
+        // Remove any leading newline after the delimiter
+        result = if let Some(stripped) = after_delimiter.strip_prefix('\n') {
+            stripped
+        } else {
+            after_delimiter
+        }
+        .to_string();
+    }
+
+    // Only remove the closing delimiter if we removed an opening markdown delimiter
+    // This prevents removing closing delimiters from other code blocks
+    if result.contains("```") {
+        // Find the last occurrence of ``` that might be our closing delimiter
+        if let Some(pos) = result.rfind("```") {
+            // Check if this looks like a closing delimiter (not followed by a language)
+            let after_delimiter = &result[pos + 3..];
+            if after_delimiter.trim().is_empty() || after_delimiter.starts_with('\n') {
+                // This looks like a closing delimiter, remove it
+                result = result[..pos].to_string();
+                // Also remove any trailing newline
+                if result.ends_with('\n') {
+                    result = result[..result.len() - 1].to_string();
+                }
+            }
+        }
+    }
+
+    result
+}
+
 #[derive(Clone, Debug)]
 pub struct Message {
     pub id: Uuid,
@@ -520,6 +573,9 @@ fn get_wrapped_message_lines_internal(
         match &msg.content {
             MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
+
+                // Strip markdown delimiters first (for session resume)
+                cleaned = strip_markdown_delimiters(&cleaned);
                 if !agent_mode_removed
                     && let Some(start) = cleaned.find("<agent_mode>")
                     && let Some(end) = cleaned.find("</agent_mode>")
