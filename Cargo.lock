@@ -4919,6 +4919,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "stakpak-api",
  "stakpak-shared",
  "syntect",
  "tempfile",

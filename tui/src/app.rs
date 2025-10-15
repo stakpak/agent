@@ -14,6 +14,7 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::text::Line;
+use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -217,6 +218,12 @@ pub struct AppState {
     pub profile_switching_in_progress: bool,
     pub profile_switch_status_message: Option<String>,
     pub rulebook_config: Option<crate::RulebookConfig>,
+
+    // Rulebook switcher state
+    pub show_rulebook_switcher: bool,
+    pub available_rulebooks: Vec<ListRuleBook>,
+    pub selected_rulebooks: std::collections::HashSet<String>, // URIs of selected rulebooks
+    pub rulebook_switcher_selected: usize,
 }
 
 #[derive(Debug)]
@@ -301,6 +308,17 @@ pub enum InputEvent {
     ProfileSwitchFailed(String),
     ProfileSwitcherSelect,
     ProfileSwitcherCancel,
+
+    // Rulebook switcher events
+    ShowRulebookSwitcher,
+    RulebooksLoaded(Vec<ListRuleBook>),
+    CurrentRulebooksLoaded(Vec<String>), // Currently active rulebook URIs
+    RulebookSwitcherSelect,
+    RulebookSwitcherToggle,
+    RulebookSwitcherCancel,
+    RulebookSwitcherConfirm,
+    RulebookSwitcherSelectAll,   // Ctrl+D to select all rulebooks
+    RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
 }
 
 #[derive(Debug)]
@@ -314,6 +332,8 @@ pub enum OutputEvent {
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
     RequestProfileSwitch(String),
+    RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
+    RequestCurrentRulebooks,            // Request currently active rulebooks
 }
 
 impl AppState {
@@ -479,6 +499,12 @@ impl AppState {
             profile_switching_in_progress: false,
             profile_switch_status_message: None,
             rulebook_config: None,
+
+            // Rulebook switcher initialization
+            show_rulebook_switcher: false,
+            available_rulebooks: Vec::new(),
+            selected_rulebooks: std::collections::HashSet::new(),
+            rulebook_switcher_selected: 0,
         }
     }
 

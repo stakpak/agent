@@ -98,6 +98,15 @@ pub fn add_rulebooks(
     user_input: &str,
     rulebooks: &Option<Vec<ListRuleBook>>,
 ) -> (String, Option<String>) {
+    let force = messages.is_empty();
+    add_rulebooks_with_force(user_input, rulebooks, force)
+}
+
+pub fn add_rulebooks_with_force(
+    user_input: &str,
+    rulebooks: &Option<Vec<ListRuleBook>>,
+    force_add: bool,
+) -> (String, Option<String>) {
     if let Some(rulebooks) = rulebooks {
         let rulebooks_text = if !rulebooks.is_empty() {
             format!(
@@ -123,8 +132,8 @@ pub fn add_rulebooks(
             "# No Rule Books Available".to_string()
         };
 
-        // only add local context if this is the first message
-        if messages.is_empty() {
+        // Add rulebooks only if explicitly requested via force_add
+        if force_add {
             let formatted_input = format!(
                 "{}\n\n<rulebooks>\n{}\n</rulebooks>",
                 user_input, rulebooks_text

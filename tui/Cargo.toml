@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 stakpak-shared = { path = "../libs/shared" }
+stakpak-api = { path = "../libs/api" }
 popup-widget = { path = "../libs/popup-widget" }
 regex = { workspace = true }
 serde = { workspace = true }
