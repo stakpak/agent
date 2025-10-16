@@ -222,10 +222,10 @@ fn detect_windows_terminal() -> String {
 
     // Check if we're in a basic Windows console by checking for common indicators
     if env::var("PROMPT").is_ok() || env::var("ComSpec").is_ok() {
-        "Windows Console".to_string()
+        "cmd.exe".to_string()
     } else {
         // Fallback for unknown Windows environment
-        "Windows Console".to_string()
+        "cmd.exe".to_string()
     }
 }
 

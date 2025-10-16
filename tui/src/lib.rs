@@ -94,24 +94,8 @@ fn set_panic_hook() {
 fn init_windows_console(emulator: &str) -> io::Result<()> {
     use crossterm::terminal::{Clear, ClearType};
 
-    // For cmd.exe, use ultra-minimal setup due to limited ANSI support
-    if emulator == "cmd.exe" {
-        log::debug!("Initializing cmd.exe with minimal setup");
-
-        // Only clear the screen - avoid any advanced terminal features
-        execute!(
-            std::io::stdout(),
-            Clear(ClearType::All),
-            crossterm::cursor::MoveTo(0, 0)
-        )?;
-
-        // Don't try any advanced features on cmd.exe
-        log::debug!("cmd.exe initialization complete");
-        return Ok(());
-    }
-
-    // For basic Windows console and PowerShell, use minimal setup
-    if emulator == "Windows Console" || emulator == "PowerShell" {
+    // For basic Windows console, use minimal setup
+    if emulator == "cmd.exe" || emulator == "PowerShell" {
         // Clear the screen and set cursor to top-left
         execute!(
             std::io::stdout(),
@@ -200,15 +184,11 @@ pub async fn run_tui(
 
     // let _guard: TerminalGuard = TerminalGuard;
 
+    enable_raw_mode()?;
+
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
     let enable_mouse_capture = !is_unsupported_terminal(&terminal_info.emulator);
-
-    // For cmd.exe, don't enable raw mode as it can cause issues
-    let is_cmd_exe = cfg!(target_os = "windows") && terminal_info.emulator == "cmd.exe";
-    if !is_cmd_exe {
-        enable_raw_mode()?;
-    }
 
     // Log terminal detection for debugging
     log::debug!(
@@ -447,11 +427,7 @@ pub async fn run_tui(
     }
 
     let _ = shutdown_tx.send(());
-
-    // Only disable raw mode if it was enabled
-    if !is_cmd_exe {
-        disable_raw_mode()?;
-    }
+    disable_raw_mode()?;
 
     // Windows-specific cleanup
     if cfg!(target_os = "windows") {
