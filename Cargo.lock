@@ -3474,7 +3474,7 @@ dependencies = [
 name = "popup-widget"
 version = "0.1.0"
 dependencies = [
- "crossterm 0.29.0",
+ "crossterm 0.28.1",
  "ratatui",
 ]
 
@@ -4822,7 +4822,7 @@ dependencies = [
  "chrono",
  "clap 4.5.41",
  "config",
- "crossterm 0.29.0",
+ "crossterm 0.28.1",
  "flate2",
  "futures-util",
  "glob",
@@ -4958,7 +4958,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "console",
- "crossterm 0.29.0",
+ "crossterm 0.28.1",
  "ignore",
  "log",
  "nucleo-matcher",

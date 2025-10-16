@@ -8,15 +8,18 @@ pub use ratatui::style::Color;
 
 mod services;
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, KeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use std::io::stdout;
 
-use crossterm::{
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode},
-};
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+
+use ratatui::crossterm::event::EnableMouseCapture;
+use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::disable_raw_mode;
+use ratatui::crossterm::terminal::enable_raw_mode;
+
 pub use event::map_crossterm_event_to_input_event;
 use ratatui::style::Style;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -45,9 +48,9 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     state.mouse_capture_enabled = !state.mouse_capture_enabled;
 
     if state.mouse_capture_enabled {
-        execute!(std::io::stdout(), EnableMouseCapture)?;
+        execute!(stdout(), EnableMouseCapture)?;
     } else {
-        execute!(std::io::stdout(), DisableMouseCapture)?;
+        execute!(stdout(), DisableMouseCapture)?;
     }
 
     let status = if state.mouse_capture_enabled {
@@ -129,12 +132,13 @@ pub async fn run_tui(
 
     let _guard = TerminalGuard;
 
-    crossterm::terminal::enable_raw_mode()?;
+    enable_raw_mode()?;
 
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
     let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
-
+    execute!(stdout(), EnableBracketedPaste)?;
+    execute!(stdout(), EnableBracketedPaste)?;
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
@@ -360,7 +364,7 @@ pub async fn run_tui(
     }
 
     let _ = shutdown_tx.send(());
-    crossterm::terminal::disable_raw_mode()?;
+    disable_raw_mode()?;
     execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,

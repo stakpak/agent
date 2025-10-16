@@ -64,7 +64,7 @@ tokio-rustls = "0.26.0"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
-crossterm = "0.29"
+crossterm = "0.28.1"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
 log = "0.4"
