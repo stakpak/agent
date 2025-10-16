@@ -89,6 +89,63 @@ fn set_panic_hook() {
     }));
 }
 
+/// Initialize Windows console with appropriate settings
+#[cfg(target_os = "windows")]
+fn init_windows_console(emulator: &str) -> io::Result<()> {
+    use crossterm::terminal::{Clear, ClearType};
+    
+    // For basic Windows console, use minimal setup
+    if emulator == "Windows Console" || emulator == "PowerShell" {
+        // Clear the screen and set cursor to top-left
+        execute!(
+            std::io::stdout(),
+            Clear(ClearType::All),
+            crossterm::cursor::MoveTo(0, 0)
+        )?;
+        
+        // Try to enable bracketed paste, but don't fail if it's not supported
+        let _ = execute!(stdout(), EnableBracketedPaste);
+        
+        // Don't use alternate screen on basic Windows console
+        return Ok(());
+    }
+    
+    // For modern Windows terminals (Windows Terminal, WSL, etc.), use full setup
+    // Try bracketed paste first, but don't fail if not supported
+    let _ = execute!(stdout(), EnableBracketedPaste);
+    
+    // Try alternate screen, but don't fail if not supported
+    let _ = execute!(
+        std::io::stdout(),
+        EnterAlternateScreen
+    );
+    
+    Ok(())
+}
+
+/// Initialize Windows console with appropriate settings (no-op on non-Windows)
+#[cfg(not(target_os = "windows"))]
+fn init_windows_console(_emulator: &str) -> io::Result<()> {
+    Ok(())
+}
+
+/// Cleanup Windows console on exit
+#[cfg(target_os = "windows")]
+fn cleanup_windows_console() -> io::Result<()> {
+    // For Windows console, just disable mouse capture and bracketed paste
+    // Don't try to leave alternate screen as it may not have been entered
+    let _ = execute!(stdout(), DisableMouseCapture);
+    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), crossterm::cursor::Show);
+    Ok(())
+}
+
+/// Cleanup Windows console on exit (no-op on non-Windows)
+#[cfg(not(target_os = "windows"))]
+fn cleanup_windows_console() -> io::Result<()> {
+    Ok(())
+}
+
 /// Restore the terminal to its original state.
 /// Inverse of `set_modes`.
 pub fn restore() -> io::Result<()> {
@@ -134,14 +191,23 @@ pub async fn run_tui(
 
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
-    let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
-    execute!(stdout(), EnableBracketedPaste)?;
-    execute!(stdout(), EnableBracketedPaste)?;
-    execute!(
-        std::io::stdout(),
-        EnterAlternateScreen,
-        EnableBracketedPaste
-    )?;
+    let enable_mouse_capture = !is_unsupported_terminal(&terminal_info.emulator);
+    
+    // Log terminal detection for debugging
+    log::debug!("Detected terminal: {}, mouse capture: {}", terminal_info.emulator, enable_mouse_capture);
+    
+    // Windows-specific console initialization
+    if cfg!(target_os = "windows") {
+        init_windows_console(&terminal_info.emulator)?;
+    } else {
+        execute!(stdout(), EnableBracketedPaste)?;
+        execute!(stdout(), EnableBracketedPaste)?;
+        execute!(
+            std::io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste
+        )?;
+    }
 
     if enable_mouse_capture {
         execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -363,12 +429,18 @@ pub async fn run_tui(
 
     let _ = shutdown_tx.send(());
     disable_raw_mode()?;
-    execute!(
-        std::io::stdout(),
-        crossterm::terminal::LeaveAlternateScreen,
-        DisableBracketedPaste,
-        DisableMouseCapture
-    )?;
+
+    // Windows-specific cleanup
+    if cfg!(target_os = "windows") {
+        cleanup_windows_console()?;
+    } else {
+        execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            DisableBracketedPaste,
+            DisableMouseCapture
+        )?;
+    }
     Ok(())
 }
 

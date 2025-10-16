@@ -160,6 +160,9 @@ fn detect_terminal_emulator() -> String {
                 }
             }
         }
+    } else {
+        // Windows-specific terminal detection
+        return detect_windows_terminal();
     }
 
     // Fallback: try to detect based on environment
@@ -172,6 +175,59 @@ fn detect_terminal_emulator() -> String {
     }
 }
 
+/// Detect Windows-specific terminal emulators
+#[cfg(target_os = "windows")]
+fn detect_windows_terminal() -> String {
+    // Check for Windows Terminal
+    if env::var("WT_SESSION").is_ok() {
+        return "Windows Terminal".to_string();
+    }
+
+    // Check for PowerShell
+    if env::var("PSModulePath").is_ok() {
+        return "PowerShell".to_string();
+    }
+
+    // Check for WSL
+    if env::var("WSL_DISTRO_NAME").is_ok() {
+        return "WSL".to_string();
+    }
+
+    // Check for ConEmu
+    if env::var("ConEmuPID").is_ok() {
+        return "ConEmu".to_string();
+    }
+
+    // Check for Cmder
+    if env::var("CMDER_ROOT").is_ok() {
+        return "Cmder".to_string();
+    }
+
+    // Check for Git Bash
+    if env::var("MSYSTEM").is_ok() {
+        return "Git Bash".to_string();
+    }
+
+    // Check for VS Code integrated terminal
+    if env::var("VSCODE_INJECTION").is_ok() {
+        return "VS Code Terminal".to_string();
+    }
+
+    // Check if we're in a basic Windows console by checking for common indicators
+    if env::var("PROMPT").is_ok() || env::var("ComSpec").is_ok() {
+        "Windows Console".to_string()
+    } else {
+        // Fallback for unknown Windows environment
+        "Windows Console".to_string()
+    }
+}
+
+/// Detect Windows-specific terminal emulators (no-op on non-Windows)
+#[cfg(not(target_os = "windows"))]
+fn detect_windows_terminal() -> String {
+    "Unknown Terminal".to_string()
+}
+
 /// Check if the terminal is one of the known unsupported terminals
 #[allow(dead_code)]
 pub fn is_unsupported_terminal(emulator: &str) -> bool {
@@ -182,12 +238,14 @@ pub fn is_unsupported_terminal(emulator: &str) -> bool {
         "Terminology" => true,  // Enlightenment terminal
         "Hyper" => true,        // cross-platform, HTML/CSS/JS-based (Electron)
 
-        // Windows terminals that may not support RGB
-        "Cmder" => true,     // Portable console emulator for Windows
-        "KiTTY" => true,     // Windows platform
-        "mRemoteNG" => true, // Windows platform
-        "MTPuTTY" => true,   // Windows platform
-        "SmarTTY" => true,   // Windows platform
+        // Windows terminals that may not support RGB or have TUI issues
+        "Cmder" => true,           // Portable console emulator for Windows
+        "KiTTY" => true,           // Windows platform
+        "mRemoteNG" => true,       // Windows platform
+        "MTPuTTY" => true,         // Windows platform
+        "SmarTTY" => true,         // Windows platform
+        "Windows Console" => true, // Basic Windows console (cmd.exe)
+        "PowerShell" => true,      // PowerShell console
 
         // Linux/Unix terminals that may not support RGB
         "aterm" => true,  // looks abandoned
