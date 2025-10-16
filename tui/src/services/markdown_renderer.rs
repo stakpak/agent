@@ -878,7 +878,7 @@ impl MarkdownRenderer {
         }
 
         // Add ellipsis if we truncated
-        if result.len() < text.len() && current_width + 1 <= max_width {
+        if result.len() < text.len() && current_width < max_width {
             result.push('…');
         }
 
