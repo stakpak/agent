@@ -188,6 +188,13 @@ fn detect_windows_terminal() -> String {
         return "PowerShell".to_string();
     }
 
+    // Check for cmd.exe specifically
+    if let Ok(comspec) = env::var("ComSpec") {
+        if comspec.to_lowercase().contains("cmd.exe") {
+            return "cmd.exe".to_string();
+        }
+    }
+
     // Check for WSL
     if env::var("WSL_DISTRO_NAME").is_ok() {
         return "WSL".to_string();
@@ -246,6 +253,7 @@ pub fn is_unsupported_terminal(emulator: &str) -> bool {
         "SmarTTY" => true,         // Windows platform
         "Windows Console" => true, // Basic Windows console (cmd.exe)
         "PowerShell" => true,      // PowerShell console
+        "cmd.exe" => true,         // Command Prompt - limited ANSI support
 
         // Linux/Unix terminals that may not support RGB
         "aterm" => true,  // looks abandoned

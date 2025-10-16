@@ -93,8 +93,24 @@ fn set_panic_hook() {
 #[cfg(target_os = "windows")]
 fn init_windows_console(emulator: &str) -> io::Result<()> {
     use crossterm::terminal::{Clear, ClearType};
-    
-    // For basic Windows console, use minimal setup
+
+    // For cmd.exe, use ultra-minimal setup due to limited ANSI support
+    if emulator == "cmd.exe" {
+        log::debug!("Initializing cmd.exe with minimal setup");
+
+        // Only clear the screen - avoid any advanced terminal features
+        execute!(
+            std::io::stdout(),
+            Clear(ClearType::All),
+            crossterm::cursor::MoveTo(0, 0)
+        )?;
+
+        // Don't try any advanced features on cmd.exe
+        log::debug!("cmd.exe initialization complete");
+        return Ok(());
+    }
+
+    // For basic Windows console and PowerShell, use minimal setup
     if emulator == "Windows Console" || emulator == "PowerShell" {
         // Clear the screen and set cursor to top-left
         execute!(
@@ -102,24 +118,21 @@ fn init_windows_console(emulator: &str) -> io::Result<()> {
             Clear(ClearType::All),
             crossterm::cursor::MoveTo(0, 0)
         )?;
-        
+
         // Try to enable bracketed paste, but don't fail if it's not supported
         let _ = execute!(stdout(), EnableBracketedPaste);
-        
+
         // Don't use alternate screen on basic Windows console
         return Ok(());
     }
-    
+
     // For modern Windows terminals (Windows Terminal, WSL, etc.), use full setup
     // Try bracketed paste first, but don't fail if not supported
     let _ = execute!(stdout(), EnableBracketedPaste);
-    
+
     // Try alternate screen, but don't fail if not supported
-    let _ = execute!(
-        std::io::stdout(),
-        EnterAlternateScreen
-    );
-    
+    let _ = execute!(std::io::stdout(), EnterAlternateScreen);
+
     Ok(())
 }
 
@@ -187,21 +200,27 @@ pub async fn run_tui(
 
     // let _guard: TerminalGuard = TerminalGuard;
 
-    enable_raw_mode()?;
-
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
     let enable_mouse_capture = !is_unsupported_terminal(&terminal_info.emulator);
-    
+
+    // For cmd.exe, don't enable raw mode as it can cause issues
+    let is_cmd_exe = cfg!(target_os = "windows") && terminal_info.emulator == "cmd.exe";
+    if !is_cmd_exe {
+        enable_raw_mode()?;
+    }
+
     // Log terminal detection for debugging
-    log::debug!("Detected terminal: {}, mouse capture: {}", terminal_info.emulator, enable_mouse_capture);
-    
+    log::debug!(
+        "Detected terminal: {}, mouse capture: {}",
+        terminal_info.emulator,
+        enable_mouse_capture
+    );
+
     // Windows-specific console initialization
     if cfg!(target_os = "windows") {
         init_windows_console(&terminal_info.emulator)?;
     } else {
-        execute!(stdout(), EnableBracketedPaste)?;
-        execute!(stdout(), EnableBracketedPaste)?;
         execute!(
             std::io::stdout(),
             EnterAlternateScreen,
@@ -428,7 +447,11 @@ pub async fn run_tui(
     }
 
     let _ = shutdown_tx.send(());
-    disable_raw_mode()?;
+
+    // Only disable raw mode if it was enabled
+    if !is_cmd_exe {
+        disable_raw_mode()?;
+    }
 
     // Windows-specific cleanup
     if cfg!(target_os = "windows") {
