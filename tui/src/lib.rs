@@ -1,6 +1,5 @@
 mod app;
 mod event;
-mod terminal;
 mod view;
 
 pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
@@ -25,7 +24,6 @@ use ratatui::style::Style;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
 use std::io;
-pub use terminal::TerminalGuard;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
 pub use view::view;
@@ -130,7 +128,7 @@ pub async fn run_tui(
         prev_hook(info);
     }));
 
-    let _guard = TerminalGuard;
+    // let _guard: TerminalGuard = TerminalGuard;
 
     enable_raw_mode()?;
 
