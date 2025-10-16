@@ -25,7 +25,8 @@ similar = { workspace = true }
 syntect = "5.2.0"
 nucleo-matcher = "0.3.1"
 ignore = "0.4.23"
-
+color-eyre = "0.6.3"
+log = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "deny"
