@@ -220,13 +220,7 @@ fn detect_windows_terminal() -> String {
         return "VS Code Terminal".to_string();
     }
 
-    // Check if we're in a basic Windows console by checking for common indicators
-    if env::var("PROMPT").is_ok() || env::var("ComSpec").is_ok() {
-        "cmd.exe".to_string()
-    } else {
-        // Fallback for unknown Windows environment
-        "cmd.exe".to_string()
-    }
+    "cmd.exe".to_string()
 }
 
 /// Detect Windows-specific terminal emulators (no-op on non-Windows)

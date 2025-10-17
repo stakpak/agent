@@ -93,23 +93,6 @@ fn set_panic_hook() {
 #[cfg(target_os = "windows")]
 fn init_windows_console(emulator: &str) -> io::Result<()> {
     use crossterm::terminal::{Clear, ClearType};
-
-    // For basic Windows console, use minimal setup
-    if emulator == "cmd.exe" || emulator == "PowerShell" {
-        // Clear the screen and set cursor to top-left
-        execute!(
-            std::io::stdout(),
-            Clear(ClearType::All),
-            crossterm::cursor::MoveTo(0, 0)
-        )?;
-
-        // Try to enable bracketed paste, but don't fail if it's not supported
-        let _ = execute!(stdout(), EnableBracketedPaste);
-
-        // Don't use alternate screen on basic Windows console
-        return Ok(());
-    }
-
     // For modern Windows terminals (Windows Terminal, WSL, etc.), use full setup
     // Try bracketed paste first, but don't fail if not supported
     let _ = execute!(stdout(), EnableBracketedPaste);
