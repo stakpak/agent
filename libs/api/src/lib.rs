@@ -198,13 +198,16 @@ impl Client {
         // Check status before consuming body
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(format!("API error ({}): {}", status, error_text));
         }
 
         // Get response as text first to handle non-JSON responses
         let response_text = response.text().await.map_err(|e| e.to_string())?;
-        
+
         // Try to parse as JSON first
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&response_text) {
             match serde_json::from_value::<CreateRuleBookResponse>(value.clone()) {
@@ -215,13 +218,13 @@ impl Client {
                 }
             }
         }
-        
+
         // If JSON parsing failed, try to parse as plain text "id: <uuid>"
         if response_text.starts_with("id: ") {
             let id = response_text.trim_start_matches("id: ").trim().to_string();
             return Ok(CreateRuleBookResponse { id });
         }
-        
+
         Err(format!("Unexpected response format: {}", response_text))
     }
 
