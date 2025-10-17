@@ -8,6 +8,7 @@ use crate::{
 use agent::AgentCommands;
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push};
+use serde::Deserialize;
 use stakpak_api::{
     Client, ClientConfig,
     models::{Document, ProvisionerType, TranspileTargetProvisionerType},
@@ -22,12 +23,64 @@ pub mod auto_update;
 pub mod flow;
 pub mod warden;
 
+/// Frontmatter structure for rulebook metadata
+#[derive(Deserialize)]
+struct RulebookFrontmatter {
+    uri: String,
+    description: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Parse rulebook metadata from markdown content with YAML frontmatter
+/// Expects frontmatter with uri, description, and tags
+fn parse_rulebook_metadata(content: &str) -> Result<(String, String, Vec<String>), String> {
+    // Check if content starts with frontmatter (---)
+    let content = content.trim_start();
+    if !content.starts_with("---") {
+        return Err("Rulebook file must start with YAML frontmatter (---) containing uri, description, and tags".into());
+    }
+
+    // Find the end of frontmatter
+    let rest = &content[3..]; // Skip first "---"
+    let end_pos = rest
+        .find("\n---")
+        .ok_or("Frontmatter must end with '---'")?;
+
+    let frontmatter_yaml = &rest[..end_pos];
+
+    // Parse YAML frontmatter
+    let frontmatter: RulebookFrontmatter = serde_yaml::from_str(frontmatter_yaml)
+        .map_err(|e| format!("Failed to parse YAML frontmatter: {}", e))?;
+
+    Ok((frontmatter.uri, frontmatter.description, frontmatter.tags))
+}
+
 #[derive(Subcommand, PartialEq)]
 pub enum ConfigCommands {
     /// Show current configuration
     Show,
     /// Print a complete sample configuration file
     Sample,
+}
+
+#[derive(Subcommand, PartialEq)]
+pub enum RulebookCommands {
+    /// Get a specific rulebook or list all rulebooks
+    Get {
+        /// Rulebook URI (optional - if not provided, lists all rulebooks)
+        uri: Option<String>,
+    },
+    /// Apply/create a rulebook from a markdown file
+    Apply {
+        /// Path to the markdown file containing the rulebook
+        file_path: String,
+    },
+    /// Delete a rulebook
+    Delete {
+        /// Rulebook URI to delete
+        uri: String,
+    },
 }
 
 #[derive(Subcommand, PartialEq)]
@@ -65,6 +118,10 @@ pub enum Commands {
     /// Configuration management commands
     #[command(subcommand)]
     Config(ConfigCommands),
+
+    /// Rulebook management commands
+    #[command(subcommand, alias = "rb")]
+    Rulebooks(RulebookCommands),
 
     /// Get current account
     Account,
@@ -355,6 +412,56 @@ impl Commands {
                     print_sample_config();
                 }
             },
+            Commands::Rulebooks(rulebook_command) => {
+                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
+                match rulebook_command {
+                    RulebookCommands::Get { uri } => {
+                        if let Some(uri) = uri {
+                            // Get specific rulebook
+                            let rulebook = client.get_rulebook_by_uri(&uri).await?;
+                            println!("URI: {}", rulebook.uri);
+                            println!("Description: {}", rulebook.description);
+                            println!("Tags: {}", rulebook.tags.join(", "));
+                            println!("Visibility: {:?}", rulebook.visibility);
+                            println!("\nContent:\n{}", rulebook.content);
+                        } else {
+                            // List all rulebooks
+                            let rulebooks = client.list_rulebooks().await?;
+                            if rulebooks.is_empty() {
+                                println!("No rulebooks found.");
+                            } else {
+                                println!("Rulebooks:\n");
+                                for rb in rulebooks {
+                                    println!("  - URI: {}", rb.uri);
+                                    println!("    Description: {}", rb.description);
+                                    println!("    Tags: {}", rb.tags.join(", "));
+                                    println!("    Visibility: {:?}", rb.visibility);
+                                }
+                            }
+                        }
+                    }
+                    RulebookCommands::Apply { file_path } => {
+                        // Read the markdown file
+                        let content = std::fs::read_to_string(file_path)
+                            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+                        // Parse frontmatter to extract metadata
+                        let (uri, description, tags) = parse_rulebook_metadata(&content)?;
+
+                        // Create the rulebook
+                        client
+                            .create_rulebook(&uri, &description, &content, tags, None)
+                            .await?;
+
+                        println!("✓ Rulebook created/updated successfully");
+                        println!("  URI: {}", uri);
+                    }
+                    RulebookCommands::Delete { uri } => {
+                        client.delete_rulebook(&uri).await?;
+                        println!("✓ Rulebook deleted: {}", uri);
+                    }
+                }
+            }
             Commands::Account => {
                 let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
                 let data = client.get_my_account().await?;
