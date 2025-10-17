@@ -16,6 +16,7 @@ clap = { version = "4.5.23", features = ["derive", "env"] }
 config = "0.14.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 toml = "0.8.19"
 tokio = { workspace = true }
 uuid = { workspace = true }

@@ -7,7 +7,6 @@ use rmcp::model::JsonRpcResponse;
 use serde::{Deserialize, Serialize};
 use stakpak_shared::tls_client::TlsClientConfig;
 use stakpak_shared::tls_client::create_tls_client;
-use url::Url;
 pub mod models;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -147,15 +146,12 @@ impl Client {
 
     pub async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
         // URL encode the URI to handle special characters
-        let base_url = Url::parse(&format!("{}/rules/", self.base_url))
-            .map_err(|e| format!("Invalid base URL: {}", e))?;
-        let url = base_url
-            .join(uri)
-            .map_err(|e| format!("Failed to construct URL: {}", e))?;
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/rules/{}", self.base_url, encoded_uri);
 
         let response = self
             .client
-            .get(url)
+            .get(&url)
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
@@ -171,6 +167,78 @@ impl Client {
                 Err("Failed to deserialize response:".into())
             }
         }
+    }
+
+    pub async fn create_rulebook(
+        &self,
+        uri: &str,
+        description: &str,
+        content: &str,
+        tags: Vec<String>,
+        visibility: Option<RuleBookVisibility>,
+    ) -> Result<CreateRuleBookResponse, String> {
+        let url = format!("{}/rules", self.base_url);
+
+        let input = CreateRuleBookInput {
+            uri: uri.to_string(),
+            description: description.to_string(),
+            content: content.to_string(),
+            tags,
+            visibility,
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        // Check status before consuming body
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(format!("API error ({}): {}", status, error_text));
+        }
+
+        // Get response as text first to handle non-JSON responses
+        let response_text = response.text().await.map_err(|e| e.to_string())?;
+        
+        // Try to parse as JSON first
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&response_text) {
+            match serde_json::from_value::<CreateRuleBookResponse>(value.clone()) {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    eprintln!("Failed to deserialize JSON response: {}", e);
+                    eprintln!("Raw response: {}", value);
+                }
+            }
+        }
+        
+        // If JSON parsing failed, try to parse as plain text "id: <uuid>"
+        if response_text.starts_with("id: ") {
+            let id = response_text.trim_start_matches("id: ").trim().to_string();
+            return Ok(CreateRuleBookResponse { id });
+        }
+        
+        Err(format!("Unexpected response format: {}", response_text))
+    }
+
+    pub async fn delete_rulebook(&self, uri: &str) -> Result<(), String> {
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/rules/{}", self.base_url, encoded_uri);
+
+        let response = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let _response = self.handle_response_error(response).await?;
+
+        Ok(())
     }
 
     pub async fn list_flows(&self, owner_name: &str) -> Result<GetFlowsResponse, String> {
@@ -867,6 +935,21 @@ pub struct RuleBook {
     pub tags: Vec<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateRuleBookInput {
+    pub uri: String,
+    pub description: String,
+    pub content: String,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<RuleBookVisibility>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateRuleBookResponse {
+    pub id: String,
 }
 
 impl ListRuleBook {
