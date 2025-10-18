@@ -96,8 +96,9 @@ pub async fn run_tui(
 
     // Detect terminal support for mouse capture
     let terminal_info = crate::services::detect_term::detect_terminal();
-    let enable_mouse_capture =
-        is_unsupported_terminal(&terminal_info.emulator) && !cfg!(target_os = "windows");
+    let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
+    eprintln!("terminal_info: {:?}", terminal_info);
+    eprintln!("enable_mouse_capture: {}", enable_mouse_capture);
 
     execute!(
         std::io::stdout(),
