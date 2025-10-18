@@ -246,6 +246,7 @@ pub async fn run_tui(
                 };
 
                 if let InputEvent::ToggleMouseCapture = event {
+                    #[cfg(unix)]
                     toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                     continue;
                 }
