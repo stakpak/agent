@@ -35,6 +35,7 @@ pub fn detect_terminal() -> TerminalInfo {
 fn detect_terminal_emulator() -> String {
     // Check TERM_PROGRAM environment variable first (most reliable)
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        eprintln!("term_program: {}", term_program);
         match term_program.as_str() {
             "Apple_Terminal" => return "Terminal.app".to_string(),
             "iTerm.app" => return "iTerm2".to_string(),
@@ -44,13 +45,13 @@ fn detect_terminal_emulator() -> String {
             "kitty" => return "Kitty".to_string(),
             "WezTerm" => return "WezTerm".to_string(),
             "Terminus" => return "Terminus".to_string(),
-            "Terminal" => return "Terminal.app".to_string(),
             _ => return term_program,
         }
     }
 
     // Check COLORTERM environment variable
     if let Ok(colorterm) = env::var("COLORTERM") {
+        eprintln!("colorterm: {}", colorterm);
         match colorterm.as_str() {
             "gnome-terminal" => return "GNOME Terminal".to_string(),
             "xfce4-terminal" => return "XFCE Terminal".to_string(),
@@ -63,11 +64,13 @@ fn detect_terminal_emulator() -> String {
 
     // Check TERMINAL_EMULATOR environment variable
     if let Ok(terminal_emulator) = env::var("TERMINAL_EMULATOR") {
+        eprintln!("terminal_emulator: {}", terminal_emulator);
         return terminal_emulator;
     }
 
     // Check TERM environment variable for clues
     if let Ok(term) = env::var("TERM") {
+        eprintln!("term: {}", term);
         match term.as_str() {
             "xterm-256color" | "xterm-color" | "xterm" => {
                 // Check for specific indicators
@@ -95,18 +98,23 @@ fn detect_terminal_emulator() -> String {
 
     // Check for specific terminal indicators
     if env::var("ITERM_PROFILE").is_ok() {
+        eprintln!("ITERM_PROFILE is ok");
         return "iTerm2".to_string();
     }
     if env::var("KITTY_WINDOW_ID").is_ok() {
+        eprintln!("KITTY_WINDOW_ID is ok");
         return "Kitty".to_string();
     }
     if env::var("ALACRITTY_LOG").is_ok() {
+        eprintln!("ALACRITTY_LOG is ok");
         return "Alacritty".to_string();
     }
     if env::var("WEZTERM_EXECUTABLE").is_ok() {
+        eprintln!("WEZTERM_EXECUTABLE is ok");
         return "WezTerm".to_string();
     }
     if env::var("HYPER_TERM").is_ok() {
+        eprintln!("HYPER_TERM is ok");
         return "Hyper".to_string();
     }
 
@@ -164,10 +172,13 @@ fn detect_terminal_emulator() -> String {
 
     // Fallback: try to detect based on environment
     if env::var("DISPLAY").is_ok() {
+        eprintln!("DISPLAY is ok");
         "X11 Terminal".to_string()
     } else if env::var("WAYLAND_DISPLAY").is_ok() {
+        eprintln!("WAYLAND_DISPLAY is ok");
         "Wayland Terminal".to_string()
     } else {
+        eprintln!("Unknown Terminal");
         "Unknown Terminal".to_string()
     }
 }
@@ -183,11 +194,11 @@ pub fn is_unsupported_terminal(emulator: &str) -> bool {
         "Hyper" => true,        // cross-platform, HTML/CSS/JS-based (Electron)
 
         // Windows terminals that may not support RGB
-        "Cmder" => true,     // Portable console emulator for Windows
-        "KiTTY" => true,     // Windows platform
-        "mRemoteNG" => true, // Windows platform
-        "MTPuTTY" => true,   // Windows platform
-        "SmarTTY" => true,   // Windows platform
+        // "Cmder" => true,     // Portable console emulator for Windows
+        // "KiTTY" => true,     // Windows platform
+        // "mRemoteNG" => true, // Windows platform
+        // "MTPuTTY" => true,   // Windows platform
+        // "SmarTTY" => true,   // Windows platform
 
         // Linux/Unix terminals that may not support RGB
         "aterm" => true,  // looks abandoned
