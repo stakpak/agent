@@ -33,7 +33,6 @@ pub struct RulebookConfig {
 
 use crate::app::ToolCallStatus;
 use crate::services::bash_block::render_collapsed_result_block;
-use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::message::Message;
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
