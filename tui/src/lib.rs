@@ -106,6 +106,7 @@ pub async fn run_tui(
         EnableBracketedPaste
     )?;
 
+    #[cfg(unix)]
     if enable_mouse_capture {
         execute!(std::io::stdout(), EnableMouseCapture)?;
     } else {
