@@ -95,7 +95,9 @@ pub async fn run_tui(
     crossterm::terminal::enable_raw_mode()?;
 
     // Detect terminal support for mouse capture
+    #[cfg(unix)]
     let terminal_info = crate::services::detect_term::detect_terminal();
+    #[cfg(unix)]
     let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
 
     execute!(
