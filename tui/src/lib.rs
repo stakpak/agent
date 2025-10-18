@@ -33,6 +33,7 @@ pub struct RulebookConfig {
 
 use crate::app::ToolCallStatus;
 use crate::services::bash_block::render_collapsed_result_block;
+use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::message::Message;
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
@@ -93,11 +94,22 @@ pub async fn run_tui(
 
     crossterm::terminal::enable_raw_mode()?;
 
+    // Detect terminal support for mouse capture
+    let terminal_info = crate::services::detect_term::detect_terminal();
+    let enable_mouse_capture =
+        is_unsupported_terminal(&terminal_info.emulator) && !cfg!(target_os = "windows");
+
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste
     )?;
+
+    if enable_mouse_capture {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
