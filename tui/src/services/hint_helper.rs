@@ -83,10 +83,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             };
 
             // Create spans for left and right alignment
+            #[cfg(unix)]
             let left_text = format!(
                 "? for shortcuts . @ for files . / for commands{}",
                 select_hint
             );
+            #[cfg(not(unix))]
+            let left_text = format!("? for shortcuts . @ for files . / for commands");
+
             let right_text = format!("profile {}", state.current_profile_name);
 
             // Calculate spacing to align profile info to the right
