@@ -657,6 +657,23 @@ include_tags = ["terraform", "kubernetes", "security"]
 # Tags to exclude - rulebooks with these tags will be filtered out
 exclude_tags = ["deprecated", "experimental"]
 
+# Warden (runtime security) configuration
+# When enabled, the main 'stakpak' command will automatically run with Warden security enforcer
+# This provides isolation and security policies for the agent execution
+[profiles.default.warden]
+enabled = true
+volumes = [
+    # working directory
+    "./:/agent:ro",
+    
+    # cloud credentials (read-only)
+    "~/.aws:/home/agent/.aws:ro",
+    "~/.config/gcloud:/home/agent/.config/gcloud:ro",
+    "~/.digitalocean:/home/agent/.digitalocean:ro",
+    "~/.azure:/home/agent/.azure:ro",
+    "~/.kube:/home/agent/.kube:ro",
+]
+
 # Production profile - stricter settings for production environments
 # Inherits from 'all' profile but restricts tools for safety
 [profiles.production]

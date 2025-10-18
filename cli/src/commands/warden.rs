@@ -139,6 +139,56 @@ async fn get_warden_plugin_path() -> String {
     get_plugin_path(warden_config).await
 }
 
+/// Helper function to prepare volumes for warden container
+/// Collects volumes from config and always appends stakpak config if it exists and isn't already mounted
+/// If check_enabled is true, only adds volumes when warden is enabled in config
+fn prepare_volumes(config: &AppConfig, check_enabled: bool) -> Vec<String> {
+    let mut volumes_to_mount = Vec::new();
+
+    // Add volumes from profile config
+    if let Some(warden_config) = config.warden.as_ref()
+        && (!check_enabled || warden_config.enabled)
+    {
+        volumes_to_mount.extend(warden_config.volumes.clone());
+    }
+
+    // Always append stakpak config if it exists and not already in the list
+    if let Ok(home_dir) = std::env::var("HOME") {
+        let config_path = Path::new(&home_dir).join(".stakpak").join("config.toml");
+        if config_path.exists() {
+            let config_path_str = config_path.to_string_lossy();
+            let stakpak_config_mount =
+                format!("{}:/home/agent/.stakpak/config.toml:ro", config_path_str);
+
+            // Check if stakpak config is already in the volume list
+            let config_already_mounted = volumes_to_mount.iter().any(|v| {
+                v.contains("/.stakpak/config.toml")
+                    || v.ends_with(":/home/agent/.stakpak/config.toml:ro")
+                    || v.ends_with(":/home/agent/.stakpak/config.toml")
+            });
+
+            if !config_already_mounted {
+                volumes_to_mount.push(stakpak_config_mount);
+            }
+        }
+    }
+
+    volumes_to_mount
+}
+
+/// Helper function to expand tilde (~) in volume paths to home directory
+fn expand_volume_path(volume: String) -> String {
+    if volume.starts_with("~/") || volume.starts_with("~:") {
+        if let Ok(home_dir) = std::env::var("HOME") {
+            volume.replacen("~", &home_dir, 1)
+        } else {
+            volume
+        }
+    } else {
+        volume
+    }
+}
+
 /// Execute warden command with proper TTY handling and streaming
 fn execute_warden_command(mut cmd: Command, needs_tty: bool) -> Result<(), String> {
     if needs_tty {
@@ -227,7 +277,7 @@ fn execute_warden_command(mut cmd: Command, needs_tty: bool) -> Result<(), Strin
 
 /// Run warden with preconfigured setup (convenience command)
 pub async fn run_default_warden(
-    _config: AppConfig,
+    config: AppConfig,
     extra_volumes: Vec<String>,
     extra_env: Vec<String>,
 ) -> Result<(), String> {
@@ -248,14 +298,10 @@ pub async fn run_default_warden(
     // Enable TTY by default for convenience command
     cmd.arg("--tty");
 
-    // Mount ~/.stakpak/config.toml if it exists as read-only volume
-    if let Ok(home_dir) = std::env::var("HOME") {
-        let config_path = Path::new(&home_dir).join(".stakpak").join("config.toml");
-        if config_path.exists() {
-            let config_path_str = config_path.to_string_lossy();
-            let volume_mount = format!("{}:/home/agent/.stakpak/config.toml:ro", config_path_str);
-            cmd.args(["--volume", &volume_mount]);
-        }
+    // Prepare and mount volumes
+    for volume in prepare_volumes(&config, true) {
+        let expanded_volume = expand_volume_path(volume);
+        cmd.args(["--volume", &expanded_volume]);
     }
 
     // Add extra environment variables
@@ -263,10 +309,70 @@ pub async fn run_default_warden(
         cmd.args(["--env", &env_var]);
     }
 
-    // Add extra volume mounts
+    // Add extra volume mounts (these override/extend profile volumes)
     for volume in extra_volumes {
         cmd.args(["--volume", &volume]);
     }
+
+    // Execute the warden command with TTY support
+    execute_warden_command(cmd, true)
+}
+
+/// Re-execute the stakpak command inside warden container
+pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result<(), String> {
+    // Get warden path (will download if not available)
+    let warden_path = get_warden_plugin_path().await;
+
+    // Build warden command
+    let mut cmd = Command::new(warden_path);
+    cmd.arg("run");
+
+    // Use stakpak image with current CLI version
+    let stakpak_image = format!(
+        "ghcr.io/stakpak/agent-warden:v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    cmd.args(["--image", &stakpak_image]);
+
+    // Enable TTY for interactive mode
+    cmd.arg("--tty");
+
+    // Prepare and mount volumes (don't check enabled flag for this function)
+    for volume in prepare_volumes(&config, false) {
+        let expanded_volume = expand_volume_path(volume);
+        cmd.args(["--volume", &expanded_volume]);
+    }
+
+    // Build the stakpak command to run inside container
+    // We need to reconstruct the original command but add STAKPAK_SKIP_WARDEN to prevent recursion
+    let mut stakpak_args = vec!["stakpak".to_string()];
+
+    // Skip the first arg (program name) and add the rest
+    for arg in args.iter().skip(1) {
+        stakpak_args.push(arg.clone());
+    }
+
+    // Set environment variable to prevent infinite recursion
+    cmd.args(["--env", "STAKPAK_SKIP_WARDEN=1"]);
+
+    // If profile was specified, pass it through
+    if let Ok(profile) = std::env::var("STAKPAK_PROFILE") {
+        cmd.args(["--env", &format!("STAKPAK_PROFILE={}", profile)]);
+    }
+
+    // Pass through API key if set
+    if let Ok(api_key) = std::env::var("STAKPAK_API_KEY") {
+        cmd.args(["--env", &format!("STAKPAK_API_KEY={}", api_key)]);
+    }
+
+    // Pass through API endpoint if set
+    if let Ok(api_endpoint) = std::env::var("STAKPAK_API_ENDPOINT") {
+        cmd.args(["--env", &format!("STAKPAK_API_ENDPOINT={}", api_endpoint)]);
+    }
+
+    // Join all stakpak arguments into a single command string
+    let stakpak_cmd = stakpak_args.join(" ");
+    cmd.arg(stakpak_cmd);
 
     // Execute the warden command with TTY support
     execute_warden_command(cmd, true)
