@@ -104,6 +104,7 @@ pub async fn run_tui(
         EnableBracketedPaste
     )?;
 
+    #[cfg(unix)]
     if enable_mouse_capture {
         execute!(std::io::stdout(), EnableMouseCapture)?;
     } else {
@@ -200,6 +201,7 @@ pub async fn run_tui(
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
                    if let InputEvent::ToggleMouseCapture = event {
+                       #[cfg(unix)]
                        toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                        continue;
                    }
@@ -244,6 +246,7 @@ pub async fn run_tui(
                 };
 
                 if let InputEvent::ToggleMouseCapture = event {
+                    #[cfg(unix)]
                     toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                     continue;
                 }

@@ -440,7 +440,7 @@ pub fn welcome_messages(
     // }
 
     messages.push(Message::info("SPACING_MARKER", None));
-
+    #[cfg(unix)]
     if state.mouse_capture_enabled {
         messages.push(mouse_capture_hint_message(state));
         messages.push(Message::info("SPACING_MARKER", None));
