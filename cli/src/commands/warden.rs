@@ -146,10 +146,10 @@ fn prepare_volumes(config: &AppConfig, check_enabled: bool) -> Vec<String> {
     let mut volumes_to_mount = Vec::new();
 
     // Add volumes from profile config
-    if let Some(warden_config) = config.warden.as_ref() {
-        if !check_enabled || warden_config.enabled {
-            volumes_to_mount.extend(warden_config.volumes.clone());
-        }
+    if let Some(warden_config) = config.warden.as_ref()
+        && (!check_enabled || warden_config.enabled)
+    {
+        volumes_to_mount.extend(warden_config.volumes.clone());
     }
 
     // Always append stakpak config if it exists and not already in the list
