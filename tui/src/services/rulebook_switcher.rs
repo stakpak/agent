@@ -153,7 +153,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Create list for left column with padding
     let list = List::new(list_items)
-        .highlight_style(Style::default().bg(Color::Cyan).fg(Color::Reset))
+        .highlight_style(Style::default().bg(Color::Cyan).fg(Color::Black))
         .block(Block::default().borders(Borders::NONE));
 
     // Create list state for highlighting
