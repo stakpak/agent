@@ -91,12 +91,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             #[cfg(not(unix))]
             let left_text = format!("? for shortcuts . @ for files . / for commands");
 
-            let right_text = format!("profile {}", state.current_profile_name);
+            let profile_text = format!("profile {}", state.current_profile_name);
+            let rulebooks_text = " | Ctrl+K: rulebooks";
+            let right_text = format!("{}{}", profile_text, rulebooks_text);
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
             let left_len = left_text.len();
-            let right_len = profile_text.len() + rulebooks_text.len();
+            let right_len = right_text.len();
             let spacing = total_width.saturating_sub(left_len + right_len);
 
             let spans = vec![

@@ -70,15 +70,17 @@ pub async fn add_local_context<'a>(
     messages: &'a [ChatMessage],
     user_input: &'a str,
     local_context: &'a Option<LocalContext>,
+    force_add: bool,
 ) -> Result<(String, Option<&'a LocalContext>), Box<dyn std::error::Error>> {
     if let Some(local_context) = local_context {
-        // only add local context if this is the first message
-        if messages
+        // Add local context if this is the first message OR if force_add is true
+        let is_first_message = messages
             .iter()
             .filter(|m: &&ChatMessage| m.role != Role::System)
             .count()
-            == 0
-        {
+            == 0;
+
+        if is_first_message || force_add {
             let context_display = local_context.format_display().await?;
             let formatted_input = format!(
                 "{}\n\n<local_context>\n{}\n</local_context>",

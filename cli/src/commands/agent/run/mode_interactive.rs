@@ -257,23 +257,29 @@ pub async fn run_interactive(
                         }
 
                         // Add local context to the user input
-                        let (user_input, _) =
-                            add_local_context(&messages, &user_input, &local_context)
-                                .await
-                                .map_err(|e| format!("Failed to format local context: {}", e))?;
-
-                        // Add rulebooks only in specific cases:
+                        // Add local context and rulebooks only in specific cases:
                         // 1. First message of new session (messages.is_empty())
                         // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
-                                // Force add rulebooks for first message, resumed session, or rulebook update
-                                let (user_input_with_rulebooks, _) =
-                                    add_rulebooks_with_force(&user_input, &rulebooks, true);
+                                // Add local context first
+                                let (user_input_with_context, _) =
+                                    add_local_context(&messages, &user_input, &local_context, true)
+                                        .await
+                                        .map_err(|e| {
+                                            format!("Failed to format local context: {}", e)
+                                        })?;
+
+                                // Then add rulebooks
+                                let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
+                                    &user_input_with_context,
+                                    &rulebooks,
+                                    true,
+                                );
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
-                                // Don't add rulebooks for regular messages
+                                // Don't add local context or rulebooks for regular messages
                                 (user_input.to_string(), None::<String>)
                             };
 
