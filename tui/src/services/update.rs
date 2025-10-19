@@ -55,6 +55,8 @@ pub fn update(
             | InputEvent::ProfileSwitchProgress(_)
             | InputEvent::ProfileSwitchComplete(_)
             | InputEvent::ProfileSwitchFailed(_)
+            | InputEvent::RulebooksLoaded(_)
+            | InputEvent::CurrentRulebooksLoaded(_)
             | InputEvent::Quit
             | InputEvent::AttemptQuit => {
                 // Allow these events through
@@ -105,12 +107,54 @@ pub fn update(
                 }
                 return; // Consume all input when popup is visible
             }
+            if state.show_rulebook_switcher {
+                if c == ' ' {
+                    let _ = input_tx.try_send(InputEvent::RulebookSwitcherToggle);
+                    return;
+                }
+                // Handle search input
+                let _ = input_tx.try_send(InputEvent::RulebookSearchInputChanged(c));
+                return;
+            }
             handle_input_changed(state, c);
         }
-        InputEvent::InputBackspace => handle_input_backspace(state),
+        InputEvent::InputBackspace => {
+            if state.show_rulebook_switcher {
+                let _ = input_tx.try_send(InputEvent::RulebookSearchBackspace);
+                return;
+            }
+            handle_input_backspace(state);
+        }
+
+        // Handle rulebook switcher first to avoid race conditions
+        InputEvent::ShowRulebookSwitcher => {
+            // Don't show rulebook switcher if input is blocked or dialog is open
+            if state.profile_switching_in_progress
+                || state.is_dialog_open
+                || state.approval_popup.is_visible()
+            {
+                return;
+            }
+
+            // Clear any pending input to prevent empty message submission
+            state.text_area.set_text("");
+
+            // Request current active rulebooks to pre-select them
+            let _ = output_tx.try_send(OutputEvent::RequestCurrentRulebooks);
+
+            state.show_rulebook_switcher = true;
+            state.rulebook_switcher_selected = 0;
+            state.rulebook_search_input.clear();
+            filter_rulebooks(state);
+        }
+
         InputEvent::InputSubmitted => {
             if state.show_profile_switcher {
                 let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
+                return;
+            }
+            if state.show_rulebook_switcher {
+                let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
                 return;
             }
             if state.approval_popup.is_visible() {
@@ -516,6 +560,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
+            if state.show_rulebook_switcher {
+                state.show_rulebook_switcher = false;
+                return;
+            }
             if state.show_profile_switcher {
                 state.show_profile_switcher = false;
                 return;
@@ -973,6 +1021,103 @@ pub fn update(
                 "Staying in current profile. Press Ctrl+P to try again.",
                 None,
             ));
+        }
+
+        // Rulebook switcher events
+        InputEvent::RulebooksLoaded(rulebooks) => {
+            state.available_rulebooks = rulebooks;
+            filter_rulebooks(state);
+        }
+
+        InputEvent::CurrentRulebooksLoaded(current_uris) => {
+            // Set the currently active rulebooks as selected
+            state.selected_rulebooks = current_uris.into_iter().collect();
+        }
+
+        InputEvent::RulebookSwitcherSelect => {
+            if state.show_rulebook_switcher && !state.filtered_rulebooks.is_empty() {
+                let selected_rulebook = &state.filtered_rulebooks[state.rulebook_switcher_selected];
+
+                // Toggle selection
+                if state.selected_rulebooks.contains(&selected_rulebook.uri) {
+                    state.selected_rulebooks.remove(&selected_rulebook.uri);
+                } else {
+                    state
+                        .selected_rulebooks
+                        .insert(selected_rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherToggle => {
+            if state.show_rulebook_switcher && !state.filtered_rulebooks.is_empty() {
+                let selected_rulebook = &state.filtered_rulebooks[state.rulebook_switcher_selected];
+
+                // Toggle selection
+                if state.selected_rulebooks.contains(&selected_rulebook.uri) {
+                    state.selected_rulebooks.remove(&selected_rulebook.uri);
+                } else {
+                    state
+                        .selected_rulebooks
+                        .insert(selected_rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherCancel => {
+            state.show_rulebook_switcher = false;
+        }
+
+        InputEvent::RulebookSwitcherConfirm => {
+            if state.show_rulebook_switcher {
+                // Send the selected rulebooks to the CLI
+                let selected_uris: Vec<String> = state.selected_rulebooks.iter().cloned().collect();
+                let _ = output_tx.try_send(OutputEvent::RequestRulebookUpdate(selected_uris));
+
+                // Close the switcher
+                state.show_rulebook_switcher = false;
+
+                // Show confirmation message
+                let count = state.selected_rulebooks.len();
+                state.messages.push(Message::info(
+                    format!(
+                        "Selected {} rulebook(s). They will be applied to your next message.",
+                        count
+                    ),
+                    Some(Style::default().fg(AdaptiveColors::green())),
+                ));
+            }
+        }
+
+        InputEvent::RulebookSwitcherSelectAll => {
+            if state.show_rulebook_switcher {
+                // Select all filtered rulebooks
+                state.selected_rulebooks.clear();
+                for rulebook in &state.filtered_rulebooks {
+                    state.selected_rulebooks.insert(rulebook.uri.clone());
+                }
+            }
+        }
+
+        InputEvent::RulebookSwitcherDeselectAll => {
+            if state.show_rulebook_switcher {
+                // Deselect all rulebooks
+                state.selected_rulebooks.clear();
+            }
+        }
+
+        InputEvent::RulebookSearchInputChanged(c) => {
+            if state.show_rulebook_switcher {
+                state.rulebook_search_input.push(c);
+                filter_rulebooks(state);
+            }
+        }
+
+        InputEvent::RulebookSearchBackspace => {
+            if state.show_rulebook_switcher && !state.rulebook_search_input.is_empty() {
+                state.rulebook_search_input.pop();
+                filter_rulebooks(state);
+            }
         }
 
         _ => {}
@@ -1632,6 +1777,14 @@ fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
+    if state.show_rulebook_switcher {
+        if state.rulebook_switcher_selected > 0 {
+            state.rulebook_switcher_selected -= 1;
+        } else {
+            state.rulebook_switcher_selected = state.filtered_rulebooks.len().saturating_sub(1);
+        }
+        return;
+    }
     // Check if approval popup is visible and should consume the event
     if state.approval_popup.is_visible() {
         state.approval_popup.scroll_up();
@@ -1669,6 +1822,13 @@ fn handle_down_navigation(
             state.profile_switcher_selected += 1;
         } else {
             state.profile_switcher_selected = 0;
+        }
+    }
+    if state.show_rulebook_switcher {
+        if state.rulebook_switcher_selected < state.filtered_rulebooks.len().saturating_sub(1) {
+            state.rulebook_switcher_selected += 1;
+        } else {
+            state.rulebook_switcher_selected = 0;
         }
     }
     // Check if approval popup is visible and should consume the event
@@ -2030,6 +2190,32 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     }
 
     true
+}
+
+fn filter_rulebooks(state: &mut AppState) {
+    if state.rulebook_search_input.is_empty() {
+        state.filtered_rulebooks = state.available_rulebooks.clone();
+    } else {
+        let search_term = state.rulebook_search_input.to_lowercase();
+        state.filtered_rulebooks = state
+            .available_rulebooks
+            .iter()
+            .filter(|rulebook| {
+                rulebook.uri.to_lowercase().contains(&search_term)
+                    || rulebook.description.to_lowercase().contains(&search_term)
+                    || rulebook
+                        .tags
+                        .iter()
+                        .any(|tag| tag.to_lowercase().contains(&search_term))
+            })
+            .cloned()
+            .collect();
+    }
+
+    // Reset selection if it's out of bounds
+    if state.rulebook_switcher_selected >= state.filtered_rulebooks.len() {
+        state.rulebook_switcher_selected = 0;
+    }
 }
 
 pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {

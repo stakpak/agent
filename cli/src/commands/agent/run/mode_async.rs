@@ -145,7 +145,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     // Add user prompt if provided
     if !config.prompt.is_empty() {
         let (user_input, _local_context) =
-            add_local_context(&chat_messages, &config.prompt, &config.local_context)
+            add_local_context(&chat_messages, &config.prompt, &config.local_context, false)
                 .await
                 .map_err(|e| e.to_string())?;
         let (user_input, _rulebooks_text) =

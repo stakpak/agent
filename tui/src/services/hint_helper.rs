@@ -42,7 +42,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
             ),
             Line::from(format!(
-                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry    ctrl + p to switch profile",
+                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry    ctrl + p to switch profile    ctrl + k for rulebooks",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
@@ -91,7 +91,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             #[cfg(not(unix))]
             let left_text = format!("? for shortcuts . @ for files . / for commands");
 
-            let right_text = format!("profile {}", state.current_profile_name);
+            let profile_text = format!("profile {}", state.current_profile_name);
+            let rulebooks_text = " | Ctrl+K: rulebooks";
+            let right_text = format!("{}{}", profile_text, rulebooks_text);
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
@@ -107,6 +109,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                     state.current_profile_name.clone(),
                     Style::default().fg(Color::Reset),
                 ),
+                Span::styled(rulebooks_text, Style::default().fg(Color::DarkGray)),
             ];
 
             let hint = Paragraph::new(Line::from(spans));
