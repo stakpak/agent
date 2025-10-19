@@ -34,7 +34,8 @@ struct RulebookFrontmatter {
 
 /// Parse rulebook metadata from markdown content with YAML frontmatter
 /// Expects frontmatter with uri, description, and tags
-fn parse_rulebook_metadata(content: &str) -> Result<(String, String, Vec<String>), String> {
+/// Returns (uri, description, tags, content_without_frontmatter)
+fn parse_rulebook_metadata(content: &str) -> Result<(String, String, Vec<String>, String), String> {
     // Check if content starts with frontmatter (---)
     let content = content.trim_start();
     if !content.starts_with("---") {
@@ -53,7 +54,15 @@ fn parse_rulebook_metadata(content: &str) -> Result<(String, String, Vec<String>
     let frontmatter: RulebookFrontmatter = serde_yaml::from_str(frontmatter_yaml)
         .map_err(|e| format!("Failed to parse YAML frontmatter: {}", e))?;
 
-    Ok((frontmatter.uri, frontmatter.description, frontmatter.tags))
+    // Extract content after frontmatter (skip the closing "---" and any leading whitespace)
+    let content_body = rest[end_pos + 4..].trim_start().to_string();
+
+    Ok((
+        frontmatter.uri,
+        frontmatter.description,
+        frontmatter.tags,
+        content_body,
+    ))
 }
 
 #[derive(Subcommand, PartialEq)]
@@ -457,12 +466,13 @@ impl Commands {
                         let content = std::fs::read_to_string(file_path)
                             .map_err(|e| format!("Failed to read file: {}", e))?;
 
-                        // Parse frontmatter to extract metadata
-                        let (uri, description, tags) = parse_rulebook_metadata(&content)?;
+                        // Parse frontmatter to extract metadata and content body
+                        let (uri, description, tags, content_body) =
+                            parse_rulebook_metadata(&content)?;
 
-                        // Create the rulebook
+                        // Create the rulebook with content body (without frontmatter)
                         client
-                            .create_rulebook(&uri, &description, &content, tags, None)
+                            .create_rulebook(&uri, &description, &content_body, tags, None)
                             .await?;
 
                         println!("✓ Rulebook created/updated successfully");
