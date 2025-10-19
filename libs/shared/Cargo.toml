@@ -27,7 +27,7 @@ rustls-platform-verifier = { workspace = true }
 russh = { version = "0.53.0" }
 russh-sftp = { version = "2.1.1" }
 dirs = "5.0"
-async-trait = "0.1"
+async-trait = { workspace = true }
 futures = { workspace = true }
 
 [dev-dependencies]
