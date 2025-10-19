@@ -12,7 +12,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.2.62"
+version = "0.2.63"
 edition = "2024"
 
 
@@ -67,6 +67,7 @@ rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
+async-trait = "0.1"
 
 # Required nightly
 [workspace.lints.clippy]

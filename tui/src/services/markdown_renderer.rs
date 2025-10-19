@@ -781,7 +781,7 @@ impl MarkdownRenderer {
         // Try to get terminal size using crossterm or similar
         // This is a safe fallback that works in most terminals
         if let Ok((width, _)) = crossterm::terminal::size() {
-            Some(width as usize)
+            Some(width.saturating_sub(6) as usize)
         } else {
             None
         }
@@ -797,9 +797,29 @@ impl MarkdownRenderer {
         let mut current_line = String::new();
 
         for word in words {
-            if current_line.is_empty() {
+            let word_width = self.display_width(word);
+
+            // If the word itself is longer than the available width, break it
+            if word_width > width {
+                // First, add any current line content
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = String::new();
+                }
+
+                // Break the long word into chunks
+                let word_chunks = self.break_long_word(word, width);
+                for chunk in word_chunks {
+                    if current_line.is_empty() {
+                        current_line = chunk;
+                    } else {
+                        lines.push(current_line);
+                        current_line = chunk;
+                    }
+                }
+            } else if current_line.is_empty() {
                 current_line = word.to_string();
-            } else if self.display_width(&current_line) + 1 + self.display_width(word) <= width {
+            } else if self.display_width(&current_line) + 1 + word_width <= width {
                 current_line.push(' ');
                 current_line.push_str(word);
             } else {
@@ -813,6 +833,56 @@ impl MarkdownRenderer {
         }
 
         lines
+    }
+
+    fn break_long_word(&self, word: &str, max_width: usize) -> Vec<String> {
+        let mut chunks = Vec::new();
+        let mut current_chunk = String::new();
+        let mut current_width = 0;
+
+        for ch in word.chars() {
+            let char_width = self.char_display_width(ch);
+
+            if current_width + char_width > max_width && !current_chunk.is_empty() {
+                chunks.push(current_chunk);
+                current_chunk = String::new();
+                current_width = 0;
+            }
+
+            current_chunk.push(ch);
+            current_width += char_width;
+        }
+
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+        }
+
+        chunks
+    }
+
+    fn truncate_text(&self, text: &str, max_width: usize) -> String {
+        if self.display_width(text) <= max_width {
+            return text.to_string();
+        }
+
+        let mut result = String::new();
+        let mut current_width = 0;
+
+        for ch in text.chars() {
+            let char_width = self.char_display_width(ch);
+            if current_width + char_width > max_width {
+                break;
+            }
+            result.push(ch);
+            current_width += char_width;
+        }
+
+        // Add ellipsis if we truncated
+        if result.len() < text.len() && current_width < max_width {
+            result.push('…');
+        }
+
+        result
     }
 
     // Calculate display width for Unicode text with accurate emoji detection
@@ -1109,60 +1179,58 @@ impl MarkdownRenderer {
                     .map(|row| row.iter().take(max_columns).cloned().collect())
                     .collect();
 
-                // Calculate maximum width for each column using display width
-                let mut column_widths: Vec<usize> = limited_headers
+                // Calculate natural width for each column based on content
+                let mut natural_column_widths: Vec<usize> = limited_headers
                     .iter()
                     .map(|h| self.display_width(h))
                     .collect();
 
                 for row in &limited_rows {
                     for (col_idx, cell) in row.iter().enumerate() {
-                        if col_idx < column_widths.len() {
-                            column_widths[col_idx] =
-                                column_widths[col_idx].max(self.display_width(cell));
+                        if col_idx < natural_column_widths.len() {
+                            natural_column_widths[col_idx] =
+                                natural_column_widths[col_idx].max(self.display_width(cell));
                         }
                     }
                 }
 
-                // Limit each column width to a reasonable maximum
-                for width in &mut column_widths {
-                    *width = (*width).min(40);
-                }
-
-                // Calculate total table width
+                // Calculate total natural width
                 // Each column has: width + 2 spaces padding + 1 separator (│)
                 // Plus 1 for the starting │
-                let table_width: usize =
-                    column_widths.iter().sum::<usize>() + (column_widths.len() * 3) + 1;
+                let natural_table_width: usize = natural_column_widths.iter().sum::<usize>()
+                    + (natural_column_widths.len() * 3)
+                    + 1;
 
                 // Get terminal width, default to 80 if unavailable
                 let terminal_width = self.get_terminal_width().unwrap_or(80);
 
-                // If table is too wide for terminal, render as plain text
-                if table_width > terminal_width {
-                    // Render header as plain text
-                    table_lines.push(Line::from(vec![Span::styled(
-                        limited_headers.join(" | "),
-                        self.style.table_header_style,
-                    )]));
+                // If natural width fits in terminal, use natural widths
+                // Otherwise, proportionally scale down all columns
+                let column_widths: Vec<usize> = if natural_table_width <= terminal_width {
+                    natural_column_widths
+                } else {
+                    // Calculate available width for content (excluding separators and padding)
+                    let available_width =
+                        terminal_width.saturating_sub(natural_column_widths.len() * 3 + 1);
+                    let total_natural_width: usize = natural_column_widths.iter().sum();
 
-                    // Simple separator
-                    table_lines.push(Line::from(vec![Span::styled(
-                        "-".repeat(terminal_width.min(80)),
-                        self.style.table_header_style,
-                    )]));
-
-                    // Render rows as plain text
-                    for row in limited_rows {
-                        let row_text = row.join(" | ");
-                        table_lines.push(Line::from(vec![Span::styled(
-                            row_text,
-                            self.style.table_cell_style,
-                        )]));
+                    if total_natural_width == 0 {
+                        // Fallback if all columns are empty
+                        vec![1; natural_column_widths.len()]
+                    } else {
+                        // Proportionally scale down each column
+                        natural_column_widths
+                            .iter()
+                            .map(|&natural_width| {
+                                let scaled_width =
+                                    (natural_width * available_width) / total_natural_width;
+                                scaled_width.max(1) // Ensure minimum width of 1
+                            })
+                            .collect()
                     }
+                };
 
-                    return table_lines;
-                }
+                // Table width is now guaranteed to fit within terminal width
 
                 // Otherwise, render with beautiful box-drawing characters
 
@@ -1180,29 +1248,65 @@ impl MarkdownRenderer {
                     self.style.table_header_style,
                 )]));
 
-                // Render headers with proper alignment
-                let header_line = format!(
-                    "│ {} │",
-                    limited_headers
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, h)| {
-                            let width = column_widths[idx];
-                            let display_width = self.display_width(h);
-                            let padding_needed = if width > display_width {
-                                width.saturating_sub(display_width)
-                            } else {
-                                0
-                            };
-                            format!("{}{}", h, " ".repeat(padding_needed))
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" │ ")
-                );
-                table_lines.push(Line::from(vec![Span::styled(
-                    header_line,
-                    self.style.table_header_style,
-                )]));
+                // Render headers with proper alignment and wrapping
+                let mut header_wrapped_cells: Vec<Vec<String>> = Vec::new();
+                let mut header_max_lines = 1;
+
+                for (col_idx, header) in limited_headers.iter().enumerate() {
+                    if col_idx < column_widths.len() {
+                        let width = column_widths[col_idx];
+                        let wrapped = self.wrap_text(header, width);
+                        header_max_lines = header_max_lines.max(wrapped.len());
+                        header_wrapped_cells.push(wrapped);
+                    }
+                }
+
+                // Fill in missing header cells
+                while header_wrapped_cells.len() < column_widths.len() {
+                    let width = column_widths[header_wrapped_cells.len()];
+                    header_wrapped_cells.push(vec![" ".repeat(width)]);
+                }
+
+                // Render each line of the header
+                for line_idx in 0..header_max_lines {
+                    let mut padded_cells: Vec<String> = Vec::new();
+
+                    for (col_idx, cell_lines) in header_wrapped_cells.iter().enumerate() {
+                        let width = column_widths[col_idx];
+                        let cell_content = if line_idx < cell_lines.len() {
+                            cell_lines[line_idx].as_str()
+                        } else {
+                            ""
+                        };
+
+                        // Truncate content if it's still too long for the column
+                        let truncated_content = if self.display_width(cell_content) > width {
+                            self.truncate_text(cell_content, width)
+                        } else {
+                            cell_content.to_string()
+                        };
+
+                        // Pad with spaces to match column width
+                        let display_width = self.display_width(&truncated_content);
+                        let padding_needed = if width > display_width {
+                            width.saturating_sub(display_width)
+                        } else {
+                            0
+                        };
+
+                        padded_cells.push(format!(
+                            "{}{}",
+                            truncated_content,
+                            " ".repeat(padding_needed)
+                        ));
+                    }
+
+                    let header_line = format!("│ {} │", padded_cells.join(" │ "));
+                    table_lines.push(Line::from(vec![Span::styled(
+                        header_line,
+                        self.style.table_header_style,
+                    )]));
+                }
 
                 // Header separator
                 let separator = format!(
@@ -1220,7 +1324,7 @@ impl MarkdownRenderer {
 
                 // Render rows with proper alignment and text wrapping
                 for row in limited_rows {
-                    // Wrap each cell content to fit column width
+                    // Wrap each cell content to fit its column width independently
                     let mut wrapped_cells: Vec<Vec<String>> = Vec::new();
                     let mut max_lines = 1;
 
@@ -1239,7 +1343,7 @@ impl MarkdownRenderer {
                         wrapped_cells.push(vec![" ".repeat(width)]);
                     }
 
-                    // Render each line of the row
+                    // Render each line of the row - each cell wraps independently
                     for line_idx in 0..max_lines {
                         let mut padded_cells: Vec<String> = Vec::new();
 
@@ -1250,16 +1354,25 @@ impl MarkdownRenderer {
                             } else {
                                 ""
                             };
-                            // Pad with spaces to match display width
-                            let display_width = self.display_width(cell_content);
+
+                            // Truncate content if it's still too long for the column
+                            let truncated_content = if self.display_width(cell_content) > width {
+                                self.truncate_text(cell_content, width)
+                            } else {
+                                cell_content.to_string()
+                            };
+
+                            // Pad with spaces to match column width
+                            let display_width = self.display_width(&truncated_content);
                             let padding_needed = if width > display_width {
                                 width.saturating_sub(display_width)
                             } else {
                                 0
                             };
+
                             padded_cells.push(format!(
                                 "{}{}",
-                                cell_content,
+                                truncated_content,
                                 " ".repeat(padding_needed)
                             ));
                         }
