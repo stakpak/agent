@@ -384,7 +384,6 @@ async fn main() {
                                 auto_approve,
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
-                                    ..EnabledToolsConfig::default()
                                 },
                             },
                         )
