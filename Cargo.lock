@@ -54,15 +54,29 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "0.1.1"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b91e5ec3ce05e8effb2a7a3b7b1a587daa6699b9f98bbde6a35e44b8c6c773a"
+checksum = "76133c067c37ae7a3641c3ad1ec88f36aac06cea5f9b3b49b5c29f18214f9101"
 dependencies = [
+ "agent-client-protocol-schema",
  "anyhow",
  "async-broadcast",
+ "async-trait",
  "futures",
  "log",
  "parking_lot",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-client-protocol-schema"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36bd1f574102fc8611d1018e06246307c3d16ed862d4259cab55bbf4be804e84"
+dependencies = [
+ "anyhow",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -4770,6 +4784,7 @@ name = "stakpak"
 version = "0.2.63"
 dependencies = [
  "agent-client-protocol",
+ "async-trait",
  "chrono",
  "clap 4.5.41",
  "config",
