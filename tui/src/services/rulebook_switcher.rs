@@ -31,6 +31,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Title
+            Constraint::Length(3), // Search input (with empty lines above and below)
             Constraint::Min(3),    // Content (left + right columns)
             Constraint::Length(1), // Help text
         ])
@@ -45,6 +46,44 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     let title_paragraph = Paragraph::new(title_line);
     f.render_widget(title_paragraph, vertical_chunks[0]);
 
+    // Render search input
+    let search_prompt = ">";
+    let cursor = "|";
+    let placeholder = "Type to filter";
+
+    let search_spans = if state.rulebook_search_input.is_empty() {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "), // Small space after
+        ]
+    } else {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(
+                &state.rulebook_search_input,
+                Style::default()
+                    .fg(Color::Reset)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::raw(" "), // Small space after
+        ]
+    };
+
+    let search_text = Text::from(vec![
+        Line::from(""), // Empty line above
+        Line::from(search_spans),
+        Line::from(""), // Empty line below
+    ]);
+    let search_paragraph = Paragraph::new(search_text);
+    f.render_widget(search_paragraph, vertical_chunks[1]);
+
     // Split content area into left (list) and right (details) columns
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -53,29 +92,11 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             Constraint::Length(1),      // Vertical separator
             Constraint::Percentage(60), // Right column for details
         ])
-        .split(vertical_chunks[1]);
+        .split(vertical_chunks[2]);
 
-    // Add spacing between title and content
-    let content_with_spacing = Rect {
-        x: content_chunks[0].x,
-        y: content_chunks[0].y + 1, // Add space below title
-        width: content_chunks[0].width + content_chunks[1].width + content_chunks[2].width,
-        height: content_chunks[0].height - 1,
-    };
-
-    // Re-split the content area with spacing
-    let final_content_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(40), // Left column for URIs
-            Constraint::Length(1),      // Vertical separator
-            Constraint::Percentage(60), // Right column for details
-        ])
-        .split(content_with_spacing);
-
-    // Left column: Rulebook list with URIs
+    // Left column: Rulebook list with URIs (using filtered list)
     let list_items: Vec<ListItem> = state
-        .available_rulebooks
+        .filtered_rulebooks
         .iter()
         .map(|rulebook| {
             let is_checked = state.selected_rulebooks.contains(&rulebook.uri);
@@ -93,7 +114,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             };
 
             // Calculate available width for URI (accounting for checkbox and padding)
-            let available_width = final_content_chunks[0].width.saturating_sub(6); // 4 for checkbox + 2 for padding
+            let available_width = content_chunks[0].width.saturating_sub(6); // 4 for checkbox + 2 for padding
 
             // Wrap the URI to fit the available width
             let wrapped_uri = textwrap::wrap(&rulebook.uri, available_width as usize);
@@ -142,10 +163,10 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Render list in left column with left/right padding
     let list_area = Rect {
-        x: final_content_chunks[0].x + 1, // Add left padding
-        y: final_content_chunks[0].y,
-        width: final_content_chunks[0].width.saturating_sub(2), // Add right padding
-        height: final_content_chunks[0].height,
+        x: content_chunks[0].x + 1, // Add left padding
+        y: content_chunks[0].y,
+        width: content_chunks[0].width.saturating_sub(2), // Add right padding
+        height: content_chunks[0].height,
     };
     f.render_stateful_widget(list, list_area, &mut list_state);
 
@@ -153,19 +174,21 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     let separator = Block::default()
         .borders(Borders::LEFT)
         .border_style(Style::default().fg(Color::Cyan));
-    f.render_widget(separator, final_content_chunks[1]);
+    f.render_widget(separator, content_chunks[1]);
 
     // Right column: Rulebook details
-    if let Some(selected_rulebook) = state
-        .available_rulebooks
-        .get(state.rulebook_switcher_selected)
-    {
+    // Always show the currently highlighted rulebook from the filtered list
+    let rulebook_to_show = state
+        .filtered_rulebooks
+        .get(state.rulebook_switcher_selected);
+
+    if let Some(selected_rulebook) = rulebook_to_show {
         // Add padding to details area
         let details_area = Rect {
-            x: final_content_chunks[2].x + 1, // Add left padding
-            y: final_content_chunks[2].y,
-            width: final_content_chunks[2].width.saturating_sub(2), // Add right padding
-            height: final_content_chunks[2].height,
+            x: content_chunks[2].x + 1, // Add left padding
+            y: content_chunks[2].y,
+            width: content_chunks[2].width.saturating_sub(2), // Add right padding
+            height: content_chunks[2].height,
         };
 
         // Create detailed information
@@ -285,10 +308,10 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     ]));
 
     let help_area = Rect {
-        x: vertical_chunks[2].x + 1,
-        y: vertical_chunks[2].y,
-        width: vertical_chunks[2].width.saturating_sub(2),
-        height: vertical_chunks[2].height,
+        x: vertical_chunks[3].x + 1,
+        y: vertical_chunks[3].y,
+        width: vertical_chunks[3].width.saturating_sub(2),
+        height: vertical_chunks[3].height,
     };
 
     f.render_widget(help, help_area);

@@ -224,6 +224,8 @@ pub struct AppState {
     pub available_rulebooks: Vec<ListRuleBook>,
     pub selected_rulebooks: std::collections::HashSet<String>, // URIs of selected rulebooks
     pub rulebook_switcher_selected: usize,
+    pub rulebook_search_input: String,
+    pub filtered_rulebooks: Vec<ListRuleBook>,
 }
 
 #[derive(Debug)]
@@ -319,6 +321,8 @@ pub enum InputEvent {
     RulebookSwitcherConfirm,
     RulebookSwitcherSelectAll,   // Ctrl+D to select all rulebooks
     RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
+    RulebookSearchInputChanged(char),
+    RulebookSearchBackspace,
 }
 
 #[derive(Debug)]
@@ -505,6 +509,8 @@ impl AppState {
             available_rulebooks: Vec::new(),
             selected_rulebooks: std::collections::HashSet::new(),
             rulebook_switcher_selected: 0,
+            rulebook_search_input: String::new(),
+            filtered_rulebooks: Vec::new(),
         }
     }
 
