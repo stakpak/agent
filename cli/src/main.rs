@@ -132,7 +132,8 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    if !matches!(cli.command, Some(Commands::Acp { .. }))
+    // Only run auto-update in interactive mode (when no command is specified)
+    if cli.command.is_none()
         && !cli.r#async
         && !cli.print
         && let Err(e) = auto_update().await
@@ -181,11 +182,7 @@ async fn main() {
 
             match cli.command {
                 Some(command) => {
-                    // Skip check_update for ACP command
-                    if !matches!(command, Commands::Acp { .. }) {
-                        let _ =
-                            check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
-                    }
+                    // check_update is only run in interactive mode (when no command is specified)
                     if config.api_key.is_none() && command.requires_auth() {
                         prompt_for_api_key(&mut config).await;
                     }
@@ -226,6 +223,9 @@ async fn main() {
                             std::process::exit(1);
                         }
                     }
+
+                    // Check for updates in interactive mode
+                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
                     let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                         if let Some(rulebook_config) = &config.rulebooks {
                             rulebook_config.filter_rulebooks(rulebooks)
