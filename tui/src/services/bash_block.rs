@@ -1319,7 +1319,13 @@ pub fn render_styled_lines(
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_call_name = tool_call.function.name.clone();
-    let tool_calls = ["view", "search_memory", "search_docs", "local_code_search"];
+    let tool_calls = [
+        "view",
+        "search_memory",
+        "search_docs",
+        "read_rulebook",
+        "local_code_search",
+    ];
     if tool_calls.contains(&tool_call_name.as_str()) {
         return true;
     }
