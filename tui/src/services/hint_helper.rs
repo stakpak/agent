@@ -75,6 +75,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let hint = Paragraph::new(Line::from(spans));
             f.render_widget(hint, area);
         } else {
+            #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
                 " . Fn/Option/Shift + drag to select text"
             } else {
@@ -82,12 +83,15 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             };
 
             // Create spans for left and right alignment
+            #[cfg(unix)]
             let left_text = format!(
                 "? for shortcuts . @ for files . / for commands{}",
                 select_hint
             );
-            let profile_text = format!("profile {}", state.current_profile_name);
-            let rulebooks_text = " | Ctrl+K: rulebooks";
+            #[cfg(not(unix))]
+            let left_text = format!("? for shortcuts . @ for files . / for commands");
+
+            let right_text = format!("profile {}", state.current_profile_name);
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;

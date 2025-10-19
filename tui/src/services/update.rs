@@ -1550,6 +1550,7 @@ fn handle_input_submitted(
                 }
                 "/mouse_capture" => {
                     // Toggle mouse capture using shared function
+                    #[cfg(unix)]
                     let _ = crate::toggle_mouse_capture(state);
 
                     state.text_area.set_text("");
