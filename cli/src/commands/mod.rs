@@ -8,7 +8,7 @@ use crate::{
 use agent::AgentCommands;
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use stakpak_api::{
     Client, ClientConfig,
     models::{Document, ProvisionerType, TranspileTargetProvisionerType},
@@ -24,7 +24,7 @@ pub mod flow;
 pub mod warden;
 
 /// Frontmatter structure for rulebook metadata
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct RulebookFrontmatter {
     uri: String,
     description: String,
@@ -417,13 +417,25 @@ impl Commands {
                 match rulebook_command {
                     RulebookCommands::Get { uri } => {
                         if let Some(uri) = uri {
-                            // Get specific rulebook
+                            // Get specific rulebook and output in apply-compatible format
                             let rulebook = client.get_rulebook_by_uri(&uri).await?;
-                            println!("URI: {}", rulebook.uri);
-                            println!("Description: {}", rulebook.description);
-                            println!("Tags: {}", rulebook.tags.join(", "));
-                            println!("Visibility: {:?}", rulebook.visibility);
-                            println!("\nContent:\n{}", rulebook.content);
+
+                            // Create frontmatter struct
+                            let frontmatter = RulebookFrontmatter {
+                                uri: rulebook.uri,
+                                description: rulebook.description,
+                                tags: rulebook.tags,
+                            };
+
+                            // Serialize frontmatter to YAML
+                            let yaml = serde_yaml::to_string(&frontmatter)
+                                .map_err(|e| format!("Failed to serialize frontmatter: {}", e))?;
+
+                            // Output in apply-compatible format with YAML frontmatter
+                            println!("---");
+                            print!("{}", yaml.trim());
+                            println!("\n---");
+                            println!("{}", rulebook.content);
                         } else {
                             // List all rulebooks
                             let rulebooks = client.list_rulebooks().await?;
