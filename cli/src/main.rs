@@ -167,6 +167,25 @@ async fn main() {
 
     match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
+            // Check if warden is enabled in profile and we're not already inside warden
+            let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
+                && std::env::var("STAKPAK_SKIP_WARDEN").is_err()
+                && cli.command.is_none(); // Only for main agent, not for subcommands
+
+            if should_use_warden {
+                // Re-execute stakpak inside warden container
+                if let Err(e) = commands::warden::run_stakpak_in_warden(
+                    config,
+                    &std::env::args().collect::<Vec<_>>(),
+                )
+                .await
+                {
+                    eprintln!("Failed to run stakpak in warden: {}", e);
+                    std::process::exit(1);
+                }
+                return; // Exit after warden execution completes
+            }
+
             if config.machine_name.is_none() {
                 // Generate a random machine name
                 let random_name = names::Generator::with_naming(Name::Numbered)

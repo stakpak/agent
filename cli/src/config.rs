@@ -18,6 +18,13 @@ pub struct RulebookConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WardenConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub volumes: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
     pub api_key: Option<String>,
@@ -27,6 +34,8 @@ pub struct ProfileConfig {
     pub auto_approve: Option<Vec<String>>,
     /// Rulebook filtering configuration
     pub rulebooks: Option<RulebookConfig>,
+    /// Warden (runtime security) configuration
+    pub warden: Option<WardenConfig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -57,6 +66,8 @@ pub struct AppConfig {
     pub auto_approve: Option<Vec<String>>,
     /// Rulebook filtering configuration
     pub rulebooks: Option<RulebookConfig>,
+    /// Warden (runtime security) configuration
+    pub warden: Option<WardenConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +130,7 @@ impl AppConfig {
                             allowed_tools: None,
                             auto_approve: None,
                             rulebooks: None,
+                            warden: None,
                         },
                     );
 
@@ -156,6 +168,7 @@ impl AppConfig {
                     allowed_tools: None,
                     auto_approve: None,
                     rulebooks: None,
+                    warden: None,
                 },
             );
 
@@ -211,6 +224,10 @@ impl AppConfig {
             .rulebooks
             .or_else(|| all_profile.and_then(|all| all.rulebooks.clone()));
 
+        let warden = profile
+            .warden
+            .or_else(|| all_profile.and_then(|all| all.warden.clone()));
+
         // Override with environment variables if present
         let api_key = std::env::var("STAKPAK_API_KEY").ok().or(api_key);
         let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(api_endpoint);
@@ -226,6 +243,7 @@ impl AppConfig {
             allowed_tools,
             auto_approve,
             rulebooks,
+            warden,
         })
     }
 
@@ -306,6 +324,7 @@ impl AppConfig {
                 allowed_tools: self.allowed_tools.clone(),
                 auto_approve: self.auto_approve.clone(),
                 rulebooks: self.rulebooks.clone(),
+                warden: self.warden.clone(),
             },
         );
 
@@ -640,6 +659,10 @@ exclude = ["https://rules.stakpak.dev/*/beta"]
 include_tags = ["security", "performance"]
 exclude_tags = ["experimental"]
 
+[profiles.test.warden]
+enabled = true
+volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro"]
+
 [settings]
 machine_name = "test-machine"
 auto_append_gitignore = true
@@ -679,6 +702,18 @@ auto_append_gitignore = true
             rulebooks.exclude_tags,
             Some(vec!["experimental".to_string()])
         );
+
+        let warden = test_profile
+            .warden
+            .as_ref()
+            .expect("Warden config not found");
+        assert!(warden.enabled);
+        assert_eq!(warden.volumes.len(), 2);
+        assert_eq!(
+            warden.volumes[0],
+            "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro"
+        );
+        assert_eq!(warden.volumes[1], "./:/agent:ro");
 
         assert_eq!(
             config.settings.machine_name,
