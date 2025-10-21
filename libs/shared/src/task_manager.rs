@@ -454,13 +454,25 @@ impl TaskManager {
         process_tx: oneshot::Sender<u32>,
         task_tx: &mpsc::UnboundedSender<TaskMessage>,
     ) -> TaskCompletion {
-        let mut child = match Command::new("sh")
-            .arg("-c")
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(&command)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
         {
+            cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                .env("SUDO_ASKPASS", "/bin/false")
+                .process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            // On Windows, create a new process group
+            cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
+        }
+
+        let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
                 return TaskCompletion {
