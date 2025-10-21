@@ -17,7 +17,7 @@ fn open_browser(url: &str) -> bool {
 
 async fn listen_for_callback(url: &str) -> String {
     let start_time = std::time::Instant::now();
-    while start_time.elapsed() < std::time::Duration::from_secs(120) {
+    while start_time.elapsed() < std::time::Duration::from_secs(15) {
         let client = reqwest::Client::new();
         let response = client.get(url).send().await;
 
@@ -96,7 +96,7 @@ async fn start_callback_server() -> (
     let mut port = 5269;
     let mut listener: Option<tokio::net::TcpListener> = None;
 
-    while port < 5270 {
+    while port < 5279 {
         match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
             Ok(l) => {
                 listener = Some(l);
@@ -254,20 +254,28 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
 
     if browser_opened {
         println!();
-        // Give user option to wait for callback or enter manually
-        println!(
-            "Waiting for authorization...
-        "
-        );
 
         // Start callback polling in background
         let url_clone = base_url.to_string();
         let callback_handle = tokio::spawn(async move { listen_for_callback(&url_clone).await });
 
+        // Start timer display
+        let timer_handle = tokio::spawn(async {
+            for remaining in (1..=15).rev() {
+                print!("\r⏳ Waiting for authorization... {}s remaining", remaining);
+                if let Err(e) = std::io::stdout().flush() {
+                    eprintln!("Failed to flush stdout: {}", e);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            println!(); // New line after timer
+        });
+
         // Use tokio::select! to wait for either the channel or a timeout
         tokio::select! {
             // Wait for API key from channel
             api_key = api_key_receiver.recv() => {
+                timer_handle.abort(); // Stop the timer
                 match api_key {
                     Some(key) => {
                         callback_handle.abort(); // Cancel polling
@@ -280,11 +288,13 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
                     }
                 }
             }
-            // Timeout after 2 minutes
-            _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+            // Timeout after 15 seconds
+            _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                timer_handle.abort(); // Stop the timer
                 println!();
                 println!("⏰ Timedout waiting for API key from server");
                 println!();
+                callback_handle.abort();
                 server_handle.abort(); // Stop the server
             }
         }
