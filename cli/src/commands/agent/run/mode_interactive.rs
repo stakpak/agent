@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
+    add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -54,7 +54,6 @@ pub async fn run_interactive(
     'profile_switch_loop: loop {
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
-        #[allow(unused_assignments)]
         let mut should_update_rulebooks_on_next_message = false;
 
         // Clone config values for this iteration
@@ -63,7 +62,8 @@ pub async fn run_interactive(
         let config_path = ctx.config_path.clone();
         let mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
-        let rulebooks = config.rulebooks.clone();
+        let mut rulebooks = config.rulebooks.clone();
+        let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let subagent_configs = config.subagent_configs.clone();
         let checkpoint_id = config.checkpoint_id.clone();
@@ -191,6 +191,13 @@ pub async fn run_interactive(
                 .await;
             }
 
+            // Load available rulebooks and send to TUI
+            if let Ok(all_rulebooks) = client.list_rulebooks().await {
+                all_available_rulebooks = Some(all_rulebooks.clone());
+                let _ =
+                    send_input_event(&input_tx, InputEvent::RulebooksLoaded(all_rulebooks)).await;
+            }
+
             if let Some(checkpoint_id_str) = checkpoint_id {
                 // Try to get session ID from checkpoint
                 let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str).map_err(|_| {
@@ -250,21 +257,31 @@ pub async fn run_interactive(
                         }
 
                         // Add local context to the user input
+                        // Add local context and rulebooks only in specific cases:
+                        // 1. First message of new session (messages.is_empty())
+                        // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
                         let (user_input, _) =
-                            add_local_context(&messages, &user_input, &local_context)
-                                .await
-                                .map_err(|e| format!("Failed to format local context: {}", e))?;
+                            if messages.is_empty() || should_update_rulebooks_on_next_message {
+                                // Add local context first
+                                let (user_input_with_context, _) =
+                                    add_local_context(&messages, &user_input, &local_context, true)
+                                        .await
+                                        .map_err(|e| {
+                                            format!("Failed to format local context: {}", e)
+                                        })?;
 
-                        // Add rulebooks if this is the first message OR if we just resumed a session
-                        let (user_input, _) = if should_update_rulebooks_on_next_message {
-                            // Force add rulebooks for resumed session (ignore messages.is_empty() check)
-                            let (user_input_with_rulebooks, _) =
-                                add_rulebooks(&[], &user_input, &rulebooks);
-                            should_update_rulebooks_on_next_message = false; // Reset the flag
-                            (user_input_with_rulebooks, None)
-                        } else {
-                            add_rulebooks(&messages, &user_input, &rulebooks)
-                        };
+                                // Then add rulebooks
+                                let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
+                                    &user_input_with_context,
+                                    &rulebooks,
+                                    true,
+                                );
+                                should_update_rulebooks_on_next_message = false; // Reset the flag
+                                (user_input_with_rulebooks, None::<String>)
+                            } else {
+                                // Don't add local context or rulebooks for regular messages
+                                (user_input.to_string(), None::<String>)
+                            };
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
@@ -617,6 +634,37 @@ pub async fn run_interactive(
 
                         // Return new config to trigger outer loop restart
                         return Ok((messages, current_session_id, Some(new_config)));
+                    }
+                    OutputEvent::RequestRulebookUpdate(selected_uris) => {
+                        // Update the rulebooks list based on selected URIs
+                        if let Some(all_rulebooks) = &all_available_rulebooks {
+                            let filtered_rulebooks: Vec<_> = all_rulebooks
+                                .iter()
+                                .filter(|rb| selected_uris.contains(&rb.uri))
+                                .cloned()
+                                .collect();
+
+                            // Update the rulebooks with the filtered list
+                            rulebooks = Some(filtered_rulebooks);
+
+                            // Set flag to update rulebooks on next message
+                            should_update_rulebooks_on_next_message = true;
+                        }
+                        continue;
+                    }
+                    OutputEvent::RequestCurrentRulebooks => {
+                        // Send currently active rulebook URIs to TUI
+                        if let Some(current_rulebooks) = &rulebooks {
+                            let current_uris: Vec<String> =
+                                current_rulebooks.iter().map(|rb| rb.uri.clone()).collect();
+
+                            let _ = send_input_event(
+                                &input_tx,
+                                InputEvent::CurrentRulebooksLoaded(current_uris),
+                            )
+                            .await;
+                        }
+                        continue;
                     }
                 }
 

@@ -11,6 +11,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::AttemptQuit)
                 }
+                KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ShowRulebookSwitcher)
+                }
                 KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RetryLastToolCall)
                 }
@@ -25,6 +28,12 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 }
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ShowShortcuts)
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::RulebookSwitcherDeselectAll)
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::RulebookSwitcherSelectAll)
                 }
                 KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputChangedNewline)

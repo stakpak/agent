@@ -95,7 +95,9 @@ pub async fn run_tui(
     crossterm::terminal::enable_raw_mode()?;
 
     // Detect terminal support for mouse capture
+    #[cfg(unix)]
     let terminal_info = crate::services::detect_term::detect_terminal();
+    #[cfg(unix)]
     let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
 
     execute!(
@@ -104,6 +106,7 @@ pub async fn run_tui(
         EnableBracketedPaste
     )?;
 
+    #[cfg(unix)]
     if enable_mouse_capture {
         execute!(std::io::stdout(), EnableMouseCapture)?;
     } else {
@@ -200,6 +203,7 @@ pub async fn run_tui(
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
                    if let InputEvent::ToggleMouseCapture = event {
+                       #[cfg(unix)]
                        toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                        continue;
                    }
@@ -212,8 +216,8 @@ pub async fn run_tui(
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
-                           && !state.filtered_helpers.is_empty()
-                           && state.input().starts_with('/');
+                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.filtered_files.is_empty());
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
@@ -244,6 +248,7 @@ pub async fn run_tui(
                 };
 
                 if let InputEvent::ToggleMouseCapture = event {
+                    #[cfg(unix)]
                     toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
                     continue;
                 }
@@ -256,8 +261,8 @@ pub async fn run_tui(
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
-                           && !state.filtered_helpers.is_empty()
-                           && state.input().starts_with('/');
+                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.filtered_files.is_empty());
                        let dropdown_height = if dropdown_showing {
                            state.filtered_helpers.len() as u16
                        } else {
