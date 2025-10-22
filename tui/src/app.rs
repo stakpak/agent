@@ -229,6 +229,12 @@ pub struct AppState {
     pub rulebook_switcher_selected: usize,
     pub rulebook_search_input: String,
     pub filtered_rulebooks: Vec<ListRuleBook>,
+
+    // Command palette state
+    pub show_command_palette: bool,
+    pub command_palette_selected: usize,
+    pub command_palette_scroll: usize,
+    pub command_palette_search: String,
 }
 
 #[derive(Debug)]
@@ -311,6 +317,10 @@ pub enum InputEvent {
     ProfileSwitchProgress(String),
     ProfileSwitchComplete(String),
     ProfileSwitchFailed(String),
+    // Command palette events
+    ShowCommandPalette,
+    CommandPaletteSearchInputChanged(char),
+    CommandPaletteSearchBackspace,
     ProfileSwitcherSelect,
     ProfileSwitcherCancel,
     // Shortcuts popup events
@@ -372,6 +382,14 @@ impl AppState {
             HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/issue",
+                description: "Submit issue on GitHub repo",
+            },
+            HelperCommand {
+                command: "/support",
+                description: "Go to Discord support channel",
             },
             HelperCommand {
                 command: "/list_approved_tools",
@@ -524,6 +542,11 @@ impl AppState {
             rulebook_switcher_selected: 0,
             rulebook_search_input: String::new(),
             filtered_rulebooks: Vec::new(),
+            // Command palette initialization
+            show_command_palette: false,
+            command_palette_selected: 0,
+            command_palette_scroll: 0,
+            command_palette_search: String::new(),
         }
     }
 

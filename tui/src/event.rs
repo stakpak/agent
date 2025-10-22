@@ -24,7 +24,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::ToggleMouseCapture)
                 }
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ShowProfileSwitcher)
+                    Some(InputEvent::ShowCommandPalette)
                 }
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ShowShortcuts)
@@ -63,7 +63,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::InputCursorPrevWord)
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::CursorRight)
+                    Some(InputEvent::ShowProfileSwitcher)
                 }
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::CursorLeft)
