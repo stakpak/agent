@@ -165,6 +165,7 @@ ACP is a standardized protocol that enables AI agents to integrate directly with
 
 1. **Install Stakpak** (if not already installed)
 2. **Configure Zed Editor** - Add to `~/.config/zed/settings.json`:
+
 ```json
 {
   "agent_servers": {
@@ -176,12 +177,53 @@ ACP is a standardized protocol that enables AI agents to integrate directly with
   }
 }
 ```
+
 3. **Start ACP Agent**:
+
 ```bash
 stakpak acp
 ```
+
 4. **Use in Zed** - Click Assistant (✨) → `+` → `New stakpak thread`
 
+### Rulebook Management
+
+Manage your standard operating procedures (SOPs), playbooks, and runbooks with Stakpak Rulebooks. Rulebooks customize agent behavior and provide context-specific guidance.
+
+```bash
+# List all rulebooks
+stakpak rulebooks get
+# or use the short alias
+stakpak rb get
+
+# Get a specific rulebook
+stakpak rb get stakpak://my-org/deployment-guide.md
+
+# Create or update a rulebook from a markdown file
+stakpak rb apply my-rulebook.md
+
+# Delete a rulebook
+stakpak rb delete stakpak://my-org/old-guide.md
+```
+
+#### Rulebook Format
+
+Rulebooks are markdown files with YAML frontmatter:
+
+```markdown
+---
+uri: stakpak://my-org/deployment-guide.md
+description: Standard deployment procedures for production
+tags:
+  - deployment
+  - production
+  - sop
+---
+
+# Deployment Guide
+
+Your deployment procedures and guidelines here...
+```
 
 ---
 

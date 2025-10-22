@@ -136,6 +136,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.show_shortcuts_popup {
         crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
     }
+    // Render rulebook switcher
+    if state.show_rulebook_switcher {
+        crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
+    }
 
     // Render profile switch overlay
     if state.profile_switching_in_progress {

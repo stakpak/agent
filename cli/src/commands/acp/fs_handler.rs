@@ -50,6 +50,7 @@ pub fn spawn_fs_handler(
                 } => {
                     log::info!("Processing ACP read_text_file: {:?}", path);
                     let request = acp::ReadTextFileRequest {
+                        meta: None,
                         session_id,
                         path,
                         line,
@@ -69,6 +70,7 @@ pub fn spawn_fs_handler(
                 } => {
                     log::info!("Processing ACP write_text_file: {:?}", path);
                     let request = acp::WriteTextFileRequest {
+                        meta: None,
                         session_id,
                         path,
                         content,

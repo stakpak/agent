@@ -132,7 +132,8 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    if !matches!(cli.command, Some(Commands::Acp { .. }))
+    // Only run auto-update in interactive mode (when no command is specified)
+    if cli.command.is_none()
         && !cli.r#async
         && !cli.print
         && let Err(e) = auto_update().await
@@ -166,6 +167,25 @@ async fn main() {
 
     match AppConfig::load(&profile_name, cli.config_path.as_deref()) {
         Ok(mut config) => {
+            // Check if warden is enabled in profile and we're not already inside warden
+            let should_use_warden = config.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
+                && std::env::var("STAKPAK_SKIP_WARDEN").is_err()
+                && cli.command.is_none(); // Only for main agent, not for subcommands
+
+            if should_use_warden {
+                // Re-execute stakpak inside warden container
+                if let Err(e) = commands::warden::run_stakpak_in_warden(
+                    config,
+                    &std::env::args().collect::<Vec<_>>(),
+                )
+                .await
+                {
+                    eprintln!("Failed to run stakpak in warden: {}", e);
+                    std::process::exit(1);
+                }
+                return; // Exit after warden execution completes
+            }
+
             if config.machine_name.is_none() {
                 // Generate a random machine name
                 let random_name = names::Generator::with_naming(Name::Numbered)
@@ -181,11 +201,7 @@ async fn main() {
 
             match cli.command {
                 Some(command) => {
-                    // Skip check_update for ACP command
-                    if !matches!(command, Commands::Acp { .. }) {
-                        let _ =
-                            check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
-                    }
+                    // check_update is only run in interactive mode (when no command is specified)
                     if config.api_key.is_none() && command.requires_auth() {
                         prompt_for_api_key(&mut config).await;
                     }
@@ -226,6 +242,9 @@ async fn main() {
                             std::process::exit(1);
                         }
                     }
+
+                    // Check for updates in interactive mode
+                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
                     let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                         if let Some(rulebook_config) = &config.rulebooks {
                             rulebook_config.filter_rulebooks(rulebooks)
@@ -384,7 +403,6 @@ async fn main() {
                                 auto_approve,
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
-                                    ..EnabledToolsConfig::default()
                                 },
                             },
                         )
