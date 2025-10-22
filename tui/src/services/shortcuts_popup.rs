@@ -122,7 +122,7 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
             if let Some(category_shortcuts) = categories.get(*category_name) {
                 // Add category header
                 let category_style = Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD);
                 let category_width = width.unwrap_or(40) - (category_name.len() + 5);
                 all_lines.push(Line::from(vec![
@@ -146,7 +146,7 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
                                 .fg(Color::Green)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(description_formatted, Style::default().fg(Color::Gray)),
+                        Span::styled(description_formatted, Style::default().fg(Color::Reset)),
                     ];
 
                     all_lines.push(Line::from(spans));
@@ -161,6 +161,11 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
     })
 }
 
+/// Get the total count of actual shortcuts (green items only)
+pub fn get_shortcuts_count() -> usize {
+    get_all_shortcuts().len()
+}
+
 pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
     // Calculate popup size (60% width, fit height to content)
     let area = centered_rect(60, 80, f.area());
@@ -172,7 +177,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    // Split area for title, content and help text inside the block
+    // Split area for title, content, scroll indicators, and help text inside the block
     let inner_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
@@ -185,6 +190,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
         .constraints([
             Constraint::Length(1), // Title
             Constraint::Min(3),    // Content
+            Constraint::Length(1), // Scroll indicators
             Constraint::Length(1), // Help text
         ])
         .split(inner_area);
@@ -199,10 +205,11 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
 
     f.render_widget(title_paragraph, chunks[0]);
 
-    // Get all shortcuts lines
+    // Get all shortcuts lines and calculate scroll info
     let all_lines = get_cached_shortcuts_content(Some(area.width as usize));
     let total_lines = all_lines.len();
     let height = chunks[1].height as usize;
+    let shortcuts_count = get_shortcuts_count();
 
     // Calculate scroll position (similar to collapsed messages)
     const SCROLL_BUFFER_LINES: usize = 2;
@@ -213,8 +220,17 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
         state.shortcuts_scroll
     };
 
-    // Create visible lines (similar to collapsed messages)
+    // Add top arrow indicator if there are hidden items above
     let mut visible_lines = Vec::new();
+    let has_content_above = scroll > 0;
+    if has_content_above {
+        visible_lines.push(Line::from(vec![Span::styled(
+            " ▲",
+            Style::default().fg(Color::Reset),
+        )]));
+    }
+
+    // Create visible lines (similar to collapsed messages)
     for i in 0..height {
         let line_index = scroll + i;
         if line_index < all_lines.len() {
@@ -231,7 +247,50 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
 
     f.render_widget(content_paragraph, chunks[1]);
 
-    // Help text
+    // Calculate cumulative shortcuts count (including scrolled past ones)
+    let mut cumulative_shortcuts_count = 0;
+
+    // Count shortcuts from the beginning up to the current scroll position + visible area
+    for line_index in 0..=(scroll + height).min(all_lines.len().saturating_sub(1)) {
+        if line_index < all_lines.len() {
+            let line = &all_lines[line_index];
+            // Check if this line contains a shortcut (green text)
+            for span in &line.spans {
+                if span.style.fg == Some(Color::Green)
+                    && span.style.add_modifier.contains(Modifier::BOLD)
+                {
+                    cumulative_shortcuts_count += 1;
+                    break; // Count each line only once
+                }
+            }
+        }
+    }
+
+    // Scroll indicators (above help line)
+    let has_content_above = scroll > 0;
+    let has_content_below = scroll < max_scroll;
+
+    if has_content_above || has_content_below {
+        let mut indicator_spans = vec![];
+
+        // Show cumulative shortcuts counter and down arrow on the left
+        indicator_spans.push(Span::styled(
+            format!(" ({}/{})", cumulative_shortcuts_count, shortcuts_count),
+            Style::default().fg(Color::Reset),
+        ));
+
+        if has_content_below {
+            indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+        }
+
+        let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
+        f.render_widget(indicator_paragraph, chunks[2]);
+    } else {
+        // Empty line when no scroll indicators
+        f.render_widget(Paragraph::new(""), chunks[2]);
+    }
+
+    // Help text (clean, without scroll indicators)
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑/↓", Style::default().fg(Color::Yellow)),
         Span::raw(": Scroll  "),
@@ -239,7 +298,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
         Span::raw(": Close"),
     ]));
 
-    f.render_widget(help, chunks[2]);
+    f.render_widget(help, chunks[3]);
 
     // Render the border with title last (so it's on top)
     f.render_widget(block, area);

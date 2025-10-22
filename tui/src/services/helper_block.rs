@@ -261,16 +261,28 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
     {
         flag = " ".repeat(flag.len());
     }
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                flag,
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(error, Style::default().fg(Color::Red)),
-        ]),
-        Line::from(""),
-    ];
+    // split error by \n
+    let error_parts: Vec<&str> = error.split('\n').collect();
+    let mut lines = Vec::new();
+    for (i, part) in error_parts.iter().enumerate() {
+        if i == 0 {
+            // First line gets the error flag
+            lines.push(Line::from(vec![
+                Span::styled(
+                    flag.clone(),
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(*part, Style::default().fg(Color::Red)),
+            ]));
+        } else {
+            // Subsequent lines are just the error text
+            lines.push(Line::from(vec![Span::styled(
+                *part,
+                Style::default().fg(Color::Red),
+            )]));
+        }
+    }
+    lines.push(Line::from(""));
     let owned_lines: Vec<Line<'static>> = lines
         .into_iter()
         .map(|line| {
@@ -457,11 +469,10 @@ pub fn push_clear_message(state: &mut AppState) {
 }
 
 const EXCEEDED_API_LIMIT_ERROR: &str = "Exceeded API limit";
-const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str =
-    "Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.";
+const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str = "Exceeded credits plan limit. Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.";
 
 pub fn handle_errors(error: String) -> String {
-    if format!("{:?}", error).contains(EXCEEDED_API_LIMIT_ERROR) {
+    if error.contains(EXCEEDED_API_LIMIT_ERROR) {
         EXCEEDED_API_LIMIT_ERROR_MESSAGE.to_string()
     } else if error.contains("Unknown(\"") && error.ends_with("\")") {
         let start = 9; // length of "Unknown(\""
@@ -469,9 +480,9 @@ pub fn handle_errors(error: String) -> String {
         if start < end {
             error[start..end].to_string()
         } else {
-            format!("{:?}", error)
+            error
         }
     } else {
-        format!("{:?}", error)
+        error
     }
 }
