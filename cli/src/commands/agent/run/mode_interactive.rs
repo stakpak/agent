@@ -413,6 +413,12 @@ pub async fn run_interactive(
                         }
                         continue;
                     }
+                    OutputEvent::NewSession => {
+                        // Clear the current session and start fresh
+                        current_session_id = None;
+                        messages.clear();
+                        continue;
+                    }
 
                     OutputEvent::ResumeSession => {
                         let session_id = if let Some(session_id) = &current_session_id {
