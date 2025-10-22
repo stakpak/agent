@@ -348,6 +348,7 @@ pub enum OutputEvent {
     RejectTool(ToolCall, bool),
     ListSessions,
     SwitchToSession(String),
+    NewSession,
     Memorize,
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
@@ -378,6 +379,10 @@ impl AppState {
             HelperCommand {
                 command: "/resume",
                 description: "Resume the last session",
+            },
+            HelperCommand {
+                command: "/new_session",
+                description: "Start a new session",
             },
             HelperCommand {
                 command: "/memorize",

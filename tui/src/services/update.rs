@@ -1583,7 +1583,9 @@ fn handle_input_submitted(
                 "/resume" => {
                     resume_session(state, output_tx);
                 }
-
+                "/new_session" => {
+                    new_session(state, output_tx);
+                }
                 "/clear" => {
                     push_clear_message(state);
                 }
@@ -2398,6 +2400,18 @@ fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
 }
+
+fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    let _ = output_tx.try_send(OutputEvent::NewSession);
+    state.text_area.set_text("");
+    state.messages.clear();
+    state
+        .messages
+        .extend(welcome_messages(state.latest_version.clone(), state));
+    render_system_message(state, "New session started.");
+    state.show_helper_dropdown = false;
+}
+
 fn execute_command_palette_selection(
     state: &mut AppState,
     input_tx: &Sender<InputEvent>,
@@ -2427,35 +2441,30 @@ fn execute_command_palette_selection(
         CommandAction::OpenShortcuts => {
             let _ = input_tx.try_send(InputEvent::ShowShortcuts);
         }
+        CommandAction::NewSession => {
+            new_session(state, output_tx);
+        }
         CommandAction::OpenSessions => {
             state.text_area.set_text("/sessions");
             let _ = output_tx.try_send(OutputEvent::ListSessions);
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
         }
         CommandAction::ResumeSession => {
             resume_session(state, output_tx);
         }
         CommandAction::ShowStatus => {
             push_status_message(state);
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
         }
         CommandAction::MemorizeConversation => {
             push_memorize_message(state);
             let _ = output_tx.try_send(OutputEvent::Memorize);
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
         }
         CommandAction::SubmitIssue => {
             push_issue_message(state);
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
         }
         CommandAction::GetSupport => {
             push_support_message(state);
-            state.text_area.set_text("");
-            state.show_helper_dropdown = false;
         }
     }
+    state.text_area.set_text("");
+    state.show_helper_dropdown = false;
 }
