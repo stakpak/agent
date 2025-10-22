@@ -6,9 +6,9 @@ use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
-    handle_errors, push_clear_message, push_error_message, push_help_message,
-    push_memorize_message, push_status_message, push_styled_message, render_system_message,
-    welcome_messages,
+    handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
+    push_memorize_message, push_status_message, push_styled_message, push_support_message,
+    render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -107,6 +107,11 @@ pub fn update(
                 }
                 return; // Consume all input when popup is visible
             }
+            if state.show_command_palette {
+                // Handle search input for command palette
+                let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
+                return;
+            }
             if state.show_rulebook_switcher {
                 if c == ' ' {
                     let _ = input_tx.try_send(InputEvent::RulebookSwitcherToggle);
@@ -119,6 +124,10 @@ pub fn update(
             handle_input_changed(state, c);
         }
         InputEvent::InputBackspace => {
+            if state.show_command_palette {
+                let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
+                return;
+            }
             if state.show_rulebook_switcher {
                 let _ = input_tx.try_send(InputEvent::RulebookSearchBackspace);
                 return;
@@ -151,6 +160,11 @@ pub fn update(
         InputEvent::InputSubmitted => {
             if state.show_profile_switcher {
                 let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
+                return;
+            }
+            if state.show_command_palette {
+                // Execute the selected command
+                execute_command_palette_selection(state, input_tx, output_tx);
                 return;
             }
             if state.show_rulebook_switcher {
@@ -564,6 +578,11 @@ pub fn update(
                 state.show_rulebook_switcher = false;
                 return;
             }
+            if state.show_command_palette {
+                state.show_command_palette = false;
+                state.command_palette_search.clear();
+                return;
+            }
             if state.show_profile_switcher {
                 state.show_profile_switcher = false;
                 return;
@@ -902,6 +921,21 @@ pub fn update(
             }
         }
 
+        InputEvent::ShowCommandPalette => {
+            // Don't show command palette if input is blocked or dialog is open
+            if state.profile_switching_in_progress
+                || state.is_dialog_open
+                || state.approval_popup.is_visible()
+            {
+                return;
+            }
+
+            state.show_command_palette = true;
+            state.command_palette_selected = 0;
+            state.command_palette_scroll = 0;
+            state.command_palette_search = String::new();
+        }
+
         InputEvent::ShowShortcuts => {
             // Don't show shortcuts popup if input is blocked or dialog is open
             if state.profile_switching_in_progress
@@ -1138,6 +1172,20 @@ pub fn update(
             if state.show_rulebook_switcher && !state.rulebook_search_input.is_empty() {
                 state.rulebook_search_input.pop();
                 filter_rulebooks(state);
+            }
+        }
+
+        InputEvent::CommandPaletteSearchInputChanged(c) => {
+            if state.show_command_palette {
+                state.command_palette_search.push(c);
+                state.command_palette_selected = 0;
+            }
+        }
+
+        InputEvent::CommandPaletteSearchBackspace => {
+            if state.show_command_palette && !state.command_palette_search.is_empty() {
+                state.command_palette_search.pop();
+                state.command_palette_selected = 0;
             }
         }
 
@@ -1533,23 +1581,7 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                 }
                 "/resume" => {
-                    state.message_tool_calls = None;
-                    state.message_approved_tools.clear();
-                    state.message_rejected_tools.clear();
-                    state.tool_call_execution_order.clear();
-                    state.session_tool_calls_queue.clear();
-                    state.toggle_approved_message = true;
-
-                    state.messages.clear();
-                    state
-                        .messages
-                        .extend(welcome_messages(state.latest_version.clone(), state));
-                    render_system_message(state, "Resuming last session.");
-
-                    let _ = output_tx.try_send(OutputEvent::ResumeSession);
-
-                    state.text_area.set_text("");
-                    state.show_helper_dropdown = false;
+                    resume_session(state, output_tx);
                 }
 
                 "/clear" => {
@@ -1568,6 +1600,16 @@ fn handle_input_submitted(
                 }
                 "/status" => {
                     push_status_message(state);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
+                "/issue" => {
+                    push_issue_message(state);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
+                "/support" => {
+                    push_support_message(state);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
@@ -1793,8 +1835,49 @@ fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgr
     }
 }
 
+/// Updates command palette scroll position to keep selected item visible
+fn update_command_palette_scroll(state: &mut AppState) {
+    let filtered_commands =
+        crate::services::command_palette::filter_commands(&state.command_palette_search);
+    let total_commands = filtered_commands.len();
+
+    if total_commands == 0 {
+        return;
+    }
+
+    // Assume a fixed height for the command list (adjust based on your popup height)
+    let visible_height = 6; // Adjust this based on your actual popup height
+
+    // Calculate the scroll position to keep the selected item visible
+    if state.command_palette_selected < state.command_palette_scroll {
+        // Selected item is above visible area, scroll up
+        state.command_palette_scroll = state.command_palette_selected;
+    } else if state.command_palette_selected >= state.command_palette_scroll + visible_height {
+        // Selected item is below visible area, scroll down
+        state.command_palette_scroll = state.command_palette_selected - visible_height + 1;
+    }
+
+    // Ensure scroll doesn't go beyond bounds
+    let max_scroll = total_commands.saturating_sub(visible_height);
+    if state.command_palette_scroll > max_scroll {
+        state.command_palette_scroll = max_scroll;
+    }
+}
+
 /// Handles upward navigation with approval popup check
 fn handle_up_navigation(state: &mut AppState) {
+    if state.show_command_palette {
+        let filtered_commands =
+            crate::services::command_palette::filter_commands(&state.command_palette_search);
+        if state.command_palette_selected > 0 {
+            state.command_palette_selected -= 1;
+        } else {
+            state.command_palette_selected = filtered_commands.len().saturating_sub(1);
+        }
+        // Update scroll position to keep selected item visible
+        update_command_palette_scroll(state);
+        return;
+    }
     if state.show_profile_switcher {
         if state.profile_switcher_selected > 0 {
             state.profile_switcher_selected -= 1;
@@ -1853,6 +1936,18 @@ fn handle_down_navigation(
     message_area_height: usize,
     message_area_width: usize,
 ) {
+    if state.show_command_palette {
+        let filtered_commands =
+            crate::services::command_palette::filter_commands(&state.command_palette_search);
+        if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
+            state.command_palette_selected += 1;
+        } else {
+            state.command_palette_selected = 0;
+        }
+        // Update scroll position to keep selected item visible
+        update_command_palette_scroll(state);
+        return;
+    }
     if state.show_profile_switcher {
         if state.profile_switcher_selected < state.available_profiles.len() - 1 {
             state.profile_switcher_selected += 1;
@@ -2280,6 +2375,87 @@ pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &
             state
                 .session_tool_calls_queue
                 .insert(id.clone(), ToolCallStatus::Skipped);
+        }
+    }
+}
+
+fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    state.message_tool_calls = None;
+    state.message_approved_tools.clear();
+    state.message_rejected_tools.clear();
+    state.tool_call_execution_order.clear();
+    state.session_tool_calls_queue.clear();
+    state.toggle_approved_message = true;
+
+    state.messages.clear();
+    state
+        .messages
+        .extend(welcome_messages(state.latest_version.clone(), state));
+    render_system_message(state, "Resuming last session.");
+
+    let _ = output_tx.try_send(OutputEvent::ResumeSession);
+
+    state.text_area.set_text("");
+    state.show_helper_dropdown = false;
+}
+fn execute_command_palette_selection(
+    state: &mut AppState,
+    input_tx: &Sender<InputEvent>,
+    output_tx: &Sender<OutputEvent>,
+) {
+    use crate::services::command_palette::{CommandAction, filter_commands};
+
+    let filtered_commands = filter_commands(&state.command_palette_search);
+    if filtered_commands.is_empty() || state.command_palette_selected >= filtered_commands.len() {
+        return;
+    }
+
+    let selected_command = &filtered_commands[state.command_palette_selected];
+
+    // Close command palette
+    state.show_command_palette = false;
+    state.command_palette_search.clear();
+
+    // Execute the command based on its action
+    match selected_command.action {
+        CommandAction::OpenProfileSwitcher => {
+            let _ = input_tx.try_send(InputEvent::ShowProfileSwitcher);
+        }
+        CommandAction::OpenRulebookSwitcher => {
+            let _ = input_tx.try_send(InputEvent::ShowRulebookSwitcher);
+        }
+        CommandAction::OpenShortcuts => {
+            let _ = input_tx.try_send(InputEvent::ShowShortcuts);
+        }
+        CommandAction::OpenSessions => {
+            state.text_area.set_text("/sessions");
+            let _ = output_tx.try_send(OutputEvent::ListSessions);
+            state.text_area.set_text("");
+            state.show_helper_dropdown = false;
+        }
+        CommandAction::ResumeSession => {
+            resume_session(state, output_tx);
+        }
+        CommandAction::ShowStatus => {
+            push_status_message(state);
+            state.text_area.set_text("");
+            state.show_helper_dropdown = false;
+        }
+        CommandAction::MemorizeConversation => {
+            push_memorize_message(state);
+            let _ = output_tx.try_send(OutputEvent::Memorize);
+            state.text_area.set_text("");
+            state.show_helper_dropdown = false;
+        }
+        CommandAction::SubmitIssue => {
+            push_issue_message(state);
+            state.text_area.set_text("");
+            state.show_helper_dropdown = false;
+        }
+        CommandAction::GetSupport => {
+            push_support_message(state);
+            state.text_area.set_text("");
+            state.show_helper_dropdown = false;
         }
     }
 }

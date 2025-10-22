@@ -52,7 +52,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         // Show both hints when appropriate
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "? for shortcuts";
+            let shortcuts_text = "ctrl+p for command palette";
             let retry_text = "Ctrl+R to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -85,14 +85,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Create spans for left and right alignment
             #[cfg(unix)]
             let left_text = format!(
-                "? for shortcuts . @ for files . / for commands{}",
+                "ctrl+p for command palette . @ for files . / for commands{}",
                 select_hint
             );
             #[cfg(not(unix))]
-            let left_text = format!("? for shortcuts . @ for files . / for commands");
+            let left_text = format!("ctrl+p for command palette . @ for files . / for commands");
 
             let profile_text = format!("profile {}", state.current_profile_name);
-            let rulebooks_text = " | Ctrl+K: rulebooks";
+            let rulebooks_text = " | ctrl+k: rulebooks";
             let right_text = format!("{}{}", profile_text, rulebooks_text);
 
             // Calculate spacing to align profile info to the right

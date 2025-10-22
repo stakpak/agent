@@ -392,7 +392,7 @@ pub fn welcome_messages(
             None,
         ),
         Message::info("SPACING_MARKER", None),
-        Message::info("/help for help, ctrl+p to switch profiles", None),
+        Message::info("/help for help, ctrl+f to switch profiles", None),
     ];
 
     // Show allowed tools for debugging
@@ -484,5 +484,65 @@ pub fn handle_errors(error: String) -> String {
         }
     } else {
         error
+    }
+}
+
+pub fn push_issue_message(state: &mut AppState) {
+    let url = "https://github.com/stakpak/cli/issues/new";
+
+    // Try to open the URL in the default browser
+    match open::that(url) {
+        Ok(_) => {
+            let message = Message::styled(Line::from(vec![
+                Span::styled(
+                    "🔗 Opening GitHub Issues... ",
+                    Style::default().fg(Color::Green),
+                ),
+                Span::raw(url),
+            ]));
+            state.messages.push(message);
+        }
+        Err(e) => {
+            let message = Message::styled(Line::from(vec![
+                Span::styled(
+                    "❌ Failed to open GitHub Issues: ",
+                    Style::default().fg(Color::Red),
+                ),
+                Span::raw(e.to_string()),
+                Span::raw(" - "),
+                Span::raw(url),
+            ]));
+            state.messages.push(message);
+        }
+    }
+}
+
+pub fn push_support_message(state: &mut AppState) {
+    let url = "https://discord.gg/c4HUkDD45d";
+
+    // Try to open the URL in the default browser
+    match open::that(url) {
+        Ok(_) => {
+            let message = Message::styled(Line::from(vec![
+                Span::styled(
+                    "💬 Opening Discord Support... ",
+                    Style::default().fg(Color::Green),
+                ),
+                Span::raw(url),
+            ]));
+            state.messages.push(message);
+        }
+        Err(e) => {
+            let message = Message::styled(Line::from(vec![
+                Span::styled(
+                    "❌ Failed to open Discord Support: ",
+                    Style::default().fg(Color::Red),
+                ),
+                Span::raw(e.to_string()),
+                Span::raw(" - "),
+                Span::raw(url),
+            ]));
+            state.messages.push(message);
+        }
     }
 }
