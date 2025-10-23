@@ -97,12 +97,34 @@ fn get_config_path(custom_path: Option<&str>) -> String {
     })
 }
 
+fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileConfig {
+    ProfileConfig {
+        api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
+        api_key: default_profile.and_then(|p| p.api_key.clone()),
+        allowed_tools: None,
+        auto_approve: None,
+        rulebooks: None,
+        warden: Some(WardenConfig {
+            enabled: true,
+            volumes: vec![
+                "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
+                "./:/agent:ro".to_string(),
+                "~/.aws:/home/agent/.aws:ro".to_string(),
+                "~/.config/gcloud:/home/agent/.config/gcloud:ro".to_string(),
+                "~/.digitalocean:/home/agent/.digitalocean:ro".to_string(),
+                "~/.azure:/home/agent/.azure:ro".to_string(),
+                "~/.kube:/home/agent/.kube:ro".to_string(),
+            ],
+        }),
+    }
+}
+
 impl AppConfig {
     pub fn load(profile_name: &str, custom_config_path: Option<&str>) -> Result<Self, ConfigError> {
         let config_path: String = get_config_path(custom_config_path);
 
         // Try to load existing config file
-        let config_file = if Path::new(&config_path).exists() {
+        let mut config_file = if Path::new(&config_path).exists() {
             let content = std::fs::read_to_string(&config_path)
                 .map_err(|e| ConfigError::Message(format!("Failed to read config file: {}", e)))?;
 
@@ -181,6 +203,16 @@ impl AppConfig {
             }
         };
 
+        let mut is_config_file_dirty = false;
+        if !config_file.profiles.contains_key("readonly") {
+            let base_profile = config_file.profiles.get("default");
+            let readonly_profile = create_readonly_profile(base_profile);
+            config_file
+                .profiles
+                .insert("readonly".to_string(), readonly_profile);
+            is_config_file_dirty = true;
+        }
+
         // Don't allow "all" as a profile to be loaded directly
         if profile_name == "all" {
             return Err(ConfigError::Message(
@@ -232,7 +264,7 @@ impl AppConfig {
         let api_key = std::env::var("STAKPAK_API_KEY").ok().or(api_key);
         let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(api_endpoint);
 
-        Ok(AppConfig {
+        let app_config = AppConfig {
             api_endpoint,
             api_key,
             mcp_server_host: None, // This can be added to profiles later if needed
@@ -244,7 +276,16 @@ impl AppConfig {
             auto_approve,
             rulebooks,
             warden,
-        })
+        };
+
+        if is_config_file_dirty {
+            // fail without crashing, because it's not critical
+            if let Err(e) = app_config.save() {
+                eprintln!("Warning: Failed to update config on load: {}", e);
+            }
+        }
+
+        Ok(app_config)
     }
 
     /// List all available profiles from config file
@@ -337,10 +378,9 @@ impl AppConfig {
         if let Some(parent) = Path::new(&self.config_path).parent() {
             create_dir_all(parent).map_err(|e| format!("{}", e))?;
         }
-        let config_str = toml::to_string_pretty(&config_file).map_err(|e| format!("{}", e))?;
-        write(&self.config_path, config_str).map_err(|e| format!("{}", e))?;
 
-        Ok(())
+        let config_str = toml::to_string_pretty(&config_file).map_err(|e| format!("{}", e))?;
+        write(&self.config_path, config_str).map_err(|e| format!("{}", e))
     }
 }
 
