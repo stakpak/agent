@@ -392,7 +392,7 @@ pub fn welcome_messages(
             None,
         ),
         Message::info("SPACING_MARKER", None),
-        Message::info("/help for help, ctrl+f to switch profiles", None),
+        Message::info("ctrl+s for shortcuts . ctrl+f switch profiles", None),
     ];
 
     // Show allowed tools for debugging

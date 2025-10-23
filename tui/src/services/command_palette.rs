@@ -41,19 +41,19 @@ impl Command {
 pub fn get_all_commands() -> Vec<Command> {
     vec![
         Command::new(
-            "Switch Profile",
+            "Profiles",
             "Change active profile",
             "Ctrl+F",
             CommandAction::OpenProfileSwitcher,
         ),
         Command::new(
-            "Rulebook Switcher",
+            "Rulebooks",
             "Select and switch rulebooks",
             "Ctrl+K",
             CommandAction::OpenRulebookSwitcher,
         ),
         Command::new(
-            "Keyboard Shortcuts",
+            "Shortcuts",
             "Show all keyboard shortcuts",
             "Ctrl+S",
             CommandAction::OpenShortcuts,
@@ -65,19 +65,19 @@ pub fn get_all_commands() -> Vec<Command> {
             CommandAction::OpenSessions,
         ),
         Command::new(
-            "Resume Session",
+            "Resume",
             "Resume last session",
             "/resume",
             CommandAction::ResumeSession,
         ),
         Command::new(
-            "Account Status",
+            "Status",
             "Show account information",
             "/status",
             CommandAction::ShowStatus,
         ),
         Command::new(
-            "Memorize Conversation",
+            "Memorize",
             "Save conversation to memory",
             "/memorize",
             CommandAction::MemorizeConversation,
@@ -89,7 +89,7 @@ pub fn get_all_commands() -> Vec<Command> {
             CommandAction::SubmitIssue,
         ),
         Command::new(
-            "Get Support",
+            "Get Help",
             "Go to Discord channel",
             "/support",
             CommandAction::GetSupport,

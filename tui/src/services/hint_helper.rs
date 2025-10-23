@@ -1,4 +1,4 @@
-use crate::services::detect_term::should_use_rgb_colors;
+use crate::services::detect_term::{detect_terminal, should_use_rgb_colors};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
@@ -52,7 +52,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         // Show both hints when appropriate
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "ctrl+p for command palette";
+            let shortcuts_text = "ctrl+p commands";
             let retry_text = "Ctrl+R to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -77,19 +77,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
-                " . Fn/Option/Shift + drag to select text"
+                " . Fn/Option/Shift + drag to select"
             } else {
                 ""
             };
 
             // Create spans for left and right alignment
             #[cfg(unix)]
-            let left_text = format!(
-                "ctrl+p for command palette . @ for files . / for commands{}",
-                select_hint
-            );
+            let left_text = format!("ctrl+p palette . @ files . / commands{}", select_hint);
             #[cfg(not(unix))]
-            let left_text = format!("ctrl+p for command palette . @ for files . / for commands");
+            let left_text = format!("ctrl+p palette . @ files . / commands");
 
             let profile_text = format!("profile {}", state.current_profile_name);
             let rulebooks_text = " | ctrl+k: rulebooks";
@@ -132,8 +129,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             Color::DarkGray
         };
 
+        // detect if terminal is vscode
+        let terminal_info = detect_terminal();
+        let terminal_name = terminal_info.emulator;
+        let is_iterm2 = terminal_name == "iTerm2";
+        let new_line_hint = if !is_iterm2 { "ctrl+j" } else { "shift+enter" };
         let hint = Paragraph::new(Span::styled(
-            format!("{} | Ctrl+o: toggle auto-approve", auto_approve_status),
+            format!(
+                "{} new line | {} | ctrl+o toggle auto-approve",
+                new_line_hint, auto_approve_status
+            ),
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);
