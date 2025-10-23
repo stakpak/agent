@@ -1583,7 +1583,7 @@ fn handle_input_submitted(
                 "/resume" => {
                     resume_session(state, output_tx);
                 }
-                "/new_session" => {
+                "/new" => {
                     new_session(state, output_tx);
                 }
                 "/clear" => {
