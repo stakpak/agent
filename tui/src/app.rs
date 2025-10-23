@@ -134,6 +134,7 @@ pub struct AppState {
     pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
+    pub helper_scroll: usize,
     pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>, // NEW: for file file_search
     pub show_shortcuts: bool,
@@ -451,6 +452,7 @@ impl AppState {
             helpers: helpers.clone(),
             show_helper_dropdown: false,
             helper_selected: 0,
+            helper_scroll: 0,
             filtered_helpers: helpers,
             filtered_files: Vec::new(),
             show_shortcuts: false,
