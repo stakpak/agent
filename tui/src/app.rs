@@ -381,7 +381,7 @@ impl AppState {
                 description: "Resume the last session",
             },
             HelperCommand {
-                command: "/new_session",
+                command: "/new",
                 description: "Start a new session",
             },
             HelperCommand {

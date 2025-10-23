@@ -62,7 +62,7 @@ pub fn get_all_commands() -> Vec<Command> {
         Command::new(
             "New Session",
             "Start a new session",
-            "/new_session",
+            "/new",
             CommandAction::NewSession,
         ),
         Command::new(
