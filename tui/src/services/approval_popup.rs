@@ -74,6 +74,8 @@ pub struct PopupService {
     selected_index: usize,
     terminal_size: ratatui::layout::Rect,
     is_maximized: bool,
+    /// Per-tab scroll positions for smart scrolling
+    tab_scroll_positions: Vec<Option<usize>>,
 }
 
 impl Default for PopupService {
@@ -91,6 +93,7 @@ impl PopupService {
             selected_index: 0,
             terminal_size: ratatui::layout::Rect::new(0, 0, 80, 24), // Default terminal size
             is_maximized: false,
+            tab_scroll_positions: Vec::new(),
         }
     }
 
@@ -111,11 +114,16 @@ impl PopupService {
             selected_index: 0,
             terminal_size: term_rect,
             is_maximized: false,
+            tab_scroll_positions: vec![None; tool_call_infos.len()],
         };
 
         // Create the popup with the actual content
         service.popup = service.create_popup_with_tool_calls(&tool_call_infos, term_rect);
         service.popup.show();
+
+        // Apply smart scroll for the first tab if it's a diff
+        service.apply_smart_scroll_for_current_tab();
+
         service
     }
 
@@ -150,16 +158,28 @@ impl PopupService {
 
     /// Handle previous tab
     pub fn prev_tab(&mut self) {
+        // Save current scroll position before switching
+        self.save_current_scroll_position();
+
         let _ = self.popup.handle_event(popup_widget::PopupEvent::PrevTab);
         // Update our selected index to match the popup's selected tab
         self.selected_index = self.popup.state().selected_tab;
+
+        // Restore scroll position for the new tab
+        self.restore_scroll_position();
     }
 
     /// Handle next tab
     pub fn next_tab(&mut self) {
+        // Save current scroll position before switching
+        self.save_current_scroll_position();
+
         let _ = self.popup.handle_event(popup_widget::PopupEvent::NextTab);
         // Update our selected index to match the popup's selected tab
         self.selected_index = self.popup.state().selected_tab;
+
+        // Restore scroll position for the new tab
+        self.restore_scroll_position();
     }
 
     /// Handle escape
@@ -372,6 +392,12 @@ impl PopupService {
 
         // height_percent is already clamped in calculate_dynamic_popup_size
 
+        // Determine if we have any diff tabs that need fixed headers
+        let has_diff_tabs = tool_call_infos.iter().any(|info| {
+            info.tool_call.function.name == "str_replace"
+                || info.tool_call.function.name == "create"
+        });
+
         // Create popup configuration with tabs using responsive positioning
         let mut config = PopupConfig::new()
             .title("Permission Required")
@@ -402,19 +428,16 @@ impl PopupService {
                 Span::styled("Enter", Style::default().fg(Color::Green)),
                 Span::styled(" submit  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("←→", Style::default().fg(Color::Yellow)),
-                Span::styled(" select action  ", Style::default().fg(Color::Indexed(254))),
+                Span::styled(" select  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("Space", Style::default().fg(Color::Cyan)),
                 Span::styled(
-                    " toggle approve/reject  ",
+                    " approve/reject  ",
                     Style::default().fg(Color::Indexed(254)),
                 ),
                 Span::styled("Ctrl+T", Style::default().fg(Color::Blue)),
-                Span::styled(
-                    " maximize/minimize  ",
-                    Style::default().fg(Color::Indexed(254)),
-                ),
+                Span::styled(" max/min  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("↑↓", Style::default().fg(Color::Magenta)),
-                Span::styled(" to scroll  ", Style::default().fg(Color::Indexed(254))),
+                Span::styled(" scroll  ", Style::default().fg(Color::Indexed(254))),
                 Span::styled("Esc", Style::default().fg(Color::Red)),
                 Span::styled(" exit", Style::default().fg(Color::Indexed(254))),
             ])]))
@@ -427,6 +450,11 @@ impl PopupService {
             })
             .text_between_tabs(Some("→".to_string()))
             .text_between_tabs_style(Style::default().fg(Color::Gray));
+
+        // Set fixed header lines for diff content (1 line for the file path header)
+        if has_diff_tabs {
+            config = config.fixed_header_lines(1);
+        }
 
         // Add all tabs
         for tab in tabs {
@@ -579,10 +607,29 @@ impl PopupService {
         &mut self,
         event: popup_widget::PopupEvent,
     ) -> popup_widget::PopupEventResult {
+        // Save current scroll position before handling events that might change tabs
+        let should_save_scroll = matches!(
+            event,
+            popup_widget::PopupEvent::NextTab
+                | popup_widget::PopupEvent::PrevTab
+                | popup_widget::PopupEvent::SwitchTab(_)
+        );
+
+        if should_save_scroll {
+            self.save_current_scroll_position();
+        }
+
         let result = self.popup.handle_event(event);
 
         // Update our selected index to match the popup's selected tab
-        self.selected_index = self.popup.config().selected_tab;
+        let new_selected_index = self.popup.state().selected_tab;
+        let tab_changed = new_selected_index != self.selected_index;
+        self.selected_index = new_selected_index;
+
+        // If tab changed, restore scroll position for the new tab
+        if tab_changed && should_save_scroll {
+            self.restore_scroll_position();
+        }
 
         result
     }
@@ -609,6 +656,7 @@ impl PopupService {
         let was_visible = self.is_visible();
         let current_selected_index = self.selected_index;
         let current_tool_calls = self.tool_calls.clone();
+        let current_scroll_positions = self.tab_scroll_positions.clone();
 
         // Create new popup with updated terminal size
         let term_rect =
@@ -618,8 +666,12 @@ impl PopupService {
 
         // Restore state
         self.popup.set_selected_tab(current_selected_index);
+        self.tab_scroll_positions = current_scroll_positions;
+
         if was_visible {
             self.popup.show();
+            // Restore scroll position for the current tab
+            self.restore_scroll_position();
         }
     }
 
@@ -642,12 +694,16 @@ impl PopupService {
             let was_visible = self.is_visible();
             let current_selected_index = self.selected_index;
             let current_tool_calls = self.tool_calls.clone();
+            let current_scroll_positions = self.tab_scroll_positions.clone();
 
             self.popup = self.create_popup_with_tool_calls(&current_tool_calls, self.terminal_size);
             self.popup.set_selected_tab(current_selected_index);
+            self.tab_scroll_positions = current_scroll_positions;
 
             if was_visible {
                 self.popup.show();
+                // Restore scroll position for the current tab
+                self.restore_scroll_position();
             }
         }
     }
@@ -655,6 +711,82 @@ impl PopupService {
     /// Check if the popup is maximized
     pub fn is_maximized(&self) -> bool {
         self.is_maximized
+    }
+
+    /// Save the current scroll position for the selected tab
+    fn save_current_scroll_position(&mut self) {
+        if self.selected_index < self.tab_scroll_positions.len() {
+            self.tab_scroll_positions[self.selected_index] = Some(self.popup.state().scroll);
+        }
+    }
+
+    /// Restore the scroll position for the selected tab
+    fn restore_scroll_position(&mut self) {
+        if self.selected_index < self.tab_scroll_positions.len() {
+            if let Some(saved_scroll) = self.tab_scroll_positions[self.selected_index] {
+                // Set the scroll position in the popup
+                self.popup.state_mut().scroll = saved_scroll;
+            } else {
+                // First time viewing this tab, calculate smart scroll position
+                self.apply_smart_scroll_for_current_tab();
+            }
+        }
+    }
+
+    /// Calculate and apply smart scroll position for diff content
+    fn apply_smart_scroll_for_current_tab(&mut self) {
+        if let Some(tool_call_info) = self.tool_calls.get(self.selected_index) {
+            let tool_call = &tool_call_info.tool_call;
+
+            // Only apply smart scrolling for str_replace and create tool calls
+            if (tool_call.function.name == "str_replace" || tool_call.function.name == "create")
+                && let Some(target_scroll) = self.calculate_smart_scroll_position(tool_call)
+            {
+                self.popup.state_mut().scroll = target_scroll;
+                // Save this position for future tab switches
+                self.tab_scroll_positions[self.selected_index] = Some(target_scroll);
+            }
+        }
+    }
+
+    /// Calculate the smart scroll position for diff content
+    fn calculate_smart_scroll_position(&self, tool_call: &ToolCall) -> Option<usize> {
+        use crate::services::file_diff::preview_str_replace_editor_style;
+
+        let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
+
+        let old_str = args["old_str"].as_str().unwrap_or("");
+        let new_str = if tool_call.function.name == "create" {
+            args["file_text"].as_str().unwrap_or("")
+        } else {
+            args["new_str"].as_str().unwrap_or("")
+        };
+        let path = args["path"].as_str().unwrap_or("");
+        let replace_all = args["replace_all"].as_bool().unwrap_or(false);
+
+        // Get the first change index from the diff
+        let (_, _, _, first_change_index) = preview_str_replace_editor_style(
+            path,
+            old_str,
+            new_str,
+            replace_all,
+            self.inner_width(),
+            &tool_call.function.name,
+        )
+        .ok()?;
+
+        // Apply smart scrolling logic:
+        // 1. If first diff line < 3, do nothing (return None)
+        // 2. If first diff line >= 3, scroll to show 2 lines before the first diff line
+        // Note: The first_change_index is relative to the diff content, but we need to account
+        // for the fixed header (1 line) that won't scroll
+        if first_change_index < 3 {
+            None
+        } else {
+            // Scroll to 2 lines before the first change, but not less than 0
+            // The fixed header (1 line) is always visible, so we scroll the content area
+            Some(first_change_index.saturating_sub(2))
+        }
     }
 
     /// Render subheader for a tool call tab
