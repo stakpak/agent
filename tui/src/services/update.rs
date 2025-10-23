@@ -1269,12 +1269,45 @@ fn handle_tab(state: &mut AppState) {
             state.show_helper_dropdown = false;
             state.filtered_helpers.clear();
             state.helper_selected = 0;
+            state.helper_scroll = 0;
             return;
         }
         return;
     }
     // Trigger file file_search with Tab
     handle_tab_trigger(state);
+}
+
+/// Updates helper dropdown scroll position to keep selected item visible
+fn update_helper_dropdown_scroll(state: &mut AppState) {
+    let commands_to_show = if state.input() == "/" {
+        &state.helpers
+    } else {
+        &state.filtered_helpers
+    };
+
+    let total_commands = commands_to_show.len();
+    if total_commands == 0 {
+        return;
+    }
+
+    const MAX_VISIBLE_ITEMS: usize = 5;
+    let visible_height = MAX_VISIBLE_ITEMS.min(total_commands);
+
+    // Calculate the scroll position to keep the selected item visible
+    if state.helper_selected < state.helper_scroll {
+        // Selected item is above visible area, scroll up
+        state.helper_scroll = state.helper_selected;
+    } else if state.helper_selected >= state.helper_scroll + visible_height {
+        // Selected item is below visible area, scroll down
+        state.helper_scroll = state.helper_selected - visible_height + 1;
+    }
+
+    // Ensure scroll doesn't go beyond bounds
+    let max_scroll = total_commands.saturating_sub(visible_height);
+    if state.helper_scroll > max_scroll {
+        state.helper_scroll = max_scroll;
+    }
 }
 
 fn handle_dropdown_up(state: &mut AppState) {
@@ -1286,6 +1319,7 @@ fn handle_dropdown_up(state: &mut AppState) {
             // Regular helper mode
             if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
                 state.helper_selected -= 1;
+                update_helper_dropdown_scroll(state);
             }
         }
     }
@@ -1300,11 +1334,18 @@ fn handle_dropdown_down(state: &mut AppState) {
             }
         } else {
             // Regular helper mode
-            if !state.filtered_helpers.is_empty()
+            let commands_to_show = if state.input() == "/" {
+                &state.helpers
+            } else {
+                &state.filtered_helpers
+            };
+
+            if !commands_to_show.is_empty()
                 && state.input().starts_with('/')
-                && state.helper_selected + 1 < state.filtered_helpers.len()
+                && state.helper_selected + 1 < commands_to_show.len()
             {
                 state.helper_selected += 1;
+                update_helper_dropdown_scroll(state);
             }
         }
     }
@@ -1335,6 +1376,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
             state.file_search.reset();
         }
         state.show_helper_dropdown = true;
+        state.helper_scroll = 0;
     }
 
     if let Some(tx) = &state.file_search_tx {
@@ -1346,6 +1388,7 @@ fn handle_input_changed(state: &mut AppState, c: char) {
         state.filtered_helpers.clear();
         state.filtered_files.clear();
         state.helper_selected = 0;
+        state.helper_scroll = 0;
         state.file_search.reset();
     }
 }
@@ -1372,6 +1415,7 @@ fn handle_input_backspace(state: &mut AppState) {
             state.file_search.reset();
         }
         state.show_helper_dropdown = true;
+        state.helper_scroll = 0;
     }
 
     // Hide dropdown if input is empty
@@ -1380,6 +1424,7 @@ fn handle_input_backspace(state: &mut AppState) {
         state.filtered_helpers.clear();
         state.filtered_files.clear();
         state.helper_selected = 0;
+        state.helper_scroll = 0;
         state.file_search.reset();
     }
 }
