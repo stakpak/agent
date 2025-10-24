@@ -4941,6 +4941,7 @@ dependencies = [
  "crossterm 0.29.0",
  "ignore",
  "nucleo-matcher",
+ "open",
  "popup-widget",
  "portable-pty",
  "rand 0.9.1",

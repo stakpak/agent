@@ -134,6 +134,7 @@ pub struct AppState {
     pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
+    pub helper_scroll: usize,
     pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>, // NEW: for file file_search
     pub show_shortcuts: bool,
@@ -219,6 +220,9 @@ pub struct AppState {
     pub profile_switch_status_message: Option<String>,
     pub rulebook_config: Option<crate::RulebookConfig>,
 
+    // Shortcuts popup state
+    pub show_shortcuts_popup: bool,
+    pub shortcuts_scroll: usize,
     // Rulebook switcher state
     pub show_rulebook_switcher: bool,
     pub available_rulebooks: Vec<ListRuleBook>,
@@ -226,6 +230,12 @@ pub struct AppState {
     pub rulebook_switcher_selected: usize,
     pub rulebook_search_input: String,
     pub filtered_rulebooks: Vec<ListRuleBook>,
+
+    // Command palette state
+    pub show_command_palette: bool,
+    pub command_palette_selected: usize,
+    pub command_palette_scroll: usize,
+    pub command_palette_search: String,
 }
 
 #[derive(Debug)]
@@ -308,8 +318,15 @@ pub enum InputEvent {
     ProfileSwitchProgress(String),
     ProfileSwitchComplete(String),
     ProfileSwitchFailed(String),
+    // Command palette events
+    ShowCommandPalette,
+    CommandPaletteSearchInputChanged(char),
+    CommandPaletteSearchBackspace,
     ProfileSwitcherSelect,
     ProfileSwitcherCancel,
+    // Shortcuts popup events
+    ShowShortcuts,
+    ShortcutsCancel,
 
     // Rulebook switcher events
     ShowRulebookSwitcher,
@@ -368,6 +385,14 @@ impl AppState {
                 description: "Memorize the current conversation history",
             },
             HelperCommand {
+                command: "/issue",
+                description: "Submit issue on GitHub repo",
+            },
+            HelperCommand {
+                command: "/support",
+                description: "Go to Discord support channel",
+            },
+            HelperCommand {
                 command: "/list_approved_tools",
                 description: "List all tools that are auto-approved",
             },
@@ -386,6 +411,10 @@ impl AppState {
             HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
+            },
+            HelperCommand {
+                command: "/shortcuts",
+                description: "Show keyboard shortcuts",
             },
         ]
     }
@@ -423,6 +452,7 @@ impl AppState {
             helpers: helpers.clone(),
             show_helper_dropdown: false,
             helper_selected: 0,
+            helper_scroll: 0,
             filtered_helpers: helpers,
             filtered_files: Vec::new(),
             show_shortcuts: false,
@@ -504,6 +534,9 @@ impl AppState {
             profile_switch_status_message: None,
             rulebook_config: None,
 
+            // Shortcuts popup initialization
+            show_shortcuts_popup: false,
+            shortcuts_scroll: 0,
             // Rulebook switcher initialization
             show_rulebook_switcher: false,
             available_rulebooks: Vec::new(),
@@ -511,6 +544,11 @@ impl AppState {
             rulebook_switcher_selected: 0,
             rulebook_search_input: String::new(),
             filtered_rulebooks: Vec::new(),
+            // Command palette initialization
+            show_command_palette: false,
+            command_palette_selected: 0,
+            command_palette_scroll: 0,
+            command_palette_search: String::new(),
         }
     }
 

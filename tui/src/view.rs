@@ -32,7 +32,20 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         if !state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
-            state.filtered_helpers.len() as u16
+            // Use compact height calculation matching helper_dropdown.rs
+            const MAX_VISIBLE_ITEMS: usize = 5;
+            let visible_height = MAX_VISIBLE_ITEMS.min(state.filtered_helpers.len());
+            let has_content_above = state.helper_scroll > 0;
+            let has_content_below =
+                state.helper_scroll < state.filtered_helpers.len().saturating_sub(visible_height);
+            let arrow_lines =
+                if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
+            let counter_line = if has_content_above || has_content_below {
+                1
+            } else {
+                0
+            };
+            (visible_height + arrow_lines + counter_line) as u16
         }
     } else {
         0
@@ -132,6 +145,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
     }
 
+    // Render shortcuts popup
+    if state.show_shortcuts_popup {
+        crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
+    }
+    // Render command palette
+    if state.show_command_palette {
+        crate::services::command_palette::render_command_palette(f, state);
+    }
     // Render rulebook switcher
     if state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);

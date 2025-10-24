@@ -19,28 +19,75 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
     let input = state.input().trim();
     let show = input == "/" || (input.starts_with('/') && !state.filtered_helpers.is_empty());
     if state.show_helper_dropdown && show {
-        use ratatui::widgets::{List, ListItem, ListState};
-        let item_style = Style::default();
-        // Find the longest command name to calculate padding
+        // Get the commands to show
         let commands_to_show = if state.input() == "/" {
             &state.helpers
         } else {
             &state.filtered_helpers
         };
 
+        if commands_to_show.is_empty() {
+            return;
+        }
+
+        let total_commands = commands_to_show.len();
+        const MAX_VISIBLE_ITEMS: usize = 5;
+        let visible_height = MAX_VISIBLE_ITEMS.min(total_commands);
+
+        // Create a compact area for the dropdown (matching view.rs calculation)
+        let has_content_above = state.helper_scroll > 0;
+        let has_content_below = state.helper_scroll < total_commands.saturating_sub(visible_height);
+        let arrow_lines =
+            if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
+        let counter_line = if has_content_above || has_content_below {
+            1
+        } else {
+            0
+        };
+        let compact_height = (visible_height + arrow_lines + counter_line) as u16;
+
+        let compact_area = Rect {
+            x: dropdown_area.x,
+            y: dropdown_area.y,
+            width: dropdown_area.width,
+            height: compact_height,
+        };
+
+        // Calculate scroll position
+        let max_scroll = total_commands.saturating_sub(visible_height);
+        let scroll = if state.helper_scroll > max_scroll {
+            max_scroll
+        } else {
+            state.helper_scroll
+        };
+
+        // Find the longest command name to calculate padding
         let max_command_length = commands_to_show
             .iter()
             .map(|h| h.command.len())
             .max()
             .unwrap_or(0);
 
-        let items: Vec<ListItem> = commands_to_show
-            .iter()
-            .enumerate()
-            .map(|(i, h)| {
-                let padding_needed = max_command_length - h.command.len();
+        // Create visible lines with scroll indicators
+        let mut visible_lines = Vec::new();
+
+        // Add top arrow indicator if there are hidden items above
+        let has_content_above = scroll > 0;
+        if has_content_above {
+            visible_lines.push(Line::from(vec![Span::styled(
+                " ▲",
+                Style::default().fg(Color::DarkGray),
+            )]));
+        }
+
+        // Create exactly the number of visible lines (no extra spacing)
+        for i in 0..visible_height {
+            let line_index = scroll + i;
+            if line_index < total_commands {
+                let command = &commands_to_show[line_index];
+                let padding_needed = max_command_length - command.command.len();
                 let padding = " ".repeat(padding_needed);
-                let is_selected = i == state.helper_selected;
+                let is_selected = line_index == state.helper_selected;
 
                 let command_style = if is_selected {
                     Style::default().fg(Color::Black).bg(Color::Cyan)
@@ -56,21 +103,53 @@ pub fn render_helper_dropdown(f: &mut Frame, state: &AppState, dropdown_area: Re
                     Style::default().fg(AdaptiveColors::text())
                 };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {}  ", h.command), command_style),
+                let spans = vec![
+                    Span::styled(format!("  {}  ", command.command), command_style),
                     Span::styled(padding, Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!(" – {}", h.description), description_style),
-                ]))
-                .style(item_style)
-            })
-            .collect();
-        // No background block
-        let mut list_state = ListState::default();
-        list_state.select(Some(
-            state.helper_selected.min(items.len().saturating_sub(1)),
-        ));
-        let dropdown_widget = List::new(items).block(Block::default());
-        f.render_stateful_widget(dropdown_widget, dropdown_area, &mut list_state);
+                    Span::styled(format!(" – {}", command.description), description_style),
+                ];
+
+                visible_lines.push(Line::from(spans));
+            } else {
+                visible_lines.push(Line::from(""));
+            }
+        }
+
+        // Add bottom arrow indicator if there are hidden items below
+        if has_content_below {
+            visible_lines.push(Line::from(vec![Span::styled(
+                " ▼",
+                Style::default().fg(Color::DarkGray),
+            )]));
+        }
+
+        // Calculate current selected item position (1-based)
+        let current_position = state.helper_selected + 1;
+
+        // Create navigation indicators
+        let mut indicator_spans = vec![];
+
+        if has_content_above || has_content_below {
+            // Show current position counter
+            indicator_spans.push(Span::styled(
+                format!(" ({}/{})", current_position, total_commands),
+                Style::default().fg(Color::Reset),
+            ));
+        }
+
+        // Add counter as a separate line if needed
+        if !indicator_spans.is_empty() {
+            visible_lines.push(Line::from(indicator_spans));
+        }
+
+        // Render the content using a List widget for more compact display
+        let items: Vec<ListItem> = visible_lines.into_iter().map(ListItem::new).collect();
+
+        let list = List::new(items)
+            .block(Block::default())
+            .style(Style::default().bg(Color::Reset).fg(Color::White));
+
+        f.render_widget(list, compact_area);
     }
 }
 
