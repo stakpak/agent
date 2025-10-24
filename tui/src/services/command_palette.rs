@@ -25,6 +25,7 @@ pub enum CommandAction {
     MemorizeConversation,
     SubmitIssue,
     GetSupport,
+    NewSession,
 }
 
 impl Command {
@@ -57,6 +58,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Show all keyboard shortcuts",
             "Ctrl+S",
             CommandAction::OpenShortcuts,
+        ),
+        Command::new(
+            "New Session",
+            "Start a new session",
+            "/new",
+            CommandAction::NewSession,
         ),
         Command::new(
             "Sessions",
