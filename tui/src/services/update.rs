@@ -651,10 +651,12 @@ pub fn update(
                 *output = truncate_output(output);
             }
 
-            line = truncate_output(&line);
+            // Redact any secrets (including pasted passwords captured earlier)
+            let redacted = state.secret_manager.redact_and_store_secrets(&line, None);
+            let redacted = truncate_output(&redacted);
             state
                 .messages
-                .push(Message::render_escaped_text_block(line));
+                .push(Message::render_escaped_text_block(redacted));
         }
 
         InputEvent::ShellError(line) => {
@@ -1502,6 +1504,10 @@ fn handle_input_submitted(
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let input = state.input().to_string();
+            // Store this input as a password candidate in the redaction map when waiting for input
+            if state.waiting_for_shell_input {
+                let _ = state.secret_manager.redact_and_store_password("", &input);
+            }
             state.text_area.set_text("");
 
             // Send the input to the shell command
@@ -2367,6 +2373,14 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // Normalize line endings: many terminals convert newlines to \r when pasting,
     // but textarea expects \n. This is the same fix used in Codex.
     let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+
+    // If we're in a password context (shell mode waiting for input), pre-register this value
+    // in the redaction map so any occurrences in output/logs are masked immediately.
+    if state.show_shell_mode && state.waiting_for_shell_input {
+        let _ = state
+            .secret_manager
+            .redact_and_store_password("", &normalized_pasted);
+    }
 
     let char_count = normalized_pasted.chars().count();
     if char_count > MAX_PASTE_CHAR_COUNT {
