@@ -70,6 +70,14 @@ pub struct AppConfig {
     pub warden: Option<WardenConfig>,
 }
 
+#[derive(Deserialize, Clone)]
+struct OldAppConfig {
+    pub api_endpoint: String,
+    pub api_key: Option<String>,
+    pub machine_name: Option<String>,
+    pub auto_append_gitignore: Option<bool>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProfileInfo {
     pub name: String,
@@ -84,6 +92,16 @@ impl From<AppConfig> for ClientConfig {
         ClientConfig {
             api_key: config.api_key.clone(),
             api_endpoint: config.api_endpoint.clone(),
+        }
+    }
+}
+
+impl From<OldAppConfig> for ProfileConfig {
+    fn from(old_config: OldAppConfig) -> Self {
+        ProfileConfig {
+            api_endpoint: Some(old_config.api_endpoint),
+            api_key: old_config.api_key,
+            ..ProfileConfig::default()
         }
     }
 }
@@ -131,25 +149,10 @@ impl AppConfig {
                 config_file
             } else {
                 // Try to parse as old format and migrate
-                #[derive(Deserialize)]
-                struct OldAppConfig {
-                    pub api_endpoint: String,
-                    pub api_key: Option<String>,
-                    pub machine_name: Option<String>,
-                    pub auto_append_gitignore: Option<bool>,
-                }
-
                 if let Ok(old_config) = toml::from_str::<OldAppConfig>(&content) {
                     // Migrate old config to new format
                     let mut profiles = HashMap::new();
-                    profiles.insert(
-                        "default".to_string(),
-                        ProfileConfig {
-                            api_endpoint: Some(old_config.api_endpoint),
-                            api_key: old_config.api_key,
-                            ..ProfileConfig::default()
-                        },
-                    );
+                    profiles.insert("default".to_string(), old_config.clone().into());
 
                     let migrated_config = ConfigFile {
                         profiles,
