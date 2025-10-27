@@ -151,11 +151,11 @@ impl AppConfig {
                 // Try to parse as old format and migrate
                 if let Ok(old_config) = toml::from_str::<OldAppConfig>(&content) {
                     // Migrate old config to new format
-                    let mut profiles = HashMap::new();
-                    profiles.insert("default".to_string(), old_config.clone().into());
-
                     let migrated_config = ConfigFile {
-                        profiles,
+                        profiles: HashMap::from([(
+                            "default".to_string(),
+                            old_config.clone().into(),
+                        )]),
                         settings: Settings {
                             machine_name: old_config.machine_name,
                             auto_append_gitignore: old_config.auto_append_gitignore,
