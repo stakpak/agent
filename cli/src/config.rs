@@ -169,12 +169,21 @@ impl AppConfig {
                     };
 
                     // Save the migrated config
-                    let config_str = toml::to_string_pretty(&migrated_config).map_err(|e| {
-                        ConfigError::Message(format!("Failed to serialize migrated config: {}", e))
-                    })?;
-                    write(&config_path, config_str).map_err(|e| {
-                        ConfigError::Message(format!("Failed to save migrated config: {}", e))
-                    })?;
+                    toml::to_string_pretty(&migrated_config)
+                        .map_err(|e| {
+                            ConfigError::Message(format!(
+                                "Failed to serialize migrated config: {}",
+                                e
+                            ))
+                        })
+                        .and_then(|config_str| {
+                            write(&config_path, config_str).map_err(|e| {
+                                ConfigError::Message(format!(
+                                    "Failed to save migrated config: {}",
+                                    e
+                                ))
+                            })
+                        })?;
 
                     migrated_config
                 } else {
