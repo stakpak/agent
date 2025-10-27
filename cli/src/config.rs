@@ -24,7 +24,7 @@ pub struct WardenConfig {
     pub volumes: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
     pub api_key: Option<String>,
@@ -101,9 +101,6 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
     ProfileConfig {
         api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
         api_key: default_profile.and_then(|p| p.api_key.clone()),
-        allowed_tools: None,
-        auto_approve: None,
-        rulebooks: None,
         warden: Some(WardenConfig {
             enabled: true,
             volumes: vec![
@@ -116,6 +113,7 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
                 "~/.kube:/home/agent/.kube:ro".to_string(),
             ],
         }),
+        ..ProfileConfig::default()
     }
 }
 
@@ -149,10 +147,7 @@ impl AppConfig {
                         ProfileConfig {
                             api_endpoint: Some(old_config.api_endpoint),
                             api_key: old_config.api_key,
-                            allowed_tools: None,
-                            auto_approve: None,
-                            rulebooks: None,
-                            warden: None,
+                            ..ProfileConfig::default()
                         },
                     );
 
@@ -186,11 +181,7 @@ impl AppConfig {
                 "default".to_string(),
                 ProfileConfig {
                     api_endpoint: Some("https://apiv2.stakpak.dev".to_string()),
-                    api_key: None,
-                    allowed_tools: None,
-                    auto_approve: None,
-                    rulebooks: None,
-                    warden: None,
+                    ..ProfileConfig::default()
                 },
             );
 
