@@ -1,0 +1,39 @@
+[sandbox]
+mode = "readonly"  # readonly | workspace-write | full-access
+
+[network]
+allow_network = true
+log_network = true
+
+# Command-specific network policies
+[[network.command_rules]]
+pattern = "rm.*-rf"           # Regex: matches "rm -rf", "rm -r -f", etc.
+allow_network = false          # Block network access
+destructive = true             # Mark as destructive
+
+[[network.command_rules]]
+pattern = "drop.*database"      # Matches destructive database operations
+allow_network = false
+destructive = true
+
+[[network.command_rules]]
+pattern = "git"                # Safe git commands
+allow_network = true
+destructive = false
+
+[audit]
+enabled = true
+log_file = "~/.stakpak/sandbox-audit.log"
+log_level = "info"
+log_file_access = true
+log_network = true
+log_commands = true
+log_security_blocks = true
+
+[filesystem]
+# Example (not yet implemented)
+read_only_paths = [
+    "./",
+    "~/.stakpak/config.toml",
+]
+
