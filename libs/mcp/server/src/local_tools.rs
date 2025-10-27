@@ -1,5 +1,6 @@
 use crate::tool_container::ToolContainer;
 use rand::Rng;
+use linux_sandbox::SandboxPolicy;
 use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
@@ -1113,6 +1114,34 @@ SAFETY NOTES:
         timeout: Option<u64>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
+        // Check if sandbox is enabled and apply policy
+        if self.sandbox_enabled {
+            tracing::info!("Sandbox mode enabled, applying policy to command: {}", actual_command);
+            
+            // Load default sandbox policy
+            let policy = SandboxPolicy::default();
+            
+            // Evaluate command against policy
+            let allow_network = policy.should_allow_network(actual_command);
+            let is_destructive = policy.is_destructive(actual_command);
+            
+            tracing::info!(
+                "Policy evaluation - command: {}, allow_network: {}, is_destructive: {}",
+                actual_command,
+                allow_network,
+                is_destructive
+            );
+            
+            // Log policy decisions
+            if !allow_network {
+                tracing::warn!("Policy blocked network access for command: {}", actual_command);
+            }
+            
+            if is_destructive {
+                tracing::warn!("Destructive command detected: {}", actual_command);
+            }
+        }
+        
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
             .arg(actual_command)

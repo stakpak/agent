@@ -20,6 +20,7 @@ pub struct ToolContainer {
     pub subagent_configs: Option<SubagentConfigs>,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
+    pub sandbox_enabled: bool,
 }
 
 #[tool_router]
@@ -32,6 +33,7 @@ impl ToolContainer {
         task_manager: Arc<TaskManagerHandle>,
         subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
+        sandbox_enabled: bool,
     ) -> Result<Self, String> {
         let client = if let Some(api_config) = api_config {
             Some(Client::new(&api_config)?)
@@ -47,6 +49,7 @@ impl ToolContainer {
             subagent_configs,
             enabled_tools,
             tool_router,
+            sandbox_enabled,
         })
     }
 

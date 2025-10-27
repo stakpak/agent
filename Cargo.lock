@@ -4973,6 +4973,7 @@ dependencies = [
  "axum-server",
  "chrono",
  "fast_html2md",
+ "linux-sandbox",
  "rand 0.9.1",
  "reqwest",
  "rmcp",

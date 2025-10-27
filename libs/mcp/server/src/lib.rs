@@ -211,6 +211,7 @@ async fn start_server_internal(
             task_manager_handle.clone(),
             config.subagent_configs.clone(),
             ToolContainer::tool_router_local(),
+            config.sandbox,
         ),
         ToolMode::RemoteOnly => {
             let mut tool_router = ToolContainer::tool_router_remote();
@@ -226,6 +227,7 @@ async fn start_server_internal(
                 task_manager_handle.clone(),
                 config.subagent_configs.clone(),
                 tool_router,
+                config.sandbox,
             )
         }
         ToolMode::Combined => {
@@ -248,6 +250,7 @@ async fn start_server_internal(
                 task_manager_handle.clone(),
                 config.subagent_configs.clone(),
                 tool_router,
+                config.sandbox,
             )
         }
     }
