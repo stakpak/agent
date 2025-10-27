@@ -106,6 +106,15 @@ impl From<OldAppConfig> for ProfileConfig {
     }
 }
 
+impl From<OldAppConfig> for Settings {
+    fn from(old_config: OldAppConfig) -> Self {
+        Settings {
+            machine_name: old_config.machine_name,
+            auto_append_gitignore: old_config.auto_append_gitignore,
+        }
+    }
+}
+
 fn get_config_path(custom_path: Option<&str>) -> String {
     custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
         format!(
@@ -156,10 +165,7 @@ impl AppConfig {
                             "default".to_string(),
                             old_config.clone().into(),
                         )]),
-                        settings: Settings {
-                            machine_name: old_config.machine_name,
-                            auto_append_gitignore: old_config.auto_append_gitignore,
-                        },
+                        settings: old_config.into(),
                     };
 
                     // Save the migrated config
