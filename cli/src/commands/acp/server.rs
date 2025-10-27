@@ -1097,6 +1097,7 @@ impl StakpakAcpAgent {
                     bind_address,
                     certificate_chain: certificate_chain_for_server,
                     subagent_configs: None,
+                    sandbox: false, // ACP mode doesn't use sandbox
                 },
                 Some(listener),
                 None,

@@ -342,6 +342,7 @@ impl Commands {
                         subagent_configs: None, // MCP standalone mode doesn't need subagent configs
                         bind_address,
                         certificate_chain: Arc::new(certificate_chain),
+                        sandbox: false, // Standalone MCP mode doesn't use sandbox
                     },
                     Some(listener),
                     None,

@@ -16,14 +16,13 @@ pub fn is_seccomp_supported() -> bool {
 
 // Check if running in container
 pub fn is_running_in_container() -> bool {
-    std::path::Path::new("/.dockerenv").exists() ||
-    (std::path::Path::new("/proc/1/cgroup").exists() && 
-     std::fs::read_to_string("/proc/1/cgroup")
-         .map(|content| {
-             content.contains("docker") || 
-             content.contains("containerd") || 
-             content.contains("kubepods")
-         })
-         .unwrap_or(false))
+    std::path::Path::new("/.dockerenv").exists()
+        || (std::path::Path::new("/proc/1/cgroup").exists()
+            && std::fs::read_to_string("/proc/1/cgroup")
+                .map(|content| {
+                    content.contains("docker")
+                        || content.contains("containerd")
+                        || content.contains("kubepods")
+                })
+                .unwrap_or(false))
 }
-

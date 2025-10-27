@@ -1,0 +1,15 @@
+feat: integrate sandbox flag into CLI and config chain
+
+Adds --sandbox flag integration throughout the CLI and MCP server:
+- Add sandbox field to RunAsyncConfig and RunInteractiveConfig
+- Add sandbox field to MCPServerConfig
+- Pass sandbox flag from CLI through to MCP server initialization
+- Fix clippy warnings in linux-sandbox library (empty doc lines, manual strip, Default impl)
+- Add sandbox parameter to all MCPServerConfig instantiations
+
+The sandbox flag is now passed through the entire config chain but not yet
+enforced at command execution. This is the groundwork for applying kernel
+restrictions when the flag is enabled.
+
+Note: Sandbox enforcement at tool execution (execute_local_command) is
+still pending and will be implemented in a follow-up commit.

@@ -9,6 +9,7 @@ stakpak-mcp-server = { path = "../libs/mcp/server" }
 stakpak-mcp-client = { path = "../libs/mcp/client" }
 stakpak-tui = { path = "../tui" }
 stakpak-shared = { path = "../libs/shared" }
+linux-sandbox = { path = "../libs/linux-sandbox" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }

@@ -40,4 +40,3 @@ pub enum SandboxError {
 }
 
 pub type Result<T> = std::result::Result<T, SandboxError>;
-

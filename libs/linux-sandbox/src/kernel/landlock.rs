@@ -27,11 +27,17 @@ pub struct LandlockRules {
     // For now, we'll just provide the structure
 }
 
+impl Default for LandlockRules {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LandlockRules {
     pub fn new() -> Self {
         LandlockRules {}
     }
-    
+
     pub fn apply(&self) -> Result<()> {
         // TODO: Implement actual Landlock rules
         // This would use liblandlock or direct syscalls via nix
@@ -42,17 +48,16 @@ impl LandlockRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_check_support() {
         // Just test that it doesn't panic
         let _ = check_support();
     }
-    
+
     #[test]
     fn test_parse_kernel_version() {
         assert_eq!(parse_kernel_version("5.13.0"), Some((5, 13)));
         assert_eq!(parse_kernel_version("6.1.0"), Some((6, 1)));
     }
 }
-

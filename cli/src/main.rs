@@ -92,6 +92,10 @@ struct Cli {
     #[arg(long = "enable-subagents", default_value_t = false)]
     enable_subagents: bool,
 
+    /// Enable sandbox mode for command execution
+    #[arg(long = "sandbox", default_value_t = false)]
+    sandbox: bool,
+
     /// Subagent configuration file subagents.toml
     #[arg(long = "subagent-config")]
     subagent_config_path: Option<String>,
@@ -374,6 +378,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
+                                sandbox: cli.sandbox,
                             },
                         )
                         .await
@@ -404,6 +409,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
+                                sandbox: cli.sandbox,
                             },
                         )
                         .await

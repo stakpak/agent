@@ -4902,6 +4902,7 @@ dependencies = [
  "glob",
  "jsonrpc-core",
  "jsonrpc-derive",
+ "linux-sandbox",
  "log",
  "names",
  "open",

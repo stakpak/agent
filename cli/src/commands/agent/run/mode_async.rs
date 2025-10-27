@@ -37,6 +37,7 @@ pub struct RunAsyncConfig {
     pub enable_mtls: bool,
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
+    pub sandbox: bool,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -82,6 +83,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 subagent_configs,
                 bind_address,
                 certificate_chain: certificate_chain_for_server,
+                sandbox: config.sandbox,
             },
             Some(listener),
             None,

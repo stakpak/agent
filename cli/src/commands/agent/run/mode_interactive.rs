@@ -44,6 +44,7 @@ pub struct RunInteractiveConfig {
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
+    pub sandbox: bool,
 }
 
 pub async fn run_interactive(
@@ -111,6 +112,7 @@ pub async fn run_interactive(
                     subagent_configs: subagent_configs_for_server,
                     bind_address,
                     certificate_chain: certificate_chain_for_server,
+                    sandbox: config.sandbox,
                 },
                 Some(listener),
                 Some(shutdown_rx),

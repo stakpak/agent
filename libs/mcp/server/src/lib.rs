@@ -91,6 +91,7 @@ pub struct MCPServerConfig {
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
     pub certificate_chain: Arc<Option<CertificateChain>>,
+    pub sandbox: bool,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
