@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::path::Path;
 
+const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
     /// Include only these rulebooks by URI (supports wildcards, empty = all allowed)
@@ -209,7 +211,7 @@ impl AppConfig {
             let mut profiles = HashMap::new();
             profiles.insert(
                 "default".to_string(),
-                ProfileConfig::with_api_endpoint("https://apiv2.stakpak.dev"),
+                ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
             );
 
             ConfigFile {
