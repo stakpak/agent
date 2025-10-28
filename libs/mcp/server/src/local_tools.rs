@@ -1,6 +1,6 @@
 use crate::tool_container::ToolContainer;
-use rand::Rng;
 use linux_sandbox::SandboxPolicy;
+use rand::Rng;
 use rmcp::service::RequestContext;
 use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
@@ -1110,15 +1110,37 @@ SAFETY NOTES:
     /// Check if a command requires network access
     fn command_requires_network(&self, command: &str) -> bool {
         let network_commands = [
-            "curl", "wget", "ping", "nc", "netcat", "ssh", "telnet", 
-            "git clone", "git fetch", "git pull", "git push",
-            "docker pull", "docker push", "kubectl", "aws", "gcloud", 
-            "az", "terraform", "http", "https://", "ftp", "sftp",
-            "rsync", "scp", "mtr"
+            "curl",
+            "wget",
+            "ping",
+            "nc",
+            "netcat",
+            "ssh",
+            "telnet",
+            "git clone",
+            "git fetch",
+            "git pull",
+            "git push",
+            "docker pull",
+            "docker push",
+            "kubectl",
+            "aws",
+            "gcloud",
+            "az",
+            "terraform",
+            "http",
+            "https://",
+            "ftp",
+            "sftp",
+            "rsync",
+            "scp",
+            "mtr",
         ];
-        
+
         let lower_command = command.to_lowercase();
-        network_commands.iter().any(|&cmd| lower_command.contains(cmd))
+        network_commands
+            .iter()
+            .any(|&cmd| lower_command.contains(cmd))
     }
 
     /// Execute local command with existing logic extracted to avoid duplication
@@ -1130,28 +1152,47 @@ SAFETY NOTES:
     ) -> Result<CommandResult, CallToolResult> {
         // Check if sandbox is enabled and apply policy
         if self.sandbox_enabled {
-            tracing::info!("Sandbox mode enabled, applying policy to command: {}", actual_command);
-            
+            tracing::info!(
+                "Sandbox mode enabled, applying policy to command: {}",
+                actual_command
+            );
+
             // Load default sandbox policy
             let policy = SandboxPolicy::default();
-            
+
             // Evaluate command against policy
             let allow_network = policy.should_allow_network(actual_command);
             let is_destructive = policy.is_destructive(actual_command);
-            
+
             tracing::info!(
                 "Policy evaluation - command: {}, allow_network: {}, is_destructive: {}",
                 actual_command,
                 allow_network,
                 is_destructive
             );
-            
+
             // Check if command requires network
             let requires_network = self.command_requires_network(actual_command);
-            
-            // Block if policy says no network but command requires it
-            if requires_network && !allow_network {
-                tracing::warn!("Policy BLOCKED network access for command: {}", actual_command);
+
+            // Block ALL destructive commands when sandbox is enabled
+            if is_destructive {
+                tracing::warn!("Policy BLOCKED destructive command: {}", actual_command);
+                let error_msg = format!(
+                    "Command blocked by sandbox policy. Destructive commands are not allowed: {}",
+                    actual_command
+                );
+                return Err(CallToolResult::error(vec![
+                    Content::text("SANDBOX_POLICY_VIOLATION"),
+                    Content::text(error_msg),
+                ]));
+            }
+
+            // Block if policy says no network and command requires it
+            if !allow_network && requires_network {
+                tracing::warn!(
+                    "Policy BLOCKED network access for command: {}",
+                    actual_command
+                );
                 let error_msg = format!(
                     "Command blocked by sandbox policy. Network access denied for: {}",
                     actual_command
@@ -1161,17 +1202,8 @@ SAFETY NOTES:
                     Content::text(error_msg),
                 ]));
             }
-            
-            // Log policy decisions
-            if !allow_network && !requires_network {
-                tracing::info!("Policy would block network but command doesn't require it");
-            }
-            
-            if is_destructive {
-                tracing::warn!("Destructive command detected: {}", actual_command);
-            }
         }
-        
+
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
             .arg(actual_command)

@@ -1,5 +1,4 @@
 use crate::error::Result;
-// Note: prctl is not available in nix crate, we'll implement seccomp via libseccomp or syscalls directly
 
 /// Check if seccomp is supported on this system
 pub fn check_support() -> bool {
@@ -19,17 +18,57 @@ impl SeccompFilter {
 
     /// Apply seccomp filter to current process
     pub fn apply(&self) -> Result<()> {
-        // TODO: Implement actual seccomp filter
-        // This would block/allow specific syscalls based on allow_network flag
-
-        // For now, just note that seccomp filtering should:
-        // - Block connect(), socket() syscalls if !allow_network
-        // - Allow read-only filesystem operations if read-only mode
-        // - Block write-related syscalls if read-only mode
-
-        if !self.allow_network {
-            // Block network-related syscalls
-            log::info!("Network syscalls will be blocked by seccomp");
+        #[cfg(target_os = "linux")]
+        {
+            use libseccomp::*;
+            
+            // Create a new seccomp filter context
+            let mut ctx = ScmpFilterContext::new_filter(ScmpAction::Allow)?;
+            
+            if !self.allow_network {
+                log::info!("Applying seccomp filter to block network syscalls");
+                
+                // Block network-related syscalls
+                // socket - create network sockets
+                if let Ok(syscall) = ScmpSyscall::new("socket") {
+                    let _ = ctx.add_rule_exact(ScmpAction::Errno(libc::EACCES), syscall);
+                }
+                
+                // connect - connect to network endpoints
+                if let Ok(syscall) = ScmpSyscall::new("connect") {
+                    let _ = ctx.add_rule_exact(ScmpAction::Errno(libc::EACCES), syscall);
+                }
+                
+                // send* - send network data
+                for syscall_name in &["send", "sendto", "sendmsg", "sendmmsg"] {
+                    if let Ok(syscall) = ScmpSyscall::new(syscall_name) {
+                        let _ = ctx.add_rule_exact(ScmpAction::Errno(libc::EACCES), syscall);
+                    }
+                }
+                
+                // recv* - receive network data
+                for syscall_name in &["recv", "recvfrom", "recvmsg", "recvmmsg"] {
+                    if let Ok(syscall) = ScmpSyscall::new(syscall_name) {
+                        let _ = ctx.add_rule_exact(ScmpAction::Errno(libc::EACCES), syscall);
+                    }
+                }
+                
+                // bind, listen, accept - socket operations
+                for syscall_name in &["bind", "listen", "accept", "accept4"] {
+                    if let Ok(syscall) = ScmpSyscall::new(syscall_name) {
+                        let _ = ctx.add_rule_exact(ScmpAction::Errno(libc::EACCES), syscall);
+                    }
+                }
+            }
+            
+            // Load the seccomp filter
+            ctx.load()?;
+            log::info!("Seccomp filter loaded successfully");
+        }
+        
+        #[cfg(not(target_os = "linux"))]
+        {
+            log::warn!("Seccomp is only supported on Linux");
         }
 
         Ok(())

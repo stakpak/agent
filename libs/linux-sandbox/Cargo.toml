@@ -11,6 +11,9 @@ toml = "0.8"
 thiserror = "1.0"
 log = "0.4"
 regex = "1.10"
+libseccomp-sys = "0.1"
+libseccomp = "0.2"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.10"
