@@ -237,14 +237,16 @@ impl AppConfig {
         }
 
         // Get the specified profile
-        let profile = if let Some(profile) = config_file.profiles.get(profile_name) {
-            profile.clone()
-        } else {
-            return Err(ConfigError::Message(format!(
-                "Profile '{}' not found in configuration",
-                profile_name
-            )));
-        };
+        let profile = config_file
+            .profiles
+            .get(profile_name)
+            .cloned()
+            .ok_or_else(|| {
+                ConfigError::Message(format!(
+                    "Profile '{}' not found in configuration",
+                    profile_name
+                ))
+            })?;
 
         // Get defaults from "all" profile if it exists
         let all_profile = config_file.profiles.get("all");
