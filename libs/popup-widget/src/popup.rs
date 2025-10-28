@@ -200,9 +200,9 @@ impl PopupWidget {
     fn calculate_content_area(&self, popup_area: Rect) -> Rect {
         Rect {
             x: popup_area.x + 2,                         // 2 for padding (left)
-            y: popup_area.y + 2,                         // 2 for padding (top)
+            y: popup_area.y + 1,                         // 1 for padding (top)
             width: popup_area.width.saturating_sub(4),   // 2 for padding (left + right)
-            height: popup_area.height.saturating_sub(4), // 2 for padding (top + bottom)
+            height: popup_area.height.saturating_sub(2), // 2 for padding (top + bottom)
         }
     }
 
@@ -272,7 +272,6 @@ impl PopupWidget {
 
             constraint_list.extend([
                 Constraint::Min(1),                       // Tab content (flexible)
-                Constraint::Length(1),                    // Space before footer
                 Constraint::Length(footer_height as u16), // Footer lines
             ]);
 
@@ -370,9 +369,9 @@ impl PopupWidget {
             let footer_area = if has_footer {
                 // Calculate footer area index based on whether subheader is present
                 let footer_index = if has_subheader {
-                    chunk_index + 6 // Skip tab headers, space, subheader, space, content, and space
+                    chunk_index + 5 // Skip tab headers, space, subheader, space, and content
                 } else {
-                    chunk_index + 4 // Skip tab headers, space, content, and space
+                    chunk_index + 3 // Skip tab headers, space, and content
                 };
                 chunks[footer_index]
             } else {
@@ -386,9 +385,9 @@ impl PopupWidget {
             let footer_area = if has_footer {
                 // Calculate footer area index based on whether subheader is present
                 let footer_index = if has_subheader {
-                    chunk_index + 6 // Skip tab headers, space, subheader, space, content, and space
+                    chunk_index + 5 // Skip tab headers, space, subheader, space, and content
                 } else {
-                    chunk_index + 4 // Skip tab headers, space, content, and space
+                    chunk_index + 3 // Skip tab headers, space, and content
                 };
                 chunks[footer_index]
             } else {
@@ -435,7 +434,6 @@ impl PopupWidget {
 
         if has_footer {
             constraints.push(Constraint::Min(1)); // Content (flexible)
-            constraints.push(Constraint::Length(1)); // Space before footer
             constraints.push(Constraint::Length(footer_height as u16)); // Footer lines
         } else {
             constraints.push(Constraint::Min(1)); // Content
@@ -478,7 +476,7 @@ impl PopupWidget {
             // Render footer if present
             if let Some(footer_lines) = &self.config.styled_footer {
                 let footer_area = if has_footer {
-                    chunks[chunk_index + 2] // Skip content and space
+                    chunks[chunk_index + 1] // Skip content only
                 } else {
                     return; // No footer area allocated
                 };
@@ -488,7 +486,7 @@ impl PopupWidget {
                 f.render_widget(footer_paragraph, footer_area);
             } else if let Some(footer_lines) = &self.config.footer {
                 let footer_area = if has_footer {
-                    chunks[chunk_index + 2] // Skip content and space
+                    chunks[chunk_index + 1] // Skip content only
                 } else {
                     return; // No footer area allocated
                 };
