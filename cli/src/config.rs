@@ -253,7 +253,7 @@ impl AppConfig {
         let api_endpoint = profile
             .api_endpoint
             .or_else(|| all_profile.and_then(|all| all.api_endpoint.clone()))
-            .unwrap_or_else(|| "https://apiv2.stakpak.dev".to_string());
+            .unwrap_or_else(|| STAKPAK_API_ENDPOINT.into());
 
         let api_key = profile
             .api_key
