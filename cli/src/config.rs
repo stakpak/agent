@@ -115,6 +115,16 @@ impl From<OldAppConfig> for Settings {
     }
 }
 
+impl From<OldAppConfig> for ConfigFile {
+    // OldAppConfigConfig will always create a 'default' ConfigFile
+    fn from(old_config: OldAppConfig) -> Self {
+        ConfigFile {
+            profiles: HashMap::from([("default".to_string(), old_config.clone().into())]),
+            settings: old_config.into(),
+        }
+    }
+}
+
 fn get_config_path(custom_path: Option<&str>) -> String {
     custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
         format!(
@@ -169,14 +179,7 @@ impl AppConfig {
                 // Try to parse as old format and migrate
                 if let Ok(old_config) = toml::from_str::<OldAppConfig>(&content) {
                     // Migrate old config to new format
-                    let migrated_config = ConfigFile {
-                        profiles: HashMap::from([(
-                            "default".to_string(),
-                            old_config.clone().into(),
-                        )]),
-                        settings: old_config.into(),
-                    };
-
+                    let migrated_config = old_config.into();
                     // Save the migrated config
                     toml::to_string_pretty(&migrated_config)
                         .map_err(|e| {
