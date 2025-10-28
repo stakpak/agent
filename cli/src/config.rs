@@ -182,6 +182,13 @@ impl ProfileConfig {
 
 impl AppConfig {
     pub fn load(profile_name: &str, custom_config_path: Option<&str>) -> Result<Self, ConfigError> {
+        // Don't allow "all" as a profile to be loaded directly
+        if profile_name == "all" {
+            return Err(ConfigError::Message(
+                "Cannot use 'all' as a profile name. It's reserved for defaults.".to_string(),
+            ));
+        }
+
         let config_path: String = get_config_path(custom_config_path);
 
         // Try to load existing config file
@@ -233,13 +240,6 @@ impl AppConfig {
                 .profiles
                 .insert("readonly".to_string(), readonly_profile);
             is_config_file_dirty = true;
-        }
-
-        // Don't allow "all" as a profile to be loaded directly
-        if profile_name == "all" {
-            return Err(ConfigError::Message(
-                "Cannot use 'all' as a profile name. It's reserved for defaults.".to_string(),
-            ));
         }
 
         // Get the specified profile
