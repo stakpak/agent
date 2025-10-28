@@ -116,8 +116,11 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             // Calculate available width for URI (accounting for checkbox and padding)
             let available_width = content_chunks[0].width.saturating_sub(6); // 4 for checkbox + 2 for padding
 
-            // Wrap the URI to fit the available width
-            let wrapped_uri = textwrap::wrap(&rulebook.uri, available_width as usize);
+            // Clean the URI for display
+            let cleaned_uri = clean_uri_for_display(&rulebook.uri);
+
+            // Wrap the cleaned URI to fit the available width
+            let wrapped_uri = textwrap::wrap(&cleaned_uri, available_width as usize);
 
             // First line with checkbox and first part of URI
             let mut first_line_spans = vec![];
@@ -236,7 +239,7 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
             detail_lines.push(Line::from("")); // Empty line
         }
 
-        // URI (full)
+        // URI (original)
         detail_lines.push(Line::from(vec![Span::styled(
             "URI:",
             Style::default()
@@ -318,6 +321,28 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Render the border with title last (so it's on top)
     f.render_widget(block, area);
+}
+
+/// Helper function to clean URI for display by showing only the filename without .md extension
+fn clean_uri_for_display(uri: &str) -> String {
+    let mut cleaned = uri.to_string();
+
+    // Remove protocol prefix (e.g., "stakpak://", "https://", etc.)
+    if let Some(protocol_end) = cleaned.find("://") {
+        cleaned = cleaned[protocol_end + 3..].to_string();
+    }
+
+    // Extract just the filename from the path
+    if let Some(last_slash) = cleaned.rfind('/') {
+        cleaned = cleaned[last_slash + 1..].to_string();
+    }
+
+    // Remove .md extension if present
+    if cleaned.ends_with(".md") {
+        cleaned = cleaned[..cleaned.len() - 3].to_string();
+    }
+
+    cleaned
 }
 
 /// Helper function to create a centered rect
