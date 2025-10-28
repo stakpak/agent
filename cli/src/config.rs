@@ -144,6 +144,15 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
     }
 }
 
+impl ProfileConfig {
+    fn with_api_endpoint(api_endpoint: &str) -> Self {
+        ProfileConfig {
+            api_endpoint: Some(api_endpoint.into()),
+            ..ProfileConfig::default()
+        }
+    }
+}
+
 impl AppConfig {
     pub fn load(profile_name: &str, custom_config_path: Option<&str>) -> Result<Self, ConfigError> {
         let config_path: String = get_config_path(custom_config_path);
@@ -197,10 +206,7 @@ impl AppConfig {
             let mut profiles = HashMap::new();
             profiles.insert(
                 "default".to_string(),
-                ProfileConfig {
-                    api_endpoint: Some("https://apiv2.stakpak.dev".to_string()),
-                    ..ProfileConfig::default()
-                },
+                ProfileConfig::with_api_endpoint("https://apiv2.stakpak.dev"),
             );
 
             ConfigFile {
