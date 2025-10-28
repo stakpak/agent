@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use stakpak_api::{ClientConfig, ListRuleBook};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
+use std::io;
 use std::path::Path;
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
@@ -181,6 +182,37 @@ impl ProfileConfig {
 }
 
 impl AppConfig {
+    fn migrate_old_config(config_path: &str, content: &str) -> Result<ConfigFile, ConfigError> {
+        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
+            ConfigError::Message("Failed to parse config file in both old and new formats".into())
+        })?;
+        let config_file = old_config.into();
+
+        toml::to_string_pretty(&config_file)
+            .map_err(|e| {
+                ConfigError::Message(format!("Failed to serialize migrated config: {}", e))
+            })
+            .and_then(|config_str| {
+                write(config_path, config_str).map_err(|e| {
+                    ConfigError::Message(format!("Failed to save migrated config: {}", e))
+                })
+            })?;
+
+        Ok(config_file)
+    }
+
+    fn load_config_file(config_path: &str) -> Result<ConfigFile, ConfigError> {
+        match std::fs::read_to_string(config_path) {
+            Ok(content) => toml::from_str::<ConfigFile>(&content)
+                .or_else(|_| Self::migrate_old_config(config_path, &content)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::default()),
+            Err(e) => Err(ConfigError::Message(format!(
+                "Failed to read config file: {}",
+                e
+            ))),
+        }
+    }
+
     pub fn load(profile_name: &str, custom_config_path: Option<&str>) -> Result<Self, ConfigError> {
         // Don't allow "all" as a profile to be loaded directly
         if profile_name == "all" {
@@ -192,45 +224,7 @@ impl AppConfig {
         let config_path: String = get_config_path(custom_config_path);
 
         // Try to load existing config file
-        let mut config_file = if Path::new(&config_path).exists() {
-            let content = std::fs::read_to_string(&config_path)
-                .map_err(|e| ConfigError::Message(format!("Failed to read config file: {}", e)))?;
-
-            // Try to parse as new format first
-            if let Ok(config_file) = toml::from_str::<ConfigFile>(&content) {
-                config_file
-            } else {
-                // Try to parse as old format and migrate
-                if let Ok(old_config) = toml::from_str::<OldAppConfig>(&content) {
-                    // Migrate old config to new format
-                    let migrated_config = old_config.into();
-                    // Save the migrated config
-                    toml::to_string_pretty(&migrated_config)
-                        .map_err(|e| {
-                            ConfigError::Message(format!(
-                                "Failed to serialize migrated config: {}",
-                                e
-                            ))
-                        })
-                        .and_then(|config_str| {
-                            write(&config_path, config_str).map_err(|e| {
-                                ConfigError::Message(format!(
-                                    "Failed to save migrated config: {}",
-                                    e
-                                ))
-                            })
-                        })?;
-
-                    migrated_config
-                } else {
-                    return Err(ConfigError::Message(
-                        "Failed to parse config file in both old and new formats".to_string(),
-                    ));
-                }
-            }
-        } else {
-            ConfigFile::default()
-        };
+        let mut config_file = Self::load_config_file(&config_path)?;
 
         let mut is_config_file_dirty = false;
         if !config_file.profiles.contains_key("readonly") {
