@@ -1157,8 +1157,8 @@ SAFETY NOTES:
                 actual_command
             );
 
-            // Load default sandbox policy
-            let policy = SandboxPolicy::default();
+            // Load sandbox policy from .stakpak/sandbox/ (or create default)
+            let policy = SandboxPolicy::load_or_default();
 
             // Evaluate command against policy
             let allow_network = policy.should_allow_network(actual_command);

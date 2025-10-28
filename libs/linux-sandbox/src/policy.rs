@@ -110,7 +110,7 @@ impl Default for SandboxPolicy {
             filesystem: None,
             audit: AuditPolicy {
                 enabled: true,
-                log_file: Some("~/.stakpak/sandbox-audit.log".to_string()),
+                log_file: Some(".stakpak/sandbox/audit.log".to_string()),
                 log_level: Some("info".to_string()),
                 log_file_access: true,
                 log_network: true,
@@ -139,6 +139,45 @@ impl SandboxPolicy {
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;
         Ok(())
+    }
+
+    /// Load policy from .stakpak/sandbox/sandbox-policy.toml in current working directory
+    /// Falls back to default if file doesn't exist
+    pub fn load_or_default() -> Self {
+        if let Ok(cwd) = std::env::current_dir() {
+            let policy_path = cwd
+                .join(".stakpak")
+                .join("sandbox")
+                .join("sandbox-policy.toml");
+
+            // Create directory structure
+            if let Some(parent) = policy_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            // Try to load from file
+            if policy_path.exists() {
+                match Self::from_file(&policy_path) {
+                    Ok(policy) => {
+                        log::info!("Loaded sandbox policy from: {:?}", policy_path);
+                        return policy;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to load policy from {:?}: {}", policy_path, e);
+                    }
+                }
+            }
+
+            // Create default policy file if it doesn't exist
+            let default_policy = Self::default();
+            if let Err(e) = default_policy.to_file(&policy_path) {
+                log::warn!("Failed to save default policy: {}", e);
+            } else {
+                log::info!("Created default sandbox policy at: {:?}", policy_path);
+            }
+        }
+
+        Self::default()
     }
 
     /// Check if a command should be allowed network access

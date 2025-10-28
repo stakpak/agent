@@ -24,6 +24,7 @@ pub struct ToolContainer {
 }
 
 #[tool_router]
+#[allow(clippy::too_many_arguments)]
 impl ToolContainer {
     pub fn new(
         api_config: Option<ClientConfig>,

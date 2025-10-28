@@ -23,7 +23,7 @@ destructive = false
 
 [audit]
 enabled = true
-log_file = "~/.stakpak/sandbox-audit.log"
+log_file = ".stakpak/sandbox/audit.log"
 log_level = "info"
 log_file_access = true
 log_network = true
@@ -36,4 +36,3 @@ read_only_paths = [
     "./",
     "~/.stakpak/config.toml",
 ]
-

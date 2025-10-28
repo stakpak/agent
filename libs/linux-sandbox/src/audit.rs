@@ -36,7 +36,14 @@ pub struct AuditLogger {
 
 impl AuditLogger {
     pub fn new(enabled: bool, log_file: Option<String>) -> Self {
-        let log_file = log_file.and_then(|f| expand_path(&f));
+        let log_file = log_file.and_then(|f| {
+            let expanded = expand_path(&f)?;
+            // Ensure directory exists
+            if let Some(parent) = expanded.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            Some(expanded)
+        });
 
         Self {
             enabled,
@@ -107,11 +114,20 @@ impl AuditLogger {
 }
 
 fn expand_path(path: &str) -> Option<PathBuf> {
+    // Handle home directory expansion
     if let Some(stripped) = path.strip_prefix("~/") {
         if let Ok(home) = std::env::var("HOME") {
             return Some(PathBuf::from(home).join(stripped));
         }
     }
+
+    // For relative paths, make them relative to current working directory
+    if path.starts_with("./") || (!path.starts_with("/") && !path.starts_with("~/")) {
+        if let Ok(cwd) = std::env::current_dir() {
+            return Some(cwd.join(path));
+        }
+    }
+
     Some(PathBuf::from(path))
 }
 
