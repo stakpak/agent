@@ -127,6 +127,21 @@ impl From<OldAppConfig> for ConfigFile {
     }
 }
 
+impl Default for ConfigFile {
+    fn default() -> Self {
+        ConfigFile {
+            profiles: HashMap::from([(
+                "default".into(),
+                ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
+            )]),
+            settings: Settings {
+                machine_name: None,
+                auto_append_gitignore: Some(true),
+            },
+        }
+    }
+}
+
 fn get_config_path(custom_path: Option<&str>) -> String {
     custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
         format!(
@@ -207,17 +222,7 @@ impl AppConfig {
                 }
             }
         } else {
-            // Create default config structure
-            ConfigFile {
-                profiles: HashMap::from([(
-                    "default".into(),
-                    ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
-                )]),
-                settings: Settings {
-                    machine_name: None,
-                    auto_append_gitignore: Some(true),
-                },
-            }
+            ConfigFile::default()
         };
 
         let mut is_config_file_dirty = false;
