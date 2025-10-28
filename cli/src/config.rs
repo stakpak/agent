@@ -208,14 +208,11 @@ impl AppConfig {
             }
         } else {
             // Create default config structure
-            let mut profiles = HashMap::new();
-            profiles.insert(
-                "default".to_string(),
-                ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
-            );
-
             ConfigFile {
-                profiles,
+                profiles: HashMap::from([(
+                    "default".into(),
+                    ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
+                )]),
                 settings: Settings {
                     machine_name: None,
                     auto_append_gitignore: Some(true),
