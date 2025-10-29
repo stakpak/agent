@@ -4,7 +4,7 @@ use stakpak_api::{ClientConfig, ListRuleBook};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
 
@@ -173,13 +173,14 @@ impl ProfileConfig {
 }
 
 impl AppConfig {
-    fn get_config_path(custom_path: Option<&str>) -> String {
-        custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
-            format!(
-                "{}/.stakpak/config.toml",
-                std::env::var("HOME").unwrap_or_default()
-            )
-        })
+    fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
+        match path {
+            Some(p) => p.as_ref().to_path_buf(),
+            None => {
+                let home = std::env::var("HOME").unwrap_or_default();
+                Path::new(&home).join("./stakpak/config.toml")
+            }
+        }
     }
 
     fn migrate_old_config<P: AsRef<Path>>(
@@ -224,7 +225,7 @@ impl AppConfig {
             ));
         }
 
-        let config_path: String = Self::get_config_path(custom_config_path);
+        let config_path = Self::get_config_path(custom_config_path);
 
         // Try to load existing config file
         let mut config_file = Self::load_config_file(&config_path)?;
@@ -292,7 +293,7 @@ impl AppConfig {
             machine_name: config_file.settings.machine_name,
             auto_append_gitignore: config_file.settings.auto_append_gitignore,
             profile_name: profile_name.to_string(),
-            config_path,
+            config_path: config_path.display().to_string(),
             allowed_tools,
             auto_approve,
             rulebooks,
