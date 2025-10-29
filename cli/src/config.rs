@@ -143,15 +143,6 @@ impl Default for ConfigFile {
     }
 }
 
-fn get_config_path(custom_path: Option<&str>) -> String {
-    custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
-        format!(
-            "{}/.stakpak/config.toml",
-            std::env::var("HOME").unwrap_or_default()
-        )
-    })
-}
-
 fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileConfig {
     ProfileConfig {
         api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
@@ -182,6 +173,15 @@ impl ProfileConfig {
 }
 
 impl AppConfig {
+    fn get_config_path(custom_path: Option<&str>) -> String {
+        custom_path.map(|p| p.to_string()).unwrap_or_else(|| {
+            format!(
+                "{}/.stakpak/config.toml",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        })
+    }
+
     fn migrate_old_config<P: AsRef<Path>>(
         config_path: P,
         content: &str,
@@ -224,7 +224,7 @@ impl AppConfig {
             ));
         }
 
-        let config_path: String = get_config_path(custom_config_path);
+        let config_path: String = Self::get_config_path(custom_config_path);
 
         // Try to load existing config file
         let mut config_file = Self::load_config_file(&config_path)?;
@@ -313,7 +313,7 @@ impl AppConfig {
     pub fn list_available_profiles(
         custom_config_path: Option<&str>,
     ) -> Result<Vec<String>, String> {
-        let config_path = get_config_path(custom_config_path);
+        let config_path = Self::get_config_path(custom_config_path);
 
         if !Path::new(&config_path).exists() {
             return Err("Config file not found".to_string());
