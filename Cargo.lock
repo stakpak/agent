@@ -4825,6 +4825,7 @@ dependencies = [
  "stakpak-shared",
  "stakpak-tui",
  "tar",
+ "tempfile",
  "termimad",
  "tokio",
  "tokio-util",
