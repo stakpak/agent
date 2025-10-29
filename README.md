@@ -232,6 +232,14 @@ tags:
 Your deployment procedures and guidelines here...
 ```
 
+## Platform Testing
+
+### Windows
+
+Comprehensive testing report for Windows CLI functionality, including installation, configuration, and integration with WSL2 and Docker.
+
+[View Windows Testing Report](platform-testing/windows-testing-report.md)
+
 ---
 
 ## ⭐ Like what we're building?
