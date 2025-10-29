@@ -182,7 +182,10 @@ impl ProfileConfig {
 }
 
 impl AppConfig {
-    fn migrate_old_config(config_path: &str, content: &str) -> Result<ConfigFile, ConfigError> {
+    fn migrate_old_config<P: AsRef<Path>>(
+        config_path: P,
+        content: &str,
+    ) -> Result<ConfigFile, ConfigError> {
         let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
             ConfigError::Message("Failed to parse config file in both old and new formats".into())
         })?;
@@ -201,8 +204,8 @@ impl AppConfig {
         Ok(config_file)
     }
 
-    fn load_config_file(config_path: &str) -> Result<ConfigFile, ConfigError> {
-        match std::fs::read_to_string(config_path) {
+    fn load_config_file<P: AsRef<Path>>(config_path: P) -> Result<ConfigFile, ConfigError> {
+        match std::fs::read_to_string(config_path.as_ref()) {
             Ok(content) => toml::from_str::<ConfigFile>(&content)
                 .or_else(|_| Self::migrate_old_config(config_path, &content)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::default()),
