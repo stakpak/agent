@@ -573,6 +573,26 @@ auto_append_gitignore = false
         assert!(saved.contains("[profiles.default]"));
         assert!(saved.contains("[settings]"));
     }
+
+    #[test]
+    fn profile_config_with_api_endpoint() {
+        let p1 = ProfileConfig::with_api_endpoint("url1");
+        let p2 = ProfileConfig::with_api_endpoint("url2");
+
+        assert_eq!(p1.api_endpoint.as_deref(), Some("url1"));
+        assert_eq!(p2.api_endpoint.as_deref(), Some("url2"));
+
+        let default = ProfileConfig::default();
+
+        assert!(default.api_endpoint.is_none());
+        assert!(default.api_key.is_none());
+
+        assert_ne!(p1.api_endpoint, default.api_endpoint);
+        assert_ne!(p2.api_endpoint, default.api_endpoint);
+
+        assert_eq!(p1.api_key, default.api_key);
+        assert_eq!(p2.api_key, default.api_key);
+    }
 }
 
 #[cfg(test)]
