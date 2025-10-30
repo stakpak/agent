@@ -176,10 +176,9 @@ impl AppConfig {
     fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
         match path {
             Some(p) => p.as_ref().to_path_buf(),
-            None => {
-                let home = std::env::var("HOME").unwrap_or_default();
-                Path::new(&home).join("./stakpak/config.toml")
-            }
+            None => std::env::home_dir()
+                .unwrap_or_default()
+                .join("./stakpak/config.toml"),
         }
     }
 
