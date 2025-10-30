@@ -466,6 +466,13 @@ impl RulebookConfig {
 mod app_config_tests {
     use super::*;
 
+    const OLD_CONFIG: &str = r#"
+api_endpoint = "https://legacy"
+api_key = "old-key"
+machine_name = "legacy-machine"
+auto_append_gitignore = false
+"#;
+
     #[test]
     fn get_config_path_returns_custom_path_when_provided() {
         let custom_path = PathBuf::from("/tmp/stakpak/custom.toml");
@@ -479,6 +486,26 @@ mod app_config_tests {
         let resolved = AppConfig::get_config_path::<&str>(None);
         let expected = home_dir.join(STAKPAK_CONFIG_PATH);
         assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn old_config_into_profile_config() {
+        let old_config: OldAppConfig = toml::from_str(OLD_CONFIG).unwrap();
+        let resolved: ProfileConfig = old_config.clone().into();
+        let expected = ProfileConfig {
+            api_endpoint: Some(old_config.api_endpoint),
+            api_key: old_config.api_key,
+            ..ProfileConfig::default()
+        };
+
+        assert!(resolved.api_endpoint.is_some());
+        assert!(expected.api_endpoint.is_some());
+
+        assert_eq!(resolved.api_endpoint, expected.api_endpoint);
+        assert_eq!(resolved.api_key, expected.api_key);
+
+        assert!(resolved.allowed_tools.is_none());
+        assert!(expected.allowed_tools.is_none());
     }
 }
 
