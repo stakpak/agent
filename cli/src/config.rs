@@ -465,6 +465,7 @@ impl RulebookConfig {
 #[cfg(test)]
 mod app_config_tests {
     use super::*;
+    use tempfile::TempDir;
 
     const OLD_CONFIG: &str = r#"
 api_endpoint = "https://legacy"
@@ -472,6 +473,10 @@ api_key = "old-key"
 machine_name = "legacy-machine"
 auto_append_gitignore = false
 "#;
+
+    fn get_a_config_path(dir: &TempDir) -> PathBuf {
+        dir.path().join("config.toml")
+    }
 
     #[test]
     fn get_config_path_returns_custom_path_when_provided() {
@@ -541,6 +546,26 @@ auto_append_gitignore = false
             resolved.settings.auto_append_gitignore,
             old_config.auto_append_gitignore
         );
+    }
+
+    #[test]
+    fn migrate_old_config() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+        let config = AppConfig::migrate_old_config(&path, OLD_CONFIG).unwrap();
+        let default = config.profiles.get("default").unwrap();
+
+        assert_eq!(default.api_endpoint.as_deref(), Some("https://legacy"));
+        assert_eq!(default.api_key.as_deref(), Some("old-key"));
+        assert_eq!(
+            config.settings.machine_name.as_deref(),
+            Some("legacy-machine")
+        );
+        assert_eq!(config.settings.auto_append_gitignore, Some(false));
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("[profiles.default]"));
+        assert!(saved.contains("[settings]"));
     }
 }
 
