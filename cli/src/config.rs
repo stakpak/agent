@@ -507,6 +507,18 @@ auto_append_gitignore = false
         assert!(resolved.allowed_tools.is_none());
         assert!(expected.allowed_tools.is_none());
     }
+
+    #[test]
+    fn old_config_into_setting() {
+        let old_config: OldAppConfig = toml::from_str(OLD_CONFIG).unwrap();
+        let resolved: Settings = old_config.clone().into();
+
+        assert_eq!(resolved.machine_name, old_config.machine_name);
+        assert_eq!(
+            resolved.auto_append_gitignore,
+            old_config.auto_append_gitignore
+        );
+    }
 }
 
 #[cfg(test)]
