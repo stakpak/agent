@@ -519,6 +519,29 @@ auto_append_gitignore = false
             old_config.auto_append_gitignore
         );
     }
+
+    #[test]
+    fn old_config_into_config_file() {
+        let old_config: OldAppConfig = toml::from_str(OLD_CONFIG).unwrap();
+        let resolved: ConfigFile = old_config.clone().into();
+
+        assert_eq!(resolved.profiles.len(), 1);
+        assert!(resolved.profiles.contains_key("default"));
+
+        let profile_config = resolved.profiles.get("default").unwrap();
+
+        assert_eq!(
+            profile_config.api_endpoint.clone().unwrap(),
+            old_config.api_endpoint
+        );
+        assert_eq!(profile_config.api_key, old_config.api_key);
+
+        assert_eq!(resolved.settings.machine_name, old_config.machine_name);
+        assert_eq!(
+            resolved.settings.auto_append_gitignore,
+            old_config.auto_append_gitignore
+        );
+    }
 }
 
 #[cfg(test)]
