@@ -340,6 +340,8 @@ pub enum InputEvent {
     RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
     RulebookSearchInputChanged(char),
     RulebookSearchBackspace,
+    HandleCtrlS,
+    ToggleMoreShortcuts,
 }
 
 #[derive(Debug)]
