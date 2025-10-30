@@ -474,6 +474,19 @@ machine_name = "legacy-machine"
 auto_append_gitignore = false
 "#;
 
+    const NEW_CONFIG: &str = r#"
+[profiles]
+
+[profiles.dev]
+api_endpoint = "https://new-api.stakpak.dev"
+api_key = "dev-key"
+allowed_tools = ["read"]
+
+[settings]
+machine_name = "dev-machine"
+auto_append_gitignore = true
+"#;
+
     fn get_a_config_path(dir: &TempDir) -> PathBuf {
         dir.path().join("config.toml")
     }
@@ -625,6 +638,28 @@ auto_append_gitignore = false
         let overriden = std::fs::read_to_string(&path).unwrap();
         assert!(overriden.contains("[profiles.default]"));
         assert!(overriden.contains("[settings]"));
+    }
+
+    #[test]
+    fn load_config_file_for_new_formats() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+
+        std::fs::write(&path, NEW_CONFIG).unwrap();
+
+        let config = AppConfig::load_config_file(&path).unwrap();
+        assert!(config.profiles.contains_key("dev"));
+
+        let dev = config.profiles.get("dev").unwrap();
+        assert_eq!(
+            dev.api_endpoint.as_deref(),
+            Some("https://new-api.stakpak.dev")
+        );
+        assert_eq!(dev.api_key.as_deref(), Some("dev-key"));
+        assert_eq!(dev.allowed_tools, Some(vec!["read".to_string()]));
+
+        assert_eq!(config.settings.machine_name.as_deref(), Some("dev-machine"));
+        assert_eq!(config.settings.auto_append_gitignore, Some(true));
     }
 }
 
