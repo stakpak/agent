@@ -511,6 +511,9 @@ auto_append_gitignore = false
 
         assert!(resolved.allowed_tools.is_none());
         assert!(expected.allowed_tools.is_none());
+
+        assert_eq!(resolved.api_endpoint.as_deref(), Some("https://legacy"));
+        assert_eq!(resolved.api_key.as_deref(), Some("old-key"));
     }
 
     #[test]
@@ -523,6 +526,9 @@ auto_append_gitignore = false
             resolved.auto_append_gitignore,
             old_config.auto_append_gitignore
         );
+
+        assert_eq!(resolved.machine_name.as_deref(), Some("legacy-machine"));
+        assert_eq!(resolved.auto_append_gitignore, Some(false));
     }
 
     #[test]
