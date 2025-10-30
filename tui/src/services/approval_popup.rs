@@ -522,7 +522,7 @@ impl PopupService {
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )
-            .title_alignment(popup_widget::Alignment::Center)
+            .title_alignment(popup_widget::Alignment::Left)
             .border_style(
                 Style::default()
                     .fg(Color::Cyan)
