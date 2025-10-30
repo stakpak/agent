@@ -603,6 +603,29 @@ auto_append_gitignore = false
         assert!(config.profiles.contains_key("default"));
         assert!(!path.exists());
     }
+
+    #[test]
+    fn load_config_file_for_old_formats() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+
+        std::fs::write(&path, OLD_CONFIG).unwrap();
+
+        let config = AppConfig::load_config_file(&path).unwrap();
+        assert_eq!(
+            config.settings.machine_name.as_deref(),
+            Some("legacy-machine")
+        );
+        assert_eq!(config.settings.auto_append_gitignore, Some(false));
+
+        let default = config.profiles.get("default").unwrap();
+        assert_eq!(default.api_endpoint.as_deref(), Some("https://legacy"));
+        assert_eq!(default.api_key.as_deref(), Some("old-key"));
+
+        let overriden = std::fs::read_to_string(&path).unwrap();
+        assert!(overriden.contains("[profiles.default]"));
+        assert!(overriden.contains("[settings]"));
+    }
 }
 
 #[cfg(test)]
