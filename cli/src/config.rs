@@ -463,6 +463,26 @@ impl RulebookConfig {
 }
 
 #[cfg(test)]
+mod app_config_tests {
+    use super::*;
+
+    #[test]
+    fn get_config_path_returns_custom_path_when_provided() {
+        let custom_path = PathBuf::from("/tmp/stakpak/custom.toml");
+        let resolved = AppConfig::get_config_path(Some(&custom_path));
+        assert_eq!(custom_path, resolved);
+    }
+
+    #[test]
+    fn get_config_path_defaults_to_home_directory() {
+        let home_dir = std::env::home_dir().unwrap();
+        let resolved = AppConfig::get_config_path::<&str>(None);
+        let expected = home_dir.join("./stakpak/config.toml");
+        assert_eq!(resolved, expected);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
