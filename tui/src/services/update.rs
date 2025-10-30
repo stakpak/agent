@@ -1666,7 +1666,7 @@ fn handle_input_submitted(
                     state.text_area.set_cursor(input.len());
                     state.show_helper_dropdown = false;
                 }
-                "/switch_profile" => {
+                "/profiles" => {
                     state.show_profile_switcher = true;
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
