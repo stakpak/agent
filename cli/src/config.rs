@@ -593,6 +593,16 @@ auto_append_gitignore = false
         assert_eq!(p1.api_key, default.api_key);
         assert_eq!(p2.api_key, default.api_key);
     }
+
+    #[test]
+    fn load_config_file_for_missing_path() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+        let config = AppConfig::load_config_file(&path).unwrap();
+
+        assert!(config.profiles.contains_key("default"));
+        assert!(!path.exists());
+    }
 }
 
 #[cfg(test)]
