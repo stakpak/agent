@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
+const STAKPAK_CONFIG_PATH: &str = "./stakpak/config.toml";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
@@ -178,7 +179,7 @@ impl AppConfig {
             Some(p) => p.as_ref().to_path_buf(),
             None => std::env::home_dir()
                 .unwrap_or_default()
-                .join("./stakpak/config.toml"),
+                .join(STAKPAK_CONFIG_PATH),
         }
     }
 
@@ -476,7 +477,7 @@ mod app_config_tests {
     fn get_config_path_defaults_to_home_directory() {
         let home_dir = std::env::home_dir().unwrap();
         let resolved = AppConfig::get_config_path::<&str>(None);
-        let expected = home_dir.join("./stakpak/config.toml");
+        let expected = home_dir.join(STAKPAK_CONFIG_PATH);
         assert_eq!(resolved, expected);
     }
 }
