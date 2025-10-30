@@ -14,6 +14,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -851,10 +852,17 @@ impl StakpakAcpAgent {
             .await?;
 
             // Check if this is a filesystem tool that should use native ACP
+            // Decide if this should be handled by native ACP FS. Avoid read_text_file for directories.
+            let is_view_directory = if tool_call.function.name == "view" {
+                Path::new(&abs_path).is_dir()
+            } else {
+                false
+            };
+
             let is_fs_tool = matches!(
                 tool_call.function.name.as_str(),
                 "view" | "create" | "str_replace"
-            );
+            ) && !is_view_directory;
 
             let result = if is_fs_tool && self.fs_operation_tx.is_some() {
                 log::info!(
