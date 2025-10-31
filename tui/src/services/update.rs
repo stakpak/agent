@@ -563,6 +563,16 @@ pub fn update(
                 state.last_message_tool_calls = prompt_tool_calls.clone();
             }
         }
+        InputEvent::ToggleMoreShortcuts => {
+            state.show_shortcuts = !state.show_shortcuts;
+        }
+        InputEvent::HandleCtrlS => {
+            if state.show_rulebook_switcher {
+                let _ = input_tx.try_send(InputEvent::RulebookSwitcherSelectAll);
+                return;
+            }
+            let _ = input_tx.try_send(InputEvent::ShowShortcuts);
+        }
         InputEvent::StartLoadingOperation(operation) => {
             state.loading_manager.start_operation(operation.clone());
             state.loading = state.loading_manager.is_loading();
