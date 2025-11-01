@@ -46,11 +46,19 @@ impl SecretManager {
     pub fn save_session_redaction_map(&self, redaction_map: &HashMap<String, String>) {
         match serde_json::to_string_pretty(redaction_map) {
             Ok(json_content) => {
-                if let Err(e) = LocalStore::write_session_data("secrets.json", &json_content) {
-                    error!("Failed to save session redaction map: {}", e);
+                eprintln!("[DEBUG] Attempting to write session secrets file with {} entries", redaction_map.len());
+                match LocalStore::write_session_data("secrets.json", &json_content) {
+                    Ok(path) => {
+                        eprintln!("[DEBUG] Successfully wrote secrets to: {}", path);
+                    }
+                    Err(e) => {
+                        eprintln!("[ERROR] Failed to save session redaction map: {}", e);
+                        error!("Failed to save session redaction map: {}", e);
+                    }
                 }
             }
             Err(e) => {
+                eprintln!("[ERROR] Failed to serialize session redaction map to JSON: {}", e);
                 error!("Failed to serialize session redaction map to JSON: {}", e);
             }
         }
@@ -84,8 +92,14 @@ impl SecretManager {
 
         // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
         let existing_redaction_map = self.load_session_redaction_map();
+        eprintln!("[DEBUG] redact_and_store_secrets called with content: '{}'", content);
+        eprintln!("[DEBUG] Loaded session map with {} entries", existing_redaction_map.len());
+        for (key, val) in &existing_redaction_map {
+            eprintln!("[DEBUG]   Map entry: {} -> {}", key, val);
+        }
         let redaction_result =
             redact_secrets(content, path, &existing_redaction_map, self.privacy_mode);
+        eprintln!("[DEBUG] After redact_secrets, result: '{}'", redaction_result.redacted_string);
 
         // Add new redactions to session map
         self.add_to_session_redaction_map(&redaction_result.redaction_map);
@@ -100,10 +114,14 @@ impl SecretManager {
 
         // TODO: this is not thread safe, we need to use a mutex or an actor to protect the redaction map
         let existing_redaction_map = self.load_session_redaction_map();
+        eprintln!("[DEBUG] redact_and_store_password called with password: '{}'", password);
+        eprintln!("[DEBUG] Existing redaction map has {} entries", existing_redaction_map.len());
         let redaction_result = redact_password(content, password, &existing_redaction_map);
+        eprintln!("[DEBUG] After redact_password, map has {} entries", redaction_result.redaction_map.len());
 
         // Add new redactions to session map
         self.add_to_session_redaction_map(&redaction_result.redaction_map);
+        eprintln!("[DEBUG] Saved redaction map to session file");
 
         redaction_result.redacted_string
     }

@@ -652,7 +652,15 @@ pub fn update(
             }
 
             // Redact any secrets (including pasted passwords captured earlier)
-            let redacted = state.secret_manager.redact_and_store_secrets(&line, None);
+            eprintln!("[DEBUG] ShellOutput line BEFORE redaction: {}", line);
+            // First apply password redaction from in-memory map
+            let mut redacted = line.clone();
+            for (redaction_key, password) in &state.password_redaction_map {
+                redacted = redacted.replace(password, redaction_key);
+            }
+            // Then apply general secret redaction
+            let redacted = state.secret_manager.redact_and_store_secrets(&redacted, None);
+            eprintln!("[DEBUG] ShellOutput line AFTER redaction: {}", redacted);
             let redacted = truncate_output(&redacted);
             state
                 .messages
@@ -1506,6 +1514,13 @@ fn handle_input_submitted(
             let input = state.input().to_string();
             // Store this input as a password candidate in the redaction map when waiting for input
             if state.waiting_for_shell_input {
+                eprintln!("[DEBUG] Storing password from input_submitted: {}", input);
+                // Generate a unique redaction key for this password
+                let redaction_key = format!("[REDACTED_SECRET:password:{}]", 
+                    stakpak_shared::helper::generate_simple_id(6));
+                state.password_redaction_map.insert(redaction_key.clone(), input.clone());
+                eprintln!("[DEBUG] Stored password with key: {}", redaction_key);
+                // Also store in session file for persistence
                 let _ = state.secret_manager.redact_and_store_password("", &input);
             }
             state.text_area.set_text("");
@@ -2377,6 +2392,13 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // If we're in a password context (shell mode waiting for input), pre-register this value
     // in the redaction map so any occurrences in output/logs are masked immediately.
     if state.show_shell_mode && state.waiting_for_shell_input {
+        eprintln!("[DEBUG] Storing password from paste: {}", normalized_pasted);
+        // Generate a unique redaction key for this password
+        let redaction_key = format!("[REDACTED_SECRET:password:{}]", 
+            stakpak_shared::helper::generate_simple_id(6));
+        state.password_redaction_map.insert(redaction_key.clone(), normalized_pasted.clone());
+        eprintln!("[DEBUG] Stored password with key: {}", redaction_key);
+        // Also store in session file for persistence
         let _ = state
             .secret_manager
             .redact_and_store_password("", &normalized_pasted);

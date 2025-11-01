@@ -164,6 +164,7 @@ pub struct AppState {
     pub dialog_message_id: Option<Uuid>,
     pub file_search: FileSearch,
     pub secret_manager: SecretManager,
+    pub password_redaction_map: HashMap<String, String>, // In-memory map for password redaction
     pub latest_version: Option<String>,
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
@@ -487,6 +488,7 @@ impl AppState {
             dialog_message_id: None,
             file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            password_redaction_map: HashMap::new(),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,

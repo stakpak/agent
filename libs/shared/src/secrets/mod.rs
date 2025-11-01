@@ -1390,6 +1390,29 @@ export PORT=3000
     }
 
     #[test]
+    fn test_shell_password_redaction_scenario() {
+        // Simulate the exact scenario from the test: 
+        // 1. User pastes password
+        let password = "SuperSecret123!Password";
+        let redaction_result1 = redact_password("", password, &HashMap::new());
+        println!("After storing password, map has {} entries", redaction_result1.redaction_map.len());
+        
+        // 2. Shell command echoes the password in output
+        let shell_output = "Attempting to echo password: SuperSecret123!Password";
+        let redaction_result2 = redact_secrets(shell_output, None, &redaction_result1.redaction_map, false);
+        
+        println!("Shell output before: {}", shell_output);
+        println!("Shell output after: {}", redaction_result2.redacted_string);
+        println!("Redaction map: {:?}", redaction_result2.redaction_map);
+        
+        // The password should be redacted
+        assert!(!redaction_result2.redacted_string.contains(password), 
+                "Password should not appear in plain text in output");
+        assert!(redaction_result2.redacted_string.contains("[REDACTED_SECRET:password:"),
+                "Output should contain redaction marker");
+    }
+
+    #[test]
     fn test_redact_secrets_with_existing_redaction_map() {
         // Test that secrets in the existing redaction map get redacted even if not detected by detect_secrets
         let content = "The secret value is mysecretvalue123 and another is anothersecret456";
