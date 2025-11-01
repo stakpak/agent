@@ -36,6 +36,19 @@ cd agent
 cargo build --release
 ```
 
+#### Uninstallation
+If you installed via Homebrew, uninstall with:
+```bash
+brew uninstall stakpak
+```
+
+If you installed via a binary or from source, remove the `stakpak` binary and the local config directory:
+```bash
+sudo rm -f /usr/local/bin/stakpak || true
+sudo rm -f /usr/bin/stakpak || true
+rm -rf ~/.stakpak
+```
+
 ### 2. Authentication
 
 #### Get Your API Key
