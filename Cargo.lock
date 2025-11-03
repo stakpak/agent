@@ -4880,6 +4880,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "stakpak-mcp-proxy"
+version = "0.2.66"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "stakpak-shared",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
 name = "stakpak-mcp-server"
 version = "0.2.66"
 dependencies = [
