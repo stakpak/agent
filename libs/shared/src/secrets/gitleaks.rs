@@ -832,16 +832,16 @@ mod tests {
 
                 // Test entropy if there are captures
                 for mat in regex.find_iter(test_input) {
-                    if let Some(captures) = regex.captures_at(test_input, mat.start()) {
-                        if let Some(capture) = captures.get(1) {
-                            let entropy = calculate_entropy(capture.as_str());
-                            println!(
-                                "  Entropy of first capture '{}': {:.2} (threshold: {:?})",
-                                capture.as_str(),
-                                entropy,
-                                rule.entropy
-                            );
-                        }
+                    if let Some(captures) = regex.captures_at(test_input, mat.start())
+                        && let Some(capture) = captures.get(1)
+                    {
+                        let entropy = calculate_entropy(capture.as_str());
+                        println!(
+                            "  Entropy of first capture '{}': {:.2} (threshold: {:?})",
+                            capture.as_str(),
+                            entropy,
+                            rule.entropy
+                        );
                     }
                 }
             } else {
@@ -1028,7 +1028,7 @@ mod tests {
 
         // Should detect the account ID in the "Account" field
         assert!(
-            aws_secrets.len() >= 1,
+            !aws_secrets.is_empty(),
             "Should detect at least one AWS account ID"
         );
         assert!(
