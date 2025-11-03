@@ -1,4 +1,4 @@
-use crate::app::{AppState, LoadingType};
+use crate::app::AppState;
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -93,6 +93,130 @@ pub fn push_status_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+}
+
+pub fn push_cost_message(state: &mut AppState) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    let usage = &state.total_session_usage;
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(vec![Span::styled(
+        "Token Usage & Costs",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+
+    if usage.total_tokens == 0 {
+        lines.push(Line::from(vec![Span::styled(
+            " No tokens used yet in this session.",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        // Manually format each line with fixed spacing to align all numbers
+        let formatted_prompt = format_number_with_separator(usage.prompt_tokens);
+        lines.push(Line::from(vec![
+            Span::raw(" Prompt tokens:"),
+            Span::raw("      "), // 6 spaces to align numbers
+            Span::styled(
+                formatted_prompt,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Show prompt token details if available
+        if let Some(details) = &usage.prompt_tokens_details {
+            // Always show all four fields, using 0 if None, with fixed spacing
+            let input_tokens = format_number_with_separator(details.input_tokens.unwrap_or(0));
+            let output_tokens = format_number_with_separator(details.output_tokens.unwrap_or(0));
+            let cache_read =
+                format_number_with_separator(details.cache_read_input_tokens.unwrap_or(0));
+            let cache_write =
+                format_number_with_separator(details.cache_write_input_tokens.unwrap_or(0));
+
+            lines.push(Line::from(vec![
+                Span::raw("  ├─ Input tokens:"),
+                Span::raw("   "), // 3 spaces to align numbers
+                Span::styled(input_tokens, Style::default().fg(Color::DarkGray)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("  ├─ Output tokens:"),
+                Span::raw("  "), // 2 spaces to align numbers
+                Span::styled(output_tokens, Style::default().fg(Color::DarkGray)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("  ├─ Cache read:"),
+                Span::raw("     "), // 5 spaces to align numbers
+                Span::styled(cache_read, Style::default().fg(Color::DarkGray)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("  └─ Cache write:"),
+                Span::raw("    "), // 4 spaces to align numbers
+                Span::styled(cache_write, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+
+        let formatted_completion = format_number_with_separator(usage.completion_tokens);
+        lines.push(Line::from(vec![
+            Span::raw(" Completion tokens:"),
+            Span::raw("  "), // 2 spaces to align numbers
+            Span::styled(
+                formatted_completion,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        let formatted_total = format_number_with_separator(usage.total_tokens);
+        lines.push(Line::from(vec![
+            Span::raw(" Total tokens:"),
+            Span::raw("       "), // 7 spaces to align numbers
+            Span::styled(
+                formatted_total,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Format with thousands separator
+        let formatted_total = format_number_with_separator(usage.total_tokens);
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled(" Session Total: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                formatted_total,
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" tokens"),
+        ]));
+    }
+
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
+    });
+}
+
+pub fn format_number_with_separator(n: u32) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (count, c) in s.chars().rev().enumerate() {
+        if count > 0 && count % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
 }
 
 pub fn push_memorize_message(state: &mut AppState) {
@@ -299,35 +423,6 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
     });
-}
-
-pub fn render_loading_spinner(state: &AppState) -> Line<'_> {
-    let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-    let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-    let spinner_text = if state.loading_type == LoadingType::Sessions {
-        "Loading sessions..."
-    } else {
-        "Stakpaking..."
-    };
-
-    if state.loading_type == LoadingType::Sessions {
-        Line::from(vec![Span::styled(
-            format!("{} {}", spinner, spinner_text),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        )])
-    } else {
-        Line::from(vec![
-            Span::styled(
-                format!("{} {}", spinner, spinner_text),
-                Style::default()
-                    .fg(Color::LightRed)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" - Esc to cancel", Style::default().fg(Color::DarkGray)),
-        ])
-    }
 }
 
 pub fn push_styled_message(

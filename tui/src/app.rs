@@ -236,6 +236,9 @@ pub struct AppState {
     pub command_palette_selected: usize,
     pub command_palette_scroll: usize,
     pub command_palette_search: String,
+    // Usage tracking
+    pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
+    pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
 }
 
 #[derive(Debug)]
@@ -342,6 +345,10 @@ pub enum InputEvent {
     RulebookSearchBackspace,
     HandleCtrlS,
     ToggleMoreShortcuts,
+    // Usage tracking events
+    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
+    RequestTotalUsage,
+    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
 }
 
 #[derive(Debug)]
@@ -358,6 +365,7 @@ pub enum OutputEvent {
     RequestProfileSwitch(String),
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
+    RequestTotalUsage,                  // Request total accumulated token usage
 }
 
 impl AppState {
@@ -390,6 +398,10 @@ impl AppState {
             HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/usage",
+                description: "Show token usage for this session",
             },
             HelperCommand {
                 command: "/issue",
@@ -556,6 +568,14 @@ impl AppState {
             command_palette_selected: 0,
             command_palette_scroll: 0,
             command_palette_search: String::new(),
+            // Usage tracking
+            current_message_usage: None,
+            total_session_usage: stakpak_shared::models::integrations::openai::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
         }
     }
 
