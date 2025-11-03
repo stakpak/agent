@@ -44,7 +44,6 @@ log = "0.4"
 regex = { workspace = true }
 async-trait = { workspace = true }
 
-
 [dev-dependencies]
 tempfile = "3"
 
