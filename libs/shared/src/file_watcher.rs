@@ -496,16 +496,12 @@ mod tests {
         while tokio::time::Instant::now() < timeout && !creation_detected {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    match event {
-                        FileWatchEvent::Created { file } => {
-                            if file.path == new_file_canonical {
-                                assert_eq!(file.content, "new file content");
-                                creation_detected = true;
-                                break;
-                            }
+                    if let FileWatchEvent::Created { file } = event
+                        && file.path == new_file_canonical {
+                            assert_eq!(file.content, "new file content");
+                            creation_detected = true;
+                            break;
                         }
-                        _ => {}
-                    }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
                     // Continue waiting
@@ -545,17 +541,13 @@ mod tests {
         while tokio::time::Instant::now() < timeout && !modification_detected {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    match event {
-                        FileWatchEvent::Modified { file, old_content } => {
-                            if file.path == test_file_canonical {
-                                assert_eq!(file.content, "modified content");
-                                assert_eq!(old_content, "initial content");
-                                modification_detected = true;
-                                break;
-                            }
+                    if let FileWatchEvent::Modified { file, old_content } = event
+                        && file.path == test_file_canonical {
+                            assert_eq!(file.content, "modified content");
+                            assert_eq!(old_content, "initial content");
+                            modification_detected = true;
+                            break;
                         }
-                        _ => {}
-                    }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
                     // Continue waiting
@@ -602,15 +594,12 @@ mod tests {
         while tokio::time::Instant::now() < timeout && !txt_detected {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    match event {
-                        FileWatchEvent::Created { file } => {
-                            if file.path == txt_file_canonical {
-                                txt_detected = true;
-                            } else if file.path == log_file_canonical {
-                                log_detected = true;
-                            }
+                    if let FileWatchEvent::Created { file } = event {
+                        if file.path == txt_file_canonical {
+                            txt_detected = true;
+                        } else if file.path == log_file_canonical {
+                            log_detected = true;
                         }
-                        _ => {}
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {

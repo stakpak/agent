@@ -7,6 +7,7 @@ members = [
     "libs/api",
     "libs/mcp/client",
     "libs/mcp/server",
+    "libs/mcp/proxy",
 ]
 default-members = ["cli"]
 
@@ -24,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { version = "0.2.1", features = [
+rmcp = { version = "0.8.3", features = [
     "base64",
     "macros",
     "client",
@@ -33,6 +34,7 @@ rmcp = { version = "0.2.1", features = [
     "transport-io",
     "transport-child-process",
     "transport-streamable-http-client",
+    "transport-streamable-http-client-reqwest",
     "transport-streamable-http-server",
     "transport-streamable-http-server-session",
     "transport-worker",
