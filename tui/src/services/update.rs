@@ -6,9 +6,9 @@ use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
-    handle_errors, push_clear_message, push_cost_message, push_error_message, push_help_message,
-    push_issue_message, push_memorize_message, push_status_message, push_styled_message,
-    push_support_message, render_system_message, welcome_messages,
+    handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
+    push_memorize_message, push_status_message, push_styled_message, push_support_message,
+    push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -279,7 +279,7 @@ pub fn update(
 
             if should_update {
                 state.messages.pop(); // Remove old message
-                crate::services::helper_block::push_cost_message(state);
+                crate::services::helper_block::push_usage_message(state);
             }
         }
         InputEvent::HasUserMessage => {
@@ -1682,7 +1682,7 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                 }
                 "/usage" => {
-                    push_cost_message(state);
+                    push_usage_message(state);
                     let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;

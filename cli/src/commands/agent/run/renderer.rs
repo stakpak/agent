@@ -597,8 +597,7 @@ impl OutputRenderer {
             OutputFormat::Text => {
                 let mut output = String::new();
 
-                // Header
-                output.push_str(&format!("\n{}\n", "━".repeat(50).with(Color::Cyan)));
+                // Header (no border, no gap - flows directly after time saved stats)
                 output.push_str(&format!("{}\n\n", "Session Usage".with(Color::Cyan).bold()));
 
                 // Format numbers with thousands separator
