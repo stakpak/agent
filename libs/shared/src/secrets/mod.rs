@@ -253,7 +253,7 @@ mod tests {
         let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the API key and redact it
-        assert!(result.redaction_map.len() > 0);
+        assert!(!result.redaction_map.is_empty());
         assert!(result.redacted_string.contains("[REDACTED_"));
         println!("Input: {}", input);
         println!("Redacted: {}", result.redacted_string);
@@ -266,7 +266,7 @@ mod tests {
         let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the AWS access key
-        assert!(result.redaction_map.len() > 0);
+        assert!(!result.redaction_map.is_empty());
         println!("Input: {}", input);
         println!("Redacted: {}", result.redacted_string);
         println!("Mapping: {:?}", result.redaction_map);
@@ -303,7 +303,7 @@ mod tests {
         let result = redact_secrets(input, None, &HashMap::new(), false);
 
         // Should detect the GitHub PAT
-        assert!(result.redaction_map.len() > 0);
+        assert!(!result.redaction_map.is_empty());
         println!("Input: {}", input);
         println!("Redacted: {}", result.redacted_string);
         println!("Mapping: {:?}", result.redaction_map);
@@ -373,7 +373,7 @@ mod tests {
                 println!("\nTesting input: {}", input);
                 let result = redact_secrets(input, None, &HashMap::new(), false);
                 println!("  Detected secrets: {}", result.redaction_map.len());
-                if result.redaction_map.len() > 0 {
+                if !result.redaction_map.is_empty() {
                     println!("  Redacted: {}", result.redacted_string);
                 }
             }
@@ -584,7 +584,7 @@ mod tests {
                 "  Full function detected: {} secrets",
                 result.redaction_map.len()
             );
-            if result.redaction_map.len() > 0 {
+            if !result.redaction_map.is_empty() {
                 println!("  Redacted result: {}", result.redacted_string);
             }
         }
@@ -879,9 +879,7 @@ export PORT=3000
         let mut rules_processed = 0;
 
         for rule in &config.rules {
-            if rule.keywords.is_empty() {
-                rules_processed += 1;
-            } else if contains_any_keyword(non_secret_input, &rule.keywords) {
+            if rule.keywords.is_empty() || contains_any_keyword(non_secret_input, &rule.keywords) {
                 rules_processed += 1;
             } else {
                 rules_skipped += 1;
@@ -930,7 +928,7 @@ export PORT=3000
             "Should find matching rules for secret input"
         );
         assert!(
-            result.redaction_map.len() >= 1,
+            !result.redaction_map.is_empty(),
             "Should detect at least one secret"
         );
     }
@@ -979,7 +977,7 @@ export PORT=3000
 
         let api_secrets = detect_secrets(api_input, None, false);
         println!("Secrets detected: {} (expected: 1)", api_secrets.len());
-        assert!(api_secrets.len() >= 1, "Should detect at least 1 secrets");
+        assert!(!api_secrets.is_empty(), "Should detect at least 1 secrets");
         println!("✅ Test passed");
 
         // Test AWS keyword - should process aws-access-token rule
@@ -1000,7 +998,7 @@ export PORT=3000
         println!("Secrets detected: {} (expected: 1)", aws_secrets.len());
 
         // Should detect AWS key
-        assert!(aws_secrets.len() >= 1, "Should detect at least 1 secrets");
+        assert!(!aws_secrets.is_empty(), "Should detect at least 1 secrets");
         println!("✅ Test passed");
     }
 
@@ -1114,13 +1112,10 @@ export PORT=3000
                         // Test global regex patterns
                         if let Some(regexes) = &global_allowlist.regexes {
                             for (i, pattern) in regexes.iter().enumerate() {
-                                if let Ok(regex) = Regex::new(pattern) {
-                                    if regex.is_match(match_text) {
-                                        println!(
-                                            "    ✗ FILTERED by global regex {}: '{}'",
-                                            i, pattern
-                                        );
-                                    }
+                                if let Ok(regex) = Regex::new(pattern)
+                                    && regex.is_match(match_text)
+                                {
+                                    println!("    ✗ FILTERED by global regex {}: '{}'", i, pattern);
                                 }
                             }
                         }
@@ -1143,13 +1138,13 @@ export PORT=3000
                             // Test rule regex patterns
                             if let Some(regexes) = &allowlist.regexes {
                                 for (i, pattern) in regexes.iter().enumerate() {
-                                    if let Ok(regex) = Regex::new(pattern) {
-                                        if regex.is_match(match_text) {
-                                            println!(
-                                                "    ✗ FILTERED by rule regex {}: '{}'",
-                                                i, pattern
-                                            );
-                                        }
+                                    if let Ok(regex) = Regex::new(pattern)
+                                        && regex.is_match(match_text)
+                                    {
+                                        println!(
+                                            "    ✗ FILTERED by rule regex {}: '{}'",
+                                            i, pattern
+                                        );
                                     }
                                 }
                             }

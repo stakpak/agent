@@ -44,8 +44,11 @@ impl ClientHandler for LocalClientHandler {
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Stakpak Client".to_string(),
+                name: "stakpak-mcp-client".to_string(),
                 version: "0.0.1".to_string(),
+                title: Some("Stakpak MCP Client".to_string()),
+                icons: Some(vec![]),
+                website_url: Some("https://stakpak.dev".to_string()),
             },
         }
     }
