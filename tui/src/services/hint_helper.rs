@@ -51,7 +51,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
             let shortcuts_text = "ctrl+p commands";
-            let retry_text = "Ctrl+R to retry last command in shell mode";
+            let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
             let total_width = area.width as usize;
@@ -116,9 +116,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         // Show auto-approve status
         let auto_approve_status = if state.auto_approve_manager.is_enabled() {
-            "🔓 Auto-approve ON"
+            "auto-approve is ON"
         } else {
-            "🔒 Auto-approve OFF"
+            "auto-approve is OFF"
         };
         let status_color = if state.auto_approve_manager.is_enabled() {
             if should_use_rgb_colors() {
@@ -157,7 +157,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 Style::default().fg(Color::Reset),
             ));
         }
-        spans_vec.push(Span::styled("Ctrl+o", Style::default().fg(Color::DarkGray)));
+        spans_vec.push(Span::styled("ctrl+o", Style::default().fg(Color::DarkGray)));
         spans_vec.push(Span::styled(
             " toggle auto-approve",
             Style::default().fg(Color::DarkGray),
