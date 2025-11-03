@@ -942,7 +942,7 @@ pub async fn run_interactive(
         // Display token usage stats
         if final_usage.total_tokens > 0 {
             let renderer = OutputRenderer::new(OutputFormat::Text, false);
-            print!("\n{}\n", renderer.render_token_usage_stats(&final_usage));
+            println!("{}", renderer.render_token_usage_stats(&final_usage));
         }
 
         let username = client

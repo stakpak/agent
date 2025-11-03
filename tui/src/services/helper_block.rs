@@ -95,13 +95,13 @@ pub fn push_status_message(state: &mut AppState) {
     });
 }
 
-pub fn push_cost_message(state: &mut AppState) {
+pub fn push_usage_message(state: &mut AppState) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
 
     let usage = &state.total_session_usage;
     let mut lines = Vec::new();
-
+    lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "Session Usage",
         Style::default()
