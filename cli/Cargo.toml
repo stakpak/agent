@@ -22,7 +22,6 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }
 chrono = { workspace = true }
-tempfile = "3"
 reqwest = { workspace = true }
 termimad = "0.31.1"
 walkdir = { workspace = true }
@@ -44,6 +43,10 @@ tokio-util = { version = "0.7", features = ["compat"] }
 log = "0.4"
 regex = { workspace = true }
 async-trait = { workspace = true }
+
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints.clippy]
 unwrap_used = "deny"
