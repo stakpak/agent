@@ -381,13 +381,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     if total_tokens > 0 {
         let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
-        let prefix_text = " tokens in session . ";
-        let usage_text = "/usage";
-        let suffix_text = " for details";
-
-        // Calculate total length including all parts
-        let total_text_len =
-            formatted.len() + prefix_text.len() + usage_text.len() + suffix_text.len();
+        let suffix_text = " tokens";
 
         // Calculate spacing to push tokens to the absolute right edge
         let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
@@ -396,6 +390,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             total_width
         };
+        let total_text_len = formatted.len() + suffix_text.len();
         let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
 
         // Add left content first
@@ -406,15 +401,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
         }
 
-        // Add tokens at the absolute right edge with different colors
-        final_spans.push(Span::styled(formatted, Style::default().fg(Color::Reset)));
+        // Add tokens at the absolute right edge - all in gray
         final_spans.push(Span::styled(
-            prefix_text,
-            Style::default().fg(Color::DarkGray),
-        ));
-        final_spans.push(Span::styled(usage_text, Style::default().fg(Color::Reset)));
-        final_spans.push(Span::styled(
-            suffix_text,
+            format!("{}{}", formatted, suffix_text),
             Style::default().fg(Color::DarkGray),
         ));
     } else {

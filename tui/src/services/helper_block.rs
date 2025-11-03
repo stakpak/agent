@@ -103,7 +103,7 @@ pub fn push_cost_message(state: &mut AppState) {
     let mut lines = Vec::new();
 
     lines.push(Line::from(vec![Span::styled(
-        "Token Usage & Costs",
+        "Session Usage",
         Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
@@ -116,10 +116,10 @@ pub fn push_cost_message(state: &mut AppState) {
             Style::default().fg(Color::DarkGray),
         )]));
     } else {
-        // Manually format each line with fixed spacing to align all numbers
+        // Manually format each line with fixed spacing to align all numbers (no colons)
         let formatted_prompt = format_number_with_separator(usage.prompt_tokens);
         lines.push(Line::from(vec![
-            Span::raw(" Prompt tokens:"),
+            Span::raw(" Prompt tokens"),
             Span::raw("      "), // 6 spaces to align numbers
             Span::styled(
                 formatted_prompt,
@@ -131,39 +131,33 @@ pub fn push_cost_message(state: &mut AppState) {
 
         // Show prompt token details if available
         if let Some(details) = &usage.prompt_tokens_details {
-            // Always show all four fields, using 0 if None, with fixed spacing
+            // Always show all fields except output_tokens (redundant with Completion tokens), using 0 if None, with fixed spacing
             let input_tokens = format_number_with_separator(details.input_tokens.unwrap_or(0));
-            let output_tokens = format_number_with_separator(details.output_tokens.unwrap_or(0));
-            let cache_read =
-                format_number_with_separator(details.cache_read_input_tokens.unwrap_or(0));
             let cache_write =
                 format_number_with_separator(details.cache_write_input_tokens.unwrap_or(0));
+            let cache_read =
+                format_number_with_separator(details.cache_read_input_tokens.unwrap_or(0));
 
             lines.push(Line::from(vec![
-                Span::raw("  ├─ Input tokens:"),
+                Span::raw("  ├─ Input tokens"),
                 Span::raw("   "), // 3 spaces to align numbers
                 Span::styled(input_tokens, Style::default().fg(Color::DarkGray)),
             ]));
             lines.push(Line::from(vec![
-                Span::raw("  ├─ Output tokens:"),
-                Span::raw("  "), // 2 spaces to align numbers
-                Span::styled(output_tokens, Style::default().fg(Color::DarkGray)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("  ├─ Cache read:"),
-                Span::raw("     "), // 5 spaces to align numbers
-                Span::styled(cache_read, Style::default().fg(Color::DarkGray)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("  └─ Cache write:"),
+                Span::raw("  ├─ Cache write"),
                 Span::raw("    "), // 4 spaces to align numbers
                 Span::styled(cache_write, Style::default().fg(Color::DarkGray)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("  └─ Cache read"),
+                Span::raw("     "), // 5 spaces to align numbers
+                Span::styled(cache_read, Style::default().fg(Color::DarkGray)),
             ]));
         }
 
         let formatted_completion = format_number_with_separator(usage.completion_tokens);
         lines.push(Line::from(vec![
-            Span::raw(" Completion tokens:"),
+            Span::raw(" Completion tokens"),
             Span::raw("  "), // 2 spaces to align numbers
             Span::styled(
                 formatted_completion,
@@ -175,7 +169,7 @@ pub fn push_cost_message(state: &mut AppState) {
 
         let formatted_total = format_number_with_separator(usage.total_tokens);
         lines.push(Line::from(vec![
-            Span::raw(" Total tokens:"),
+            Span::raw(" Total tokens"),
             Span::raw("       "), // 7 spaces to align numbers
             Span::styled(
                 formatted_total,
@@ -183,20 +177,6 @@ pub fn push_cost_message(state: &mut AppState) {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]));
-
-        // Format with thousands separator
-        let formatted_total = format_number_with_separator(usage.total_tokens);
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(" Session Total: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                formatted_total,
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" tokens"),
         ]));
     }
 
