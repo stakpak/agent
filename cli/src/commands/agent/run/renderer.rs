@@ -599,10 +599,7 @@ impl OutputRenderer {
 
                 // Header
                 output.push_str(&format!("\n{}\n", "━".repeat(50).with(Color::Cyan)));
-                output.push_str(&format!(
-                    "{}\n\n",
-                    "Token Usage Summary".with(Color::Cyan).bold()
-                ));
+                output.push_str(&format!("{}\n\n", "Session Usage".with(Color::Cyan).bold()));
 
                 // Format numbers with thousands separator
                 let format_num = |n: u32| {
@@ -617,43 +614,39 @@ impl OutputRenderer {
                     result.chars().rev().collect::<String>()
                 };
 
-                // Manually format each line with fixed spacing to align all numbers
+                // Manually format each line with fixed spacing to align all numbers (no colons)
                 output.push_str(&format!(
-                    " Prompt tokens:      {}\n", // 6 spaces to align numbers
+                    " Prompt tokens      {}\n", // 6 spaces to align numbers
                     format_num(usage.prompt_tokens).with(Color::Yellow).bold()
                 ));
 
                 // Show prompt token details if available
                 if let Some(details) = &usage.prompt_tokens_details {
-                    // Always show all four fields, using 0 if None, with fixed spacing
+                    // Always show fields except output_tokens (redundant), using 0 if None, with fixed spacing
                     output.push_str(&format!(
-                        "  ├─ Input tokens:   {}\n", // 3 spaces to align numbers
+                        "  ├─ Input tokens   {}\n", // 3 spaces to align numbers
                         format_num(details.input_tokens.unwrap_or(0)).with(Color::DarkGrey)
                     ));
                     output.push_str(&format!(
-                        "  ├─ Output tokens:  {}\n", // 2 spaces to align numbers
-                        format_num(details.output_tokens.unwrap_or(0)).with(Color::DarkGrey)
-                    ));
-                    output.push_str(&format!(
-                        "  ├─ Cache read:     {}\n", // 5 spaces to align numbers
-                        format_num(details.cache_read_input_tokens.unwrap_or(0))
+                        "  ├─ Cache write    {}\n", // 4 spaces to align numbers
+                        format_num(details.cache_write_input_tokens.unwrap_or(0))
                             .with(Color::DarkGrey)
                     ));
                     output.push_str(&format!(
-                        "  └─ Cache write:    {}\n", // 4 spaces to align numbers
-                        format_num(details.cache_write_input_tokens.unwrap_or(0))
+                        "  └─ Cache read     {}\n", // 5 spaces to align numbers
+                        format_num(details.cache_read_input_tokens.unwrap_or(0))
                             .with(Color::DarkGrey)
                     ));
                 }
 
                 output.push_str(&format!(
-                    " Completion tokens:  {}\n", // 2 spaces to align numbers
+                    " Completion tokens  {}\n", // 2 spaces to align numbers
                     format_num(usage.completion_tokens)
                         .with(Color::Yellow)
                         .bold()
                 ));
                 output.push_str(&format!(
-                    " Total tokens:       {}\n", // 7 spaces to align numbers
+                    " Total tokens       {}\n", // 7 spaces to align numbers
                     format_num(usage.total_tokens).with(Color::Green).bold()
                 ));
 
