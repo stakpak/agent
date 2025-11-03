@@ -1,7 +1,7 @@
 // Secret redaction implementation based on gitleaks (https://github.com/gitleaks/gitleaks)
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitleaksConfig {
@@ -223,11 +223,12 @@ impl RegexCompilable for GitleaksConfig {
 }
 
 /// Lazy-loaded gitleaks configuration
-pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| create_gitleaks_config(false));
+pub static GITLEAKS_CONFIG: LazyLock<GitleaksConfig> =
+    LazyLock::new(|| create_gitleaks_config(false));
 
 /// Lazy-loaded gitleaks configuration with privacy rules
-pub static GITLEAKS_CONFIG_WITH_PRIVACY: Lazy<GitleaksConfig> =
-    Lazy::new(|| create_gitleaks_config(true));
+pub static GITLEAKS_CONFIG_WITH_PRIVACY: LazyLock<GitleaksConfig> =
+    LazyLock::new(|| create_gitleaks_config(true));
 
 /// Creates a gitleaks configuration with optional privacy rules
 fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
