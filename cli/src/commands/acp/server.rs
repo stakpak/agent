@@ -1632,6 +1632,14 @@ impl acp::Agent for StakpakAcpAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         log::info!("Received new session request {args:?}");
 
+        // Check if we have a valid API key
+        if self.config.api_key.is_none() {
+            log::error!("API key is missing - authentication required");
+            return Err(acp::Error::auth_required().with_data(serde_json::Value::String(
+                "Authentication required. Please visit https://github.com/stakpak/agent for more information.".to_string()
+            )));
+        }
+
         let temp_session_id = Uuid::new_v4();
         let session_id = acp::SessionId(temp_session_id.to_string().into());
 
