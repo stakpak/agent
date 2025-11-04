@@ -1166,6 +1166,7 @@ impl StakpakAcpAgent {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
+                prompt_tokens_details: None,
             },
             system_fingerprint: None,
         };
@@ -1230,6 +1231,7 @@ impl StakpakAcpAgent {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,
+                            prompt_tokens_details: None,
                         },
                         system_fingerprint: None,
                     };

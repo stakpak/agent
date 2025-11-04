@@ -1,5 +1,5 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
+use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -8,7 +8,7 @@ use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
     push_memorize_message, push_status_message, push_styled_message, push_support_message,
-    render_system_message, welcome_messages,
+    push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -249,6 +249,38 @@ pub fn update(
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
+        }
+        InputEvent::StreamUsage(_usage) => {
+            // Usage is sent but we don't display it individually
+            // Total usage will be updated when accumulation happens in mode_interactive
+        }
+        InputEvent::RequestTotalUsage => {
+            // Request total usage from CLI
+            let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
+        }
+        InputEvent::TotalUsage(usage) => {
+            // Update total session usage from CLI
+            state.total_session_usage = usage;
+            // If cost message was just displayed, update it
+            let should_update = state
+                .messages
+                .last()
+                .and_then(|msg| {
+                    if let MessageContent::StyledBlock(lines) = &msg.content {
+                        lines
+                            .first()
+                            .and_then(|l| l.spans.first())
+                            .map(|s| s.content.contains("Token Usage & Costs"))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false);
+
+            if should_update {
+                state.messages.pop(); // Remove old message
+                crate::services::helper_block::push_usage_message(state);
+            }
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
@@ -579,6 +611,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::EndLoadingOperation(operation) => {
+            // Clear current message usage when stream processing ends
+            if matches!(operation, LoadingOperation::StreamProcessing) {
+                state.current_message_usage = None;
+            }
             state.loading_manager.end_operation(operation);
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();
@@ -1642,6 +1678,12 @@ fn handle_input_submitted(
                 "/memorize" => {
                     push_memorize_message(state);
                     let _ = output_tx.try_send(OutputEvent::Memorize);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
+                "/usage" => {
+                    push_usage_message(state);
+                    let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
