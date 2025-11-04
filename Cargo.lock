@@ -4738,6 +4738,7 @@ dependencies = [
  "stakpak-shared",
  "stakpak-tui",
  "tar",
+ "tempfile",
  "tokio",
  "tokio-util",
  "toml 0.8.23",
