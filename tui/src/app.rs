@@ -340,6 +340,8 @@ pub enum InputEvent {
     RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
     RulebookSearchInputChanged(char),
     RulebookSearchBackspace,
+    HandleCtrlS,
+    ToggleMoreShortcuts,
 }
 
 #[derive(Debug)]
@@ -410,7 +412,7 @@ impl AppState {
                 description: "Toggle mouse capture on/off",
             },
             HelperCommand {
-                command: "/switch_profile",
+                command: "/profiles",
                 description: "Switch to a different profile",
             },
             HelperCommand {

@@ -74,7 +74,7 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
             "Commands",
         ),
         Shortcut::new("/mouse_capture", "Toggle mouse capture", "Commands"),
-        Shortcut::new("/switch_profile", "Switch profile", "Commands"),
+        Shortcut::new("/profiles", "Switch profile", "Commands"),
         Shortcut::new("/quit", "Quit application", "Commands"),
         // File Search
         Shortcut::new("@", "Trigger file search", "File Search"),

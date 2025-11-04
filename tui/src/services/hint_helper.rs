@@ -38,11 +38,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
-            Line::from(
-                "/ for commands      PageUp/Down(Fn + ↑/↓) for fast scroll      shift + enter or ctrl + j to insert newline",
-            ),
+            Line::from("ctrl+p palette . @ files . / commands . ctrl+g less"),
             Line::from(format!(
-                "{} for shell mode    ↵ to send message    ctrl + c to quit    ctrl + r to retry    ctrl + p to switch profile    ctrl + k for rulebooks",
+                "{} shell mode . ↵ submit . ctrl+c quit . ctrl+f profile . ctrl+k rulebooks . ctrl+s shortcuts",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
@@ -53,7 +51,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         if state.latest_tool_call.is_some() {
             // Create a line with both hints - shortcuts on left, retry on right
             let shortcuts_text = "ctrl+p commands";
-            let retry_text = "Ctrl+R to retry last command in shell mode";
+            let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
             let total_width = area.width as usize;
@@ -84,9 +82,12 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
             // Create spans for left and right alignment
             #[cfg(unix)]
-            let left_text = format!("ctrl+p palette . @ files . / commands{}", select_hint);
+            let left_text = format!(
+                "ctrl+p palette . @ files . / commands . ctrl+g more{}",
+                select_hint
+            );
             #[cfg(not(unix))]
-            let left_text = format!("ctrl+p palette . @ files . / commands");
+            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+g more");
 
             let profile_text = format!("profile {}", state.current_profile_name);
             let rulebooks_text = " | ctrl+k: rulebooks";
@@ -115,9 +116,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         // Show auto-approve status
         let auto_approve_status = if state.auto_approve_manager.is_enabled() {
-            "🔓 Auto-approve ON"
+            "auto-approve is ON"
         } else {
-            "🔒 Auto-approve OFF"
+            "auto-approve is OFF"
         };
         let status_color = if state.auto_approve_manager.is_enabled() {
             if should_use_rgb_colors() {
@@ -156,7 +157,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 Style::default().fg(Color::Reset),
             ));
         }
-        spans_vec.push(Span::styled("Ctrl+o", Style::default().fg(Color::DarkGray)));
+        spans_vec.push(Span::styled("ctrl+o", Style::default().fg(Color::DarkGray)));
         spans_vec.push(Span::styled(
             " toggle auto-approve",
             Style::default().fg(Color::DarkGray),

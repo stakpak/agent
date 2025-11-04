@@ -5,22 +5,14 @@ use crate::{
     config::AppConfig,
     utils::network,
 };
-use agent::AgentCommands;
 use clap::Subcommand;
-use flow::{clone, get_flow_ref, push};
 use serde::{Deserialize, Serialize};
-use stakpak_api::{
-    Client, ClientConfig,
-    models::{Document, ProvisionerType, TranspileTargetProvisionerType},
-};
+use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use termimad::MadSkin;
-use walkdir::WalkDir;
 
 pub mod acp;
 pub mod agent;
 pub mod auto_update;
-pub mod flow;
 pub mod warden;
 
 /// Frontmatter structure for rulebook metadata
@@ -135,74 +127,6 @@ pub enum Commands {
     /// Get current account
     Account,
 
-    /// List my flows
-    List,
-
-    /// Get a flow
-    Get {
-        /// Flow reference in format: <owner_name>/<flow_name>
-        flow_ref: String,
-    },
-
-    /// Clone configurations from a flow
-    Clone {
-        /// Flow reference in format: <owner_name>/<flow_name>(/<version_id_or_tag>)?
-        #[arg(name = "flow-ref")]
-        flow_ref: String,
-        /// Destination directory
-        #[arg(long, short)]
-        dir: Option<String>,
-    },
-
-    /// Query your configurations
-    Query {
-        /// Query string to search/prompt for over your flows
-        query: String,
-        /// Limit the query to a specific flow reference in format: <owner_name>/<flow_name>/<version_id_or_tag>
-        #[arg(long, short)]
-        flow_ref: Option<String>,
-        /// Re-generate the semantic query used to find code blocks with natural language
-        #[arg(long, short)]
-        generate_query: bool,
-        /// Synthesize output with an LLM into a custom response
-        #[arg(long, short = 'o')]
-        synthesize_output: bool,
-    },
-
-    /// Push configurations to a flow
-    Push {
-        /// Flow reference in format: <owner_name>/<flow_name>(/<version_id_or_tag>)?
-        #[arg(name = "flow-ref")]
-        flow_ref: String,
-        /// Create a new index
-        #[arg(long, short, default_value_t = false)]
-        create: bool,
-        /// Source directory
-        #[arg(long, short)]
-        dir: Option<String>,
-        /// Ignore delete operations
-        #[arg(long, default_value_t = false)]
-        ignore_delete: bool,
-        /// Auto approve all changes
-        #[arg(long, short = 'y', default_value_t = false)]
-        auto_approve: bool,
-    },
-
-    /// Transpile configurations
-    Transpile {
-        /// Source directory
-        #[arg(long, short)]
-        dir: Option<String>,
-
-        /// Source DSL to transpile from (currently only supports terraform)
-        #[arg(long, short = 's')]
-        source_provisioner: ProvisionerType,
-
-        /// Target DSL to transpile to (currently only supports eraser)
-        #[arg(long, short = 't')]
-        target_provisioner: TranspileTargetProvisionerType,
-    },
-
     /// Start the MCP server
     Mcp {
         /// Disable secret redaction (WARNING: this will print secrets to the console)
@@ -229,10 +153,6 @@ pub enum Commands {
         #[arg(long = "disable-mcp-mtls", default_value_t = false)]
         disable_mcp_mtls: bool,
     },
-
-    /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
-    #[command(subcommand)]
-    Agent(AgentCommands),
 
     /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
     Warden {
@@ -488,187 +408,6 @@ impl Commands {
                 let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
-            }
-            Commands::List => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-                let owner_name = client.get_my_account().await?.username;
-                let data = client.list_flows(&owner_name).await?;
-                println!("{}", data.to_text(&owner_name));
-            }
-            Commands::Get { flow_ref } => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-                let parts: Vec<&str> = flow_ref.split('/').collect();
-
-                let (owner_name, flow_name) = if parts.len() == 2 {
-                    (parts[0], parts[1])
-                } else {
-                    return Err("Flow ref must be of the format <owner name>/<flow name>".into());
-                };
-
-                let data = client.get_flow(owner_name, flow_name).await?;
-                println!("{}", data.to_text(owner_name));
-            }
-            Commands::Clone { flow_ref, dir } => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-                let flow_ref = get_flow_ref(&client, flow_ref).await?;
-                clone(&client, &flow_ref, dir.as_deref()).await?;
-            }
-            Commands::Query {
-                query,
-                flow_ref,
-                generate_query,
-                synthesize_output,
-            } => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-                let data = client
-                    .query_blocks(
-                        &query,
-                        generate_query,
-                        synthesize_output,
-                        flow_ref.as_deref(),
-                    )
-                    .await?;
-
-                let skin = MadSkin::default();
-                println!("{}", skin.inline(&data.to_text(synthesize_output)));
-            }
-            Commands::Push {
-                flow_ref,
-                create,
-                dir,
-                ignore_delete,
-                auto_approve,
-            } => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-
-                let save_result =
-                    push(&client, flow_ref, create, dir, ignore_delete, auto_approve).await?;
-
-                if let Some(save_result) = save_result {
-                    if !save_result.errors.is_empty() {
-                        println!("\nSave errors:");
-                        for error in save_result.errors {
-                            println!("\t{}: {}", error.uri, error.message);
-                            if let Some(details) = error.details {
-                                println!("\t\t{}", details);
-                            }
-                        }
-                    }
-
-                    let total_blocks =
-                        save_result.created_blocks.len() + save_result.modified_blocks.len();
-
-                    if total_blocks > 0 {
-                        println!(
-                            "Please wait {:.2} minutes for indexing to complete",
-                            total_blocks as f64 * 1.5 / 60.0
-                        );
-                    }
-                }
-            }
-            Commands::Transpile {
-                dir,
-                source_provisioner,
-                target_provisioner,
-            } => {
-                if target_provisioner != TranspileTargetProvisionerType::EraserDSL {
-                    return Err(
-                        "Currently only EraserDSL is supported as a transpile target".into(),
-                    );
-                }
-                if source_provisioner != ProvisionerType::Terraform {
-                    return Err("Currently only terraform is supported as a source DSL".into());
-                }
-
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
-                let base_dir = dir.unwrap_or_else(|| ".".into());
-
-                let mut documents = Vec::new();
-
-                for entry in WalkDir::new(&base_dir)
-                    .follow_links(false)
-                    .into_iter()
-                    .filter_entry(|e| {
-                        // Skip hidden directories and non-supported files
-                        let file_name = e.file_name().to_str();
-                        match file_name {
-                            Some(name) => {
-                                // Skip hidden files/dirs that aren't just "."
-                                if name.starts_with('.') && name.len() > 1 {
-                                    return false;
-                                }
-                                // Only allow terraform files when from is terraform
-                                if e.file_type().is_file() {
-                                    name.ends_with(".tf")
-                                } else {
-                                    true // Allow directories to be traversed
-                                }
-                            }
-                            None => false,
-                        }
-                    })
-                    .filter_map(|e| e.ok())
-                {
-                    // Skip directories
-                    if !entry.file_type().is_file() {
-                        continue;
-                    }
-
-                    let path = entry.path();
-                    // Skip binary files by attempting to read as UTF-8 and checking for errors
-                    let content = match std::fs::read_to_string(path) {
-                        Ok(content) => content,
-                        Err(_) => continue, // Skip file if it can't be read as valid UTF-8
-                    };
-
-                    // Convert path to URI format
-                    #[allow(clippy::unwrap_used)]
-                    let document_path = path
-                        .strip_prefix(&base_dir)
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    let document_uri = format!("file://{}", document_path);
-
-                    documents.push(Document {
-                        content,
-                        uri: document_uri,
-                        provisioner: source_provisioner.clone(),
-                    });
-                }
-
-                if documents.is_empty() {
-                    return Err(format!(
-                        "No {} files found to transpile",
-                        source_provisioner
-                    ));
-                }
-
-                let result = client
-                    .transpile(documents, source_provisioner, target_provisioner)
-                    .await?;
-                println!(
-                    "{}",
-                    result
-                        .result
-                        .blocks
-                        .into_iter()
-                        .map(|b| b.code)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
-            }
-            Commands::Agent(agent_commands) => {
-                if let AgentCommands::Get { .. } = agent_commands {
-                } else {
-                    println!();
-                    println!(
-                        "[WARNING: These agents are in early alpha development and may be unstable]"
-                    );
-                    println!();
-                };
-
-                AgentCommands::run(agent_commands, config).await?;
             }
             Commands::Version => {
                 println!(
