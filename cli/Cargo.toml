@@ -23,7 +23,6 @@ uuid = { workspace = true }
 futures-util = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
-termimad = "0.31.1"
 walkdir = { workspace = true }
 rpassword = "7.3"
 names = "0.14.0"
