@@ -28,7 +28,15 @@ use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
 use uuid::Uuid;
 
-type ClientTaskResult = Result<(Vec<ChatMessage>, Option<Uuid>, Option<AppConfig>), String>;
+type ClientTaskResult = Result<
+    (
+        Vec<ChatMessage>,
+        Option<Uuid>,
+        Option<AppConfig>,
+        stakpak_shared::models::integrations::openai::Usage,
+    ),
+    String,
+>;
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
@@ -55,6 +63,12 @@ pub async fn run_interactive(
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
+        let mut total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            prompt_tokens_details: None,
+        };
 
         // Clone config values for this iteration
         let api_key = ctx.api_key.clone();
@@ -639,7 +653,12 @@ pub async fn run_interactive(
                         let _ = shutdown_tx_for_client.send(());
 
                         // Return new config to trigger outer loop restart
-                        return Ok((messages, current_session_id, Some(new_config)));
+                        return Ok((
+                            messages,
+                            current_session_id,
+                            Some(new_config),
+                            total_session_usage,
+                        ));
                     }
                     OutputEvent::RequestRulebookUpdate(selected_uris) => {
                         // Update the rulebooks list based on selected URIs
@@ -670,6 +689,15 @@ pub async fn run_interactive(
                             )
                             .await;
                         }
+                        continue;
+                    }
+                    OutputEvent::RequestTotalUsage => {
+                        // Send total accumulated usage to TUI
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::TotalUsage(total_session_usage.clone()),
+                        )
+                        .await?;
                         continue;
                     }
                 }
@@ -756,6 +784,54 @@ pub async fn run_interactive(
                     Ok(response) => {
                         messages.push(response.choices[0].message.clone());
 
+                        // Accumulate usage from response
+                        total_session_usage.prompt_tokens += response.usage.prompt_tokens;
+                        total_session_usage.completion_tokens += response.usage.completion_tokens;
+                        total_session_usage.total_tokens += response.usage.total_tokens;
+
+                        // Accumulate prompt token details if available
+                        if let Some(response_details) = &response.usage.prompt_tokens_details {
+                            if total_session_usage.prompt_tokens_details.is_none() {
+                                total_session_usage.prompt_tokens_details = Some(
+                                    stakpak_shared::models::integrations::openai::PromptTokensDetails {
+                                        input_tokens: response_details.input_tokens,
+                                        output_tokens: response_details.output_tokens,
+                                        cache_read_input_tokens: response_details.cache_read_input_tokens,
+                                        cache_write_input_tokens: response_details.cache_write_input_tokens,
+                                    },
+                                );
+                            } else if let Some(details) =
+                                total_session_usage.prompt_tokens_details.as_mut()
+                            {
+                                if let Some(input) = response_details.input_tokens {
+                                    details.input_tokens =
+                                        Some(details.input_tokens.unwrap_or(0) + input);
+                                }
+                                if let Some(output) = response_details.output_tokens {
+                                    details.output_tokens =
+                                        Some(details.output_tokens.unwrap_or(0) + output);
+                                }
+                                if let Some(cache_read) = response_details.cache_read_input_tokens {
+                                    details.cache_read_input_tokens = Some(
+                                        details.cache_read_input_tokens.unwrap_or(0) + cache_read,
+                                    );
+                                }
+                                if let Some(cache_write) = response_details.cache_write_input_tokens
+                                {
+                                    details.cache_write_input_tokens = Some(
+                                        details.cache_write_input_tokens.unwrap_or(0) + cache_write,
+                                    );
+                                }
+                            }
+                        }
+
+                        // Send updated total usage to TUI for display
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::TotalUsage(total_session_usage.clone()),
+                        )
+                        .await?;
+
                         if current_session_id.is_none()
                             && let Some(checkpoint_id) =
                                 extract_checkpoint_id_from_messages(&messages)
@@ -794,7 +870,12 @@ pub async fn run_interactive(
                 }
             }
 
-            Ok((messages, current_session_id, None))
+            Ok((
+                messages,
+                current_session_id,
+                None,
+                total_session_usage.clone(),
+            ))
         });
 
         // Wait for all tasks to finish
@@ -802,7 +883,7 @@ pub async fn run_interactive(
             tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
                 .map_err(|e| e.to_string())?;
 
-        let (final_messages, final_session_id, profile_switch_config) = client_res?;
+        let (final_messages, final_session_id, profile_switch_config, final_usage) = client_res?;
 
         // Check if profile switch was requested
         if let Some(new_config) = profile_switch_config {
@@ -856,6 +937,12 @@ pub async fn run_interactive(
                     // Don't fail the whole operation if stats fetch fails
                 }
             }
+        }
+
+        // Display token usage stats
+        if final_usage.total_tokens > 0 {
+            let renderer = OutputRenderer::new(OutputFormat::Text, false);
+            println!("{}", renderer.render_token_usage_stats(&final_usage));
         }
 
         let username = client

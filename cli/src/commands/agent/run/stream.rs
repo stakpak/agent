@@ -24,6 +24,7 @@ pub async fn process_responses_stream(
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
+            prompt_tokens_details: None,
         },
         system_fingerprint: None,
     };
@@ -47,6 +48,14 @@ pub async fn process_responses_stream(
     while let Some(response) = stream.next().await {
         match &response {
             Ok(response) => {
+                // Handle usage first - it can come in any event, including those with no content
+                if let Some(usage) = &response.usage {
+                    chat_completion_response.usage = usage.clone();
+
+                    // Send usage to TUI for display immediately when we receive it
+                    send_input_event(input_tx, InputEvent::StreamUsage(usage.clone())).await?;
+                }
+
                 let delta = &response.choices[0].delta;
 
                 chat_completion_response = ChatCompletionResponse {
@@ -55,11 +64,7 @@ pub async fn process_responses_stream(
                     created: response.created,
                     model: response.model.clone(),
                     choices: vec![],
-                    usage: Usage {
-                        prompt_tokens: 0,
-                        completion_tokens: 0,
-                        total_tokens: 0,
-                    },
+                    usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,
                 };
 
