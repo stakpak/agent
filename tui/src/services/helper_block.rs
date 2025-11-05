@@ -229,6 +229,7 @@ pub fn push_help_message(state: &mut AppState) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
     let mut lines = Vec::new();
+    lines.push(Line::from(""));
     // usage mode
     lines.push(Line::from(vec![Span::styled(
         "Usage Mode",
