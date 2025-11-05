@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    code_index::{get_or_build_local_code_index, start_code_index_watcher},
+    // code_index::{get_or_build_local_code_index, start_code_index_watcher},
     config::AppConfig,
     utils::network,
 };
@@ -189,37 +189,37 @@ impl Commands {
                 privacy_mode,
                 tool_mode,
                 enable_slack_tools,
-                index_big_project,
+                index_big_project: _,
                 disable_mcp_mtls,
             } => {
-                let api_config: ClientConfig = config.clone().into();
+                let _api_config: ClientConfig = config.clone().into();
                 match tool_mode {
                     ToolMode::RemoteOnly | ToolMode::Combined => {
-                        match get_or_build_local_code_index(&api_config, None, index_big_project)
-                            .await
-                        {
-                            Ok(_) => {
-                                // Indexing was successful, start the file watcher
-                                tokio::spawn(async move {
-                                    match start_code_index_watcher(&api_config, None) {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            eprintln!("Failed to start code index watcher: {}", e);
-                                        }
-                                    }
-                                });
-                            }
-                            Err(e)
-                                if e.contains("threshold") && e.contains("--index-big-project") =>
-                            {
-                                // This is the expected error when file count exceeds limit
-                                // Continue silently without file watcher
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to build code index: {}", e);
-                                // Continue without code indexing instead of exiting
-                            }
-                        }
+                        // match get_or_build_local_code_index(&api_config, None, index_big_project)
+                        //     .await
+                        // {
+                        //     Ok(_) => {
+                        //         // Indexing was successful, start the file watcher
+                        //         tokio::spawn(async move {
+                        //             match start_code_index_watcher(&api_config, None) {
+                        //                 Ok(_) => {}
+                        //                 Err(e) => {
+                        //                     eprintln!("Failed to start code index watcher: {}", e);
+                        //                 }
+                        //             }
+                        //         });
+                        //     }
+                        //     Err(e)
+                        //         if e.contains("threshold") && e.contains("--index-big-project") =>
+                        //     {
+                        //         // This is the expected error when file count exceeds limit
+                        //         // Continue silently without file watcher
+                        //     }
+                        //     Err(e) => {
+                        //         eprintln!("Failed to build code index: {}", e);
+                        //         // Continue without code indexing instead of exiting
+                        //     }
+                        // }
                     }
                     ToolMode::LocalOnly => {}
                 }
@@ -533,7 +533,7 @@ enabled = true
 volumes = [
     # working directory
     "./:/agent:ro",
-    
+
     # cloud credentials (read-only)
     "~/.aws:/home/agent/.aws:ro",
     "~/.config/gcloud:/home/agent/.config/gcloud:ro",
