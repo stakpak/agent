@@ -67,19 +67,15 @@ impl Default for AutoApproveConfig {
 pub struct AutoApproveManager {
     pub config: AutoApproveConfig,
     pub config_path: PathBuf,
-    error_sender: Option<mpsc::Sender<InputEvent>>,
+    input_tx: Option<mpsc::Sender<InputEvent>>,
 }
 
 impl AutoApproveManager {
-    pub fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
-        Self::new_with_error_sender(auto_approve_tools, None)
-    }
-
-    pub fn new_with_error_sender(
+    pub fn new(
         auto_approve_tools: Option<&Vec<String>>,
-        error_sender: Option<mpsc::Sender<InputEvent>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
     ) -> Self {
-        match Self::try_new(auto_approve_tools, error_sender.clone()) {
+        match Self::try_new(auto_approve_tools, input_tx.clone()) {
             Ok(manager) => manager,
             Err(e) => {
                 let config_path = PathBuf::from(AUTO_APPROVE_CONFIG_PATH);
@@ -87,14 +83,14 @@ impl AutoApproveManager {
                 let error_msg = format!("Failed to load auto-approve config: {}", e);
 
                 // Send error via InputEvent if sender is available
-                if let Some(ref sender) = error_sender {
+                if let Some(ref sender) = input_tx {
                     let _ = sender.try_send(InputEvent::Error(error_msg));
                 }
 
                 // Try to save the default config even if loading failed
-                if let Err(e) = config.save(&config_path, error_sender.clone()) {
+                if let Err(e) = config.save(&config_path, input_tx.clone()) {
                     let warning_msg = format!("Warning: Failed to save auto-approve config: {}", e);
-                    if let Some(ref sender) = error_sender {
+                    if let Some(ref sender) = input_tx {
                         let _ = sender.try_send(InputEvent::Error(warning_msg));
                     }
                 }
@@ -102,28 +98,20 @@ impl AutoApproveManager {
                 AutoApproveManager {
                     config,
                     config_path,
-                    error_sender: error_sender.clone(),
+                    input_tx: input_tx.clone(),
                 }
             }
         }
     }
-}
 
-impl Default for AutoApproveManager {
-    fn default() -> Self {
-        Self::new(None)
-    }
-}
-
-impl AutoApproveManager {
     pub fn try_new(
         auto_approve_tools: Option<&Vec<String>>,
-        error_sender: Option<mpsc::Sender<InputEvent>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
     ) -> Result<Self, String> {
         let config_path = Self::get_config_path()?;
         let session_config = if config_path.exists() {
             // Load existing session config
-            Some(Self::load_config(&config_path, error_sender.clone())?)
+            Some(Self::load_config(&config_path, input_tx.clone())?)
         } else {
             None
         };
@@ -135,7 +123,7 @@ impl AutoApproveManager {
         Ok(AutoApproveManager {
             config,
             config_path,
-            error_sender,
+            input_tx,
         })
     }
 
@@ -317,10 +305,10 @@ impl AutoApproveManager {
 
     fn save_config(&self) -> Result<(), String> {
         self.config
-            .save(&self.config_path, self.error_sender.clone())
+            .save(&self.config_path, self.input_tx.clone())
             .map_err(|e| {
                 let error_msg = format!("Failed to save auto-approve config: {}", e);
-                if let Some(ref sender) = self.error_sender {
+                if let Some(ref sender) = self.input_tx {
                     let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
                 }
                 error_msg
@@ -483,7 +471,7 @@ mod tests {
         let (error_tx, mut error_rx) = tokio::sync::mpsc::channel::<InputEvent>(10);
 
         // Try to create AutoApproveManager with invalid config - should send error via channel
-        let _manager = AutoApproveManager::new_with_error_sender(None, Some(error_tx.clone()));
+        let _manager = AutoApproveManager::new(None, Some(error_tx.clone()));
 
         // Check that we received an error event (try_send is synchronous)
         let error_received = error_rx.try_recv();
@@ -525,7 +513,7 @@ mod tests {
         let _ = std::env::set_current_dir(temp_dir.path());
 
         // Try to create AutoApproveManager without error sender - should not panic
-        let manager = AutoApproveManager::new_with_error_sender(None, None);
+        let manager = AutoApproveManager::new(None, None);
 
         // Manager should still be created with default config despite the error
         assert!(manager.config.enabled);
