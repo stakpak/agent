@@ -117,6 +117,9 @@ pub async fn run_tui(
 
     let term_size = terminal.size()?;
 
+    // Create internal channel for event handling (needed for error reporting during initialization)
+    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
+
     let mut state = AppState::new(
         latest_version,
         redact_secrets,
@@ -124,6 +127,7 @@ pub async fn run_tui(
         is_git_repo,
         auto_approve_tools,
         allowed_tools,
+        Some(internal_tx.clone()),
     );
 
     // Set the current profile name and rulebook config
@@ -134,9 +138,6 @@ pub async fn run_tui(
     let welcome_msg =
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
     state.messages.extend(welcome_msg);
-
-    // Internal channel for event handling
-    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
     let internal_tx_thread = internal_tx.clone();
     std::thread::spawn(move || {
         loop {

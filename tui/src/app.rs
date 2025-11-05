@@ -445,6 +445,7 @@ impl AppState {
         is_git_repo: bool,
         auto_approve_tools: Option<&Vec<String>>,
         allowed_tools: Option<&Vec<String>>,
+        error_sender: Option<mpsc::Sender<InputEvent>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
         let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
@@ -510,7 +511,10 @@ impl AppState {
             file_search_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
+            auto_approve_manager: AutoApproveManager::new_with_error_sender(
+                auto_approve_tools,
+                error_sender,
+            ),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
