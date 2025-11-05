@@ -26,6 +26,7 @@ pub enum CommandAction {
     SubmitIssue,
     GetSupport,
     NewSession,
+    ShowUsage,
 }
 
 impl Command {
@@ -76,6 +77,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Resume last session",
             "/resume",
             CommandAction::ResumeSession,
+        ),
+        Command::new(
+            "Usage",
+            "Show token usage for this session",
+            "/usage",
+            CommandAction::ShowUsage,
         ),
         Command::new(
             "Status",
