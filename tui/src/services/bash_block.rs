@@ -733,7 +733,7 @@ pub fn render_bash_block(
         extract_bash_block_info(tool_call, output);
 
     if is_auto_approved {
-        bubble_title = format!("{} - 🔓 Auto-approved tool", bubble_title).to_string();
+        bubble_title = format!("{} - Auto-approved tool", bubble_title).to_string();
     }
 
     render_styled_block_ansi_to_tui(

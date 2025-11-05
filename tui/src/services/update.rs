@@ -2384,9 +2384,9 @@ fn list_auto_approved_tools(state: &mut AppState) {
             .as_ref()
             .is_some_and(|tools| !tools.is_empty())
         {
-            "💡 No allowed tools are currently set to auto-approve."
+            "No allowed tools are currently set to auto-approve."
         } else {
-            "💡 No tools are currently set to auto-approve."
+            "No tools are currently set to auto-approve."
         };
         push_styled_message(state, message, Color::Cyan, "", Color::Cyan);
     } else {
@@ -2399,7 +2399,7 @@ fn list_auto_approved_tools(state: &mut AppState) {
         state.messages.push(Message::plain_text(""));
         push_styled_message(
             state,
-            &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
+            &format!("Tools currently set to auto-approve: {}", tool_list),
             Color::Yellow,
             "",
             Color::Yellow,
