@@ -476,8 +476,8 @@ mod tests {
         fs::write(&config_path, "invalid json content {").expect("Failed to write invalid config");
 
         // Temporarily change directory to the temp directory so the config path resolution works
-        let original_dir = std::env::current_dir().expect("Failed to get current directory");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change directory");
+        let original_dir = std::env::current_dir().ok();
+        let _ = std::env::set_current_dir(temp_dir.path());
 
         // Create a channel to receive error events
         let (error_tx, mut error_rx) = tokio::sync::mpsc::channel::<InputEvent>(10);
@@ -500,8 +500,10 @@ mod tests {
             panic!("Expected InputEvent::Error, got: {:?}", error_received);
         }
 
-        // Restore original directory
-        std::env::set_current_dir(&original_dir).expect("Failed to restore directory");
+        // Restore original directory if it existed
+        if let Some(original) = original_dir {
+            let _ = std::env::set_current_dir(&original);
+        }
     }
 
     #[tokio::test]
@@ -519,8 +521,8 @@ mod tests {
         fs::write(&config_path, "invalid json content {").expect("Failed to write invalid config");
 
         // Temporarily change directory to the temp directory so the config path resolution works
-        let original_dir = std::env::current_dir().expect("Failed to get current directory");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change directory");
+        let original_dir = std::env::current_dir().ok();
+        let _ = std::env::set_current_dir(temp_dir.path());
 
         // Try to create AutoApproveManager without error sender - should not panic
         let manager = AutoApproveManager::new_with_error_sender(None, None);
@@ -528,7 +530,9 @@ mod tests {
         // Manager should still be created with default config despite the error
         assert!(manager.config.enabled);
 
-        // Restore original directory
-        std::env::set_current_dir(&original_dir).expect("Failed to restore directory");
+        // Restore original directory if it existed
+        if let Some(original) = original_dir {
+            let _ = std::env::set_current_dir(&original);
+        }
     }
 }
