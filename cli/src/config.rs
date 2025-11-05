@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
-const STAKPAK_CONFIG_PATH: &str = "./stakpak/config.toml";
+const STAKPAK_CONFIG_PATH: &str = ".stakpak/config.toml";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
