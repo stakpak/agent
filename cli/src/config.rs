@@ -153,6 +153,7 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
             volumes: vec![
                 "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
                 "./:/agent:ro".to_string(),
+                "./.stakpak:/agent/.stakpak".to_string(),
                 "~/.aws:/home/agent/.aws:ro".to_string(),
                 "~/.config/gcloud:/home/agent/.config/gcloud:ro".to_string(),
                 "~/.digitalocean:/home/agent/.digitalocean:ro".to_string(),
@@ -924,7 +925,7 @@ exclude_tags = ["experimental"]
 
 [profiles.test.warden]
 enabled = true
-volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro"]
+volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro", "./.stakpak:/agent/.stakpak"]
 
 [settings]
 machine_name = "test-machine"
