@@ -152,7 +152,8 @@ impl AutoApproveManager {
         if !config_path.exists() {
             // Create default config
             let config = AutoApproveConfig::default();
-            config.save(config_path, error_sender.clone())
+            config
+                .save(config_path, error_sender.clone())
                 .map_err(|e| {
                     let error_msg = format!("Failed to load auto-approve config: {}", e);
                     if let Some(ref sender) = error_sender {
@@ -184,7 +185,8 @@ impl AutoApproveManager {
             .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
 
         // Save the updated config back to file
-        config.save(config_path, error_sender.clone())
+        config
+            .save(config_path, error_sender.clone())
             .map_err(|e| {
                 let error_msg = format!("Failed to load auto-approve config: {}", e);
                 if let Some(ref sender) = error_sender {
@@ -383,8 +385,7 @@ impl AutoApproveConfig {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-        fs::write(path, json)
-            .map_err(|e| format!("Failed to write config file: {}", e))
+        fs::write(path, json).map_err(|e| format!("Failed to write config file: {}", e))
     }
 }
 
