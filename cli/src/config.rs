@@ -972,12 +972,13 @@ auto_append_gitignore = true
             .as_ref()
             .expect("Warden config not found");
         assert!(warden.enabled);
-        assert_eq!(warden.volumes.len(), 2);
+        assert_eq!(warden.volumes.len(), 3);
         assert_eq!(
             warden.volumes[0],
             "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro"
         );
         assert_eq!(warden.volumes[1], "./:/agent:ro");
+        assert_eq!(warden.volumes[2], "./.stakpak:/agent/.stakpak");
 
         assert_eq!(
             config.settings.machine_name,
