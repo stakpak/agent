@@ -720,7 +720,6 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             // Command completed, reset active command state
             state.waiting_for_shell_input = false;
-            state.text_area.set_shell_mode(false);
             if let Some(dialog_command) = &state.dialog_command {
                 let dialog_command_id = dialog_command.id.clone();
                 let result = shell_command_to_tool_call_result(state);
@@ -774,6 +773,7 @@ pub fn update(
                 state.show_shell_mode = false;
                 state.dialog_command = None;
                 state.toggle_approved_message = true;
+                state.text_area.set_shell_mode(false);
             }
             if state.ondemand_shell_mode {
                 let new_tool_call_result = shell_command_to_tool_call_result(state);
@@ -785,7 +785,6 @@ pub fn update(
             state.active_shell_command = None;
             state.active_shell_command_output = None;
             state.text_area.set_text("");
-            state.text_area.set_shell_mode(false);
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -2555,6 +2554,9 @@ fn execute_command_palette_selection(
         }
         CommandAction::GetSupport => {
             push_support_message(state);
+        }
+        CommandAction::ShowUsage => {
+            push_usage_message(state);
         }
     }
     state.text_area.set_text("");
