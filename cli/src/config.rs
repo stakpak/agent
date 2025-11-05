@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
-const STAKPAK_CONFIG_PATH: &str = "./stakpak/config.toml";
+const STAKPAK_CONFIG_PATH: &str = ".stakpak/config.toml";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
@@ -153,6 +153,7 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
             volumes: vec![
                 "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
                 "./:/agent:ro".to_string(),
+                "./.stakpak:/agent/.stakpak".to_string(),
                 "~/.aws:/home/agent/.aws:ro".to_string(),
                 "~/.config/gcloud:/home/agent/.config/gcloud:ro".to_string(),
                 "~/.digitalocean:/home/agent/.digitalocean:ro".to_string(),
@@ -924,7 +925,7 @@ exclude_tags = ["experimental"]
 
 [profiles.test.warden]
 enabled = true
-volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro"]
+volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro", "./.stakpak:/agent/.stakpak"]
 
 [settings]
 machine_name = "test-machine"
@@ -971,12 +972,13 @@ auto_append_gitignore = true
             .as_ref()
             .expect("Warden config not found");
         assert!(warden.enabled);
-        assert_eq!(warden.volumes.len(), 2);
+        assert_eq!(warden.volumes.len(), 3);
         assert_eq!(
             warden.volumes[0],
             "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro"
         );
         assert_eq!(warden.volumes[1], "./:/agent:ro");
+        assert_eq!(warden.volumes[2], "./.stakpak:/agent/.stakpak");
 
         assert_eq!(
             config.settings.machine_name,
