@@ -120,6 +120,19 @@ impl From<OldAppConfig> for ConfigFile {
     }
 }
 
+impl From<AppConfig> for ProfileConfig {
+    fn from(config: AppConfig) -> Self {
+        ProfileConfig {
+            api_endpoint: Some(config.api_endpoint),
+            api_key: config.api_key,
+            allowed_tools: config.allowed_tools,
+            auto_approve: config.auto_approve,
+            rulebooks: config.rulebooks,
+            warden: config.warden,
+        }
+    }
+}
+
 impl Default for ConfigFile {
     fn default() -> Self {
         ConfigFile {
@@ -349,17 +362,9 @@ impl AppConfig {
         let mut config_file = Self::load_config_file(&self.config_path).unwrap_or_default();
 
         // Update the current profile
-        config_file.profiles.insert(
-            self.profile_name.clone(),
-            ProfileConfig {
-                api_endpoint: Some(self.api_endpoint.clone()),
-                api_key: self.api_key.clone(),
-                allowed_tools: self.allowed_tools.clone(),
-                auto_approve: self.auto_approve.clone(),
-                rulebooks: self.rulebooks.clone(),
-                warden: self.warden.clone(),
-            },
-        );
+        config_file
+            .profiles
+            .insert(self.profile_name.clone(), self.clone().into());
 
         // Update settings
         config_file.settings = Settings {
