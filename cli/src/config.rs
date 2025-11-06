@@ -123,6 +123,18 @@ impl From<OldAppConfig> for ConfigFile {
 impl Default for ConfigFile {
     fn default() -> Self {
         ConfigFile {
+            profiles: HashMap::new(),
+            settings: Settings {
+                machine_name: None,
+                auto_append_gitignore: Some(true),
+            },
+        }
+    }
+}
+
+impl ConfigFile {
+    fn with_default_profile() -> Self {
+        ConfigFile {
             profiles: HashMap::from([(
                 "default".into(),
                 ProfileConfig::with_api_endpoint(STAKPAK_API_ENDPOINT),
@@ -207,7 +219,7 @@ impl AppConfig {
         match std::fs::read_to_string(config_path.as_ref()) {
             Ok(content) => toml::from_str::<ConfigFile>(&content)
                 .or_else(|_| Self::migrate_old_config(config_path, &content)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::with_default_profile()),
             Err(e) => Err(ConfigError::Message(format!(
                 "Failed to read config file: {}",
                 e
