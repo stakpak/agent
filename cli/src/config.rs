@@ -316,17 +316,7 @@ impl AppConfig {
         custom_config_path: Option<P>,
     ) -> Result<Vec<String>, String> {
         let config_path = Self::get_config_path(custom_config_path);
-
-        if !Path::new(&config_path).exists() {
-            return Err("Config file not found".to_string());
-        }
-
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-
-        let config_file: ConfigFile =
-            toml::from_str(&content).map_err(|e| format!("Failed to parse config file: {}", e))?;
-
+        let config_file = Self::load_config_file(&config_path).map_err(|e| format!("{}", e))?;
         let mut profiles: Vec<String> = config_file
             .profiles
             .keys()
