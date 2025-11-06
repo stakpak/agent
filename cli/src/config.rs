@@ -377,11 +377,12 @@ impl AppConfig {
 
     pub fn save(&self) -> Result<(), String> {
         // Load existing config or create new one
-        let mut config_file = Self::load_config_file(&self.config_path).unwrap_or_default();
+        let config_path = PathBuf::from(&self.config_path);
+        let mut config_file = Self::load_config_file(&config_path).unwrap_or_default();
         config_file.insert(self.clone()); // Update the current profile
         config_file.set_app_config_settings(self.clone()); // Update settings
 
-        if let Some(parent) = Path::new(&self.config_path).parent() {
+        if let Some(parent) = config_path.parent() {
             create_dir_all(parent).map_err(|e| format!("{}", e))?;
         }
 
