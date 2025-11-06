@@ -158,6 +158,11 @@ impl ConfigFile {
             },
         }
     }
+
+    fn insert(&mut self, config: AppConfig) {
+        self.profiles
+            .insert(config.profile_name.clone(), config.into());
+    }
 }
 
 impl WardenConfig {
@@ -362,9 +367,7 @@ impl AppConfig {
         let mut config_file = Self::load_config_file(&self.config_path).unwrap_or_default();
 
         // Update the current profile
-        config_file
-            .profiles
-            .insert(self.profile_name.clone(), self.clone().into());
+        config_file.insert(self.clone());
 
         // Update settings
         config_file.settings = Settings {
