@@ -346,20 +346,7 @@ impl AppConfig {
 
     pub fn save(&self) -> Result<(), String> {
         // Load existing config or create new one
-        let mut config_file = if Path::new(&self.config_path).exists() {
-            let content = std::fs::read_to_string(&self.config_path)
-                .map_err(|e| format!("Failed to read config file: {}", e))?;
-            toml::from_str::<ConfigFile>(&content)
-                .map_err(|e| format!("Failed to parse config file: {}", e))?
-        } else {
-            ConfigFile {
-                profiles: HashMap::new(),
-                settings: Settings {
-                    machine_name: None,
-                    auto_append_gitignore: Some(true),
-                },
-            }
-        };
+        let mut config_file = Self::load_config_file(&self.config_path).unwrap_or_default();
 
         // Update the current profile
         config_file.profiles.insert(
