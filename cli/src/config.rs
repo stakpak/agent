@@ -218,7 +218,10 @@ impl AppConfig {
         }
     }
 
-    pub fn load(profile_name: &str, custom_config_path: Option<&str>) -> Result<Self, ConfigError> {
+    pub fn load<P: AsRef<Path>>(
+        profile_name: &str,
+        custom_config_path: Option<P>,
+    ) -> Result<Self, ConfigError> {
         // Don't allow "all" as a profile to be loaded directly
         if profile_name == "all" {
             return Err(ConfigError::Message(
