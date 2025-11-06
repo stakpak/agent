@@ -82,15 +82,6 @@ struct OldAppConfig {
     pub auto_append_gitignore: Option<bool>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ProfileInfo {
-    pub name: String,
-    pub has_api_key: bool,
-    pub allowed_tools_count: usize,
-    pub auto_approve_count: usize,
-    pub is_restricted: bool,
-}
-
 impl From<AppConfig> for ClientConfig {
     fn from(config: AppConfig) -> Self {
         ClientConfig {
@@ -349,26 +340,6 @@ impl AppConfig {
 
         profiles.sort();
         Ok(profiles)
-    }
-
-    /// Get profile display info
-    pub fn get_profile_info<P: AsRef<Path>>(
-        profile_name: &str,
-        custom_config_path: Option<P>,
-    ) -> Result<ProfileInfo, String> {
-        let config = Self::load(profile_name, custom_config_path).map_err(|e| e.to_string())?;
-
-        Ok(ProfileInfo {
-            name: profile_name.to_string(),
-            has_api_key: config.api_key.is_some(),
-            allowed_tools_count: config.allowed_tools.as_ref().map(|t| t.len()).unwrap_or(0),
-            auto_approve_count: config.auto_approve.as_ref().map(|t| t.len()).unwrap_or(0),
-            is_restricted: config
-                .allowed_tools
-                .as_ref()
-                .map(|t| t.len() < 5)
-                .unwrap_or(false),
-        })
     }
 
     pub fn save(&self) -> Result<(), String> {
