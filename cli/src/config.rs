@@ -352,9 +352,9 @@ impl AppConfig {
     }
 
     /// Get profile display info
-    pub fn get_profile_info(
+    pub fn get_profile_info<P: AsRef<Path>>(
         profile_name: &str,
-        custom_config_path: Option<&str>,
+        custom_config_path: Option<P>,
     ) -> Result<ProfileInfo, String> {
         let config = Self::load(profile_name, custom_config_path).map_err(|e| e.to_string())?;
 
