@@ -162,19 +162,19 @@ impl WardenConfig {
     }
 }
 
-fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileConfig {
-    ProfileConfig {
-        api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
-        api_key: default_profile.and_then(|p| p.api_key.clone()),
-        warden: Some(WardenConfig::readonly_profile()),
-        ..ProfileConfig::default()
-    }
-}
-
 impl ProfileConfig {
     fn with_api_endpoint(api_endpoint: &str) -> Self {
         ProfileConfig {
             api_endpoint: Some(api_endpoint.into()),
+            ..ProfileConfig::default()
+        }
+    }
+
+    fn readonly_profile(default_profile: Option<&ProfileConfig>) -> Self {
+        ProfileConfig {
+            api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
+            api_key: default_profile.and_then(|p| p.api_key.clone()),
+            warden: Some(WardenConfig::readonly_profile()),
             ..ProfileConfig::default()
         }
     }
@@ -243,7 +243,7 @@ impl AppConfig {
         let mut is_config_file_dirty = false;
         if !config_file.profiles.contains_key("readonly") {
             let base_profile = config_file.profiles.get("default");
-            let readonly_profile = create_readonly_profile(base_profile);
+            let readonly_profile = ProfileConfig::readonly_profile(base_profile);
             config_file
                 .profiles
                 .insert("readonly".to_string(), readonly_profile);
