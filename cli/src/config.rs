@@ -144,11 +144,9 @@ impl Default for ConfigFile {
     }
 }
 
-fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileConfig {
-    ProfileConfig {
-        api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
-        api_key: default_profile.and_then(|p| p.api_key.clone()),
-        warden: Some(WardenConfig {
+impl WardenConfig {
+    fn readonly_profile() -> Self {
+        WardenConfig {
             enabled: true,
             volumes: vec![
                 "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro".to_string(),
@@ -160,7 +158,15 @@ fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileCo
                 "~/.azure:/home/agent/.azure:ro".to_string(),
                 "~/.kube:/home/agent/.kube:ro".to_string(),
             ],
-        }),
+        }
+    }
+}
+
+fn create_readonly_profile(default_profile: Option<&ProfileConfig>) -> ProfileConfig {
+    ProfileConfig {
+        api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
+        api_key: default_profile.and_then(|p| p.api_key.clone()),
+        warden: Some(WardenConfig::readonly_profile()),
         ..ProfileConfig::default()
     }
 }
