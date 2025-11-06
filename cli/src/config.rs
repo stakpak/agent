@@ -321,8 +321,8 @@ impl AppConfig {
     }
 
     /// List all available profiles from config file
-    pub fn list_available_profiles(
-        custom_config_path: Option<&str>,
+    pub fn list_available_profiles<P: AsRef<Path>>(
+        custom_config_path: Option<P>,
     ) -> Result<Vec<String>, String> {
         let config_path = Self::get_config_path(custom_config_path);
 
