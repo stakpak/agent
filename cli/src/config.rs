@@ -101,6 +101,15 @@ impl From<OldAppConfig> for ProfileConfig {
     }
 }
 
+impl From<AppConfig> for Settings {
+    fn from(config: AppConfig) -> Self {
+        Settings {
+            machine_name: config.machine_name,
+            auto_append_gitignore: config.auto_append_gitignore,
+        }
+    }
+}
+
 impl From<OldAppConfig> for Settings {
     fn from(old_config: OldAppConfig) -> Self {
         Settings {
@@ -162,6 +171,10 @@ impl ConfigFile {
     fn insert(&mut self, config: AppConfig) {
         self.profiles
             .insert(config.profile_name.clone(), config.into());
+    }
+
+    fn set_app_config_settings(&mut self, config: AppConfig) {
+        self.settings = config.into();
     }
 }
 
@@ -365,15 +378,8 @@ impl AppConfig {
     pub fn save(&self) -> Result<(), String> {
         // Load existing config or create new one
         let mut config_file = Self::load_config_file(&self.config_path).unwrap_or_default();
-
-        // Update the current profile
-        config_file.insert(self.clone());
-
-        // Update settings
-        config_file.settings = Settings {
-            machine_name: self.machine_name.clone(),
-            auto_append_gitignore: self.auto_append_gitignore,
-        };
+        config_file.insert(self.clone()); // Update the current profile
+        config_file.set_app_config_settings(self.clone()); // Update settings
 
         if let Some(parent) = Path::new(&self.config_path).parent() {
             create_dir_all(parent).map_err(|e| format!("{}", e))?;
