@@ -466,6 +466,10 @@ api_endpoint = "https://new-api.stakpak.dev"
 api_key = "dev-key"
 allowed_tools = ["read"]
 
+[profiles.a]
+api_endpoint = "https://new-api.stakpak.a"
+api_key = "a-key"
+
 [settings]
 machine_name = "dev-machine"
 auto_append_gitignore = true
@@ -644,6 +648,28 @@ auto_append_gitignore = true
 
         assert_eq!(config.settings.machine_name.as_deref(), Some("dev-machine"));
         assert_eq!(config.settings.auto_append_gitignore, Some(true));
+    }
+
+    #[test]
+    fn list_available_profiles_returns_default_when_missing_config() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+
+        let profiles = AppConfig::list_available_profiles(Some(&path)).unwrap();
+
+        assert_eq!(profiles, vec!["default".to_string()]);
+    }
+
+    #[test]
+    fn list_available_profiles_reads_existing_config() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+
+        std::fs::write(&path, NEW_CONFIG).unwrap();
+
+        let profiles = AppConfig::list_available_profiles(Some(&path)).unwrap();
+
+        assert_eq!(profiles, vec!["a".to_string(), "dev".to_string()]);
     }
 }
 
