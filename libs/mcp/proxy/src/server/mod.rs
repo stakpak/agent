@@ -3,7 +3,7 @@ use rmcp::service::{NotificationContext, Peer, RequestContext};
 use rmcp::{
     RoleServer, ServerHandler, ServiceError,
     model::{
-        CallToolRequestParam, CallToolResult, CancelledNotificationParam, ErrorData,
+        CallToolRequestParam, CallToolResult, CancelledNotificationParam, Content, ErrorData,
         GetPromptRequestParam, GetPromptResult, Implementation, InitializeRequestParam,
         InitializeResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
         ListToolsResult, PaginatedRequestParam, ProtocolVersion, ReadResourceRequestParam,
@@ -16,6 +16,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -29,15 +30,18 @@ pub struct ProxyServer {
     client_config: Arc<Mutex<Option<ClientPoolConfig>>>,
     // Track if upstream clients have been initialized
     clients_initialized: Arc<Mutex<bool>>,
+    // Secret manager for redacting secrets in tool responses
+    secret_manager: SecretManager,
 }
 
 impl ProxyServer {
-    pub fn new(config: ClientPoolConfig) -> Self {
+    pub fn new(config: ClientPoolConfig, redact_secrets: bool, privacy_mode: bool) -> Self {
         Self {
             pool: Arc::new(ClientPool::new()),
             request_id_to_client: Arc::new(Mutex::new(HashMap::new())),
             client_config: Arc::new(Mutex::new(Some(config))),
             clients_initialized: Arc::new(Mutex::new(false)),
+            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
         }
     }
 
@@ -248,7 +252,7 @@ impl ServerHandler for ProxyServer {
                 let mut tool_params = params.clone();
                 tool_params.name = tool_name.to_string().into();
 
-                let result = client.call_tool(tool_params).await.map_err(|e| match e {
+                let mut result = client.call_tool(tool_params).await.map_err(|e| match e {
                     ServiceError::McpError(err) => err,
                     _ => ErrorData::internal_error(
                         format!(
@@ -258,6 +262,24 @@ impl ServerHandler for ProxyServer {
                         None,
                     ),
                 })?;
+
+                // Redact secrets in the result content
+                let redacted_content: Vec<Content> = result
+                    .content
+                    .into_iter()
+                    .map(|content| {
+                        if let Some(text_content) = content.raw.as_text() {
+                            let redacted_text = self
+                                .secret_manager
+                                .redact_and_store_secrets(&text_content.text, None);
+                            Content::text(&redacted_text)
+                        } else {
+                            content
+                        }
+                    })
+                    .collect();
+
+                result.content = redacted_content;
 
                 Ok(result)
             }

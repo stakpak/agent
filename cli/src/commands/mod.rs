@@ -119,6 +119,14 @@ pub enum McpCommands {
         /// Config file path
         #[arg(long = "config-file")]
         config_file: Option<String>,
+
+        /// Disable secret redaction (WARNING: this will print secrets to the console)
+        #[arg(long = "disable-secret-redaction", default_value_t = false)]
+        disable_secret_redaction: bool,
+
+        /// Enable privacy mode to redact private data like IP addresses and AWS account IDs
+        #[arg(long = "privacy-mode", default_value_t = false)]
+        privacy_mode: bool,
     },
 }
 
@@ -293,7 +301,11 @@ impl Commands {
                     .await
                     .map_err(|e| e.to_string())?;
                 }
-                McpCommands::Proxy { config_file } => {
+                McpCommands::Proxy {
+                    config_file,
+                    disable_secret_redaction,
+                    privacy_mode,
+                } => {
                     let config = match ClientPoolConfig::from_toml_file(
                         config_file.as_deref().unwrap_or("mcp.toml"),
                     ) {
@@ -304,7 +316,7 @@ impl Commands {
                         .map_err(|e| e.to_string())?,
                     };
 
-                    let server = ProxyServer::new(config)
+                    let server = ProxyServer::new(config, !disable_secret_redaction, privacy_mode)
                         .serve(stdio())
                         .await
                         .map_err(|e| e.to_string())?;
