@@ -241,6 +241,35 @@ impl ProfileConfig {
             ..ProfileConfig::default()
         }
     }
+
+    fn merge(&self, other: Option<&ProfileConfig>) -> ProfileConfig {
+        ProfileConfig {
+            api_endpoint: self
+                .api_endpoint
+                .clone()
+                .or_else(|| other.and_then(|config| config.api_endpoint.clone())),
+            api_key: self
+                .api_key
+                .clone()
+                .or_else(|| other.and_then(|config| config.api_key.clone())),
+            allowed_tools: self
+                .allowed_tools
+                .clone()
+                .or_else(|| other.and_then(|config| config.allowed_tools.clone())),
+            auto_approve: self
+                .auto_approve
+                .clone()
+                .or_else(|| other.and_then(|config| config.auto_approve.clone())),
+            rulebooks: self
+                .rulebooks
+                .clone()
+                .or_else(|| other.and_then(|config| config.rulebooks.clone())),
+            warden: self
+                .warden
+                .clone()
+                .or_else(|| other.and_then(|config| config.warden.clone())),
+        }
+    }
 }
 
 impl AppConfig {
@@ -310,35 +339,15 @@ impl AppConfig {
         let all_profile = config_file.profile_config("all");
 
         // Apply inheritance: profile values override "all" profile values
-        let api_endpoint = profile
-            .api_endpoint
-            .or_else(|| all_profile.and_then(|all| all.api_endpoint.clone()))
-            .unwrap_or_else(|| STAKPAK_API_ENDPOINT.into());
-
-        let api_key = profile
-            .api_key
-            .or_else(|| all_profile.and_then(|all| all.api_key.clone()));
-
-        // Apply inheritance for tool settings
-        let allowed_tools = profile
-            .allowed_tools
-            .or_else(|| all_profile.and_then(|all| all.allowed_tools.clone()));
-
-        let auto_approve = profile
-            .auto_approve
-            .or_else(|| all_profile.and_then(|all| all.auto_approve.clone()));
-
-        let rulebooks = profile
-            .rulebooks
-            .or_else(|| all_profile.and_then(|all| all.rulebooks.clone()));
-
-        let warden = profile
-            .warden
-            .or_else(|| all_profile.and_then(|all| all.warden.clone()));
+        let profile = profile.merge(all_profile);
 
         // Override with environment variables if present
-        let api_key = std::env::var("STAKPAK_API_KEY").ok().or(api_key);
-        let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(api_endpoint);
+        let api_key = std::env::var("STAKPAK_API_KEY").ok().or(profile.api_key);
+        let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
+            profile
+                .api_endpoint
+                .unwrap_or_else(|| STAKPAK_API_ENDPOINT.into()),
+        );
 
         let app_config = AppConfig {
             api_endpoint,
@@ -348,10 +357,10 @@ impl AppConfig {
             auto_append_gitignore: config_file.settings.auto_append_gitignore,
             profile_name: profile_name.to_string(),
             config_path: config_path.display().to_string(),
-            allowed_tools,
-            auto_approve,
-            rulebooks,
-            warden,
+            allowed_tools: profile.allowed_tools,
+            auto_approve: profile.auto_approve,
+            rulebooks: profile.rulebooks,
+            warden: profile.warden,
         };
 
         if is_config_file_dirty {
