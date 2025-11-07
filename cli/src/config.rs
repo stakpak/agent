@@ -181,6 +181,14 @@ impl ConfigFile {
         })
     }
 
+    // Get the specified profile
+    // Get defaults from "all" profile if it exists
+    // Apply inheritance: profile values override "all" profile values
+    fn resolved_profile_config(&self, profile_name: &str) -> Result<ProfileConfig, ConfigError> {
+        let profile = self.profile_config_ok_or(profile_name)?;
+        Ok(profile.merge(self.profile_config("all")))
+    }
+
     fn insert_app_config(&mut self, config: AppConfig) {
         self.profiles
             .insert(config.profile_name.clone(), config.into());
@@ -332,14 +340,7 @@ impl AppConfig {
         // Try to load existing config file
         let mut config_file = Self::load_config_file(&config_path)?;
         let is_config_file_dirty = config_file.ensure_readonly();
-
-        // Get the specified profile
-        let profile = config_file.profile_config_ok_or(profile_name)?;
-        // Get defaults from "all" profile if it exists
-        let all_profile = config_file.profile_config("all");
-
-        // Apply inheritance: profile values override "all" profile values
-        let profile = profile.merge(all_profile);
+        let profile = config_file.resolved_profile_config(profile_name)?;
 
         // Override with environment variables if present
         let api_key = std::env::var("STAKPAK_API_KEY").ok().or(profile.api_key);
