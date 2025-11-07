@@ -1,18 +1,75 @@
-use rmcp::service::RunningService;
-use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::transport::TokioChildProcess;
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::{RoleClient, ServiceExt};
+use rmcp::ClientHandler;
+use rmcp::model::{
+    CancelledNotificationParam, ClientCapabilities, ClientInfo, Implementation,
+    ProgressNotificationParam,
+};
+use rmcp::service::{NotificationContext, Peer, RunningService};
+use rmcp::{RoleClient, RoleServer};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 
+/// Client handler that forwards notifications from upstream servers to downstream server
+#[derive(Clone)]
+pub struct ProxyClientHandler {
+    downstream_peer: Arc<Mutex<Option<Peer<RoleServer>>>>,
+}
+
+impl ProxyClientHandler {
+    pub fn new(downstream_peer: Arc<Mutex<Option<Peer<RoleServer>>>>) -> Self {
+        Self { downstream_peer }
+    }
+}
+
+impl ClientHandler for ProxyClientHandler {
+    async fn on_progress(
+        &self,
+        notification: ProgressNotificationParam,
+        _ctx: NotificationContext<RoleClient>,
+    ) {
+        // Then forward progress notification from upstream server to downstream server
+        let peer = self.downstream_peer.lock().await;
+        if let Some(ref peer) = *peer {
+            let _ = peer.notify_progress(notification).await;
+        } else {
+            tracing::debug!("Progress notification received but no downstream peer available");
+        }
+    }
+
+    async fn on_cancelled(
+        &self,
+        notification: CancelledNotificationParam,
+        _ctx: NotificationContext<RoleClient>,
+    ) {
+        // Forward cancellation notification from upstream server to downstream server
+        let peer = self.downstream_peer.lock().await;
+        if let Some(ref peer) = *peer {
+            let _ = peer.notify_cancelled(notification).await;
+        } else {
+            tracing::debug!("Cancellation notification received but no downstream peer available");
+        }
+    }
+
+    fn get_info(&self) -> ClientInfo {
+        ClientInfo {
+            protocol_version: Default::default(),
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "proxy-client-handler".to_string(),
+                version: "0.1.0".to_string(),
+                title: None,
+                icons: None,
+                website_url: None,
+            },
+        }
+    }
+}
+
 pub struct ClientPool {
-    pub(crate) clients: Arc<Mutex<HashMap<String, RunningService<RoleClient, ()>>>>,
+    pub(crate) clients: Arc<Mutex<HashMap<String, RunningService<RoleClient, ProxyClientHandler>>>>,
 }
 
 impl ClientPool {
@@ -22,13 +79,18 @@ impl ClientPool {
         }
     }
 
-    pub async fn add_client(&self, name: String, client: RunningService<RoleClient, ()>) {
+    pub async fn add_client(
+        &self,
+        name: String,
+        client: RunningService<RoleClient, ProxyClientHandler>,
+    ) {
         self.clients.lock().await.insert(name, client);
     }
 
     pub async fn get_clients(
         &self,
-    ) -> tokio::sync::MutexGuard<'_, HashMap<String, RunningService<RoleClient, ()>>> {
+    ) -> tokio::sync::MutexGuard<'_, HashMap<String, RunningService<RoleClient, ProxyClientHandler>>>
+    {
         self.clients.lock().await
     }
 }
@@ -123,112 +185,4 @@ impl ClientPoolConfig {
 
         Self { servers }
     }
-}
-
-
-
-pub async fn initialize_clients(
-    config: ClientPoolConfig,
-    pool: Arc<ClientPool>,
-) -> Arc<ClientPool> {
-    for (name, server_config) in config.servers {
-        let pool_clone = pool.clone();
-        let name_clone = name.clone();
-
-        tokio::spawn(async move {
-            match server_config {
-                ServerConfig::Stdio { command, args, env } => {
-                    let mut cmd = Command::new(&command);
-                    for arg in args {
-                        cmd.arg(arg);
-                    }
-                    if let Some(env_vars) = env {
-                        cmd.envs(&env_vars);
-                    }
-                    let proc = match TokioChildProcess::new(cmd) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::error!("Failed to create process for {}: {:?}", name_clone, e);
-                            return;
-                        }
-                    };
-
-                    // Use () as a default client handler to serve the process
-                    match ().serve(proc).await {
-                        Ok(client) => {
-                            pool_clone.add_client(name_clone.clone(), client).await;
-                            tracing::info!("{} MCP client initialized", name_clone);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to start {} MCP client: {:?}", name_clone, e);
-                        }
-                    }
-                }
-                ServerConfig::Http { url, headers } => {
-                    // Validate TLS usage
-                    if !url.starts_with("https://") {
-                        tracing::warn!(
-                            "⚠️  MCP server '{}' is using insecure HTTP connection: {}",
-                            name_clone,
-                            url
-                        );
-                        tracing::warn!(
-                            "   Consider using HTTPS or pass --allow-insecure-mcp-transport flag"
-                        );
-                        // TODO: Check for --allow-insecure-mcp-transport flag and return early if not set
-                    }
-
-                    let mut client_builder = reqwest::Client::builder();
-                    if let Some(headers_map) = headers {
-                        let mut header_map = reqwest::header::HeaderMap::new();
-                        for (key, value) in headers_map {
-                            if let (Ok(header_name), Ok(header_value)) = (
-                                reqwest::header::HeaderName::from_bytes(key.as_bytes()),
-                                reqwest::header::HeaderValue::from_str(&value),
-                            ) {
-                                header_map.insert(header_name, header_value);
-                            } else {
-                                tracing::warn!(
-                                    "Invalid header for {}: {} = {}",
-                                    name_clone,
-                                    key,
-                                    value
-                                );
-                            }
-                        }
-                        client_builder = client_builder.default_headers(header_map);
-                    }
-
-                    let http_client = match client_builder.build() {
-                        Ok(client) => client,
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to build HTTP client for {}: {:?}",
-                                name_clone,
-                                e
-                            );
-                            return;
-                        }
-                    };
-
-                    let config = StreamableHttpClientTransportConfig::with_uri(url.as_str());
-                    let transport = StreamableHttpClientTransport::<reqwest::Client>::with_client(
-                        http_client,
-                        config,
-                    );
-                    match ().serve(transport).await {
-                        Ok(client) => {
-                            pool_clone.add_client(name_clone.clone(), client).await;
-                            tracing::info!("{} MCP client initialized", name_clone);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to start {} MCP client: {:?}", name_clone, e);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    pool
 }
