@@ -163,14 +163,7 @@ Commands:
   config     Configuration management commands
   rulebooks  Rulebook management commands
   account    Get current account
-  list       List my flows
-  get        Get a flow
-  clone      Clone configurations from a flow
-  query      Query your configurations
-  push       Push configurations to a flow
-  transpile  Transpile configurations
   mcp        Start the MCP server
-  agent      Stakpak Agent (early alpha)
   warden     Stakpak Warden (security policies)
   update     Update Stakpak Agent
   help       Print this message

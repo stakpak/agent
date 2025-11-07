@@ -13,7 +13,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.2.66"
+version = "0.2.71"
 edition = "2024"
 
 
@@ -54,7 +54,6 @@ ratatui = { version = "0.29.0", features = [
     "unstable-widget-ref",
 ] }
 toml = "0.8.0"
-once_cell = "1.19.0"
 rand = "0.9.1"
 walkdir = "2.0.0"
 notify = "8.0.0"

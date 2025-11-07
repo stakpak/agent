@@ -236,6 +236,9 @@ pub struct AppState {
     pub command_palette_selected: usize,
     pub command_palette_scroll: usize,
     pub command_palette_search: String,
+    // Usage tracking
+    pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
+    pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
 }
 
 #[derive(Debug)]
@@ -342,6 +345,10 @@ pub enum InputEvent {
     RulebookSearchBackspace,
     HandleCtrlS,
     ToggleMoreShortcuts,
+    // Usage tracking events
+    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
+    RequestTotalUsage,
+    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
 }
 
 #[derive(Debug)]
@@ -358,6 +365,7 @@ pub enum OutputEvent {
     RequestProfileSwitch(String),
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
+    RequestTotalUsage,                  // Request total accumulated token usage
 }
 
 impl AppState {
@@ -390,6 +398,10 @@ impl AppState {
             HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/usage",
+                description: "Show token usage for this session",
             },
             HelperCommand {
                 command: "/issue",
@@ -433,6 +445,7 @@ impl AppState {
         is_git_repo: bool,
         auto_approve_tools: Option<&Vec<String>>,
         allowed_tools: Option<&Vec<String>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
         let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
@@ -498,7 +511,7 @@ impl AppState {
             file_search_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
+            auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
@@ -556,6 +569,14 @@ impl AppState {
             command_palette_selected: 0,
             command_palette_scroll: 0,
             command_palette_search: String::new(),
+            // Usage tracking
+            current_message_usage: None,
+            total_session_usage: stakpak_shared::models::integrations::openai::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
         }
     }
 

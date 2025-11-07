@@ -1,8 +1,10 @@
+use crate::app::InputEvent;
 use serde::{Deserialize, Serialize};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::sync::mpsc;
 
 const AUTO_APPROVE_CONFIG_PATH: &str = ".stakpak/session/auto_approve.json";
 
@@ -65,42 +67,51 @@ impl Default for AutoApproveConfig {
 pub struct AutoApproveManager {
     pub config: AutoApproveConfig,
     pub config_path: PathBuf,
+    input_tx: Option<mpsc::Sender<InputEvent>>,
 }
 
 impl AutoApproveManager {
-    pub fn new(auto_approve_tools: Option<&Vec<String>>) -> Self {
-        match Self::try_new(auto_approve_tools) {
+    pub fn new(
+        auto_approve_tools: Option<&Vec<String>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
+    ) -> Self {
+        match Self::try_new(auto_approve_tools, input_tx.clone()) {
             Ok(manager) => manager,
             Err(e) => {
                 let config_path = PathBuf::from(AUTO_APPROVE_CONFIG_PATH);
                 let config = Self::merge_profile_and_session_config(auto_approve_tools, None);
-                eprintln!("Failed to load auto-approve config: {}", e);
+                let error_msg = format!("Failed to load auto-approve config: {}", e);
+
+                // Send error via InputEvent if sender is available
+                if let Some(ref sender) = input_tx {
+                    let _ = sender.try_send(InputEvent::Error(error_msg));
+                }
+
                 // Try to save the default config even if loading failed
-                if let Err(e) = config.save(&config_path) {
-                    eprintln!("Warning: Failed to save auto-approve config: {}", e);
+                if let Err(e) = config.save(&config_path, input_tx.clone()) {
+                    let warning_msg = format!("Warning: Failed to save auto-approve config: {}", e);
+                    if let Some(ref sender) = input_tx {
+                        let _ = sender.try_send(InputEvent::Error(warning_msg));
+                    }
                 }
 
                 AutoApproveManager {
                     config,
                     config_path,
+                    input_tx: input_tx.clone(),
                 }
             }
         }
     }
-}
 
-impl Default for AutoApproveManager {
-    fn default() -> Self {
-        Self::new(None)
-    }
-}
-
-impl AutoApproveManager {
-    pub fn try_new(auto_approve_tools: Option<&Vec<String>>) -> Result<Self, String> {
+    pub fn try_new(
+        auto_approve_tools: Option<&Vec<String>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
+    ) -> Result<Self, String> {
         let config_path = Self::get_config_path()?;
         let session_config = if config_path.exists() {
             // Load existing session config
-            Some(Self::load_config(&config_path)?)
+            Some(Self::load_config(&config_path, input_tx.clone())?)
         } else {
             None
         };
@@ -112,6 +123,7 @@ impl AutoApproveManager {
         Ok(AutoApproveManager {
             config,
             config_path,
+            input_tx,
         })
     }
 
@@ -121,26 +133,55 @@ impl AutoApproveManager {
         Ok(local_config.to_path_buf())
     }
 
-    fn load_config(config_path: &Path) -> Result<AutoApproveConfig, String> {
+    fn load_config(
+        config_path: &Path,
+        error_sender: Option<mpsc::Sender<InputEvent>>,
+    ) -> Result<AutoApproveConfig, String> {
         if !config_path.exists() {
             // Create default config
             let config = AutoApproveConfig::default();
-            config.save(config_path)?;
+            config
+                .save(config_path, error_sender.clone())
+                .map_err(|e| {
+                    let error_msg = format!("Failed to load auto-approve config: {}", e);
+                    if let Some(ref sender) = error_sender {
+                        let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+                    }
+                    error_msg
+                })?;
             return Ok(config);
         }
 
-        let content = fs::read_to_string(config_path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
+        let content = fs::read_to_string(config_path).map_err(|e| {
+            let error_msg = format!("Failed to read config file: {}", e);
+            if let Some(ref sender) = error_sender {
+                let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+            }
+            error_msg
+        })?;
 
-        let mut config: AutoApproveConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+        let mut config: AutoApproveConfig = serde_json::from_str(&content).map_err(|e| {
+            let error_msg = format!("Failed to parse config file: {}", e);
+            if let Some(ref sender) = error_sender {
+                let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+            }
+            error_msg
+        })?;
 
         config
             .tools
             .insert("run_command".to_string(), AutoApprovePolicy::Prompt);
 
         // Save the updated config back to file
-        config.save(config_path)?;
+        config
+            .save(config_path, error_sender.clone())
+            .map_err(|e| {
+                let error_msg = format!("Failed to load auto-approve config: {}", e);
+                if let Some(ref sender) = error_sender {
+                    let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+                }
+                error_msg
+            })?;
 
         Ok(config)
     }
@@ -263,17 +304,15 @@ impl AutoApproveManager {
     }
 
     fn save_config(&self) -> Result<(), String> {
-        // Ensure directory exists
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
-
-        let json = serde_json::to_string_pretty(&self.config)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-        fs::write(&self.config_path, json)
-            .map_err(|e| format!("Failed to write config file: {}", e))
+        self.config
+            .save(&self.config_path, self.input_tx.clone())
+            .map_err(|e| {
+                let error_msg = format!("Failed to save auto-approve config: {}", e);
+                if let Some(ref sender) = self.input_tx {
+                    let _ = sender.try_send(InputEvent::Error(error_msg.clone()));
+                }
+                error_msg
+            })
     }
 
     /// Merge profile auto-approve settings with existing session config.
@@ -320,7 +359,11 @@ impl AutoApproveManager {
 }
 
 impl AutoApproveConfig {
-    fn save(&self, path: &Path) -> Result<(), String> {
+    fn save(
+        &self,
+        path: &Path,
+        _error_sender: Option<mpsc::Sender<InputEvent>>,
+    ) -> Result<(), String> {
         // Ensure directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -404,5 +447,80 @@ mod tests {
         // Should just have default config
         assert_eq!(config.tools.get("view"), Some(&AutoApprovePolicy::Auto));
         assert_eq!(config.tools.get("create"), Some(&AutoApprovePolicy::Prompt));
+    }
+
+    #[tokio::test]
+    async fn test_error_handling_with_invalid_config_file() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for the test
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let config_dir = temp_dir.path().join(".stakpak/session");
+        fs::create_dir_all(&config_dir).expect("Failed to create config directory");
+        let config_path = config_dir.join("auto_approve.json");
+
+        // Create an invalid JSON file that will cause a parse error
+        fs::write(&config_path, "invalid json content {").expect("Failed to write invalid config");
+
+        // Temporarily change directory to the temp directory so the config path resolution works
+        let original_dir = std::env::current_dir().ok();
+        let _ = std::env::set_current_dir(temp_dir.path());
+
+        // Create a channel to receive error events
+        let (error_tx, mut error_rx) = tokio::sync::mpsc::channel::<InputEvent>(10);
+
+        // Try to create AutoApproveManager with invalid config - should send error via channel
+        let _manager = AutoApproveManager::new(None, Some(error_tx.clone()));
+
+        // Check that we received an error event (try_send is synchronous)
+        let error_received = error_rx.try_recv();
+        assert!(error_received.is_ok(), "Expected error event to be sent");
+
+        if let Ok(InputEvent::Error(error_msg)) = error_received {
+            assert!(
+                error_msg.contains("Failed to load auto-approve config")
+                    || error_msg.contains("Failed to parse config file"),
+                "Error message should indicate config loading/parsing failure. Got: {}",
+                error_msg
+            );
+        } else {
+            panic!("Expected InputEvent::Error, got: {:?}", error_received);
+        }
+
+        // Restore original directory if it existed
+        if let Some(original) = original_dir {
+            let _ = std::env::set_current_dir(&original);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_error_handling_without_error_sender() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for the test
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let config_dir = temp_dir.path().join(".stakpak/session");
+        fs::create_dir_all(&config_dir).expect("Failed to create config directory");
+        let config_path = config_dir.join("auto_approve.json");
+
+        // Create an invalid JSON file that will cause a parse error
+        fs::write(&config_path, "invalid json content {").expect("Failed to write invalid config");
+
+        // Temporarily change directory to the temp directory so the config path resolution works
+        let original_dir = std::env::current_dir().ok();
+        let _ = std::env::set_current_dir(temp_dir.path());
+
+        // Try to create AutoApproveManager without error sender - should not panic
+        let manager = AutoApproveManager::new(None, None);
+
+        // Manager should still be created with default config despite the error
+        assert!(manager.config.enabled);
+
+        // Restore original directory if it existed
+        if let Some(original) = original_dir {
+            let _ = std::env::set_current_dir(&original);
+        }
     }
 }

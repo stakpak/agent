@@ -1,5 +1,5 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
+use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -8,7 +8,7 @@ use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
     push_memorize_message, push_status_message, push_styled_message, push_support_message,
-    render_system_message, welcome_messages,
+    push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -249,6 +249,38 @@ pub fn update(
         }
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
+        }
+        InputEvent::StreamUsage(_usage) => {
+            // Usage is sent but we don't display it individually
+            // Total usage will be updated when accumulation happens in mode_interactive
+        }
+        InputEvent::RequestTotalUsage => {
+            // Request total usage from CLI
+            let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
+        }
+        InputEvent::TotalUsage(usage) => {
+            // Update total session usage from CLI
+            state.total_session_usage = usage;
+            // If cost message was just displayed, update it
+            let should_update = state
+                .messages
+                .last()
+                .and_then(|msg| {
+                    if let MessageContent::StyledBlock(lines) = &msg.content {
+                        lines
+                            .first()
+                            .and_then(|l| l.spans.first())
+                            .map(|s| s.content.contains("Token Usage & Costs"))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false);
+
+            if should_update {
+                state.messages.pop(); // Remove old message
+                crate::services::helper_block::push_usage_message(state);
+            }
         }
         InputEvent::HasUserMessage => {
             state.has_user_messages = true;
@@ -579,6 +611,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::EndLoadingOperation(operation) => {
+            // Clear current message usage when stream processing ends
+            if matches!(operation, LoadingOperation::StreamProcessing) {
+                state.current_message_usage = None;
+            }
             state.loading_manager.end_operation(operation);
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();
@@ -684,7 +720,6 @@ pub fn update(
         InputEvent::ShellCompleted(_code) => {
             // Command completed, reset active command state
             state.waiting_for_shell_input = false;
-            state.text_area.set_shell_mode(false);
             if let Some(dialog_command) = &state.dialog_command {
                 let dialog_command_id = dialog_command.id.clone();
                 let result = shell_command_to_tool_call_result(state);
@@ -738,6 +773,7 @@ pub fn update(
                 state.show_shell_mode = false;
                 state.dialog_command = None;
                 state.toggle_approved_message = true;
+                state.text_area.set_shell_mode(false);
             }
             if state.ondemand_shell_mode {
                 let new_tool_call_result = shell_command_to_tool_call_result(state);
@@ -749,7 +785,6 @@ pub fn update(
             state.active_shell_command = None;
             state.active_shell_command_output = None;
             state.text_area.set_text("");
-            state.text_area.set_shell_mode(false);
             state.messages.push(Message::plain_text(""));
             state.is_tool_call_shell_command = false;
             adjust_scroll(state, message_area_height, message_area_width);
@@ -1645,6 +1680,12 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
+                "/usage" => {
+                    push_usage_message(state);
+                    let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
                 "/help" => {
                     push_help_message(state);
                     state.text_area.set_text("");
@@ -2343,9 +2384,9 @@ fn list_auto_approved_tools(state: &mut AppState) {
             .as_ref()
             .is_some_and(|tools| !tools.is_empty())
         {
-            "💡 No allowed tools are currently set to auto-approve."
+            "No allowed tools are currently set to auto-approve."
         } else {
-            "💡 No tools are currently set to auto-approve."
+            "No tools are currently set to auto-approve."
         };
         push_styled_message(state, message, Color::Cyan, "", Color::Cyan);
     } else {
@@ -2358,7 +2399,7 @@ fn list_auto_approved_tools(state: &mut AppState) {
         state.messages.push(Message::plain_text(""));
         push_styled_message(
             state,
-            &format!("🔓 Tools currently set to auto-approve: {}", tool_list),
+            &format!("Tools currently set to auto-approve: {}", tool_list),
             Color::Yellow,
             "",
             Color::Yellow,
@@ -2513,6 +2554,9 @@ fn execute_command_palette_selection(
         }
         CommandAction::GetSupport => {
             push_support_message(state);
+        }
+        CommandAction::ShowUsage => {
+            push_usage_message(state);
         }
     }
     state.text_area.set_text("");
