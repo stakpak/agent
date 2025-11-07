@@ -652,6 +652,77 @@ auto_append_gitignore = true
     }
 
     #[test]
+    fn save_writes_profile_and_settings() {
+        let dir = TempDir::new().unwrap();
+        let path = get_a_config_path(&dir);
+        let config = AppConfig {
+            api_endpoint: "https://custom-api.stakpak.dev".into(),
+            api_key: Some("custom-key".into()),
+            mcp_server_host: Some("localhost:9000".into()),
+            machine_name: Some("workstation-1".into()),
+            auto_append_gitignore: Some(false),
+            profile_name: "dev".into(),
+            config_path: path.to_string_lossy().into_owned(),
+            allowed_tools: Some(vec!["git".into(), "curl".into()]),
+            auto_approve: Some(vec!["git status".into()]),
+            rulebooks: Some(RulebookConfig {
+                include: Some(vec!["https://rules.stakpak.dev/security/*".into()]),
+                exclude: Some(vec!["https://rules.stakpak.dev/internal/*".into()]),
+                include_tags: Some(vec!["security".into()]),
+                exclude_tags: Some(vec!["beta".into()]),
+            }),
+            warden: Some(WardenConfig {
+                enabled: true,
+                volumes: vec!["/tmp:/tmp:ro".into()],
+            }),
+        };
+
+        config.save().unwrap();
+
+        let saved: ConfigFile = AppConfig::load_config_file(&path).unwrap();
+
+        let profile = saved.profiles.get("dev").expect("profile saved");
+        assert_eq!(
+            profile.api_endpoint.as_deref(),
+            Some("https://custom-api.stakpak.dev")
+        );
+        assert_eq!(profile.api_key.as_deref(), Some("custom-key"));
+        assert_eq!(
+            profile.allowed_tools,
+            Some(vec!["git".to_string(), "curl".to_string()])
+        );
+        assert_eq!(profile.auto_approve, Some(vec!["git status".to_string()]));
+
+        let rulebooks = profile.rulebooks.as_ref().expect("rulebooks persisted");
+        assert_eq!(
+            rulebooks.include.as_ref().unwrap(),
+            &vec!["https://rules.stakpak.dev/security/*".to_string()]
+        );
+        assert_eq!(
+            rulebooks.exclude.as_ref().unwrap(),
+            &vec!["https://rules.stakpak.dev/internal/*".to_string()]
+        );
+        assert_eq!(
+            rulebooks.include_tags.as_ref().unwrap(),
+            &vec!["security".to_string()]
+        );
+        assert_eq!(
+            rulebooks.exclude_tags.as_ref().unwrap(),
+            &vec!["beta".to_string()]
+        );
+
+        let warden = profile.warden.as_ref().expect("warden persisted");
+        assert!(warden.enabled);
+        assert_eq!(&warden.volumes, &vec!["/tmp:/tmp:ro".to_string()]);
+
+        assert_eq!(
+            saved.settings.machine_name.as_deref(),
+            Some("workstation-1")
+        );
+        assert_eq!(saved.settings.auto_append_gitignore, Some(false));
+    }
+
+    #[test]
     fn list_available_profiles_returns_default_when_missing_config() {
         let dir = TempDir::new().unwrap();
         let path = get_a_config_path(&dir);
