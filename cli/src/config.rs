@@ -168,6 +168,10 @@ impl ConfigFile {
         }
     }
 
+    fn get_profile_config(&self, profile_name: &str) -> Option<&ProfileConfig> {
+        self.profiles.get(profile_name)
+    }
+
     fn insert_config(&mut self, config: AppConfig) {
         self.profiles
             .insert(config.profile_name.clone(), config.into());
@@ -175,6 +179,22 @@ impl ConfigFile {
 
     fn set_app_config_settings(&mut self, config: AppConfig) {
         self.settings = config.into();
+    }
+
+    fn contains_readonly(&self) -> bool {
+        self.profiles.contains_key("readonly")
+    }
+
+    fn ensure_readonly(&mut self) -> bool {
+        if self.contains_readonly() {
+            false
+        } else {
+            self.profiles.insert(
+                "readonly".into(),
+                ProfileConfig::readonly_profile(self.get_profile_config("default")),
+            );
+            true
+        }
     }
 }
 
@@ -273,16 +293,7 @@ impl AppConfig {
 
         // Try to load existing config file
         let mut config_file = Self::load_config_file(&config_path)?;
-
-        let mut is_config_file_dirty = false;
-        if !config_file.profiles.contains_key("readonly") {
-            let base_profile = config_file.profiles.get("default");
-            let readonly_profile = ProfileConfig::readonly_profile(base_profile);
-            config_file
-                .profiles
-                .insert("readonly".to_string(), readonly_profile);
-            is_config_file_dirty = true;
-        }
+        let is_config_file_dirty = config_file.ensure_readonly();
 
         // Get the specified profile
         let profile = config_file
