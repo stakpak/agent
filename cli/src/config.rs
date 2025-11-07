@@ -181,7 +181,7 @@ impl ConfigFile {
         })
     }
 
-    fn insert_config(&mut self, config: AppConfig) {
+    fn insert_app_config(&mut self, config: AppConfig) {
         self.profiles
             .insert(config.profile_name.clone(), config.into());
     }
@@ -389,7 +389,7 @@ impl AppConfig {
         // Load existing config or create new one
         let config_path = PathBuf::from(&self.config_path);
         let mut config_file = Self::load_config_file(&config_path).unwrap_or_default();
-        config_file.insert_config(self.clone()); // Update the current profile
+        config_file.insert_app_config(self.clone()); // Update the current profile
         config_file.set_app_config_settings(self.clone()); // Update settings
 
         if let Some(parent) = config_path.parent() {
