@@ -32,11 +32,11 @@ pub struct ProxyServer {
 }
 
 impl ProxyServer {
-    pub fn new(pool: Arc<ClientPool>) -> Self {
+    pub fn new(config: ClientPoolConfig) -> Self {
         Self {
-            pool,
+            pool: Arc::new(ClientPool::new()),
             request_id_to_client: Arc::new(Mutex::new(HashMap::new())),
-            client_config: Arc::new(Mutex::new(None)),
+            client_config: Arc::new(Mutex::new(Some(config))),
             clients_initialized: Arc::new(Mutex::new(false)),
         }
     }

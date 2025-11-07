@@ -4734,6 +4734,7 @@ dependencies = [
  "serde_yaml",
  "stakpak-api",
  "stakpak-mcp-client",
+ "stakpak-mcp-proxy",
  "stakpak-mcp-server",
  "stakpak-shared",
  "stakpak-tui",
@@ -4783,7 +4784,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-proxy"
-version = "0.2.66"
+version = "0.2.77"
 dependencies = [
  "anyhow",
  "reqwest",
