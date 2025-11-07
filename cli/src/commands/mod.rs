@@ -8,11 +8,13 @@ use crate::{
 use agent::AgentCommands;
 use clap::Subcommand;
 use flow::{clone, get_flow_ref, push};
+use rmcp::{ServiceExt, transport::stdio};
 use serde::{Deserialize, Serialize};
 use stakpak_api::{
     Client, ClientConfig,
     models::{Document, ProvisionerType, TranspileTargetProvisionerType},
 };
+use stakpak_mcp_proxy::{client::ClientPoolConfig, server::ProxyServer};
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use termimad::MadSkin;
 use walkdir::WalkDir;
@@ -89,6 +91,42 @@ pub enum RulebookCommands {
     Delete {
         /// Rulebook URI to delete
         uri: String,
+    },
+}
+
+#[derive(Subcommand, PartialEq)]
+pub enum McpCommands {
+    /// Start the MCP server
+    Start {
+        /// Disable secret redaction (WARNING: this will print secrets to the console)
+        #[arg(long = "disable-secret-redaction", default_value_t = false)]
+        disable_secret_redaction: bool,
+
+        /// Enable privacy mode to redact private data like IP addresses and AWS account IDs
+        #[arg(long = "privacy-mode", default_value_t = false)]
+        privacy_mode: bool,
+
+        /// Tool mode to use (local, remote, combined)
+        #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
+        tool_mode: ToolMode,
+
+        /// Enable Slack tools (experimental)
+        #[arg(long = "enable-slack-tools", default_value_t = false)]
+        enable_slack_tools: bool,
+
+        /// Allow indexing of large projects (more than 500 supported files)
+        #[arg(long = "index-big-project", default_value_t = false)]
+        index_big_project: bool,
+
+        /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
+        #[arg(long = "disable-mcp-mtls", default_value_t = false)]
+        disable_mcp_mtls: bool,
+    },
+    /// Start the MCP proxy server
+    Proxy {
+        /// Config file path
+        #[arg(long = "config-file")]
+        config_file: Option<String>,
     },
 }
 
@@ -203,32 +241,9 @@ pub enum Commands {
         target_provisioner: TranspileTargetProvisionerType,
     },
 
-    /// Start the MCP server
-    Mcp {
-        /// Disable secret redaction (WARNING: this will print secrets to the console)
-        #[arg(long = "disable-secret-redaction", default_value_t = false)]
-        disable_secret_redaction: bool,
-
-        /// Enable privacy mode to redact private data like IP addresses and AWS account IDs
-        #[arg(long = "privacy-mode", default_value_t = false)]
-        privacy_mode: bool,
-
-        /// Tool mode to use (local, remote, combined)
-        #[arg(long, short = 'm', default_value_t = ToolMode::Combined)]
-        tool_mode: ToolMode,
-
-        /// Enable Slack tools (experimental)
-        #[arg(long = "enable-slack-tools", default_value_t = false)]
-        enable_slack_tools: bool,
-
-        /// Allow indexing of large projects (more than 500 supported files)
-        #[arg(long = "index-big-project", default_value_t = false)]
-        index_big_project: bool,
-
-        /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
-        #[arg(long = "disable-mcp-mtls", default_value_t = false)]
-        disable_mcp_mtls: bool,
-    },
+    /// MCP commands
+    #[command(subcommand)]
+    Mcp(McpCommands),
 
     /// Stakpak Agent (WARNING: These agents are in early alpha development and may be unstable)
     #[command(subcommand)]
@@ -264,91 +279,119 @@ impl Commands {
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
-            Commands::Mcp {
-                disable_secret_redaction,
-                privacy_mode,
-                tool_mode,
-                enable_slack_tools,
-                index_big_project,
-                disable_mcp_mtls,
-            } => {
-                let api_config: ClientConfig = config.clone().into();
-                match tool_mode {
-                    ToolMode::RemoteOnly | ToolMode::Combined => {
-                        match get_or_build_local_code_index(&api_config, None, index_big_project)
+            Commands::Mcp(command) => match command {
+                McpCommands::Start {
+                    disable_secret_redaction,
+                    privacy_mode,
+                    tool_mode,
+                    enable_slack_tools,
+                    index_big_project,
+                    disable_mcp_mtls,
+                } => {
+                    let api_config: ClientConfig = config.clone().into();
+                    match tool_mode {
+                        ToolMode::RemoteOnly | ToolMode::Combined => {
+                            match get_or_build_local_code_index(
+                                &api_config,
+                                None,
+                                index_big_project,
+                            )
                             .await
-                        {
-                            Ok(_) => {
-                                // Indexing was successful, start the file watcher
-                                tokio::spawn(async move {
-                                    match start_code_index_watcher(&api_config, None) {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            eprintln!("Failed to start code index watcher: {}", e);
-                                        }
-                                    }
-                                });
-                            }
-                            Err(e)
-                                if e.contains("threshold") && e.contains("--index-big-project") =>
                             {
-                                // This is the expected error when file count exceeds limit
-                                // Continue silently without file watcher
+                                Ok(_) => {
+                                    // Indexing was successful, start the file watcher
+                                    tokio::spawn(async move {
+                                        match start_code_index_watcher(&api_config, None) {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Failed to start code index watcher: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+                                Err(e)
+                                    if e.contains("threshold")
+                                        && e.contains("--index-big-project") =>
+                                {
+                                    // This is the expected error when file count exceeds limit
+                                    // Continue silently without file watcher
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to build code index: {}", e);
+                                    // Continue without code indexing instead of exiting
+                                }
+                            }
+                        }
+                        ToolMode::LocalOnly => {}
+                    }
+
+                    let (bind_address, listener) =
+                        network::find_available_bind_address_with_listener().await?;
+
+                    // Generate certificates if mTLS is enabled
+                    let certificate_chain = if !disable_mcp_mtls {
+                        match stakpak_shared::cert_utils::CertificateChain::generate() {
+                            Ok(chain) => {
+                                println!("🔐 mTLS enabled - generated certificate chain");
+                                if let Ok(ca_pem) = chain.get_ca_cert_pem() {
+                                    println!("📜 CA Certificate (copy this to your client):");
+                                    println!("{}", ca_pem);
+                                }
+                                Some(chain)
                             }
                             Err(e) => {
-                                eprintln!("Failed to build code index: {}", e);
-                                // Continue without code indexing instead of exiting
+                                eprintln!("Failed to generate certificate chain: {}", e);
+                                std::process::exit(1);
                             }
                         }
-                    }
-                    ToolMode::LocalOnly => {}
-                }
+                    } else {
+                        None
+                    };
 
-                let (bind_address, listener) =
-                    network::find_available_bind_address_with_listener().await?;
+                    let protocol = if !disable_mcp_mtls { "https" } else { "http" };
+                    println!("MCP server started at {}://{}/mcp", protocol, bind_address);
 
-                // Generate certificates if mTLS is enabled
-                let certificate_chain = if !disable_mcp_mtls {
-                    match stakpak_shared::cert_utils::CertificateChain::generate() {
-                        Ok(chain) => {
-                            println!("🔐 mTLS enabled - generated certificate chain");
-                            if let Ok(ca_pem) = chain.get_ca_cert_pem() {
-                                println!("📜 CA Certificate (copy this to your client):");
-                                println!("{}", ca_pem);
-                            }
-                            Some(chain)
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to generate certificate chain: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                let protocol = if !disable_mcp_mtls { "https" } else { "http" };
-                println!("MCP server started at {}://{}/mcp", protocol, bind_address);
-
-                start_server(
-                    MCPServerConfig {
-                        api: config.into(),
-                        redact_secrets: !disable_secret_redaction,
-                        privacy_mode,
-                        enabled_tools: EnabledToolsConfig {
-                            slack: enable_slack_tools,
+                    start_server(
+                        MCPServerConfig {
+                            api: config.into(),
+                            redact_secrets: !disable_secret_redaction,
+                            privacy_mode,
+                            enabled_tools: EnabledToolsConfig {
+                                slack: enable_slack_tools,
+                            },
+                            tool_mode,
+                            subagent_configs: None, // MCP standalone mode doesn't need subagent configs
+                            bind_address,
+                            certificate_chain: Arc::new(certificate_chain),
                         },
-                        tool_mode,
-                        subagent_configs: None, // MCP standalone mode doesn't need subagent configs
-                        bind_address,
-                        certificate_chain: Arc::new(certificate_chain),
-                    },
-                    Some(listener),
-                    None,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-            }
+                        Some(listener),
+                        None,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                }
+                McpCommands::Proxy { config_file } => {
+                    let config = match ClientPoolConfig::from_toml_file(
+                        config_file.as_deref().unwrap_or("mcp.toml"),
+                    ) {
+                        Ok(config) => config,
+                        Err(_) => ClientPoolConfig::from_json_file(
+                            config_file.as_deref().unwrap_or("mcp.json"),
+                        )
+                        .map_err(|e| e.to_string())?,
+                    };
+
+                    let server = ProxyServer::new(config)
+                        .serve(stdio())
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    server.waiting().await.map_err(|e| e.to_string())?;
+                }
+            },
             Commands::Login { api_key } => {
                 let mut updated_config = config.clone();
                 updated_config.api_key = Some(api_key);

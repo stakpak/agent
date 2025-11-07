@@ -4832,6 +4832,7 @@ dependencies = [
  "serde_yaml",
  "stakpak-api",
  "stakpak-mcp-client",
+ "stakpak-mcp-proxy",
  "stakpak-mcp-server",
  "stakpak-shared",
  "stakpak-tui",
