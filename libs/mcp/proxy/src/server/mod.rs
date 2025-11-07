@@ -59,7 +59,8 @@ impl ServerHandler for ProxyServer {
             match client.list_tools(params.clone()).await {
                 Ok(result) => {
                     all_tools.extend(result.tools.into_iter().map(|mut tool| {
-                        tool.name = format!("{}_{}", name, tool.name).into();
+                        // Using double underscore as separator to support underscores in server names
+                        tool.name = format!("{}__{}", name, tool.name).into();
                         tool
                     }));
                 }
@@ -80,13 +81,14 @@ impl ServerHandler for ProxyServer {
         params: CallToolRequestParam,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        // Parse the client name from the tool name (format: client_name_tool_name)
-        let parts: Vec<&str> = params.name.splitn(2, '_').collect();
+        // Parse the client name from the tool name (format: client_name__tool_name)
+        // Using double underscore as separator to support underscores in server names
+        let parts: Vec<&str> = params.name.splitn(2, "__").collect();
 
         if parts.len() != 2 {
             return Err(ErrorData::invalid_params(
                 format!(
-                    "Invalid tool name format: {}. Expected format: client_name_tool_name",
+                    "Invalid tool name format: {}. Expected format: client_name__tool_name",
                     params.name
                 ),
                 None,

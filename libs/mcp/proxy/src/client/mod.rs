@@ -74,16 +74,14 @@ enum ServerConfigJson {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ClientPoolConfig {
     pub servers: HashMap<String, ServerConfig>,
 }
 
 impl ClientPoolConfig {
     pub fn new() -> Self {
-        Self {
-            servers: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn with_servers(servers: HashMap<String, ServerConfig>) -> Self {
@@ -127,11 +125,7 @@ impl ClientPoolConfig {
     }
 }
 
-impl Default for ClientPoolConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 pub async fn initialize_clients(
     config: ClientPoolConfig,
@@ -171,6 +165,19 @@ pub async fn initialize_clients(
                     }
                 }
                 ServerConfig::Http { url, headers } => {
+                    // Validate TLS usage
+                    if !url.starts_with("https://") {
+                        tracing::warn!(
+                            "⚠️  MCP server '{}' is using insecure HTTP connection: {}",
+                            name_clone,
+                            url
+                        );
+                        tracing::warn!(
+                            "   Consider using HTTPS or pass --allow-insecure-mcp-transport flag"
+                        );
+                        // TODO: Check for --allow-insecure-mcp-transport flag and return early if not set
+                    }
+
                     let mut client_builder = reqwest::Client::builder();
                     if let Some(headers_map) = headers {
                         let mut header_map = reqwest::header::HeaderMap::new();
