@@ -172,6 +172,15 @@ impl ConfigFile {
         self.profiles.get(profile_name)
     }
 
+    fn profile_config_ok_or(&self, profile_name: &str) -> Result<ProfileConfig, ConfigError> {
+        self.profile_config(profile_name).cloned().ok_or_else(|| {
+            ConfigError::Message(format!(
+                "Profile '{}' not found in configuration",
+                profile_name
+            ))
+        })
+    }
+
     fn insert_config(&mut self, config: AppConfig) {
         self.profiles
             .insert(config.profile_name.clone(), config.into());
@@ -296,19 +305,9 @@ impl AppConfig {
         let is_config_file_dirty = config_file.ensure_readonly();
 
         // Get the specified profile
-        let profile = config_file
-            .profiles
-            .get(profile_name)
-            .cloned()
-            .ok_or_else(|| {
-                ConfigError::Message(format!(
-                    "Profile '{}' not found in configuration",
-                    profile_name
-                ))
-            })?;
-
+        let profile = config_file.profile_config_ok_or(profile_name)?;
         // Get defaults from "all" profile if it exists
-        let all_profile = config_file.profiles.get("all");
+        let all_profile = config_file.profile_config("all");
 
         // Apply inheritance: profile values override "all" profile values
         let api_endpoint = profile
