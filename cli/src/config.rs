@@ -168,7 +168,7 @@ impl ConfigFile {
         }
     }
 
-    fn get_profile_config(&self, profile_name: &str) -> Option<&ProfileConfig> {
+    fn profile_config(&self, profile_name: &str) -> Option<&ProfileConfig> {
         self.profiles.get(profile_name)
     }
 
@@ -191,7 +191,7 @@ impl ConfigFile {
         } else {
             self.profiles.insert(
                 "readonly".into(),
-                ProfileConfig::readonly_profile(self.get_profile_config("default")),
+                ProfileConfig::readonly_profile(self.profile_config("default")),
             );
             true
         }
