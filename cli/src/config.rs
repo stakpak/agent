@@ -310,33 +310,6 @@ impl AppConfig {
         Ok(app_config)
     }
 
-    fn build(
-        profile_name: &str,
-        path: PathBuf,
-        settings: Settings,
-        profile_config: ProfileConfig,
-    ) -> Self {
-        AppConfig {
-            api_endpoint: std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
-                profile_config
-                    .api_endpoint
-                    .unwrap_or_else(|| STAKPAK_API_ENDPOINT.into()),
-            ),
-            api_key: std::env::var("STAKPAK_API_KEY")
-                .ok()
-                .or(profile_config.api_key),
-            mcp_server_host: None, // This can be added to profiles later if needed
-            machine_name: settings.machine_name,
-            auto_append_gitignore: settings.auto_append_gitignore,
-            profile_name: profile_name.to_string(),
-            config_path: path.display().to_string(),
-            allowed_tools: profile_config.allowed_tools,
-            auto_approve: profile_config.auto_approve,
-            rulebooks: profile_config.rulebooks,
-            warden: profile_config.warden,
-        }
-    }
-
     /// List all available profiles from config file
     pub fn list_available_profiles<P: AsRef<Path>>(
         custom_config_path: Option<P>,
@@ -371,6 +344,33 @@ impl AppConfig {
 
         let config_str = toml::to_string_pretty(&config_file).map_err(|e| format!("{}", e))?;
         write(&self.config_path, config_str).map_err(|e| format!("{}", e))
+    }
+
+    fn build(
+        profile_name: &str,
+        path: PathBuf,
+        settings: Settings,
+        profile_config: ProfileConfig,
+    ) -> Self {
+        AppConfig {
+            api_endpoint: std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(
+                profile_config
+                    .api_endpoint
+                    .unwrap_or_else(|| STAKPAK_API_ENDPOINT.into()),
+            ),
+            api_key: std::env::var("STAKPAK_API_KEY")
+                .ok()
+                .or(profile_config.api_key),
+            mcp_server_host: None, // This can be added to profiles later if needed
+            machine_name: settings.machine_name,
+            auto_append_gitignore: settings.auto_append_gitignore,
+            profile_name: profile_name.to_string(),
+            config_path: path.display().to_string(),
+            allowed_tools: profile_config.allowed_tools,
+            auto_approve: profile_config.auto_approve,
+            rulebooks: profile_config.rulebooks,
+            warden: profile_config.warden,
+        }
     }
 
     fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
