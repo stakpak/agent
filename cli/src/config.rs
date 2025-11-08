@@ -213,6 +213,18 @@ impl ConfigFile {
             true
         }
     }
+
+    fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
+        if let Some(parent) = path.as_ref().parent() {
+            create_dir_all(parent).map_err(|e| {
+                ConfigError::Message(format!("Failed to create config directory: {}", e))
+            })?;
+        }
+        let body = toml::to_string_pretty(self)
+            .map_err(|e| ConfigError::Message(format!("Failed to serialize config file: {}", e)))?;
+        write(path, body)
+            .map_err(|e| ConfigError::Message(format!("Failed to write config file: {}", e)))
+    }
 }
 
 impl WardenConfig {
@@ -289,21 +301,24 @@ impl AppConfig {
         Self::validate_profile_name(profile_name)?;
 
         let config_path = Self::get_config_path(custom_config_path);
-
         // Try to load existing config file
         let mut config_file = Self::load_config_file(&config_path)?;
-        let is_config_file_dirty = config_file.ensure_readonly();
+        let is_config_dirty = config_file.ensure_readonly();
         let profile = config_file.resolved_profile_config(profile_name)?;
-        let app_config = Self::build(profile_name, config_path, config_file.settings, profile);
 
-        if is_config_file_dirty {
+        if is_config_dirty {
             // fail without crashing, because it's not critical
-            if let Err(e) = app_config.save() {
+            if let Err(e) = config_file.save_to(&config_path) {
                 eprintln!("Warning: Failed to update config on load: {}", e);
             }
         }
 
-        Ok(app_config)
+        Ok(Self::build(
+            profile_name,
+            config_path,
+            config_file.settings,
+            profile,
+        ))
     }
 
     /// List all available profiles from config file
