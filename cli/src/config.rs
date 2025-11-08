@@ -281,49 +281,6 @@ impl ProfileConfig {
 }
 
 impl AppConfig {
-    fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
-        match path {
-            Some(p) => p.as_ref().to_path_buf(),
-            None => std::env::home_dir()
-                .unwrap_or_default()
-                .join(STAKPAK_CONFIG_PATH),
-        }
-    }
-
-    fn migrate_old_config<P: AsRef<Path>>(
-        config_path: P,
-        content: &str,
-    ) -> Result<ConfigFile, ConfigError> {
-        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
-            ConfigError::Message("Failed to parse config file in both old and new formats".into())
-        })?;
-        let config_file = old_config.into();
-
-        toml::to_string_pretty(&config_file)
-            .map_err(|e| {
-                ConfigError::Message(format!("Failed to serialize migrated config: {}", e))
-            })
-            .and_then(|config_str| {
-                write(config_path, config_str).map_err(|e| {
-                    ConfigError::Message(format!("Failed to save migrated config: {}", e))
-                })
-            })?;
-
-        Ok(config_file)
-    }
-
-    fn load_config_file<P: AsRef<Path>>(config_path: P) -> Result<ConfigFile, ConfigError> {
-        match std::fs::read_to_string(config_path.as_ref()) {
-            Ok(content) => toml::from_str::<ConfigFile>(&content)
-                .or_else(|_| Self::migrate_old_config(config_path, &content)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::with_default_profile()),
-            Err(e) => Err(ConfigError::Message(format!(
-                "Failed to read config file: {}",
-                e
-            ))),
-        }
-    }
-
     pub fn load<P: AsRef<Path>>(
         profile_name: &str,
         custom_config_path: Option<P>,
@@ -408,6 +365,49 @@ impl AppConfig {
 
         let config_str = toml::to_string_pretty(&config_file).map_err(|e| format!("{}", e))?;
         write(&self.config_path, config_str).map_err(|e| format!("{}", e))
+    }
+
+    fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
+        match path {
+            Some(p) => p.as_ref().to_path_buf(),
+            None => std::env::home_dir()
+                .unwrap_or_default()
+                .join(STAKPAK_CONFIG_PATH),
+        }
+    }
+
+    fn migrate_old_config<P: AsRef<Path>>(
+        config_path: P,
+        content: &str,
+    ) -> Result<ConfigFile, ConfigError> {
+        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
+            ConfigError::Message("Failed to parse config file in both old and new formats".into())
+        })?;
+        let config_file = old_config.into();
+
+        toml::to_string_pretty(&config_file)
+            .map_err(|e| {
+                ConfigError::Message(format!("Failed to serialize migrated config: {}", e))
+            })
+            .and_then(|config_str| {
+                write(config_path, config_str).map_err(|e| {
+                    ConfigError::Message(format!("Failed to save migrated config: {}", e))
+                })
+            })?;
+
+        Ok(config_file)
+    }
+
+    fn load_config_file<P: AsRef<Path>>(config_path: P) -> Result<ConfigFile, ConfigError> {
+        match std::fs::read_to_string(config_path.as_ref()) {
+            Ok(content) => toml::from_str::<ConfigFile>(&content)
+                .or_else(|_| Self::migrate_old_config(config_path, &content)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::with_default_profile()),
+            Err(e) => Err(ConfigError::Message(format!(
+                "Failed to read config file: {}",
+                e
+            ))),
+        }
     }
 }
 
