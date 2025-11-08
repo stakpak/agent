@@ -286,11 +286,7 @@ impl AppConfig {
         custom_config_path: Option<P>,
     ) -> Result<Self, ConfigError> {
         // Don't allow "all" as a profile to be loaded directly
-        if profile_name == "all" {
-            return Err(ConfigError::Message(
-                "Cannot use 'all' as a profile name. It's reserved for defaults.".to_string(),
-            ));
-        }
+        Self::validate_profile_name(profile_name)?;
 
         let config_path = Self::get_config_path(custom_config_path);
 
@@ -413,6 +409,16 @@ impl AppConfig {
                 "Failed to read config file: {}",
                 e
             ))),
+        }
+    }
+
+    fn validate_profile_name(profile_name: &str) -> Result<(), ConfigError> {
+        if profile_name == "all" {
+            Err(ConfigError::Message(
+                "Cannot use 'all' as a profile name. It's reserved for defaults.".into(),
+            ))
+        } else {
+            Ok(())
         }
     }
 }
