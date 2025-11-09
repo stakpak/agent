@@ -17,7 +17,7 @@ fn open_browser(url: &str) -> bool {
 
 async fn listen_for_callback(url: &str) -> String {
     let start_time = std::time::Instant::now();
-    while start_time.elapsed() < std::time::Duration::from_secs(15) {
+    while start_time.elapsed() < std::time::Duration::from_secs(120) {
         let client = reqwest::Client::new();
         let response = client.get(url).send().await;
 
@@ -233,116 +233,32 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
 
     println!();
 
-    // Centered header with colored border and text
     println!("\x1b[1;36m┌──────────────────────────────────────────────────────────────┐\x1b[0m");
     println!(
         "\x1b[1;36m│\x1b[0m \x1b[1;33m                  Stakpak API Key Required                  \x1b[0m \x1b[1;36m│\x1b[0m"
     );
     println!("\x1b[1;36m└──────────────────────────────────────────────────────────────┘\x1b[0m");
     println!();
-    println!("\x1b[1;34mBrowser did not open automatically? Use this url below to sign in\x1b[0m");
+    println!("\x1b[1;34mUse the link below to authorize or paste your key directly\x1b[0m");
     println!();
     println!("{}", base_url);
     println!();
-
-    // Clean separator
     println!("─────────────────────────────────────────────────────────────────────────────");
     println!();
 
-    // Try to open browser first
     let browser_opened = !port_error && open_browser(&base_url);
 
-    if browser_opened {
-        println!();
-
-        // Start callback polling in background
-        let url_clone = base_url.to_string();
-        let callback_handle = tokio::spawn(async move { listen_for_callback(&url_clone).await });
-
-        // Start timer display
-        let timer_handle = tokio::spawn(async {
-            for remaining in (1..=15).rev() {
-                print!("\r⏳ Waiting for authorization... {}s remaining", remaining);
-                if let Err(e) = std::io::stdout().flush() {
-                    eprintln!("Failed to flush stdout: {}", e);
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            println!(); // New line after timer
-        });
-
-        // Use tokio::select! to wait for either the channel or a timeout
-        tokio::select! {
-            // Wait for API key from channel
-            api_key = api_key_receiver.recv() => {
-                timer_handle.abort(); // Stop the timer
-                match api_key {
-                    Some(key) => {
-                        callback_handle.abort(); // Cancel polling
-                        server_handle.abort(); // Stop the server
-                        render_and_save_api_key(&key, config).await;
-                        return;
-                    }
-                    None => {
-                        println!("❌ Server channel closed unexpectedly");
-                    }
-                }
-            }
-            // Timeout after 15 seconds
-            _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                timer_handle.abort(); // Stop the timer
-                println!();
-                println!("⏰ Timedout waiting for API key from server");
-                println!();
-                callback_handle.abort();
-                server_handle.abort(); // Stop the server
-            }
-        }
-
-        // If we didn't get an API key from the channel, check if user wants to enter manually
-        println!("Press Enter to enter API key manually.");
-        let mut input = String::new();
-        if std::io::stdin().read_line(&mut input).is_ok() && input.trim().is_empty() {
-            // User pressed Enter, show manual prompt
-            println!("🔄 Stopping server and switching to manual input...");
-            println!();
-            callback_handle.abort();
-            server_handle.abort(); // Stop the server
-        } else {
-            // User typed something, fall back to polling
-            println!("Checking polling result...");
-            match callback_handle.await {
-                Ok(result) => match result.as_str() {
-                    "TIMEOUT" => {
-                        println!("Callback timed out, switching to manual input...");
-                        server_handle.abort(); // Stop the server
-                    }
-                    "ERROR" => {
-                        println!("Callback failed, switching to manual input...");
-                        server_handle.abort(); // Stop the server
-                    }
-                    key => {
-                        let api_key = key.to_string();
-                        server_handle.abort(); // Stop the server
-                        render_and_save_api_key(&api_key, config).await;
-                        return;
-                    }
-                },
-                Err(_) => {
-                    println!("Callback was cancelled, switching to manual input...");
-                    server_handle.abort(); // Stop the server
-                }
-            }
-        }
+    if port_error {
+        println!("⚠️ Could not start the local callback server. Paste the API key manually.");
+    } else if browser_opened {
+        println!("Follow the prompts in your browser or paste the key here at any time.");
     } else {
-        println!("❌ Browser could not be opened automatically");
-        println!();
-        println!("Stopping server and switching to manual input...");
-        println!();
-        server_handle.abort(); // Stop the server
+        println!(
+            "❌ Browser could not be opened automatically. Use the link above or paste the key below."
+        );
     }
 
-    // Manual input path
+    println!();
     println!("Copy your API key (starts with '\x1b[1;32mstkpk_api\x1b[0m')");
     println!();
     print!("\x1b[1;34mPaste\x1b[0m your key here: ");
@@ -353,15 +269,93 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
     println!();
     println!();
 
-    let manual_key = match rpassword::read_password() {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("\nFailed to read API key: {}", e);
-            std::process::exit(1);
+    let (manual_tx, mut manual_rx) = mpsc::channel::<Result<String, String>>(1);
+    let manual_input_handle = tokio::spawn(async move {
+        let read_res = tokio::task::spawn_blocking(rpassword::read_password).await;
+        let _ = match read_res {
+            Ok(Ok(key)) => manual_tx.send(Ok(key)).await,
+            Ok(Err(e)) => manual_tx.send(Err(format!("{}", e))).await,
+            Err(e) => manual_tx.send(Err(format!("{}", e))).await,
+        };
+    });
+
+    let mut callback_rx_option = None;
+    let callback_handle_option = if !port_error {
+        let (callback_tx, callback_rx) = mpsc::channel::<String>(1);
+        let url_clone = base_url.clone();
+        let handle = tokio::spawn(async move {
+            let result = listen_for_callback(&url_clone).await;
+            let _ = callback_tx.send(result).await;
+        });
+        callback_rx_option = Some(callback_rx);
+        Some(handle)
+    } else {
+        None
+    };
+
+    let timeout = tokio::time::sleep(std::time::Duration::from_secs(120));
+    tokio::pin!(timeout);
+    let mut timeout_triggered = false;
+
+    let selected_key: Option<String> = loop {
+        tokio::select! {
+            Some(key) = api_key_receiver.recv() => {
+                println!("\n🔐 Received API key via local callback");
+                break Some(key);
+            }
+            Some(manual_result) = manual_rx.recv() => {
+                match manual_result {
+                    Ok(key) => {
+                        println!("\n🔑 Received API key from manual input");
+                        break Some(key);
+                    }
+                    Err(err) => {
+                        eprintln!("\nFailed to read API key: {}", err);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            callback_result = async {
+                if let Some(rx) = callback_rx_option.as_mut() {
+                    rx.recv().await
+                } else {
+                    std::future::pending::<Option<String>>().await
+                }
+            } => {
+                match callback_result {
+                    Some(result) => {
+                        match result.as_str() {
+                            "TIMEOUT" => {
+                                println!("\n⏰ Waiting for authorization timed out. You can paste the key manually whenever you're ready.");
+                            }
+                            "ERROR" => {
+                                println!("\n⚠️ Authorization attempt failed. Paste the key manually or try again in the browser.");
+                            }
+                            key => {
+                                println!("\n🔐 Received API key from polling endpoint");
+                                break Some(key.to_string());
+                            }
+                        }
+                    }
+                    None => {
+                        callback_rx_option = None;
+                    }
+                }
+            }
+            _ = &mut timeout, if !timeout_triggered => {
+                timeout_triggered = true;
+                println!("\n⏳ Still waiting for browser authorization... paste the key here any time.");
+            }
         }
     };
 
-    render_and_save_api_key(&manual_key, config).await;
+    if let Some(handle) = callback_handle_option {
+        handle.abort();
+    }
+    manual_input_handle.abort();
+    server_handle.abort();
 
-    // Clean success message
+    if let Some(key) = selected_key {
+        render_and_save_api_key(&key, config).await;
+    }
 }
