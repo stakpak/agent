@@ -3,7 +3,7 @@ use std::io::Write;
 use tokio::sync::mpsc;
 
 const CLIENT_ID: &str = "stakpak-cli";
-const GENERATE_API_KEY_URL: &str = "https://stakpak.dev/generate-api-key";
+const GENERATE_API_KEY_URL: &str = "https://stakpak.dev/generate-api-keys";
 
 fn open_browser(url: &str) -> bool {
     match open::that(url) {
@@ -67,6 +67,13 @@ fn success_message() {
     println!();
 }
 
+fn clear_terminal() {
+    print!("\x1b[2J\x1b[H");
+    if let Err(e) = std::io::stdout().flush() {
+        eprintln!("Failed to clear terminal: {}", e);
+    }
+}
+
 async fn render_and_save_api_key(api_key: &str, config: &mut AppConfig) {
     if api_key.trim().is_empty() || !api_key.trim().starts_with("stkpk_api") {
         eprintln!("\nInvalid API key format.");
@@ -78,9 +85,13 @@ async fn render_and_save_api_key(api_key: &str, config: &mut AppConfig) {
 
     if let Err(e) = config.save() {
         eprintln!("Failed to save config: {}", e);
+        std::process::exit(1);
     }
 
     success_message();
+    // add timeout for 2 seconds
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    clear_terminal();
 }
 
 async fn start_callback_server() -> (
