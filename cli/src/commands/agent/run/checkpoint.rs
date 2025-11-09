@@ -30,10 +30,9 @@ pub async fn get_checkpoint_messages(
 }
 
 pub fn get_messages_from_checkpoint_output(output: &AgentOutput) -> Vec<ChatMessage> {
-    if let AgentOutput::PabloV1 { messages, .. } = output {
-        return messages.clone();
-    }
-    vec![]
+    let AgentOutput::PabloV1 { messages, .. } = output;
+
+    messages.clone()
 }
 
 pub async fn extract_checkpoint_messages_and_tool_calls(

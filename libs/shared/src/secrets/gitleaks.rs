@@ -1,7 +1,7 @@
 // Secret redaction implementation based on gitleaks (https://github.com/gitleaks/gitleaks)
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitleaksConfig {
@@ -223,11 +223,12 @@ impl RegexCompilable for GitleaksConfig {
 }
 
 /// Lazy-loaded gitleaks configuration
-pub static GITLEAKS_CONFIG: Lazy<GitleaksConfig> = Lazy::new(|| create_gitleaks_config(false));
+pub static GITLEAKS_CONFIG: LazyLock<GitleaksConfig> =
+    LazyLock::new(|| create_gitleaks_config(false));
 
 /// Lazy-loaded gitleaks configuration with privacy rules
-pub static GITLEAKS_CONFIG_WITH_PRIVACY: Lazy<GitleaksConfig> =
-    Lazy::new(|| create_gitleaks_config(true));
+pub static GITLEAKS_CONFIG_WITH_PRIVACY: LazyLock<GitleaksConfig> =
+    LazyLock::new(|| create_gitleaks_config(true));
 
 /// Creates a gitleaks configuration with optional privacy rules
 fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
@@ -831,16 +832,16 @@ mod tests {
 
                 // Test entropy if there are captures
                 for mat in regex.find_iter(test_input) {
-                    if let Some(captures) = regex.captures_at(test_input, mat.start()) {
-                        if let Some(capture) = captures.get(1) {
-                            let entropy = calculate_entropy(capture.as_str());
-                            println!(
-                                "  Entropy of first capture '{}': {:.2} (threshold: {:?})",
-                                capture.as_str(),
-                                entropy,
-                                rule.entropy
-                            );
-                        }
+                    if let Some(captures) = regex.captures_at(test_input, mat.start())
+                        && let Some(capture) = captures.get(1)
+                    {
+                        let entropy = calculate_entropy(capture.as_str());
+                        println!(
+                            "  Entropy of first capture '{}': {:.2} (threshold: {:?})",
+                            capture.as_str(),
+                            entropy,
+                            rule.entropy
+                        );
                     }
                 }
             } else {
@@ -1027,7 +1028,7 @@ mod tests {
 
         // Should detect the account ID in the "Account" field
         assert!(
-            aws_secrets.len() >= 1,
+            !aws_secrets.is_empty(),
             "Should detect at least one AWS account ID"
         );
         assert!(

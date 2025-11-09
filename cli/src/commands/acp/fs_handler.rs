@@ -147,6 +147,8 @@ pub async fn execute_acp_fs_tool(
             Ok(Some(rmcp::model::CallToolResult {
                 content: vec![rmcp::model::Content::text(content)],
                 is_error: Some(false),
+                meta: None,
+                structured_content: None,
             }))
         }
         "create" => {
@@ -188,6 +190,8 @@ pub async fn execute_acp_fs_tool(
                     path
                 ))],
                 is_error: Some(false),
+                meta: None,
+                structured_content: None,
             }))
         }
         "str_replace" => {
@@ -277,6 +281,8 @@ pub async fn execute_acp_fs_tool(
                     replacement_count, path
                 ))],
                 is_error: Some(false),
+                meta: None,
+                structured_content: None,
             }))
         }
         _ => Err(format!(

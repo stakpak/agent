@@ -1,6 +1,5 @@
-use crate::app::AppState;
+use crate::app::{AppState, LoadingType};
 use crate::services::detect_term::AdaptiveColors;
-use crate::services::helper_block::render_loading_spinner;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
 use crate::services::message::{
@@ -11,8 +10,8 @@ use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
-    style::{Color, Style},
-    text::Line,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -32,7 +31,20 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         if !state.filtered_files.is_empty() {
             DROPDOWN_MAX_HEIGHT as u16
         } else {
-            state.filtered_helpers.len() as u16
+            // Use compact height calculation matching helper_dropdown.rs
+            const MAX_VISIBLE_ITEMS: usize = 5;
+            let visible_height = MAX_VISIBLE_ITEMS.min(state.filtered_helpers.len());
+            let has_content_above = state.helper_scroll > 0;
+            let has_content_below =
+                state.helper_scroll < state.filtered_helpers.len().saturating_sub(visible_height);
+            let arrow_lines =
+                if has_content_above { 1 } else { 0 } + if has_content_below { 1 } else { 0 };
+            let counter_line = if has_content_above || has_content_below {
+                1
+            } else {
+                0
+            };
+            (visible_height + arrow_lines + counter_line) as u16
         }
     } else {
         0
@@ -49,7 +61,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Layout: [messages][loading_line][dialog_margin][dialog][input][dropdown][hint]
     let mut constraints = vec![
         Constraint::Min(1),    // messages
-        Constraint::Length(1), // reserved line for loading indicator
+        Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
         Constraint::Length(dialog_margin),
         Constraint::Length(dialog_height),
     ];
@@ -132,6 +144,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
     }
 
+    // Render shortcuts popup
+    if state.show_shortcuts_popup {
+        crate::services::shortcuts_popup::render_shortcuts_popup(f, state);
+    }
+    // Render command palette
+    if state.show_command_palette {
+        crate::services::command_palette::render_command_palette(f, state);
+    }
     // Render rulebook switcher
     if state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
@@ -326,13 +346,72 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
+    // Always render this line - shows spinner when loading on left, tokens always on right (if > 0)
+    let mut left_spans = Vec::new();
+
+    // Left side: spinner (if loading)
     if state.loading {
-        let loading_line = render_loading_spinner(state);
-        let loading_widget =
-            Paragraph::new(loading_line).wrap(ratatui::widgets::Wrap { trim: false });
-        f.render_widget(loading_widget, area);
-    } else {
-        // Clear the area when not loading
-        f.render_widget(ratatui::widgets::Clear, area);
+        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
+        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+        let spinner_text = if state.loading_type == LoadingType::Sessions {
+            "Loading sessions..."
+        } else {
+            "Stakpaking..."
+        };
+
+        left_spans.push(Span::styled(
+            format!("{} {}", spinner, spinner_text),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        if state.loading_type == LoadingType::Llm {
+            left_spans.push(Span::styled(
+                " - Esc to cancel",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
     }
+
+    // Right side: total tokens (if > 0)
+    let total_tokens = state.total_session_usage.total_tokens;
+    let total_width = area.width as usize;
+    let mut final_spans = Vec::new();
+
+    if total_tokens > 0 {
+        let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
+        let suffix_text = " tokens";
+
+        // Calculate spacing to push tokens to the absolute right edge
+        let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+        let total_adjusted_width = if state.loading {
+            total_width + 4
+        } else {
+            total_width
+        };
+        let total_text_len = formatted.len() + suffix_text.len();
+        let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
+
+        // Add left content first
+        final_spans.extend(left_spans);
+
+        // Add spacing to push tokens to absolute right
+        if spacing > 0 {
+            final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+        }
+
+        // Add tokens at the absolute right edge - all in gray
+        final_spans.push(Span::styled(
+            format!("{}{}", formatted, suffix_text),
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        // No tokens, just show left content if any
+        final_spans.extend(left_spans);
+    }
+
+    let widget =
+        Paragraph::new(Line::from(final_spans)).wrap(ratatui::widgets::Wrap { trim: false });
+    f.render_widget(widget, area);
 }

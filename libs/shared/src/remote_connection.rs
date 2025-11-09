@@ -501,8 +501,8 @@ impl RemoteConnection {
                         {
                             let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
                                     progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
-                                    progress: 50,
-                                    total: Some(100),
+                                    progress: 50.0,
+                                    total: Some(100.0),
                                     message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
                                         id: progress_id,
                                         message: text,
@@ -524,8 +524,8 @@ impl RemoteConnection {
                         {
                             let _ = ctx.peer.notify_progress(rmcp::model::ProgressNotificationParam {
                                     progress_token: rmcp::model::ProgressToken(rmcp::model::NumberOrString::Number(0)),
-                                    progress: 50,
-                                    total: Some(100),
+                                    progress: 50.0,
+                                    total: Some(100.0),
                                     message: Some(serde_json::to_string(&crate::models::integrations::openai::ToolCallResultProgress {
                                         id: progress_id,
                                         message: text,
