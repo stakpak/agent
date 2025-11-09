@@ -6,7 +6,7 @@ use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::{env, path::Path};
 
-mod apkey_auth;
+mod apikey_auth;
 // mod code_index;
 mod commands;
 mod config;
@@ -25,7 +25,7 @@ use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
-use crate::apkey_auth::prompt_for_api_key;
+use crate::apikey_auth::prompt_for_api_key;
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
