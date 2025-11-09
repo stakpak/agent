@@ -1,7 +1,7 @@
 use crate::tool_container::ToolContainer;
 use rand::Rng;
 use rmcp::service::RequestContext;
-use rmcp::{Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool};
+use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
@@ -1165,8 +1165,8 @@ SAFETY NOTES:
                         // Send notification but continue processing
                         let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                             progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50,
-                            total: Some(100),
+                            progress: 50.0,
+                            total: Some(100.0),
                             message: Some(serde_json::to_string(&ToolCallResultProgress {
                                 id: progress_id,
                                 message: line,
@@ -1187,8 +1187,8 @@ SAFETY NOTES:
                         }
                         let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                             progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50,
-                            total: Some(100),
+                            progress: 50.0,
+                            total: Some(100.0),
                             message: Some(serde_json::to_string(&ToolCallResultProgress {
                                 id: progress_id,
                                 message: format!("{}\n", line),
@@ -1948,8 +1948,8 @@ SAFETY NOTES:
                     .peer
                     .notify_progress(ProgressNotificationParam {
                         progress_token: ProgressToken(NumberOrString::Number(0)),
-                        progress: if target_tasks_completed { 100 } else { 50 },
-                        total: Some(100),
+                        progress: if target_tasks_completed { 100.0 } else { 50.0 },
+                        total: Some(100.0),
                         message: Some(
                             serde_json::to_string(&ToolCallResultProgress {
                                 id: progress_id,

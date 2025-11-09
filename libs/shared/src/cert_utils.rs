@@ -297,7 +297,7 @@ mod tests {
         let result = timeout(
             Duration::from_secs(5),
             client
-                .get(&format!("https://127.0.0.1:{}/test", server_addr.port()))
+                .get(format!("https://127.0.0.1:{}/test", server_addr.port()))
                 .send(),
         )
         .await;
@@ -363,7 +363,7 @@ mod tests {
         let result = timeout(
             Duration::from_secs(5),
             client
-                .get(&format!("https://127.0.0.1:{}/test", server_addr.port()))
+                .get(format!("https://127.0.0.1:{}/test", server_addr.port()))
                 .send(),
         )
         .await;
@@ -497,7 +497,7 @@ mod tests {
             let response = timeout(
                 Duration::from_secs(10),
                 client
-                    .get(&format!("https://127.0.0.1:{}/{}", test_port, endpoint))
+                    .get(format!("https://127.0.0.1:{}/{}", test_port, endpoint))
                     .send(),
             )
             .await

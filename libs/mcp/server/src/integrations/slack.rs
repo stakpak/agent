@@ -1,6 +1,7 @@
 use crate::tool_container::ToolContainer;
 use rmcp::{
-    Error as McpError, handler::server::tool::Parameters, model::*, schemars, tool, tool_router,
+    ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool,
+    tool_router,
 };
 use serde::Deserialize;
 use serde_json::json;

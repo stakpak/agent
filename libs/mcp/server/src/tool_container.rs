@@ -1,7 +1,7 @@
 use super::EnabledToolsConfig;
 use rmcp::tool_handler;
 use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
+    ErrorData as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
     service::RequestContext, tool_router,
 };
 use stakpak_api::{Client, ClientConfig};

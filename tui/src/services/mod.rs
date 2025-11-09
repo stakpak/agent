@@ -1,6 +1,7 @@
 pub mod approval_popup;
 pub mod auto_approve;
 pub mod bash_block;
+pub mod command_palette;
 pub mod detect_term;
 pub mod file_diff;
 pub mod file_search;
@@ -15,6 +16,7 @@ pub mod profile_switcher;
 pub mod rulebook_switcher;
 pub mod sessions_dialog;
 pub mod shell_mode;
+pub mod shortcuts_popup;
 pub mod syntax_highlighter;
 pub mod textarea;
 pub mod update;

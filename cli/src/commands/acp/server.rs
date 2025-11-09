@@ -14,6 +14,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -60,8 +61,20 @@ impl StakpakAcpAgent {
         system_prompt: Option<String>,
     ) -> Result<Self, String> {
         let api_config: ClientConfig = config.clone().into();
-        let client =
-            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?;
+
+        // If no API key, create a dummy client that will fail on first use
+        // The user will be prompted during authenticate/new_session
+        let client = if api_config.api_key.is_none() {
+            log::warn!("No API key found. User will be prompted to authenticate.");
+            // Create a dummy client that will fail gracefully
+            Client::new(&ClientConfig {
+                api_key: Some("dummy_for_initialization".to_string()),
+                api_endpoint: api_config.api_endpoint.clone(),
+            })
+            .map_err(|e| format!("Failed to create client: {}", e))?
+        } else {
+            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?
+        };
 
         // Initialize MCP server and tools (optional for ACP)
         let (mcp_server_host, clients, tools) =
@@ -851,10 +864,17 @@ impl StakpakAcpAgent {
             .await?;
 
             // Check if this is a filesystem tool that should use native ACP
+            // Decide if this should be handled by native ACP FS. Avoid read_text_file for directories.
+            let is_view_directory = if tool_call.function.name == "view" {
+                Path::new(&abs_path).is_dir()
+            } else {
+                false
+            };
+
             let is_fs_tool = matches!(
                 tool_call.function.name.as_str(),
                 "view" | "create" | "str_replace"
-            );
+            ) && !is_view_directory;
 
             let result = if is_fs_tool && self.fs_operation_tx.is_some() {
                 log::info!(
@@ -1146,6 +1166,7 @@ impl StakpakAcpAgent {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
+                prompt_tokens_details: None,
             },
             system_fingerprint: None,
         };
@@ -1210,6 +1231,7 @@ impl StakpakAcpAgent {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,
+                            prompt_tokens_details: None,
                         },
                         system_fingerprint: None,
                     };
@@ -1583,6 +1605,19 @@ impl acp::Agent for StakpakAcpAgent {
         args: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse, acp::Error> {
         log::info!("Received initialize request {args:?}");
+
+        // If no API key, provide an auth method that links to GitHub
+        let auth_methods = if self.config.api_key.is_none() {
+            vec![acp::AuthMethod {
+                id: acp::AuthMethodId("github".into()),
+                name: "Use STAKPAK_API_KEY".to_string(),
+                description: Some("Required setting `STAKPAK_API_KEY` in your environment. Get your API key from https://stakpak.dev".to_string()),
+                meta: None,
+            }]
+        } else {
+            Vec::new()
+        };
+
         Ok(acp::InitializeResponse {
             meta: None,
             protocol_version: acp::V1,
@@ -1606,7 +1641,7 @@ impl acp::Agent for StakpakAcpAgent {
                     embedded_context: true,
                 },
             },
-            auth_methods: Vec::new(),
+            auth_methods,
         })
     }
 
@@ -1615,6 +1650,39 @@ impl acp::Agent for StakpakAcpAgent {
         args: acp::AuthenticateRequest,
     ) -> Result<acp::AuthenticateResponse, acp::Error> {
         log::info!("Received authenticate request {args:?}");
+
+        // Handle GitHub authentication method - check for STAKPAK_API_KEY environment variable
+        if args.method_id.0.to_string() == "github" {
+            log::info!(
+                "GitHub auth method selected, checking for STAKPAK_API_KEY environment variable"
+            );
+            match std::env::var("STAKPAK_API_KEY") {
+                Ok(_api_key) => {
+                    log::info!("STAKPAK_API_KEY found in environment");
+                    // The config is already checked at initialization and will pick up the env var
+                    // if it was available when the agent started. Since we can't modify self.config
+                    // here (it's &self), we'll rely on the environment variable being available
+                    // for subsequent operations. The next check will verify if we have an API key.
+                }
+                Err(_) => {
+                    log::error!("STAKPAK_API_KEY environment variable is not set");
+                    return Err(
+                        acp::Error::internal_error().with_data(serde_json::Value::String(
+                            "STAKPAK_API_KEY is not set".to_string(),
+                        )),
+                    );
+                }
+            }
+        }
+
+        // Check if we have a valid API key
+        if self.config.api_key.is_none() {
+            log::error!("API key is missing - authentication required");
+            return Err(acp::Error::auth_required().with_data(serde_json::Value::String(
+                "Authentication required. Please visit https://github.com/stakpak/zed-stakpak-agent-server for more information.".to_string()
+            )));
+        }
+
         Ok(acp::AuthenticateResponse { meta: None })
     }
 
@@ -1623,6 +1691,14 @@ impl acp::Agent for StakpakAcpAgent {
         args: acp::NewSessionRequest,
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         log::info!("Received new session request {args:?}");
+
+        // Check if we have a valid API key
+        if self.config.api_key.is_none() {
+            log::error!("API key is missing - authentication required");
+            return Err(acp::Error::auth_required().with_data(serde_json::Value::String(
+                "Authentication required. Please visit https://github.com/stakpak/agent for more information.".to_string()
+            )));
+        }
 
         let temp_session_id = Uuid::new_v4();
         let session_id = acp::SessionId(temp_session_id.to_string().into());

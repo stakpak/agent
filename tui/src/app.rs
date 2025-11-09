@@ -134,6 +134,7 @@ pub struct AppState {
     pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
+    pub helper_scroll: usize,
     pub filtered_helpers: Vec<HelperCommand>,
     pub filtered_files: Vec<String>, // NEW: for file file_search
     pub show_shortcuts: bool,
@@ -219,6 +220,9 @@ pub struct AppState {
     pub profile_switch_status_message: Option<String>,
     pub rulebook_config: Option<crate::RulebookConfig>,
 
+    // Shortcuts popup state
+    pub show_shortcuts_popup: bool,
+    pub shortcuts_scroll: usize,
     // Rulebook switcher state
     pub show_rulebook_switcher: bool,
     pub available_rulebooks: Vec<ListRuleBook>,
@@ -226,6 +230,15 @@ pub struct AppState {
     pub rulebook_switcher_selected: usize,
     pub rulebook_search_input: String,
     pub filtered_rulebooks: Vec<ListRuleBook>,
+
+    // Command palette state
+    pub show_command_palette: bool,
+    pub command_palette_selected: usize,
+    pub command_palette_scroll: usize,
+    pub command_palette_search: String,
+    // Usage tracking
+    pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
+    pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
 }
 
 #[derive(Debug)]
@@ -308,8 +321,15 @@ pub enum InputEvent {
     ProfileSwitchProgress(String),
     ProfileSwitchComplete(String),
     ProfileSwitchFailed(String),
+    // Command palette events
+    ShowCommandPalette,
+    CommandPaletteSearchInputChanged(char),
+    CommandPaletteSearchBackspace,
     ProfileSwitcherSelect,
     ProfileSwitcherCancel,
+    // Shortcuts popup events
+    ShowShortcuts,
+    ShortcutsCancel,
 
     // Rulebook switcher events
     ShowRulebookSwitcher,
@@ -323,6 +343,12 @@ pub enum InputEvent {
     RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
     RulebookSearchInputChanged(char),
     RulebookSearchBackspace,
+    HandleCtrlS,
+    ToggleMoreShortcuts,
+    // Usage tracking events
+    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
+    RequestTotalUsage,
+    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
 }
 
 #[derive(Debug)]
@@ -332,12 +358,14 @@ pub enum OutputEvent {
     RejectTool(ToolCall, bool),
     ListSessions,
     SwitchToSession(String),
+    NewSession,
     Memorize,
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
     RequestProfileSwitch(String),
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
+    RequestTotalUsage,                  // Request total accumulated token usage
 }
 
 impl AppState {
@@ -364,8 +392,24 @@ impl AppState {
                 description: "Resume the last session",
             },
             HelperCommand {
+                command: "/new",
+                description: "Start a new session",
+            },
+            HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/usage",
+                description: "Show token usage for this session",
+            },
+            HelperCommand {
+                command: "/issue",
+                description: "Submit issue on GitHub repo",
+            },
+            HelperCommand {
+                command: "/support",
+                description: "Go to Discord support channel",
             },
             HelperCommand {
                 command: "/list_approved_tools",
@@ -380,12 +424,16 @@ impl AppState {
                 description: "Toggle mouse capture on/off",
             },
             HelperCommand {
-                command: "/switch_profile",
+                command: "/profiles",
                 description: "Switch to a different profile",
             },
             HelperCommand {
                 command: "/quit",
                 description: "Quit the application",
+            },
+            HelperCommand {
+                command: "/shortcuts",
+                description: "Show keyboard shortcuts",
             },
         ]
     }
@@ -397,6 +445,7 @@ impl AppState {
         is_git_repo: bool,
         auto_approve_tools: Option<&Vec<String>>,
         allowed_tools: Option<&Vec<String>>,
+        input_tx: Option<mpsc::Sender<InputEvent>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
         let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
@@ -423,6 +472,7 @@ impl AppState {
             helpers: helpers.clone(),
             show_helper_dropdown: false,
             helper_selected: 0,
+            helper_scroll: 0,
             filtered_helpers: helpers,
             filtered_files: Vec::new(),
             show_shortcuts: false,
@@ -461,7 +511,7 @@ impl AppState {
             file_search_rx: Some(result_rx),
             is_streaming: false,
             interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            auto_approve_manager: AutoApproveManager::new(auto_approve_tools),
+            auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused
             latest_tool_call: None,
@@ -504,6 +554,9 @@ impl AppState {
             profile_switch_status_message: None,
             rulebook_config: None,
 
+            // Shortcuts popup initialization
+            show_shortcuts_popup: false,
+            shortcuts_scroll: 0,
             // Rulebook switcher initialization
             show_rulebook_switcher: false,
             available_rulebooks: Vec::new(),
@@ -511,6 +564,19 @@ impl AppState {
             rulebook_switcher_selected: 0,
             rulebook_search_input: String::new(),
             filtered_rulebooks: Vec::new(),
+            // Command palette initialization
+            show_command_palette: false,
+            command_palette_selected: 0,
+            command_palette_scroll: 0,
+            command_palette_search: String::new(),
+            // Usage tracking
+            current_message_usage: None,
+            total_session_usage: stakpak_shared::models::integrations::openai::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
         }
     }
 

@@ -5,8 +5,24 @@ use std::error::Error;
 
 use crate::commands::auto_update::run_auto_update;
 #[derive(Deserialize, Debug)]
-pub struct Release {
+#[allow(dead_code)]
+pub struct LatestRelease {
     pub tag_name: String,
+    pub name: String,
+    pub published_at: String,
+    pub html_url: String,
+    pub prerelease: bool,
+    pub draft: bool,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct ReleaseResponse {
+    pub repository: String,
+    pub stargazers_count: u64,
+    pub latest_release: LatestRelease,
+    pub cached_at: String,
+    pub expires_at: String,
 }
 
 pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
@@ -36,7 +52,7 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
 
     let client = create_tls_client(TlsClientConfig::default().with_headers(headers))?;
 
-    let url = "https://api.github.com/repos/stakpak/cli/releases/latest".to_string();
+    let url = "https://apiv2.stakpak.dev/github/releases".to_string();
 
     let response = client.get(&url).send().await?;
 
@@ -44,8 +60,8 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
         return Err("Failed to fetch release info".into());
     }
 
-    let release: Release = response.json().await?;
-    Ok(release.tag_name)
+    let release_response: ReleaseResponse = response.json().await?;
+    Ok(release_response.latest_release.tag_name)
 }
 
 pub async fn auto_update() -> Result<(), Box<dyn Error>> {

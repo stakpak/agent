@@ -73,6 +73,13 @@ docker pull ghcr.io/stakpak/agent:latest
 
    <img src="assets/apikeys.png" width="800">
 
+#### Browser Compatibility Note
+
+**Brave Browser Users**: Brave's security features may block automatic redirects to localhost ports during the API key creation flow. If you encounter this:
+
+- **Option 1**: Click the security shield icon in the address bar and allow the redirect
+- **Option 2**: Wait ~15 seconds for the timeout, then manually add your API key using the steps below
+
 #### Set the environment variable `STAKPAK_API_KEY`
 
 ```bash
@@ -224,6 +231,14 @@ tags:
 
 Your deployment procedures and guidelines here...
 ```
+
+## Platform Testing
+
+### Windows
+
+Comprehensive testing report for Windows CLI functionality, including installation, configuration, and integration with WSL2 and Docker.
+
+[View Windows Testing Report](platform-testing/windows-testing-report.md)
 
 ---
 
