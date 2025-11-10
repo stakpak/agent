@@ -11,6 +11,7 @@ pub mod models;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use models::*;
+pub use models::{RecoveryMode, RecoveryOption, RecoveryOptionsResponse};
 use serde_json::Value;
 use serde_json::json;
 use stakpak_shared::models::integrations::openai::{
@@ -418,6 +419,72 @@ impl Client {
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         match serde_json::from_value::<RunAgentOutput>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    pub async fn get_recovery_options(
+        &self,
+        session_id: Uuid,
+        status: Option<&str>,
+    ) -> Result<RecoveryOptionsResponse, String> {
+        let url = format!(
+            "{}/recovery/sessions/{}/recoveries",
+            self.base_url, session_id
+        );
+
+        let status = status.unwrap_or("pending");
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("status", status)])
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let response = self.handle_response_error(response).await?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        if value.is_null() {
+            return Ok(RecoveryOptionsResponse {
+                recovery_options: Vec::new(),
+                id: None,
+            });
+        }
+
+        if let Some(result) = value.get("result") {
+            if result.is_null() {
+                return Ok(RecoveryOptionsResponse {
+                    recovery_options: Vec::new(),
+                    id: None,
+                });
+            }
+
+            match serde_json::from_value::<RecoveryOptionsResponse>(result.clone()) {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    eprintln!("Failed to deserialize response: {}", e);
+                    eprintln!("Raw response: {}", result);
+                }
+            }
+        }
+
+        if let Some(recovery_options) = value.get("recovery_options")
+            && recovery_options.is_null()
+        {
+            return Ok(RecoveryOptionsResponse {
+                recovery_options: Vec::new(),
+                id: None,
+            });
+        }
+
+        match serde_json::from_value::<RecoveryOptionsResponse>(value.clone()) {
             Ok(response) => Ok(response),
             Err(e) => {
                 eprintln!("Failed to deserialize response: {}", e);

@@ -3,6 +3,40 @@ use serde::{Deserialize, Serialize};
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub enum RecoveryMode {
+    #[serde(rename = "REDIRECTION")]
+    Redirection,
+    #[serde(rename = "REVERT")]
+    Revert,
+    #[serde(rename = "MODELCHANGE")]
+    ModelChange,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecoveryOption {
+    pub id: Uuid,
+    pub mode: RecoveryMode,
+    pub state_edits: serde_json::Value,
+    pub reasoning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirection_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revert_to_checkpoint: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecoveryOptionsResponse {
+    #[serde(default)]
+    pub recovery_options: Vec<RecoveryOption>,
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ApiStreamError {
     AgentInputInvalid(String),

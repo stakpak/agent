@@ -862,6 +862,27 @@ pub async fn run_interactive(
                             }
                         }
 
+                        if let Some(session_id) = current_session_id {
+                            match client
+                                .get_recovery_options(session_id, Some("pending"))
+                                .await
+                            {
+                                Ok(recovery_response) => {
+                                    eprintln!("Recovery response: {:?}", recovery_response);
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::RecoveryOptions(recovery_response),
+                                    )
+                                    .await?;
+                                }
+                                Err(err) => {
+                                    let message =
+                                        format!("Failed to fetch recovery options: {}", err);
+                                    send_input_event(&input_tx, InputEvent::Error(message)).await?;
+                                }
+                            }
+                        }
+
                         send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     }
                     Err(_) => {

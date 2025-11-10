@@ -71,9 +71,22 @@ pub fn update(
     state.scroll = state.scroll.max(0);
     match event {
         InputEvent::Up => {
+            if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
+                if state.recovery_popup_selected == 0 {
+                    state.recovery_popup_selected = state.recovery_options.len().saturating_sub(1);
+                } else {
+                    state.recovery_popup_selected -= 1;
+                }
+                return;
+            }
             handle_up_navigation(state);
         }
         InputEvent::Down => {
+            if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
+                let len = state.recovery_options.len();
+                state.recovery_popup_selected = (state.recovery_popup_selected + 1) % len;
+                return;
+            }
             handle_down_navigation(state, message_area_height, message_area_width);
         }
         InputEvent::DropdownUp => handle_dropdown_up(state),
@@ -158,6 +171,13 @@ pub fn update(
         }
 
         InputEvent::InputSubmitted => {
+            if state.show_recovery_options_popup {
+                if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected) {
+                    eprintln!("Selected recovery option: {}", selected.id);
+                }
+                state.show_recovery_options_popup = false;
+                return;
+            }
             if state.show_profile_switcher {
                 let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
                 return;
@@ -303,6 +323,15 @@ pub fn update(
 
             // Invalidate cache since messages changed
             crate::services::message::invalidate_message_lines_cache(state);
+        }
+        InputEvent::RecoveryOptions(response) => {
+            eprintln!("Recovery response: {:?}", response);
+            state.recovery_options = response.recovery_options.clone();
+            state.recovery_response = Some(response);
+            state.recovery_popup_selected = 0;
+            if state.recovery_options.is_empty() {
+                state.show_recovery_options_popup = false;
+            }
         }
         InputEvent::ScrollUp => handle_up_navigation(state),
         InputEvent::ScrollDown => {
@@ -595,8 +624,17 @@ pub fn update(
                 state.last_message_tool_calls = prompt_tool_calls.clone();
             }
         }
-        InputEvent::ToggleMoreShortcuts => {
-            state.show_shortcuts = !state.show_shortcuts;
+        InputEvent::ExpandNotifications => {
+            if state.recovery_options.is_empty() {
+                return;
+            }
+
+            if state.show_recovery_options_popup {
+                state.show_recovery_options_popup = false;
+            } else {
+                state.show_recovery_options_popup = true;
+                state.recovery_popup_selected = 0;
+            }
         }
         InputEvent::HandleCtrlS => {
             if state.show_rulebook_switcher {
@@ -620,6 +658,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
+            if state.show_recovery_options_popup {
+                state.show_recovery_options_popup = false;
+                return;
+            }
             if state.show_rulebook_switcher {
                 state.show_rulebook_switcher = false;
                 return;

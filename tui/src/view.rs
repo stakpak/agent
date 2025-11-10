@@ -157,6 +157,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
     }
 
+    if state.show_recovery_options_popup {
+        crate::services::recovery_popup::render_recovery_popup(f, state);
+    }
+
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
@@ -377,38 +381,81 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Right side: total tokens (if > 0)
     let total_tokens = state.total_session_usage.total_tokens;
     let total_width = area.width as usize;
-    let mut final_spans = Vec::new();
+    let total_adjusted_width = if state.loading {
+        total_width + 4
+    } else {
+        total_width
+    };
 
-    if total_tokens > 0 {
+    let formatted_tokens = if total_tokens > 0 {
         let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
-        let suffix_text = " tokens";
+        Some(format!("{} tokens", formatted))
+    } else {
+        None
+    };
+    let right_len = formatted_tokens
+        .as_ref()
+        .map(|text| text.len())
+        .unwrap_or(0);
 
-        // Calculate spacing to push tokens to the absolute right edge
-        let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-        let total_adjusted_width = if state.loading {
-            total_width + 4
-        } else {
-            total_width
-        };
-        let total_text_len = formatted.len() + suffix_text.len();
-        let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
+    let middle_message = (!state.recovery_options.is_empty())
+        .then_some("Detected agent tool call loop . ctr+g for more");
+    let middle_len = middle_message.map(|msg| msg.len()).unwrap_or(0);
 
-        // Add left content first
-        final_spans.extend(left_spans);
+    let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let mut final_spans = Vec::new();
+    final_spans.extend(left_spans);
 
-        // Add spacing to push tokens to absolute right
+    if let Some(message) = middle_message {
+        let available_without_right = total_adjusted_width.saturating_sub(right_len);
+        let desired_center = available_without_right / 2;
+        let current_center = left_len + middle_len / 2;
+        let mut space_before_mid = desired_center.saturating_sub(current_center);
+        if !final_spans.is_empty() && space_before_mid == 0 {
+            space_before_mid = 1;
+        }
+
+        if space_before_mid > 0 {
+            final_spans.push(Span::styled(" ".repeat(space_before_mid), Style::default()));
+        }
+
+        final_spans.push(Span::styled(
+            message.to_string(),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        if let Some(tokens_text) = formatted_tokens.clone() {
+            let mut space_before_right = total_adjusted_width
+                .saturating_sub(left_len + space_before_mid + middle_len + right_len);
+            if space_before_right == 0 {
+                space_before_right = 1;
+            }
+
+            if space_before_right > 0 {
+                final_spans.push(Span::styled(
+                    " ".repeat(space_before_right),
+                    Style::default(),
+                ));
+            }
+
+            final_spans.push(Span::styled(
+                tokens_text,
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    } else if let Some(tokens_text) = formatted_tokens {
+        let spacing = total_adjusted_width.saturating_sub(left_len + right_len);
         if spacing > 0 {
             final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
         }
 
-        // Add tokens at the absolute right edge - all in gray
         final_spans.push(Span::styled(
-            format!("{}{}", formatted, suffix_text),
+            tokens_text,
             Style::default().fg(Color::DarkGray),
         ));
-    } else {
-        // No tokens, just show left content if any
-        final_spans.extend(left_spans);
     }
 
     let widget =
