@@ -450,6 +450,8 @@ impl Client {
 
         let response = self.handle_response_error(response).await?;
 
+        eprintln!("Recovery options response: {:?}", response);
+
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         if value.is_null() {
             return Ok(RecoveryOptionsResponse {
@@ -492,6 +494,37 @@ impl Client {
                 Err("Failed to deserialize response:".into())
             }
         }
+    }
+
+    pub async fn submit_recovery_action(
+        &self,
+        session_id: Uuid,
+        recovery_id: &str,
+        action: RecoveryActionType,
+        selected_option_id: Option<Uuid>,
+    ) -> Result<(), String> {
+        let url = format!(
+            "{}/recovery/sessions/{}/recovery/{}/action",
+            self.base_url, session_id, recovery_id
+        );
+
+        let payload = RecoveryActionRequest {
+            action,
+            selected_option_id,
+        };
+
+        eprintln!("Submitting recovery action: {:?}", payload);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        self.handle_response_error(response).await?;
+        Ok(())
     }
 
     pub async fn chat_completion(

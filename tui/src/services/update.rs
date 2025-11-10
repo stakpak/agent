@@ -172,8 +172,15 @@ pub fn update(
 
         InputEvent::InputSubmitted => {
             if state.show_recovery_options_popup {
-                if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected) {
-                    eprintln!("Selected recovery option: {}", selected.id);
+                if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
+                    && let Some(response) = &state.recovery_response
+                {
+                    let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+                        action: stakpak_api::models::RecoveryActionType::Approve,
+                        recovery_request_id: response.id.clone(),
+                        selected_option_id: selected.id,
+                        mode: selected.mode.clone(),
+                    });
                 }
                 state.show_recovery_options_popup = false;
                 return;

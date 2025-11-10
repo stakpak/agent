@@ -17,6 +17,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
+use stakpak_api::models::{RecoveryActionRequest, RecoveryMode};
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
@@ -93,6 +94,8 @@ pub async fn run_interactive(
         // Create fresh channels for this iteration
         let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
         let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
+        let output_tx_for_tui = output_tx.clone();
+        let output_tx_for_client = output_tx.clone();
         let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
         let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
@@ -156,7 +159,7 @@ pub async fn run_interactive(
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
                 input_rx,
-                output_tx,
+                output_tx_for_tui,
                 Some(cancel_tx.clone()),
                 shutdown_tx_for_tui,
                 latest_version.ok(),
@@ -582,6 +585,89 @@ pub async fn run_interactive(
                             continue;
                         }
                     }
+                    OutputEvent::RecoveryAction {
+                        action,
+                        recovery_request_id,
+                        selected_option_id,
+                        mode,
+                    } => {
+                        let Some(session_id) = current_session_id else {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(
+                                    "Cannot process recovery action without active session".into(),
+                                ),
+                            )
+                            .await?;
+                            continue;
+                        };
+
+                        let Some(recovery_request_id) = recovery_request_id else {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(
+                                    "Recovery request id unavailable for selected option".into(),
+                                ),
+                            )
+                            .await?;
+                            continue;
+                        };
+
+                        let request = RecoveryActionRequest {
+                            action,
+                            selected_option_id: Some(selected_option_id),
+                        };
+
+                        match client
+                            .submit_recovery_action(
+                                session_id,
+                                &recovery_request_id,
+                                request.action,
+                                Some(selected_option_id),
+                            )
+                            .await
+                        {
+                            Ok(()) => {
+                                eprintln!(
+                                    "Submitted recovery action {:?} for session {}; recovery_request_id={}; option={}",
+                                    request.action,
+                                    session_id,
+                                    recovery_request_id,
+                                    selected_option_id,
+                                );
+                                let mode_label = match mode {
+                                    RecoveryMode::Redirection => "REDIRECTION",
+                                    RecoveryMode::Revert => "REVERT",
+                                    RecoveryMode::ModelChange => "MODELCHANGE",
+                                };
+
+                                let _ = output_tx_for_client.try_send(OutputEvent::UserMessage(
+                                    format!("Proceeding with recovery option [{}]", mode_label),
+                                    None,
+                                ));
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "Failed to submit recovery action {:?} for session {}; recovery_request_id={}; option={} -> {}",
+                                    request.action,
+                                    session_id,
+                                    recovery_request_id,
+                                    selected_option_id,
+                                    err,
+                                );
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::Error(format!(
+                                        "Failed to submit recovery action: {}",
+                                        err
+                                    )),
+                                )
+                                .await?;
+                            }
+                        }
+
+                        continue;
+                    }
                     OutputEvent::Memorize => {
                         let checkpoint_id = extract_checkpoint_id_from_messages(&messages);
                         if let Some(checkpoint_id) = checkpoint_id {
@@ -863,6 +949,7 @@ pub async fn run_interactive(
                         }
 
                         if let Some(session_id) = current_session_id {
+                            eprintln!("session_id: {:?}", session_id);
                             match client
                                 .get_recovery_options(session_id, Some("pending"))
                                 .await

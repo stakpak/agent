@@ -37,6 +37,20 @@ pub struct RecoveryOptionsResponse {
     pub id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecoveryActionType {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecoveryActionRequest {
+    pub action: RecoveryActionType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_option_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ApiStreamError {
     AgentInputInvalid(String),

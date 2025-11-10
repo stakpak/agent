@@ -35,7 +35,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(Color::Cyan));
 
     let inner_area = Rect {
         x: popup_area.x + 1,
@@ -47,19 +47,22 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(3),
             Constraint::Length(1),
         ])
         .split(inner_area);
 
-    let title_line = Line::from(vec![Span::styled(
-        " Recovery Options",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )]);
-    f.render_widget(Paragraph::new(title_line), chunks[0]);
+    let title_text = Text::from(vec![
+        Line::from(vec![Span::styled(
+            " Recovery Options",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+    ]);
+    f.render_widget(Paragraph::new(title_text), chunks[0]);
 
     let mut list_state = ListState::default();
     list_state.select(Some(state.recovery_popup_selected));
@@ -73,7 +76,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
         .map(|(idx, option)| {
             let mut lines: Vec<Line> = Vec::new();
 
-            let label = format!("{}.", idx + 1);
+            let label = format!(" {}.", idx + 1);
             lines.push(Line::from(vec![format_label(
                 &label,
                 &option.mode,
@@ -84,7 +87,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
             let wrapped = textwrap::wrap(&summary, list_width as usize);
             for line in wrapped {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("    {}", line),
+                    format!("    {} ", line),
                     Style::default().fg(Color::Gray),
                 )]));
             }
@@ -102,14 +105,14 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().fg(Color::Gray))
+        .style(Style::default().fg(Color::Reset))
         .block(Block::default().borders(Borders::NONE));
 
     f.render_stateful_widget(list, chunks[1], &mut list_state);
 
     let help = Paragraph::new(Line::from(vec![
         Span::styled(
-            "↑/↓",
+            " ↑/↓",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -141,9 +144,19 @@ fn format_label(
 ) -> Span<'static> {
     let text = format!("{} {}", label, format_mode(mode));
     if selected {
-        Span::styled(text, Style::default().fg(Color::Black))
+        Span::styled(
+            text,
+            Style::default()
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        Span::styled(text, Style::default().fg(Color::Yellow))
+        Span::styled(
+            text,
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
     }
 }
 
@@ -156,12 +169,7 @@ fn format_mode(mode: &stakpak_api::models::RecoveryMode) -> &'static str {
 }
 
 fn summarize_option(option: &stakpak_api::models::RecoveryOption) -> String {
-    let primary = option
-        .redirection_message
-        .as_ref()
-        .filter(|msg| !msg.trim().is_empty())
-        .unwrap_or(&option.reasoning);
-
+    let primary = option.reasoning.clone();
     let sanitized = primary.replace('\n', " ").trim().to_string();
 
     if sanitized.len() > 140 {

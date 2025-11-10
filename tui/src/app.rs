@@ -16,7 +16,8 @@ use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_api::ListRuleBook;
 use stakpak_api::models::{
-    RecoveryOption as ApiRecoveryOption, RecoveryOptionsResponse as ApiRecoveryOptionsResponse,
+    RecoveryActionType as ApiRecoveryActionType, RecoveryOption as ApiRecoveryOption,
+    RecoveryOptionsResponse as ApiRecoveryOptionsResponse,
 };
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultProgress,
@@ -370,6 +371,12 @@ pub enum OutputEvent {
     Memorize,
     SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
     ResumeSession,
+    RecoveryAction {
+        action: ApiRecoveryActionType,
+        recovery_request_id: Option<String>,
+        selected_option_id: Uuid,
+        mode: stakpak_api::models::RecoveryMode,
+    },
     RequestProfileSwitch(String),
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
@@ -467,85 +474,6 @@ impl AppState {
             helpers_clone,
             file_search_instance,
         ));
-
-        // TODO(TEST): remove hardcoded recovery response when backend provides real data
-        let test_recovery_options: Vec<ApiRecoveryOption> = vec![
-            ApiRecoveryOption {
-                id: Uuid::nil(),
-                mode: stakpak_api::models::RecoveryMode::Redirection,
-                state_edits: serde_json::json!([
-                    {
-                        "content": null,
-                        "failed_tool_call_ids_to_remove": null,
-                        "message_index": 14,
-                        "recovery_operation": "Truncate",
-                        "role": null
-                    },
-                    {
-                        "content": null,
-                        "failed_tool_call_ids_to_remove": ["tool_id_1", "tool_id_2"],
-                        "message_index": 0,
-                        "recovery_operation": "RemoveTools",
-                        "role": null
-                    },
-                    {
-                        "content": "Guidance text",
-                        "failed_tool_call_ids_to_remove": null,
-                        "message_index": 0,
-                        "recovery_operation": "Append",
-                        "role": "user"
-                    }
-                ]),
-                reasoning: "Brief explanation of why this recovery is needed".to_string(),
-                redirection_message: Some(
-                    "Guidance message with sections like [WHAT WENT WRONG], [WHAT TO AVOID], etc."
-                        .to_string(),
-                ),
-                revert_to_checkpoint: None,
-                model: None,
-                system_prompt_key: None,
-            },
-            ApiRecoveryOption {
-                id: Uuid::from_u128(1),
-                mode: stakpak_api::models::RecoveryMode::Revert,
-                state_edits: serde_json::json!([
-                    {
-                        "content": "Guidance text",
-                        "failed_tool_call_ids_to_remove": null,
-                        "message_index": 0,
-                        "recovery_operation": "Append",
-                        "role": "user"
-                    }
-                ]),
-                reasoning: "Revert to checkpoint and provide guidance".to_string(),
-                redirection_message: Some("Guidance message".to_string()),
-                revert_to_checkpoint: Some(Uuid::from_u128(0x10)),
-                model: None,
-                system_prompt_key: None,
-            },
-            ApiRecoveryOption {
-                id: Uuid::from_u128(2),
-                mode: stakpak_api::models::RecoveryMode::ModelChange,
-                state_edits: serde_json::json!([
-                    {
-                        "content": "Guidance text",
-                        "failed_tool_call_ids_to_remove": null,
-                        "message_index": 0,
-                        "recovery_operation": "Append",
-                        "role": "user"
-                    }
-                ]),
-                reasoning: "Switch to more capable model".to_string(),
-                redirection_message: Some("Guidance message".to_string()),
-                revert_to_checkpoint: Some(Uuid::from_u128(0x20)),
-                model: None,
-                system_prompt_key: None,
-            },
-        ];
-        let test_recovery_response = ApiRecoveryOptionsResponse {
-            id: Some("test-recovery-response".to_string()),
-            recovery_options: test_recovery_options.clone(),
-        };
 
         AppState {
             text_area: TextArea::new(),
@@ -669,8 +597,8 @@ impl AppState {
             },
             show_recovery_options_popup: false,
             recovery_popup_selected: 0,
-            recovery_options: test_recovery_options,
-            recovery_response: Some(test_recovery_response),
+            recovery_options: Vec::new(),
+            recovery_response: None,
         }
     }
 
