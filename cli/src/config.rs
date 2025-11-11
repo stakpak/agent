@@ -441,45 +441,54 @@ impl AppConfig {
 impl RulebookConfig {
     /// Filter rulebooks based on the configuration rules
     pub fn filter_rulebooks(&self, rulebooks: Vec<ListRuleBook>) -> Vec<ListRuleBook> {
-        let mut filtered = rulebooks;
+        rulebooks
+            .into_iter()
+            .filter(|rulebook| self.should_keep(rulebook))
+            .collect()
+    }
 
-        // Apply include patterns first (if specified)
-        if let Some(include_patterns) = &self.include
-            && !include_patterns.is_empty()
-        {
-            filtered.retain(|rulebook| {
-                include_patterns
-                    .iter()
-                    .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
-            });
+    fn should_keep(&self, rulebook: &ListRuleBook) -> bool {
+        self.matches_uri_filters(rulebook) && self.matches_tag_filters(rulebook)
+    }
+
+    fn matches_uri_filters(&self, rulebook: &ListRuleBook) -> bool {
+        self.matches_include_patterns(rulebook) && self.matches_exclude_patterns(rulebook)
+    }
+
+    fn matches_include_patterns(&self, rulebook: &ListRuleBook) -> bool {
+        match &self.include {
+            Some(patterns) if !patterns.is_empty() => patterns
+                .iter()
+                .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern)),
+            _ => true,
         }
+    }
 
-        // Apply exclude patterns (if specified)
-        if let Some(exclude_patterns) = &self.exclude
-            && !exclude_patterns.is_empty()
-        {
-            filtered.retain(|rulebook| {
-                !exclude_patterns
-                    .iter()
-                    .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern))
-            });
+    fn matches_exclude_patterns(&self, rulebook: &ListRuleBook) -> bool {
+        match &self.exclude {
+            Some(patterns) if !patterns.is_empty() => !patterns
+                .iter()
+                .any(|pattern| Self::matches_pattern(&rulebook.uri, pattern)),
+            _ => true,
         }
+    }
 
-        // Apply include tags (if specified)
-        if let Some(include_tags) = &self.include_tags
-            && !include_tags.is_empty()
-        {
-            filtered.retain(|rulebook| include_tags.iter().any(|tag| rulebook.tags.contains(tag)));
+    fn matches_tag_filters(&self, rulebook: &ListRuleBook) -> bool {
+        self.matches_include_tags(rulebook) && self.matches_exclude_tags(rulebook)
+    }
+
+    fn matches_include_tags(&self, rulebook: &ListRuleBook) -> bool {
+        match &self.include_tags {
+            Some(tags) if !tags.is_empty() => tags.iter().any(|tag| rulebook.tags.contains(tag)),
+            _ => true,
         }
+    }
 
-        // Apply exclude tags (if specified)
-        if let Some(exclude_tags) = &self.exclude_tags
-            && !exclude_tags.is_empty()
-        {
-            filtered.retain(|rulebook| !exclude_tags.iter().any(|tag| rulebook.tags.contains(tag)));
+    fn matches_exclude_tags(&self, rulebook: &ListRuleBook) -> bool {
+        match &self.exclude_tags {
+            Some(tags) if !tags.is_empty() => !tags.iter().any(|tag| rulebook.tags.contains(tag)),
+            _ => true,
         }
-
-        filtered
     }
 
     /// Check if a URI matches a pattern (supports wildcards)
