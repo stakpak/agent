@@ -19,8 +19,8 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     }
 
     let available_width = screen.width.saturating_sub(2);
-    let desired_width = 74;
-    let min_width = 50;
+    let desired_width = 55;
+    let min_width = 40;
     let popup_width = if available_width == 0 {
         0
     } else {
@@ -78,10 +78,10 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // top padding
-            Constraint::Length(3), // usage summary
-            Constraint::Length(2), // gauge
+            Constraint::Length(4), // usage summary (allows wrapping + IO line)
+            Constraint::Length(1), // gauge
             Constraint::Length(2), // markers
-            Constraint::Length(9), // pricing table
+            Constraint::Length(8), // pricing table
             Constraint::Min(2),    // footer
         ])
         .split(inner);
@@ -164,9 +164,9 @@ fn render_markers(f: &mut Frame, area: Rect) {
     let marker_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(40),
-            Constraint::Percentage(40),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
         ])
         .split(area);
 
@@ -194,16 +194,15 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let headers = ["Tier", "Context Window", "Input Pricing", "Output Pricing"];
+    let headers = ["Claude Tier", "Input", "Output"];
     let mut min_widths = headers.map(|h| h.len() + 2);
     for tier in CONTEXT_PRICING_TABLE.iter() {
         min_widths[0] = min_widths[0].max(tier.tier_label.len() + 2);
-        min_widths[1] = min_widths[1].max(tier.range_label.len() + 2);
-        min_widths[2] = min_widths[2].max(tier.input_cost.len() + 2);
-        min_widths[3] = min_widths[3].max(tier.output_cost.len() + 2);
+        min_widths[1] = min_widths[1].max(tier.input_cost.len() + 2);
+        min_widths[2] = min_widths[2].max(tier.output_cost.len() + 2);
     }
 
-    let ratios = [4, 3, 3, 3];
+    let ratios = [4, 3, 3];
     let total_width = area.width as usize;
     let column_count = headers.len();
     let separators = column_count + 1;
@@ -216,8 +215,8 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
             let bullet = if is_active { ">" } else { "-" };
             lines.push(Line::from(vec![Span::styled(
                 format!(
-                    "{} {} · {} · {} / {}",
-                    bullet, tier.tier_label, tier.range_label, tier.input_cost, tier.output_cost
+                    "{} {} · {} / {}",
+                    bullet, tier.tier_label, tier.input_cost, tier.output_cost
                 ),
                 if is_active {
                     Style::default()
@@ -279,12 +278,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         };
 
         lines.push(build_row_line(
-            [
-                tier.tier_label,
-                tier.range_label,
-                tier.input_cost,
-                tier.output_cost,
-            ],
+            [tier.tier_label, tier.input_cost, tier.output_cost],
             &widths,
             row_style,
             border_color,
@@ -334,7 +328,7 @@ fn border_line(
 }
 
 fn build_row_line(
-    cells: [&str; 4],
+    cells: [&str; 3],
     widths: &[usize],
     text_style: Style,
     border_color: Color,
@@ -372,9 +366,9 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let message = if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
         "Approaching the 1M token limit. Try /summarize."
     } else if total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
-        "Claude price per token is higher beyond 200K. Consider /summarize."
+        "Claude price per token is higher beyond 200K."
     } else {
-        "You are in the lower pricing tier. Keep prompts lean to stay here."
+        "You are in the lower pricing tier."
     };
 
     let paragraph = Paragraph::new(Line::from(message))

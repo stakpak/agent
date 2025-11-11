@@ -404,6 +404,10 @@ impl AppState {
                 description: "Memorize the current conversation history",
             },
             HelperCommand {
+                command: "/summarize",
+                description: "Summarize the session into summary.md for later resume",
+            },
+            HelperCommand {
                 command: "/usage",
                 description: "Show token usage for this session",
             },
@@ -582,7 +586,7 @@ impl AppState {
                 total_tokens: 0,
                 prompt_tokens_details: None,
             },
-            context_usage_percent: 0,
+            context_usage_percent: 90,
         }
     }
 
