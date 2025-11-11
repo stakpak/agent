@@ -527,6 +527,30 @@ auto_append_gitignore = true
         dir.path().join("config.toml")
     }
 
+    fn sample_app_config(profile_name: &str) -> AppConfig {
+        AppConfig {
+            api_endpoint: "https://custom-api.stakpak.dev".into(),
+            api_key: Some("custom-key".into()),
+            mcp_server_host: Some("localhost:9000".into()),
+            machine_name: Some("workstation-1".into()),
+            auto_append_gitignore: Some(false),
+            profile_name: profile_name.into(),
+            config_path: "/tmp/stakpak/config.toml".into(),
+            allowed_tools: Some(vec!["git".into(), "curl".into()]),
+            auto_approve: Some(vec!["git status".into()]),
+            rulebooks: Some(RulebookConfig {
+                include: Some(vec!["https://rules.stakpak.dev/security/*".into()]),
+                exclude: Some(vec!["https://rules.stakpak.dev/internal/*".into()]),
+                include_tags: Some(vec!["security".into()]),
+                exclude_tags: Some(vec!["beta".into()]),
+            }),
+            warden: Some(WardenConfig {
+                enabled: true,
+                volumes: vec!["/tmp:/tmp:ro".into()],
+            }),
+        }
+    }
+
     #[test]
     fn get_config_path_returns_custom_path_when_provided() {
         let custom_path = PathBuf::from("/tmp/stakpak/custom.toml");
@@ -601,6 +625,149 @@ auto_append_gitignore = true
             resolved.settings.auto_append_gitignore,
             old_config.auto_append_gitignore
         );
+    }
+
+    #[test]
+    fn config_file_default_has_no_profiles() {
+        let config = ConfigFile::default();
+        assert!(config.profiles.is_empty());
+        assert!(config.profile_config("default").is_none());
+        assert_eq!(config.settings.machine_name, None);
+        assert_eq!(config.settings.auto_append_gitignore, Some(true));
+    }
+
+    #[test]
+    fn config_file_with_default_profile_contains_built_in_profile() {
+        let config = ConfigFile::with_default_profile();
+        let default = config.profile_config("default").expect("default profile");
+        assert_eq!(default.api_endpoint.as_deref(), Some(STAKPAK_API_ENDPOINT));
+        assert!(config.profile_config("readonly").is_none());
+    }
+
+    #[test]
+    fn profile_config_ok_or_errors_on_missing_profile() {
+        let config = ConfigFile::with_default_profile();
+        assert!(config.profile_config_ok_or("default").is_ok());
+        let err = config.profile_config_ok_or("missing").unwrap_err();
+        match err {
+            ConfigError::Message(msg) => {
+                assert!(msg.contains("missing"));
+            }
+            _ => panic!("unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn resolved_profile_config_merges_all_profile_defaults() {
+        let mut config = ConfigFile {
+            profiles: HashMap::new(),
+            settings: Settings {
+                machine_name: None,
+                auto_append_gitignore: Some(true),
+            },
+        };
+
+        config.profiles.insert(
+            "all".into(),
+            ProfileConfig {
+                api_endpoint: Some("https://shared-api.stakpak.dev".into()),
+                api_key: Some("shared-key".into()),
+                allowed_tools: Some(vec!["git".into()]),
+                auto_approve: Some(vec!["git status".into()]),
+                rulebooks: Some(RulebookConfig {
+                    include: Some(vec!["https://rules.stakpak.dev/shared/*".into()]),
+                    exclude: None,
+                    include_tags: None,
+                    exclude_tags: None,
+                }),
+                warden: Some(WardenConfig {
+                    enabled: true,
+                    volumes: vec!["/tmp:/tmp:ro".into()],
+                }),
+            },
+        );
+
+        config.profiles.insert(
+            "dev".into(),
+            ProfileConfig {
+                api_endpoint: Some("https://dev-api.stakpak.dev".into()),
+                api_key: None,
+                allowed_tools: None,
+                auto_approve: Some(vec!["dev override".into()]),
+                rulebooks: None,
+                warden: None,
+            },
+        );
+
+        let resolved = config
+            .resolved_profile_config("dev")
+            .expect("profile resolves");
+        assert_eq!(
+            resolved.api_endpoint.as_deref(),
+            Some("https://dev-api.stakpak.dev")
+        );
+        assert_eq!(resolved.api_key.as_deref(), Some("shared-key"));
+        assert_eq!(resolved.allowed_tools, Some(vec!["git".into()]));
+        assert_eq!(resolved.auto_approve, Some(vec!["dev override".into()]));
+        assert!(resolved.rulebooks.is_some());
+        assert!(resolved.warden.as_ref().expect("warden merged").enabled);
+    }
+
+    #[test]
+    fn insert_and_set_app_config_update_profiles_and_settings() {
+        let mut config = ConfigFile::default();
+        let app_config = sample_app_config("custom");
+
+        config.insert_app_config(app_config.clone());
+        config.set_app_config_settings(app_config.clone());
+
+        let stored = config.profile_config("custom").expect("profile stored");
+        assert_eq!(
+            stored.api_endpoint.as_deref(),
+            Some("https://custom-api.stakpak.dev")
+        );
+        assert_eq!(stored.api_key.as_deref(), Some("custom-key"));
+        assert_eq!(
+            stored.allowed_tools,
+            Some(vec!["git".into(), "curl".into()])
+        );
+        assert_eq!(stored.auto_approve, Some(vec!["git status".into()]));
+        assert!(stored.rulebooks.is_some());
+        assert!(stored.warden.is_some());
+
+        assert_eq!(
+            config.settings.machine_name.as_deref(),
+            Some("workstation-1")
+        );
+        assert_eq!(config.settings.auto_append_gitignore, Some(false));
+    }
+
+    #[test]
+    fn ensure_readonly_inserts_profile_once() {
+        let mut config = ConfigFile::with_default_profile();
+        assert!(!config.profiles.contains_key("readonly"));
+        assert!(config.ensure_readonly());
+        assert!(config.profiles.contains_key("readonly"));
+        assert!(!config.ensure_readonly(), "second call should be a no-op");
+
+        let readonly = config.profile_config("readonly").expect("readonly present");
+        let default = config.profile_config("default").expect("default present");
+        assert_eq!(readonly.api_endpoint, default.api_endpoint);
+        assert!(readonly.warden.as_ref().expect("readonly warden").enabled);
+    }
+
+    #[test]
+    fn save_to_creates_parent_directories() {
+        let dir = TempDir::new().unwrap();
+        let nested_path = dir.path().join("nested/config/config.toml");
+        let config = ConfigFile::with_default_profile();
+
+        config.save_to(&nested_path).unwrap();
+
+        assert!(nested_path.exists());
+        let saved = std::fs::read_to_string(&nested_path).unwrap();
+        assert!(saved.contains("[profiles.default]"));
+        assert!(saved.contains("[settings]"));
     }
 
     #[test]
