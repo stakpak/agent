@@ -39,7 +39,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
-            Line::from("ctrl+p palette . @ files . / commands . ctrl+g less"),
+            Line::from("ctrl+p palette . @ files . / commands . ctrl+s shortcuts"),
             Line::from(format!(
                 "{} shell mode . ↵ submit . ctrl+c quit . ctrl+f profile . ctrl+k rulebooks . ctrl+s shortcuts",
                 SHELL_PROMPT_PREFIX.trim()
@@ -54,7 +54,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
         if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "ctrl+p palette . @ files . / commands . ctrl+g more";
+            let shortcuts_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
             let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -87,26 +87,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Create spans for left and right alignment
             #[cfg(unix)]
             let left_text = format!(
-                "ctrl+p palette . @ files . / commands . ctrl+g more{}",
+                "ctrl+p palette . @ files . / commands . ctrl+s shortcuts{}",
                 select_hint
             );
             #[cfg(not(unix))]
-            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+g more");
+            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+s shortcuts");
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
             let left_len = left_text.len();
-            let (right_text, right_style) = if approaching_max {
-                (
-                    "Approaching max context . try /summarize . ctrl+g for more".to_string(),
-                    Style::default().fg(Color::Yellow),
-                )
-            } else if high_cost_warning {
-                (
-                    "Token pricing gets higher beyond 200K · ctrl+g for more".to_string(),
-                    Style::default().fg(Color::Yellow),
-                )
-            } else {
+            let (right_text, right_style) = {
                 let profile_text = format!("profile {}", state.current_profile_name);
                 let rulebooks_text = " | ctrl+k: rulebooks";
                 (

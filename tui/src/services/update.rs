@@ -1,5 +1,6 @@
 use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
+use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, SUMMARIZE_PROMPT_BASE};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -1687,6 +1688,21 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
+                "/summarize" => {
+                    let prompt = build_summarize_prompt(state);
+                    state.messages.push(Message::info("".to_string(), None));
+                    state.messages.push(Message::info(
+                        "Requesting session summary (summary.md)...",
+                        Some(Style::default().fg(Color::Cyan)),
+                    ));
+                    let _ = output_tx.try_send(OutputEvent::UserMessage(
+                        prompt.clone(),
+                        state.shell_tool_calls.clone(),
+                    ));
+                    state.shell_tool_calls = None;
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
                 "/usage" => {
                     push_usage_message(state);
                     let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
@@ -1799,6 +1815,77 @@ fn handle_input_submitted(
         // Loading will be managed by stream processing
         state.spinner_frame = 0;
     }
+}
+
+fn build_summarize_prompt(state: &AppState) -> String {
+    let usage = &state.total_session_usage;
+    let total_tokens = usage.total_tokens;
+    let prompt_tokens = usage.prompt_tokens;
+    let completion_tokens = usage.completion_tokens;
+    let context_usage_pct = if CONTEXT_MAX_UTIL_TOKENS > 0 {
+        (total_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let recent_inputs = collect_recent_user_inputs(state, 6);
+
+    let mut prompt = String::from(SUMMARIZE_PROMPT_BASE);
+    prompt.push('\n');
+    prompt.push_str("Session snapshot:\n");
+    prompt.push_str(&format!(
+        "- Active profile: {}\n",
+        state.current_profile_name
+    ));
+    prompt.push_str(&format!(
+        "- Total tokens used: {} (prompt: {}, completion: {})\n",
+        total_tokens, prompt_tokens, completion_tokens
+    ));
+    prompt.push_str(&format!(
+        "- Context window usage: {:.1}% of {} tokens\n",
+        context_usage_pct.min(100.0),
+        CONTEXT_MAX_UTIL_TOKENS
+    ));
+    if !recent_inputs.is_empty() {
+        prompt.push('\n');
+        prompt.push_str("Recent user inputs to emphasize:\n");
+        for input in recent_inputs {
+            prompt.push_str("- ");
+            prompt.push_str(&input);
+            prompt.push('\n');
+        }
+    }
+    prompt.push('\n');
+    prompt.push_str(
+        "Be precise, note outstanding TODOs or follow-ups, and reflect any cost or context considerations mentioned earlier.\n",
+    );
+    prompt.push_str(
+        "When ready, create or overwrite `summary.md` using the tool call and populate it with the markdown summary.\n",
+    );
+
+    prompt
+}
+
+fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
+    let mut entries = Vec::new();
+    for message in state.messages.iter().rev() {
+        match &message.content {
+            MessageContent::Plain(text, _) | MessageContent::PlainText(text) => {
+                let trimmed = text.trim();
+                if let Some(stripped) = trimmed.strip_prefix("→ ") {
+                    entries.push(stripped.trim().to_string());
+                } else if trimmed.starts_with('/') {
+                    entries.push(trimmed.to_string());
+                }
+            }
+            _ => {}
+        }
+        if entries.len() >= limit {
+            break;
+        }
+    }
+    entries.reverse();
+    entries
 }
 
 fn handle_input_submitted_with(

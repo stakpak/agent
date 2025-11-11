@@ -63,6 +63,11 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
         Shortcut::new("/sessions", "List available sessions", "Commands"),
         Shortcut::new("/resume", "Resume last session", "Commands"),
         Shortcut::new("/memorize", "Memorize conversation", "Commands"),
+        Shortcut::new(
+            "/summarize",
+            "Summarize session into summary.md",
+            "Commands",
+        ),
         Shortcut::new("/usage", "Show token usage for this session", "Commands"),
         Shortcut::new(
             "/list_approved_tools",

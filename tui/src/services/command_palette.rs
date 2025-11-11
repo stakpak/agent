@@ -55,6 +55,12 @@ pub fn get_all_commands() -> Vec<Command> {
             CommandAction::OpenRulebookSwitcher,
         ),
         Command::new(
+            "Context",
+            "Show context utilization popup",
+            "Ctrl+G",
+            CommandAction::ShowUsage, // reuse for now; actual action handled upstream
+        ),
+        Command::new(
             "Shortcuts",
             "Show all keyboard shortcuts",
             "Ctrl+S",
