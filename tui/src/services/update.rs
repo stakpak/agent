@@ -620,6 +620,10 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::HandleEsc => {
+            if state.show_context_popup {
+                state.show_context_popup = false;
+                return;
+            }
             if state.show_rulebook_switcher {
                 state.show_rulebook_switcher = false;
                 return;
@@ -917,6 +921,9 @@ pub fn update(
                     state.collapsed_messages_selected = 0;
                 }
             }
+        }
+        InputEvent::ToggleContextPopup => {
+            state.show_context_popup = !state.show_context_popup;
         }
         InputEvent::AttemptQuit => {
             use std::time::Instant;
