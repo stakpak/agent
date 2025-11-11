@@ -187,6 +187,8 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
+    pub show_context_popup: bool,
+
     pub is_git_repo: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
@@ -239,6 +241,7 @@ pub struct AppState {
     // Usage tracking
     pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
+    pub context_usage_percent: u64,
 }
 
 #[derive(Debug)]
@@ -306,6 +309,7 @@ pub enum InputEvent {
     RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
+    ToggleContextPopup,      // Ctrl+G to toggle context pricing popup
     EmergencyClearTerminal,
     ToggleMouseCapture, // Toggle mouse capture on/off
     // Approval popup events
@@ -522,6 +526,7 @@ impl AppState {
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
+            show_context_popup: false,
             is_git_repo,
             message_lines_cache: None,
             collapsed_message_lines_cache: None,
@@ -577,6 +582,7 @@ impl AppState {
                 total_tokens: 0,
                 prompt_tokens_details: None,
             },
+            context_usage_percent: 0,
         }
     }
 
