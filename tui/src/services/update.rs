@@ -1643,6 +1643,15 @@ fn handle_input_submitted(
         state.session_tool_calls_queue.clear();
         state.toggle_approved_message = true;
         state.messages.clear();
+
+        // Reset usage for the switched session
+        state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            prompt_tokens_details: None,
+        };
+
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
@@ -2608,6 +2617,14 @@ fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "Resuming last session.");
 
+    // Reset usage for the resumed session
+    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        prompt_tokens_details: None,
+    };
+
     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
     state.text_area.set_text("");
@@ -2622,6 +2639,15 @@ fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .messages
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "New session started.");
+
+    // Reset usage for the new session
+    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        prompt_tokens_details: None,
+    };
+
     state.show_helper_dropdown = false;
 }
 
