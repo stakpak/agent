@@ -69,7 +69,7 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" · ctrl+g to close", Style::default().fg(Color::DarkGray)),
+            Span::styled(" · ctrl+g", Style::default().fg(Color::DarkGray)),
         ]));
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -172,7 +172,7 @@ fn render_markers(f: &mut Frame, area: Rect) {
 
     let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
     let cost_marker = Paragraph::new(Line::from(format!(
-        "{} (pricing jump)",
+        "{}",
         format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT)
     )))
     .alignment(Alignment::Center)
@@ -194,7 +194,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let headers = ["Claude Tier", "Input", "Output"];
+    let headers = ["Claude Price Tier", "Input", "Output"];
     let mut min_widths = headers.map(|h| h.len() + 2);
     for tier in CONTEXT_PRICING_TABLE.iter() {
         min_widths[0] = min_widths[0].max(tier.tier_label.len() + 2);
@@ -366,9 +366,9 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let message = if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
         "Approaching the 1M token limit. Try /summarize."
     } else if total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
-        "Claude price per token is higher beyond 200K."
+        "Anthropic charges extra for 1M context."
     } else {
-        "You are in the lower pricing tier."
+        "Anthopic regular pricing tier."
     };
 
     let paragraph = Paragraph::new(Line::from(message))

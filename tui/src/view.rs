@@ -394,7 +394,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         let utilization_ratio =
             (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
         let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
-        let percentage_text = format!("{}% of ctx . ctrl+g details", ctx_percentage);
+        let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
         let tokens_text = format!("{}{}", formatted, suffix_text);
         let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
 
@@ -430,7 +430,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         final_spans.push(Span::styled(percentage_text, token_style));
     } else {
         // No tokens, show hint in the same right-aligned slot
-        let hint_text = "Send msg to get total ctx";
+        let hint_text = "prompt to see ctx stats";
         let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
         let total_adjusted_width = if state.loading {
             total_width + 4
