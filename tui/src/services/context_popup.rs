@@ -30,8 +30,8 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     };
 
     let available_height = screen.height.saturating_sub(2);
-    let desired_height = 18;
-    let min_height = 18;
+    let desired_height = 17;
+    let min_height = 17;
     let popup_height = if available_height == 0 {
         0
     } else {
@@ -78,11 +78,11 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // top padding
-            Constraint::Length(4), // usage summary (allows wrapping + IO line)
+            Constraint::Length(3), // usage summary (allows wrapping + IO line)
             Constraint::Length(1), // gauge
             Constraint::Length(2), // markers
-            Constraint::Length(8), // pricing table
-            Constraint::Min(2),    // footer
+            Constraint::Length(7), // pricing table
+            Constraint::Min(1),    // footer
         ])
         .split(inner);
 
@@ -171,10 +171,9 @@ fn render_markers(f: &mut Frame, area: Rect) {
         .split(area);
 
     let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
-    let cost_marker = Paragraph::new(Line::from(format!(
-        "{}",
-        format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT)
-    )))
+    let cost_marker = Paragraph::new(Line::from(
+        format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
+    ))
     .alignment(Alignment::Center)
     .style(Style::default().fg(Color::Yellow));
     let limit_marker = Paragraph::new(Line::from(format!(
