@@ -9,10 +9,15 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
 
+pub struct StreamProcessingResult {
+    pub response: ChatCompletionResponse,
+    pub metadata: Option<Value>,
+}
+
 pub async fn process_responses_stream(
     stream: impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-) -> Result<ChatCompletionResponse, ApiStreamError> {
+) -> Result<StreamProcessingResult, ApiStreamError> {
     let mut stream = Box::pin(stream);
 
     let mut chat_completion_response = ChatCompletionResponse {
@@ -38,6 +43,7 @@ pub async fn process_responses_stream(
         tool_call_id: None,
     };
     let message_id = Uuid::new_v4();
+    let mut latest_metadata: Option<Value> = None;
 
     // Start stream processing loading at the beginning
     send_input_event(
@@ -50,10 +56,7 @@ pub async fn process_responses_stream(
         match &response {
             Ok(response) => {
                 if let Some(metadata) = &response.metadata {
-                    eprintln!(
-                        "[interactive] stream metadata: {}",
-                        metadata
-                    );
+                    eprintln!("[interactive] stream metadata: {}", metadata);
                     if metadata
                         .get("history_updated")
                         .and_then(Value::as_bool)
@@ -72,6 +75,7 @@ pub async fn process_responses_stream(
                             );
                         }
                     }
+                    latest_metadata = Some(metadata.clone());
                 }
                 // Handle usage first - it can come in any event, including those with no content
                 if let Some(usage) = &response.usage {
@@ -198,5 +202,8 @@ pub async fn process_responses_stream(
     )
     .await?;
 
-    Ok(chat_completion_response)
+    Ok(StreamProcessingResult {
+        response: chat_completion_response,
+        metadata: latest_metadata,
+    })
 }

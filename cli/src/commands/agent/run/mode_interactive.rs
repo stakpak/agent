@@ -1,14 +1,15 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
-    get_checkpoint_messages, resume_session_from_checkpoint,
+    get_checkpoint_messages, prepare_checkpoint_messages_and_tool_calls,
+    resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
-use crate::commands::agent::run::stream::process_responses_stream;
+use crate::commands::agent::run::stream::{StreamProcessingResult, process_responses_stream};
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::config::AppConfig;
@@ -830,9 +831,9 @@ pub async fn run_interactive(
                             break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
                         }
                     } {
-                        Ok(response) => {
+                        Ok(StreamProcessingResult { response, metadata }) => {
                             retry_attempts = 0;
-                            break Ok(response);
+                            break Ok(StreamProcessingResult { response, metadata });
                         }
                         Err(e) => {
                             if matches!(e, ApiStreamError::AgentInvalidResponseStream) {
@@ -867,8 +868,41 @@ pub async fn run_interactive(
                 };
 
                 match response_result {
-                    Ok(response) => {
-                        messages.push(response.choices[0].message.clone());
+                    Ok(processed) => {
+                        let StreamProcessingResult { response, metadata } = processed;
+                        let mut history_synced = false;
+
+                        if let Some(metadata) = metadata
+                            && metadata
+                                .get("history_updated")
+                                .and_then(|value| value.as_bool())
+                                .unwrap_or(false)
+                            && let Some(checkpoint_id) = metadata
+                                .get("checkpoint_id")
+                                .and_then(|value| value.as_str())
+                                .filter(|checkpoint_id| !checkpoint_id.is_empty())
+                        {
+                            match get_checkpoint_messages(&client, &checkpoint_id.to_string()).await
+                            {
+                                Ok(checkpoint_messages) => {
+                                    let (chat_messages, _tool_calls) =
+                                        prepare_checkpoint_messages_and_tool_calls(
+                                            &checkpoint_id.to_string(),
+                                            checkpoint_messages,
+                                        );
+                                    messages = chat_messages;
+                                    history_synced = true;
+                                }
+                                Err(err) => {
+                                    let _ =
+                                        send_input_event(&input_tx, InputEvent::Error(err)).await;
+                                }
+                            }
+                        }
+
+                        if !history_synced {
+                            messages.push(response.choices[0].message.clone());
+                        }
 
                         // Accumulate usage from response
                         total_session_usage.prompt_tokens += response.usage.prompt_tokens;

@@ -35,30 +35,57 @@ pub fn get_messages_from_checkpoint_output(output: &AgentOutput) -> Vec<ChatMess
     messages.clone()
 }
 
-pub async fn extract_checkpoint_messages_and_tool_calls(
+pub fn prepare_checkpoint_messages_and_tool_calls(
     checkpoint_id: &String,
-    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
-    messages: Vec<ChatMessage>,
-) -> Result<(Vec<ChatMessage>, Vec<ToolCall>), String> {
-    let mut checkpoint_messages = messages.clone();
-    // Append checkpoint_id to the last assistant message if present
-    if let Some(last_message) = checkpoint_messages
+    mut messages: Vec<ChatMessage>,
+) -> (Vec<ChatMessage>, Vec<ToolCall>) {
+    if let Ok(checkpoint_uuid) = Uuid::parse_str(checkpoint_id) {
+        if let Some(last_message) = messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.role != Role::User && message.role != Role::Tool)
+            .filter(|message| message.role == Role::Assistant)
+            && let Some(content) = last_message.content.as_ref()
+            && content.extract_checkpoint_id().is_none()
+        {
+            last_message.content = Some(content.inject_checkpoint_id(checkpoint_uuid));
+        }
+    } else if let Some(last_message) = messages
         .iter_mut()
         .rev()
         .find(|message| message.role != Role::User && message.role != Role::Tool)
-        && last_message.role == Role::Assistant
+        .filter(|message| message.role == Role::Assistant)
     {
         last_message.content = Some(MessageContent::String(format!(
             "{}\n<checkpoint_id>{}</checkpoint_id>",
             last_message
                 .content
                 .as_ref()
-                .unwrap_or(&MessageContent::String(String::new())),
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default(),
             checkpoint_id
         )));
     }
 
-    for message in &*checkpoint_messages {
+    let tool_calls = messages
+        .last()
+        .filter(|msg| msg.role == Role::Assistant)
+        .and_then(|msg| msg.tool_calls.as_ref())
+        .map(|tool_calls| tool_calls.to_vec())
+        .unwrap_or_default();
+
+    (messages, tool_calls)
+}
+
+pub async fn extract_checkpoint_messages_and_tool_calls(
+    checkpoint_id: &String,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+    messages: Vec<ChatMessage>,
+) -> Result<(Vec<ChatMessage>, Vec<ToolCall>), String> {
+    let (checkpoint_messages, tool_calls) =
+        prepare_checkpoint_messages_and_tool_calls(checkpoint_id, messages);
+
+    for message in &checkpoint_messages {
         match message.role {
             Role::Assistant => {
                 if let Some(content) = &message.content {
@@ -122,15 +149,7 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         }
     }
 
-    let tool_calls = checkpoint_messages
-        .last()
-        .filter(|msg| msg.role == Role::Assistant)
-        .and_then(|msg| msg.tool_calls.as_ref());
-
-    Ok((
-        checkpoint_messages.clone(),
-        tool_calls.map(|t| t.to_vec()).unwrap_or_default(),
-    ))
+    Ok((checkpoint_messages, tool_calls))
 }
 
 pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
