@@ -14,15 +14,15 @@ pub struct ContextPricingTier {
 
 pub const CONTEXT_PRICING_TABLE: [ContextPricingTier; 2] = [
     ContextPricingTier {
-        tier_label: "<200k tokens",
-        input_cost: "$3 / MTok",
-        output_cost: "$15 / MTok",
+        tier_label: "<200K tokens",
+        input_cost: "$3/1M",
+        output_cost: "$15/1M",
         upper_bound: Some(CONTEXT_LESS_CHARGE_LIMIT),
     },
     ContextPricingTier {
-        tier_label: "200k-1M tokens",
-        input_cost: "$6 / MTok",
-        output_cost: "$22.50 / MTok",
+        tier_label: "200K-1M tokens",
+        input_cost: "$6/1M",
+        output_cost: "$22.5/1M",
         upper_bound: None,
     },
 ];
