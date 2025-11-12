@@ -29,8 +29,11 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::HandleCtrlS)
                 }
-                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ExpandNotifications)
+                }
+                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ToggleContextPopup)
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RulebookSwitcherDeselectAll)

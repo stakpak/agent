@@ -593,7 +593,10 @@ impl Client {
         let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {
             event
-                .map_err(|_| ApiStreamError::Unknown("Failed to read response".to_string()))
+                .map_err(|err| {
+                    eprintln!("stream: failed to read response: {:?}", err);
+                    ApiStreamError::Unknown("Failed to read response".to_string())
+                })
                 .and_then(|event| match event.event.as_str() {
                     "error" => Err(ApiStreamError::from(event.data)),
                     _ => serde_json::from_str::<ChatCompletionStreamResponse>(&event.data).map_err(

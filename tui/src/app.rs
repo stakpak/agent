@@ -191,6 +191,8 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
     pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
+    pub show_context_popup: bool,
+
     pub is_git_repo: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
@@ -247,6 +249,7 @@ pub struct AppState {
     pub show_recovery_options_popup: bool,
     pub recovery_popup_selected: usize,
     pub recovery_response: Option<ApiRecoveryOptionsResponse>,
+    pub context_usage_percent: u64,
 }
 
 #[derive(Debug)]
@@ -315,6 +318,7 @@ pub enum InputEvent {
     RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
     AttemptQuit,             // First Ctrl+C press for quit sequence
     ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
+    ToggleContextPopup,      // Ctrl+G to toggle context pricing popup
     EmergencyClearTerminal,
     ToggleMouseCapture, // Toggle mouse capture on/off
     // Approval popup events
@@ -413,6 +417,10 @@ impl AppState {
             HelperCommand {
                 command: "/memorize",
                 description: "Memorize the current conversation history",
+            },
+            HelperCommand {
+                command: "/summarize",
+                description: "Summarize the session into summary.md for later resume",
             },
             HelperCommand {
                 command: "/usage",
@@ -537,6 +545,7 @@ impl AppState {
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
+            show_context_popup: false,
             is_git_repo,
             message_lines_cache: None,
             collapsed_message_lines_cache: None,
@@ -599,6 +608,7 @@ impl AppState {
             recovery_popup_selected: 0,
             recovery_options: Vec::new(),
             recovery_response: None,
+            context_usage_percent: 0,
         }
     }
 

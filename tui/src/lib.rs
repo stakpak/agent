@@ -1,4 +1,5 @@
 mod app;
+mod constants;
 mod event;
 mod terminal;
 mod view;
