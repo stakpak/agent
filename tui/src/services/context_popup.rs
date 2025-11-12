@@ -366,9 +366,9 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let message = if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
         "Approaching the 1M token limit. Try /summarize."
     } else if total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
-        "Anthropic charges extra for 1M context."
+        "Anthropic charges you extra for >200K context"
     } else {
-        "Anthopic regular pricing tier."
+        "Anthropic regular pricing"
     };
 
     let paragraph = Paragraph::new(Line::from(message))
