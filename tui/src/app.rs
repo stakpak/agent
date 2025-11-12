@@ -586,7 +586,7 @@ impl AppState {
                 total_tokens: 0,
                 prompt_tokens_details: None,
             },
-            context_usage_percent: 90,
+            context_usage_percent: 0,
         }
     }
 

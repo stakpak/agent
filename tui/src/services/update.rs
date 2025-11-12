@@ -1797,12 +1797,40 @@ fn handle_input_submitted(
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
-        let _ = output_tx.try_send(OutputEvent::UserMessage(
-            final_input.clone(),
-            state.shell_tool_calls.clone(),
-        ));
+        let capped_tokens = state
+            .total_session_usage
+            .total_tokens
+            .min(CONTEXT_MAX_UTIL_TOKENS);
+        let utilization_ratio =
+            (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+        let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
-        let _ = input_tx.try_send(InputEvent::AddUserMessage(final_input));
+        let user_message_text = final_input.clone();
+        if utilization_pct < 92 {
+            let _ = output_tx.try_send(OutputEvent::UserMessage(
+                final_input.clone(),
+                state.shell_tool_calls.clone(),
+            ));
+            let _ = input_tx.try_send(InputEvent::AddUserMessage(user_message_text));
+        }
+
+        if utilization_pct >= 92 {
+            if !state.messages.is_empty() {
+                state.messages.push(Message::plain_text(""));
+            }
+
+            state.messages.push(Message::user(final_input, None));
+            // Add spacing after user message
+            state.messages.push(Message::plain_text(""));
+            state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(Color::Yellow))));
+            state.messages.push(Message::plain_text(""));
+            state.messages.push(Message::info(
+                "Start a new session or /summarize to export compressed summary to be resued"
+                    .to_string(),
+                Some(Style::default().fg(Color::Green)),
+            ));
+            state.messages.push(Message::plain_text(""));
+        }
         state.shell_tool_calls = None;
         state.text_area.set_text("");
         let total_lines = state.messages.len() * 2;
