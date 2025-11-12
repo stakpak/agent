@@ -175,13 +175,19 @@ pub fn update(
                 if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
                     && let Some(response) = &state.recovery_response
                 {
+                    let recovery_request_id = response.id.clone();
+                    let selected_option_id = selected.id;
+                    let mode = selected.mode.clone();
                     let _ = output_tx.try_send(OutputEvent::RecoveryAction {
                         action: stakpak_api::models::RecoveryActionType::Approve,
-                        recovery_request_id: response.id.clone(),
-                        selected_option_id: selected.id,
-                        mode: selected.mode.clone(),
+                        recovery_request_id,
+                        selected_option_id,
+                        mode,
                     });
                 }
+                state.recovery_options.clear();
+                state.recovery_response = None;
+                state.recovery_popup_selected = 0;
                 state.show_recovery_options_popup = false;
                 return;
             }

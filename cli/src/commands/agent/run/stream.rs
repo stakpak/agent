@@ -1,5 +1,6 @@
 use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
+use serde_json::Value;
 use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
@@ -48,6 +49,30 @@ pub async fn process_responses_stream(
     while let Some(response) = stream.next().await {
         match &response {
             Ok(response) => {
+                if let Some(metadata) = &response.metadata {
+                    eprintln!(
+                        "[interactive] stream metadata: {}",
+                        metadata
+                    );
+                    if metadata
+                        .get("history_updated")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        let checkpoint_id = metadata
+                            .get("checkpoint_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        if checkpoint_id.is_empty() {
+                            eprintln!("[interactive] history_updated: true");
+                        } else {
+                            eprintln!(
+                                "[interactive] history_updated: true, checkpoint_id: {}",
+                                checkpoint_id
+                            );
+                        }
+                    }
+                }
                 // Handle usage first - it can come in any event, including those with no content
                 if let Some(usage) = &response.usage {
                     chat_completion_response.usage = usage.clone();
