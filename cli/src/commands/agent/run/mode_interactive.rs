@@ -431,6 +431,12 @@ pub async fn run_interactive(
                         // Clear the current session and start fresh
                         current_session_id = None;
                         messages.clear();
+                        total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            prompt_tokens_details: None,
+                        };
                         continue;
                     }
 
@@ -460,6 +466,15 @@ pub async fn run_interactive(
 
                                     // Mark that we need to update rulebooks on the next user message
                                     should_update_rulebooks_on_next_message = true;
+
+                                    // Reset usage for the resumed session
+                                    total_session_usage =
+                                        stakpak_shared::models::integrations::openai::Usage {
+                                            prompt_tokens: 0,
+                                            completion_tokens: 0,
+                                            total_tokens: 0,
+                                            prompt_tokens_details: None,
+                                        };
 
                                     messages.extend(chat_messages);
                                     tools_queue.extend(tool_calls.clone());
@@ -516,6 +531,15 @@ pub async fn run_interactive(
 
                                 // Mark that we need to update rulebooks on the next user message
                                 should_update_rulebooks_on_next_message = true;
+
+                                // Reset usage for the switched session
+                                total_session_usage =
+                                    stakpak_shared::models::integrations::openai::Usage {
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        total_tokens: 0,
+                                        prompt_tokens_details: None,
+                                    };
 
                                 messages.extend(chat_messages);
                                 tools_queue.extend(tool_calls.clone());
