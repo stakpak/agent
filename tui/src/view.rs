@@ -1,4 +1,5 @@
 use crate::app::{AppState, LoadingType};
+use crate::constants::{CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -160,6 +161,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render profile switch overlay
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
+    }
+
+    if state.show_context_popup {
+        crate::services::context_popup::render_context_popup(f, state);
     }
 }
 
@@ -374,6 +379,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         }
     }
 
+    // Reset utilization warnings before calculating
+    state.context_usage_percent = 0;
+
     // Right side: total tokens (if > 0)
     let total_tokens = state.total_session_usage.total_tokens;
     let total_width = area.width as usize;
@@ -382,6 +390,15 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     if total_tokens > 0 {
         let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
         let suffix_text = " tokens";
+        let capped_tokens = total_tokens.min(CONTEXT_MAX_UTIL_TOKENS);
+        let utilization_ratio =
+            (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+        let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
+        let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
+        let tokens_text = format!("{}{}", formatted, suffix_text);
+        let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
+
+        state.context_usage_percent = ctx_percentage;
 
         // Calculate spacing to push tokens to the absolute right edge
         let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
@@ -390,7 +407,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             total_width
         };
-        let total_text_len = formatted.len() + suffix_text.len();
+        let total_text_len = tokens_text.len() + 3 + percentage_text.len();
         let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
 
         // Add left content first
@@ -402,13 +419,36 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         }
 
         // Add tokens at the absolute right edge - all in gray
-        final_spans.push(Span::styled(
-            format!("{}{}", formatted, suffix_text),
-            Style::default().fg(Color::DarkGray),
-        ));
+        let token_style = if high_utilization {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        final_spans.push(Span::styled(tokens_text, token_style));
+        final_spans.push(Span::styled(" · ", token_style));
+        final_spans.push(Span::styled(percentage_text, token_style));
     } else {
-        // No tokens, just show left content if any
+        // No tokens, show hint in the same right-aligned slot
+        let hint_text = "prompt to see ctx stats";
+        let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+        let total_adjusted_width = if state.loading {
+            total_width + 4
+        } else {
+            total_width
+        };
+        let spacing = total_adjusted_width.saturating_sub(left_len + hint_text.len());
+
         final_spans.extend(left_spans);
+        if spacing > 0 {
+            final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+        }
+        final_spans.push(Span::styled(
+            hint_text,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        ));
     }
 
     let widget =
