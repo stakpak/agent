@@ -1,3 +1,4 @@
+use crate::constants::{CONTEXT_APPROACH_PERCENT, CONTEXT_HIGH_UTIL_THRESHOLD};
 use crate::services::detect_term::{detect_terminal, should_use_rgb_colors};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use crate::{app::AppState, services::detect_term::AdaptiveColors};
@@ -38,7 +39,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
-            Line::from("ctrl+p palette . @ files . / commands . ctrl+g less"),
+            Line::from("ctrl+p palette . @ files . / commands . ctrl+s shortcuts"),
             Line::from(format!(
                 "{} shell mode . ↵ submit . ctrl+c quit . ctrl+f profile . ctrl+k rulebooks . ctrl+s shortcuts",
                 SHELL_PROMPT_PREFIX.trim()
@@ -47,10 +48,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
-        // Show both hints when appropriate
-        if state.latest_tool_call.is_some() {
+        let high_cost_warning =
+            state.total_session_usage.total_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
+        let approaching_max = state.context_usage_percent >= CONTEXT_APPROACH_PERCENT;
+
+        if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "ctrl+p commands";
+            let shortcuts_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
             let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -83,32 +87,47 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Create spans for left and right alignment
             #[cfg(unix)]
             let left_text = format!(
-                "ctrl+p palette . @ files . / commands . ctrl+g more{}",
+                "ctrl+p palette . @ files . / commands . ctrl+s shortcuts{}",
                 select_hint
             );
             #[cfg(not(unix))]
-            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+g more");
-
-            let profile_text = format!("profile {}", state.current_profile_name);
-            let rulebooks_text = " | ctrl+k: rulebooks";
-            let right_text = format!("{}{}", profile_text, rulebooks_text);
+            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+s shortcuts");
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
             let left_len = left_text.len();
+            let (right_text, right_style) = {
+                let profile_text = format!("profile {}", state.current_profile_name);
+                let rulebooks_text = " | ctrl+k: rulebooks";
+                (
+                    format!("{}{}", profile_text, rulebooks_text),
+                    Style::default().fg(Color::DarkGray),
+                )
+            };
             let right_len = right_text.len();
             let spacing = total_width.saturating_sub(left_len + right_len);
 
-            let spans = vec![
+            let mut spans = vec![
                 Span::styled(left_text, Style::default().fg(Color::Cyan)),
                 Span::styled(" ".repeat(spacing), Style::default()),
-                Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
+            ];
+
+            if high_cost_warning || approaching_max {
+                spans.push(Span::styled(right_text, right_style));
+            } else {
+                spans.push(Span::styled(
+                    "profile ",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                spans.push(Span::styled(
                     state.current_profile_name.clone(),
                     Style::default().fg(Color::Reset),
-                ),
-                Span::styled(rulebooks_text, Style::default().fg(Color::DarkGray)),
-            ];
+                ));
+                spans.push(Span::styled(
+                    " | ctrl+k: rulebooks",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
 
             let hint = Paragraph::new(Line::from(spans));
             f.render_widget(hint, area);
