@@ -230,7 +230,30 @@ async fn main() {
                         std::process::exit(1);
                     };
 
-                    match client.get_my_account().await {
+                    // Parallelize HTTP calls for faster startup
+                    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
+                    let client_for_rulebooks = client.clone();
+                    let config_for_rulebooks = config.clone();
+
+                    let (api_result, update_result, rulebooks_result) = tokio::join!(
+                        client.get_my_account(),
+                        check_update(&current_version),
+                        async {
+                            client_for_rulebooks
+                                .list_rulebooks()
+                                .await
+                                .ok()
+                                .map(|rulebooks| {
+                                    if let Some(rulebook_config) = &config_for_rulebooks.rulebooks {
+                                        rulebook_config.filter_rulebooks(rulebooks)
+                                    } else {
+                                        rulebooks
+                                    }
+                                })
+                        }
+                    );
+
+                    match api_result {
                         Ok(_) => {}
                         Err(e) => {
                             println!();
@@ -243,15 +266,8 @@ async fn main() {
                         }
                     }
 
-                    // Check for updates in interactive mode
-                    let _ = check_update(format!("v{}", env!("CARGO_PKG_VERSION")).as_str()).await;
-                    let rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
-                        if let Some(rulebook_config) = &config.rulebooks {
-                            rulebook_config.filter_rulebooks(rulebooks)
-                        } else {
-                            rulebooks
-                        }
-                    });
+                    let _ = update_result;
+                    let rulebooks = rulebooks_result;
 
                     let subagent_configs = if cli.enable_subagents {
                         if let Some(subagent_config_path) = &cli.subagent_config_path {
