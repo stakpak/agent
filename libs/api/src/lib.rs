@@ -450,8 +450,6 @@ impl Client {
 
         let response = self.handle_response_error(response).await?;
 
-        eprintln!("Recovery options response: {:?}", response);
-
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         if value.is_null() {
             return Ok(RecoveryOptionsResponse {
@@ -512,8 +510,6 @@ impl Client {
             action,
             selected_option_id,
         };
-
-        eprintln!("Submitting recovery action: {:?}", payload);
 
         let response = self
             .client
@@ -594,8 +590,7 @@ impl Client {
         let stream = response.bytes_stream().eventsource().map(|event| {
             event
                 .map_err(|err| {
-                    eprintln!("stream: failed to read response: {:?}", err);
-                    ApiStreamError::Unknown("Failed to read response".to_string())
+                    ApiStreamError::Unknown(format!("Failed to read response: {:?}", err))
                 })
                 .and_then(|event| match event.event.as_str() {
                     "error" => Err(ApiStreamError::from(event.data)),

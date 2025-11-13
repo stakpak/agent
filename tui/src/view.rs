@@ -421,7 +421,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Middle message for recovery options
     let middle_message = (!state.recovery_options.is_empty())
-        .then_some("Detected agent tool call loop . ctr+g for more");
+        .then_some("Detected agent tool call loop . ctrl+x for more");
     let middle_len = middle_message.map(|msg| msg.len()).unwrap_or(0);
 
     let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();

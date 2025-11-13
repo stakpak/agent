@@ -653,13 +653,6 @@ pub async fn run_interactive(
                             .await
                         {
                             Ok(()) => {
-                                eprintln!(
-                                    "Submitted recovery action {:?} for session {}; recovery_request_id={}; option={}",
-                                    request.action,
-                                    session_id,
-                                    recovery_request_id,
-                                    selected_option_id,
-                                );
                                 let mode_label = match mode {
                                     RecoveryMode::Redirection => "REDIRECTION",
                                     RecoveryMode::Revert => "REVERT",
@@ -672,14 +665,6 @@ pub async fn run_interactive(
                                 ));
                             }
                             Err(err) => {
-                                eprintln!(
-                                    "Failed to submit recovery action {:?} for session {}; recovery_request_id={}; option={} -> {}",
-                                    request.action,
-                                    session_id,
-                                    recovery_request_id,
-                                    selected_option_id,
-                                    err,
-                                );
                                 send_input_event(
                                     &input_tx,
                                     InputEvent::Error(format!(
@@ -914,6 +899,19 @@ pub async fn run_interactive(
                                             &checkpoint_id.to_string(),
                                             checkpoint_messages,
                                         );
+
+                                    // Clear messages in mode_interactive
+                                    messages.clear();
+
+                                    // Send checkpoint messages to TUI for background rendering and replacement
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ReplaceMessagesFromCheckpoint(
+                                            chat_messages.clone(),
+                                        ),
+                                    )
+                                    .await?;
+
                                     messages = chat_messages;
                                     history_synced = true;
                                 }
@@ -1007,13 +1005,11 @@ pub async fn run_interactive(
                         }
 
                         if let Some(session_id) = current_session_id {
-                            eprintln!("session_id: {:?}", session_id);
                             match client
                                 .get_recovery_options(session_id, Some("pending"))
                                 .await
                             {
                                 Ok(recovery_response) => {
-                                    eprintln!("Recovery response: {:?}", recovery_response);
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::RecoveryOptions(recovery_response),

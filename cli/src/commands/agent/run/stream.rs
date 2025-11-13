@@ -56,25 +56,6 @@ pub async fn process_responses_stream(
         match &response {
             Ok(response) => {
                 if let Some(metadata) = &response.metadata {
-                    eprintln!("[interactive] stream metadata: {}", metadata);
-                    if metadata
-                        .get("history_updated")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                    {
-                        let checkpoint_id = metadata
-                            .get("checkpoint_id")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        if checkpoint_id.is_empty() {
-                            eprintln!("[interactive] history_updated: true");
-                        } else {
-                            eprintln!(
-                                "[interactive] history_updated: true, checkpoint_id: {}",
-                                checkpoint_id
-                            );
-                        }
-                    }
                     latest_metadata = Some(metadata.clone());
                 }
                 // Handle usage first - it can come in any event, including those with no content

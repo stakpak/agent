@@ -362,6 +362,9 @@ pub enum InputEvent {
     StreamUsage(stakpak_shared::models::integrations::openai::Usage),
     RequestTotalUsage,
     TotalUsage(stakpak_shared::models::integrations::openai::Usage),
+    // Checkpoint message replacement
+    ReplaceMessagesFromCheckpoint(Vec<stakpak_shared::models::integrations::openai::ChatMessage>),
+    SetRenderedCheckpointMessages(Vec<Message>),
 }
 
 #[derive(Debug)]
