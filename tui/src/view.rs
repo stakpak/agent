@@ -117,8 +117,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
+    let padded_loading_area = Rect {
+        x: loading_area.x + 1,
+        y: loading_area.y,
+        width: loading_area.width.saturating_sub(2),
+        height: loading_area.height,
+    };
     // Render loading indicator in dedicated area
-    render_loading_indicator(f, state, loading_area);
+    render_loading_indicator(f, state, padded_loading_area);
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
@@ -132,7 +138,13 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
     // Render hint/shortcuts if not hiding for dropdown and not showing collapsed messages (unless dialog is open)
     if !state.show_helper_dropdown && !state.show_collapsed_messages {
-        render_hint_or_shortcuts(f, state, hint_area);
+        let padded_hint_area = Rect {
+            x: hint_area.x + 1,
+            y: hint_area.y,
+            width: hint_area.width.saturating_sub(2),
+            height: hint_area.height,
+        };
+        render_hint_or_shortcuts(f, state, padded_hint_area);
     }
 
     // Render approval popup LAST to ensure it appears on top of everything
@@ -382,73 +394,79 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Reset utilization warnings before calculating
     state.context_usage_percent = 0;
 
-    // Right side: total tokens (if > 0)
+    // Right side: total tokens (if > 0) - hide when sessions dialog is open
     let total_tokens = state.total_session_usage.total_tokens;
     let total_width = area.width as usize;
     let mut final_spans = Vec::new();
 
-    if total_tokens > 0 {
-        let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
-        let suffix_text = " tokens";
-        let capped_tokens = total_tokens.min(CONTEXT_MAX_UTIL_TOKENS);
-        let utilization_ratio =
-            (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
-        let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
-        let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
-        let tokens_text = format!("{}{}", formatted, suffix_text);
-        let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
+    if !state.show_sessions_dialog {
+        if total_tokens > 0 {
+            let formatted =
+                crate::services::helper_block::format_number_with_separator(total_tokens);
+            let suffix_text = " tokens";
+            let capped_tokens = total_tokens.min(CONTEXT_MAX_UTIL_TOKENS);
+            let utilization_ratio =
+                (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+            let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
+            let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
+            let tokens_text = format!("{}{}", formatted, suffix_text);
+            let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
 
-        state.context_usage_percent = ctx_percentage;
+            state.context_usage_percent = ctx_percentage;
 
-        // Calculate spacing to push tokens to the absolute right edge
-        let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-        let total_adjusted_width = if state.loading {
-            total_width + 4
+            // Calculate spacing to push tokens to the absolute right edge
+            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+            let total_adjusted_width = if state.loading {
+                total_width + 4
+            } else {
+                total_width
+            };
+            let total_text_len = tokens_text.len() + 3 + percentage_text.len();
+            let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
+
+            // Add left content first
+            final_spans.extend(left_spans);
+
+            // Add spacing to push tokens to absolute right
+            if spacing > 0 {
+                final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+            }
+
+            // Add tokens at the absolute right edge - all in gray
+            let token_style = if high_utilization {
+                Style::default().fg(Color::Black).bg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
+            final_spans.push(Span::styled(tokens_text, token_style));
+            final_spans.push(Span::styled(" · ", token_style));
+            final_spans.push(Span::styled(percentage_text, token_style));
         } else {
-            total_width
-        };
-        let total_text_len = tokens_text.len() + 3 + percentage_text.len();
-        let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
+            // No tokens, show hint in the same right-aligned slot
+            let hint_text = "prompt to see ctx stats";
+            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+            let total_adjusted_width = if state.loading {
+                total_width + 4
+            } else {
+                total_width
+            };
+            let spacing = total_adjusted_width.saturating_sub(left_len + hint_text.len());
 
-        // Add left content first
-        final_spans.extend(left_spans);
-
-        // Add spacing to push tokens to absolute right
-        if spacing > 0 {
-            final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+            final_spans.extend(left_spans);
+            if spacing > 0 {
+                final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+            }
+            final_spans.push(Span::styled(
+                hint_text,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            ));
         }
-
-        // Add tokens at the absolute right edge - all in gray
-        let token_style = if high_utilization {
-            Style::default().fg(Color::Black).bg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-
-        final_spans.push(Span::styled(tokens_text, token_style));
-        final_spans.push(Span::styled(" · ", token_style));
-        final_spans.push(Span::styled(percentage_text, token_style));
     } else {
-        // No tokens, show hint in the same right-aligned slot
-        let hint_text = "prompt to see ctx stats";
-        let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-        let total_adjusted_width = if state.loading {
-            total_width + 4
-        } else {
-            total_width
-        };
-        let spacing = total_adjusted_width.saturating_sub(left_len + hint_text.len());
-
+        // Sessions dialog is open - just show left content
         final_spans.extend(left_spans);
-        if spacing > 0 {
-            final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
-        }
-        final_spans.push(Span::styled(
-            hint_text,
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        ));
     }
 
     let widget =
