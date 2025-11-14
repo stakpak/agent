@@ -1,5 +1,5 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
+use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::constants::{
     CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
 };
@@ -254,9 +254,8 @@ pub fn update(
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
         }
-        InputEvent::StreamUsage(_usage) => {
-            // Usage is sent but we don't display it individually
-            // Total usage will be updated when accumulation happens in mode_interactive
+        InputEvent::StreamUsage(usage) => {
+            state.current_message_usage = usage;
         }
         InputEvent::RequestTotalUsage => {
             // Request total usage from CLI
@@ -615,10 +614,6 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::EndLoadingOperation(operation) => {
-            // Clear current message usage when stream processing ends
-            if matches!(operation, LoadingOperation::StreamProcessing) {
-                state.current_message_usage = None;
-            }
             state.loading_manager.end_operation(operation);
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();

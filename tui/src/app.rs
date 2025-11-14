@@ -239,7 +239,7 @@ pub struct AppState {
     pub command_palette_scroll: usize,
     pub command_palette_search: String,
     // Usage tracking
-    pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
+    pub current_message_usage: stakpak_shared::models::integrations::openai::Usage,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
     pub context_usage_percent: u64,
 
@@ -587,7 +587,12 @@ impl AppState {
             command_palette_scroll: 0,
             command_palette_search: String::new(),
             // Usage tracking
-            current_message_usage: None,
+            current_message_usage: stakpak_shared::models::integrations::openai::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
             total_session_usage: stakpak_shared::models::integrations::openai::Usage {
                 prompt_tokens: 0,
                 completion_tokens: 0,

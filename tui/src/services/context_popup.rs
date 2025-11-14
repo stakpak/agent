@@ -96,7 +96,7 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
 }
 
 fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
-    let usage = &state.total_session_usage;
+    let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens;
     let formatted_total = format_number_with_separator(total_tokens);
 
@@ -140,7 +140,7 @@ fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
-    let usage = &state.total_session_usage;
+    let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens as f64;
 
     // Use eco limit if eco model is selected
@@ -183,39 +183,22 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
+    let marker_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+        ])
+        .split(area);
+
+    let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
+
     // Use eco limit if eco model is selected
     let max_tokens = match state.model {
         AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
         AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
     };
-
-    // Calculate the percentage for the cost marker
-    // For Smart: 200,000 / 1,000,000 = 20%
-    // For Eco: no middle marker needed
-    let marker_layout = match state.model {
-        AgentModel::Eco => Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(0),
-                Constraint::Percentage(0),
-                Constraint::Percentage(100),
-            ])
-            .split(area),
-        AgentModel::Smart => {
-            let cost_marker_percent =
-                ((CONTEXT_LESS_CHARGE_LIMIT as f64 / max_tokens as f64) * 100.0) as u16;
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(0),
-                    Constraint::Percentage(cost_marker_percent),
-                    Constraint::Percentage(100 - cost_marker_percent),
-                ])
-                .split(area)
-        }
-    };
-
-    let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
 
     // For eco model, don't show the middle marker since there's no pricing tier change
     let cost_marker = match state.model {
@@ -223,7 +206,7 @@ fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
         AgentModel::Smart => Paragraph::new(Line::from(
             format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
         ))
-        .alignment(Alignment::Left)
+        .alignment(Alignment::Center)
         .style(Style::default().fg(Color::Yellow)),
     };
 
@@ -270,7 +253,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         // Fallback: render a simplified list if space is too tight
         let mut lines = Vec::new();
         for (idx, tier) in pricing_table.iter().enumerate() {
-            let is_active = tier_is_active(tier, state.total_session_usage.total_tokens);
+            let is_active = tier_is_active(tier, state.current_message_usage.total_tokens);
             let bullet = if is_active { ">" } else { "-" };
 
             // For eco model, don't highlight as we want to keep it green
@@ -333,7 +316,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
     lines.push(border_line('├', '┼', '┤', '─', &widths, border_color));
 
     for (idx, tier) in pricing_table.iter().enumerate() {
-        let is_active = tier_is_active(tier, state.total_session_usage.total_tokens);
+        let is_active = tier_is_active(tier, state.current_message_usage.total_tokens);
 
         // For eco model, don't highlight as we want to keep it consistent
         let row_style = if state.model == AgentModel::Eco {
@@ -430,7 +413,7 @@ fn build_row_line(
 }
 
 fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
-    let total_tokens = state.total_session_usage.total_tokens;
+    let total_tokens = state.current_message_usage.total_tokens;
 
     let message = match state.model {
         AgentModel::Eco => {

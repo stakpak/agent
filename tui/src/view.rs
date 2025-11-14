@@ -398,27 +398,28 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     state.context_usage_percent = 0;
 
     // Right side: total tokens (if > 0) - hide when sessions dialog is open
-    let total_tokens = state.total_session_usage.total_tokens;
+    let used_context = &state.current_message_usage;
     let total_width = area.width as usize;
     let mut final_spans = Vec::new();
 
     if !state.show_sessions_dialog {
-        if total_tokens > 0 {
-            let formatted =
-                crate::services::helper_block::format_number_with_separator(total_tokens);
-            let suffix_text = " tokens";
-
+        if used_context.total_tokens > 0 {
             // Use eco limit if eco model is selected
             let max_tokens = match state.model {
                 AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
                 AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
             };
 
-            let capped_tokens = total_tokens.min(max_tokens);
+            let capped_tokens = used_context.total_tokens.min(max_tokens);
             let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
             let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
             let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
-            let tokens_text = format!("{}{}", formatted, suffix_text);
+            let tokens_text = format!(
+                "consumed {} tokens",
+                crate::services::helper_block::format_number_with_separator(
+                    state.total_session_usage.total_tokens,
+                )
+            );
             let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
 
             state.context_usage_percent = ctx_percentage;
