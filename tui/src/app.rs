@@ -16,7 +16,7 @@ use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress,
+    AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
@@ -239,9 +239,12 @@ pub struct AppState {
     pub command_palette_scroll: usize,
     pub command_palette_search: String,
     // Usage tracking
-    pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
+    pub current_message_usage: stakpak_shared::models::integrations::openai::Usage,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
     pub context_usage_percent: u64,
+
+    // Model
+    pub model: AgentModel,
 }
 
 #[derive(Debug)]
@@ -370,6 +373,7 @@ pub enum OutputEvent {
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
     RequestTotalUsage,                  // Request total accumulated token usage
+    SwitchModel(AgentModel),
 }
 
 impl AppState {
@@ -378,6 +382,10 @@ impl AppState {
             HelperCommand {
                 command: "/help",
                 description: "Show help information and available commands",
+            },
+            HelperCommand {
+                command: "/model",
+                description: "Switch model (smart/eco)",
             },
             HelperCommand {
                 command: "/clear",
@@ -579,7 +587,12 @@ impl AppState {
             command_palette_scroll: 0,
             command_palette_search: String::new(),
             // Usage tracking
-            current_message_usage: None,
+            current_message_usage: stakpak_shared::models::integrations::openai::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            },
             total_session_usage: stakpak_shared::models::integrations::openai::Usage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
@@ -587,6 +600,7 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
+            model: AgentModel::Smart,
         }
     }
 

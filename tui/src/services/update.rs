@@ -1,6 +1,8 @@
 use super::message::extract_truncated_command_arguments;
-use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
-use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, SUMMARIZE_PROMPT_BASE};
+use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
+use crate::constants::{
+    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
+};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -8,8 +10,8 @@ use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_status_message, push_styled_message, push_support_message,
-    push_usage_message, render_system_message, welcome_messages,
+    push_memorize_message, push_model_message, push_status_message, push_styled_message,
+    push_support_message, push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -21,7 +23,8 @@ use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
-    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
+    AgentModel, FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+    ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -251,9 +254,8 @@ pub fn update(
         InputEvent::StreamAssistantMessage(id, s) => {
             handle_stream_message(state, id, s, message_area_height)
         }
-        InputEvent::StreamUsage(_usage) => {
-            // Usage is sent but we don't display it individually
-            // Total usage will be updated when accumulation happens in mode_interactive
+        InputEvent::StreamUsage(usage) => {
+            state.current_message_usage = usage;
         }
         InputEvent::RequestTotalUsage => {
             // Request total usage from CLI
@@ -612,10 +614,6 @@ pub fn update(
             state.loading_type = state.loading_manager.get_loading_type();
         }
         InputEvent::EndLoadingOperation(operation) => {
-            // Clear current message usage when stream processing ends
-            if matches!(operation, LoadingOperation::StreamProcessing) {
-                state.current_message_usage = None;
-            }
             state.loading_manager.end_operation(operation);
             state.loading = state.loading_manager.is_loading();
             state.loading_type = state.loading_manager.get_loading_type();
@@ -1723,6 +1721,20 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
+                "/model" => {
+                    match switch_model(state) {
+                        Ok(()) => {
+                            let _ =
+                                output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+                            push_model_message(state);
+                        }
+                        Err(e) => {
+                            push_error_message(state, &e, None);
+                        }
+                    }
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
                 "/status" => {
                     push_status_message(state);
                     state.text_area.set_text("");
@@ -1806,12 +1818,15 @@ fn handle_input_submitted(
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
-        let capped_tokens = state
-            .total_session_usage
-            .total_tokens
-            .min(CONTEXT_MAX_UTIL_TOKENS);
-        let utilization_ratio =
-            (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+
+        // Use eco limit if eco model is selected
+        let max_tokens = match state.model {
+            AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+            AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+        };
+
+        let capped_tokens = state.total_session_usage.total_tokens.min(max_tokens);
+        let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
         let user_message_text = final_input.clone();
@@ -2706,7 +2721,36 @@ fn execute_command_palette_selection(
         CommandAction::ShowUsage => {
             push_usage_message(state);
         }
+        CommandAction::SwitchModel => match switch_model(state) {
+            Ok(()) => {
+                let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+                push_model_message(state);
+            }
+            Err(e) => {
+                push_error_message(state, &e, None);
+            }
+        },
     }
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
+}
+
+fn switch_model(state: &mut AppState) -> Result<(), String> {
+    match state.model {
+        AgentModel::Smart => {
+            if state.current_message_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
+                state.model = AgentModel::Eco;
+                Ok(())
+            } else {
+                Err(
+                    "Cannot switch model: context exceeds eco model context window size."
+                        .to_string(),
+                )
+            }
+        }
+        AgentModel::Eco => {
+            state.model = AgentModel::Smart;
+            Ok(())
+        }
+    }
 }

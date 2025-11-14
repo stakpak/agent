@@ -22,7 +22,9 @@ use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_shared::models::integrations::openai::{ChatMessage, ToolCall, ToolCallResultStatus};
+use stakpak_shared::models::integrations::openai::{
+    AgentModel, ChatMessage, ToolCall, ToolCallResultStatus,
+};
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::sync::Arc;
@@ -52,6 +54,7 @@ pub struct RunInteractiveConfig {
     pub allowed_tools: Option<Vec<String>>,
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
+    pub model: AgentModel,
 }
 
 pub async fn run_interactive(
@@ -60,6 +63,7 @@ pub async fn run_interactive(
 ) -> Result<(), String> {
     // Outer loop for profile switching
     'profile_switch_loop: loop {
+        let mut model = config.model.clone();
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
@@ -259,6 +263,10 @@ pub async fn run_interactive(
 
             while let Some(output_event) = output_rx.recv().await {
                 match output_event {
+                    OutputEvent::SwitchModel(new_model) => {
+                        model = new_model;
+                        continue;
+                    }
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
                         // Loading will be managed by stream processing
                         let mut user_input = user_input.clone();
@@ -737,6 +745,7 @@ pub async fn run_interactive(
                 let response_result = loop {
                     let stream_result = client
                         .chat_completion_stream(
+                            model.clone(),
                             messages.clone(),
                             Some(tools.clone()),
                             headers.clone(),

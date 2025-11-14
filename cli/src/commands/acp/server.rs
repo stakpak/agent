@@ -10,7 +10,8 @@ use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_se
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionResponse, ChatCompletionStreamResponse, Role, ToolCall, ToolCallResultProgress,
+    AgentModel, ChatCompletionResponse, ChatCompletionStreamResponse, Role, ToolCall,
+    ToolCallResultProgress,
 };
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -1160,7 +1161,7 @@ impl StakpakAcpAgent {
             id: "".to_string(),
             object: "".to_string(),
             created: 0,
-            model: "".to_string(),
+            model: AgentModel::Smart,
             choices: vec![],
             usage: stakpak_shared::models::integrations::openai::Usage {
                 prompt_tokens: 0,
@@ -1225,7 +1226,7 @@ impl StakpakAcpAgent {
                         id: response.id.clone(),
                         object: response.object.clone(),
                         created: response.created,
-                        model: response.model.clone(),
+                        model: response.model.clone().into(),
                         choices: vec![],
                         usage: stakpak_shared::models::integrations::openai::Usage {
                             prompt_tokens: 0,
@@ -1806,7 +1807,7 @@ impl acp::Agent for StakpakAcpAgent {
 
         let (stream, _request_id) = self
             .client
-            .chat_completion_stream(messages, tools_option.clone(), None)
+            .chat_completion_stream(AgentModel::Smart, messages, tools_option.clone(), None)
             .await
             .map_err(|e| {
                 log::error!("Chat completion stream failed: {}", e);
@@ -2024,17 +2025,21 @@ impl acp::Agent for StakpakAcpAgent {
                     messages.clone()
                 };
 
-                let (follow_up_stream, _request_id) = self
-                    .client
-                    .chat_completion_stream(current_messages.clone(), tools_option.clone(), None)
-                    .await
-                    .map_err(|e| {
-                        log::error!("Follow-up chat completion stream failed: {}", e);
-                        acp::Error::internal_error().with_data(serde_json::Value::String(format!(
-                            "Follow-up chat completion failed: {}",
-                            e
-                        )))
-                    })?;
+                let (follow_up_stream, _request_id) =
+                    self.client
+                        .chat_completion_stream(
+                            AgentModel::Smart,
+                            current_messages.clone(),
+                            tools_option.clone(),
+                            None,
+                        )
+                        .await
+                        .map_err(|e| {
+                            log::error!("Follow-up chat completion stream failed: {}", e);
+                            acp::Error::internal_error().with_data(serde_json::Value::String(
+                                format!("Follow-up chat completion failed: {}", e),
+                            ))
+                        })?;
 
                 let follow_up_response = match self
                     .process_acp_streaming_response_with_cancellation(

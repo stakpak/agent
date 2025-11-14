@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::constants::{
     CONTEXT_APPROACH_PERCENT, CONTEXT_LESS_CHARGE_LIMIT, CONTEXT_MAX_UTIL_TOKENS,
-    CONTEXT_PRICING_TABLE,
+    CONTEXT_MAX_UTIL_TOKENS_ECO, CONTEXT_PRICING_TABLE, CONTEXT_PRICING_TABLE_ECO,
 };
 use crate::services::helper_block::format_number_with_separator;
 use ratatui::{
@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Paragraph},
 };
+use stakpak_shared::models::integrations::openai::AgentModel;
 
 pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     let screen = f.area();
@@ -89,16 +90,23 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     f.render_widget(Paragraph::new(""), layout[0]);
     render_usage_summary(f, state, layout[1]);
     render_usage_gauge(f, state, layout[2]);
-    render_markers(f, layout[3]);
+    render_markers(f, state, layout[3]);
     render_pricing_table(f, state, layout[4]);
     render_footer(f, state, layout[5]);
 }
 
 fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
-    let usage = &state.total_session_usage;
+    let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens;
     let formatted_total = format_number_with_separator(total_tokens);
-    let formatted_max = format_number_with_separator(CONTEXT_MAX_UTIL_TOKENS);
+
+    // Use eco limit if eco model is selected
+    let max_tokens = match state.model {
+        AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+        AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+    };
+    let formatted_max = format_number_with_separator(max_tokens);
+
     let summary_lines = vec![
         Line::from(vec![
             Span::styled("Total: ", Style::default().fg(Color::DarkGray)),
@@ -132,13 +140,27 @@ fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
-    let usage = &state.total_session_usage;
+    let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens as f64;
-    let ratio = (total_tokens / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
-    let gauge_color = if usage.total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
-        Color::Yellow
-    } else {
-        Color::Green
+
+    // Use eco limit if eco model is selected
+    let max_tokens = match state.model {
+        AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+        AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+    };
+
+    let ratio = (total_tokens / max_tokens as f64).clamp(0.0, 1.0);
+
+    // For eco model, always show green since there's no extra charge
+    let gauge_color = match state.model {
+        AgentModel::Eco => Color::Green,
+        AgentModel::Smart => {
+            if usage.total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
+                Color::Yellow
+            } else {
+                Color::Green
+            }
+        }
     };
 
     let gauge = Gauge::default()
@@ -160,7 +182,7 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(gauge, area);
 }
 
-fn render_markers(f: &mut Frame, area: Rect) {
+fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
     let marker_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -171,14 +193,26 @@ fn render_markers(f: &mut Frame, area: Rect) {
         .split(area);
 
     let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
-    let cost_marker = Paragraph::new(Line::from(
-        format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
-    ))
-    .alignment(Alignment::Center)
-    .style(Style::default().fg(Color::Yellow));
+
+    // Use eco limit if eco model is selected
+    let max_tokens = match state.model {
+        AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+        AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+    };
+
+    // For eco model, don't show the middle marker since there's no pricing tier change
+    let cost_marker = match state.model {
+        AgentModel::Eco => Paragraph::new(Line::from("")).alignment(Alignment::Center),
+        AgentModel::Smart => Paragraph::new(Line::from(
+            format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
+        ))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Yellow)),
+    };
+
     let limit_marker = Paragraph::new(Line::from(format!(
         "{} max",
-        format_number_with_separator(CONTEXT_MAX_UTIL_TOKENS)
+        format_number_with_separator(max_tokens)
     )))
     .alignment(Alignment::Right)
     .style(Style::default().fg(Color::DarkGray));
@@ -193,9 +227,18 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
+    // Select the appropriate pricing table based on model
+    let (pricing_table, table_len) = match state.model {
+        AgentModel::Eco => (
+            &CONTEXT_PRICING_TABLE_ECO[..],
+            CONTEXT_PRICING_TABLE_ECO.len(),
+        ),
+        AgentModel::Smart => (&CONTEXT_PRICING_TABLE[..], CONTEXT_PRICING_TABLE.len()),
+    };
+
     let headers = ["Claude Price Tier", "Input", "Output"];
     let mut min_widths = headers.map(|h| h.len() + 2);
-    for tier in CONTEXT_PRICING_TABLE.iter() {
+    for tier in pricing_table.iter() {
         min_widths[0] = min_widths[0].max(tier.tier_label.len() + 2);
         min_widths[1] = min_widths[1].max(tier.input_cost.len() + 2);
         min_widths[2] = min_widths[2].max(tier.output_cost.len() + 2);
@@ -209,23 +252,29 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
     if total_width < min_widths.iter().sum::<usize>() + separators {
         // Fallback: render a simplified list if space is too tight
         let mut lines = Vec::new();
-        for (idx, tier) in CONTEXT_PRICING_TABLE.iter().enumerate() {
-            let is_active = tier_is_active(tier, state.total_session_usage.total_tokens);
+        for (idx, tier) in pricing_table.iter().enumerate() {
+            let is_active = tier_is_active(tier, state.current_message_usage.total_tokens);
             let bullet = if is_active { ">" } else { "-" };
+
+            // For eco model, don't highlight as we want to keep it green
+            let style = if state.model == AgentModel::Eco {
+                Style::default().fg(Color::DarkGray)
+            } else if is_active {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
             lines.push(Line::from(vec![Span::styled(
                 format!(
                     "{} {} · {} / {}",
                     bullet, tier.tier_label, tier.input_cost, tier.output_cost
                 ),
-                if is_active {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                },
+                style,
             )]));
-            if idx < CONTEXT_PRICING_TABLE.len() - 1 {
+            if idx < table_len - 1 {
                 lines.push(Line::from(""));
             }
         }
@@ -266,9 +315,13 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
     lines.push(build_row_line(headers, &widths, header_style, border_color));
     lines.push(border_line('├', '┼', '┤', '─', &widths, border_color));
 
-    for (idx, tier) in CONTEXT_PRICING_TABLE.iter().enumerate() {
-        let is_active = tier_is_active(tier, state.total_session_usage.total_tokens);
-        let row_style = if is_active {
+    for (idx, tier) in pricing_table.iter().enumerate() {
+        let is_active = tier_is_active(tier, state.current_message_usage.total_tokens);
+
+        // For eco model, don't highlight as we want to keep it consistent
+        let row_style = if state.model == AgentModel::Eco {
+            Style::default().fg(Color::DarkGray)
+        } else if is_active {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
@@ -283,7 +336,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
             border_color,
         ));
 
-        if idx == CONTEXT_PRICING_TABLE.len() - 1 {
+        if idx == table_len - 1 {
             lines.push(border_line('└', '┴', '┘', '─', &widths, border_color));
         } else {
             lines.push(border_line('├', '┼', '┤', '─', &widths, border_color));
@@ -360,14 +413,25 @@ fn build_row_line(
 }
 
 fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
-    let total_tokens = state.total_session_usage.total_tokens;
+    let total_tokens = state.current_message_usage.total_tokens;
 
-    let message = if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
-        "Approaching the 1M token limit. Try /summarize."
-    } else if total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
-        "Anthropic charges you extra for >200K context"
-    } else {
-        "Anthropic regular pricing"
+    let message = match state.model {
+        AgentModel::Eco => {
+            if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
+                "Approaching the 200K token limit. Try /summarize."
+            } else {
+                "Anthropic Haiku 4.5 - flat pricing, 200K context"
+            }
+        }
+        AgentModel::Smart => {
+            if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
+                "Approaching the 1M token limit. Try /summarize."
+            } else if total_tokens >= CONTEXT_LESS_CHARGE_LIMIT {
+                "Anthropic charges you extra for >200K context"
+            } else {
+                "Anthropic regular pricing"
+            }
+        }
     };
 
     let paragraph = Paragraph::new(Line::from(message))

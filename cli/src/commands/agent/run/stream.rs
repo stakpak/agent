@@ -2,8 +2,9 @@ use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
 use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
-    FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall, Usage,
+    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
+    ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
+    Usage,
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
@@ -18,7 +19,7 @@ pub async fn process_responses_stream(
         id: "".to_string(),
         object: "".to_string(),
         created: 0,
-        model: "".to_string(),
+        model: AgentModel::Smart,
         choices: vec![],
         usage: Usage {
             prompt_tokens: 0,
@@ -62,7 +63,7 @@ pub async fn process_responses_stream(
                     id: response.id.clone(),
                     object: response.object.clone(),
                     created: response.created,
-                    model: response.model.clone(),
+                    model: response.model.clone().into(),
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,
