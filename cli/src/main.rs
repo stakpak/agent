@@ -3,7 +3,7 @@ use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{Client, ClientConfig};
 use stakpak_mcp_server::EnabledToolsConfig;
-use stakpak_shared::models::subagent::SubagentConfigs;
+use stakpak_shared::models::{integrations::openai::AgentModel, subagent::SubagentConfigs};
 use std::{env, path::Path};
 
 mod apikey_auth;
@@ -390,6 +390,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
+                                model: AgentModel::Smart,
                             },
                         )
                         .await
@@ -420,6 +421,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
+                                model: AgentModel::Smart,
                             },
                         )
                         .await

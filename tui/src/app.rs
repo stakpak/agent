@@ -16,7 +16,7 @@ use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_api::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress,
+    AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
@@ -370,6 +370,7 @@ pub enum OutputEvent {
     RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
     RequestCurrentRulebooks,            // Request currently active rulebooks
     RequestTotalUsage,                  // Request total accumulated token usage
+    SwitchModel(AgentModel),
 }
 
 impl AppState {
