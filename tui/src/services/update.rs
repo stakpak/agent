@@ -2738,7 +2738,7 @@ fn execute_command_palette_selection(
 fn switch_model(state: &mut AppState) -> Result<(), String> {
     match state.model {
         AgentModel::Smart => {
-            if state.total_session_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
+            if state.current_message_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
                 state.model = AgentModel::Eco;
                 Ok(())
             } else {
