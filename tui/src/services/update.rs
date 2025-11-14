@@ -8,8 +8,8 @@ use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
     handle_errors, push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_status_message, push_styled_message, push_support_message,
-    push_usage_message, render_system_message, welcome_messages,
+    push_memorize_message, push_model_message, push_status_message, push_styled_message,
+    push_support_message, push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{
     Message, MessageContent, get_command_type_name, get_wrapped_collapsed_message_lines_cached,
@@ -21,7 +21,8 @@ use ratatui::style::{Color, Style};
 use serde_json;
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
-    FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
+    AgentModel, FunctionCall, ToolCall, ToolCallResult, ToolCallResultProgress,
+    ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -1723,6 +1724,13 @@ fn handle_input_submitted(
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
+                "/model" => {
+                    switch_model(state);
+                    let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+                    push_model_message(state);
+                    state.text_area.set_text("");
+                    state.show_helper_dropdown = false;
+                }
                 "/status" => {
                     push_status_message(state);
                     state.text_area.set_text("");
@@ -2706,7 +2714,23 @@ fn execute_command_palette_selection(
         CommandAction::ShowUsage => {
             push_usage_message(state);
         }
+        CommandAction::SwitchModel => {
+            switch_model(state);
+            let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+            push_model_message(state);
+        }
     }
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
+}
+
+fn switch_model(state: &mut AppState) {
+    match state.model {
+        AgentModel::Smart => {
+            state.model = AgentModel::Eco;
+        }
+        AgentModel::Eco => {
+            state.model = AgentModel::Smart;
+        }
+    };
 }

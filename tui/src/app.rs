@@ -242,6 +242,9 @@ pub struct AppState {
     pub current_message_usage: Option<stakpak_shared::models::integrations::openai::Usage>,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
     pub context_usage_percent: u64,
+
+    // Model
+    pub model: AgentModel,
 }
 
 #[derive(Debug)]
@@ -379,6 +382,10 @@ impl AppState {
             HelperCommand {
                 command: "/help",
                 description: "Show help information and available commands",
+            },
+            HelperCommand {
+                command: "/model",
+                description: "Switch model (smart/eco)",
             },
             HelperCommand {
                 command: "/clear",
@@ -588,6 +595,7 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
+            model: AgentModel::Smart,
         }
     }
 

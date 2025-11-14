@@ -2,6 +2,7 @@ use crate::app::AppState;
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use stakpak_shared::models::integrations::openai::AgentModel;
 use uuid::Uuid;
 
 pub fn get_stakpak_version() -> String {
@@ -221,6 +222,29 @@ pub fn push_memorize_message(state: &mut AppState) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
+        is_collapsed: None,
+    });
+}
+
+pub fn push_model_message(state: &mut AppState) {
+    let mut line = Vec::new();
+    line.push(Span::styled(
+        "Switched to ",
+        Style::default().fg(Color::DarkGray),
+    ));
+    match state.model {
+        AgentModel::Smart => {
+            line.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
+        }
+        AgentModel::Eco => {
+            line.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
+        }
+    }
+    line.push(Span::styled(" model", Style::default().fg(Color::DarkGray)));
+
+    state.messages.push(Message {
+        id: uuid::Uuid::new_v4(),
+        content: MessageContent::Styled(Line::from(line)),
         is_collapsed: None,
     });
 }

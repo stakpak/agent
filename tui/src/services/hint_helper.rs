@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
+use stakpak_shared::models::integrations::openai::AgentModel;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.is_pasting {
@@ -97,7 +98,10 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let total_width = area.width as usize;
             let left_len = left_text.len();
             let (right_text, right_style) = {
-                let profile_text = format!("profile {}", state.current_profile_name);
+                let profile_text = format!(
+                    "model {} | profile {}",
+                    state.model, state.current_profile_name
+                );
                 let rulebooks_text = " | ctrl+k: rulebooks";
                 (
                     format!("{}{}", profile_text, rulebooks_text),
@@ -115,6 +119,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             if high_cost_warning || approaching_max {
                 spans.push(Span::styled(right_text, right_style));
             } else {
+                spans.push(Span::styled("model ", Style::default().fg(Color::DarkGray)));
+                match state.model {
+                    AgentModel::Smart => {
+                        spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
+                    }
+                    AgentModel::Eco => {
+                        spans.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
+                    }
+                }
+                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
                 spans.push(Span::styled(
                     "profile ",
                     Style::default().fg(Color::DarkGray),

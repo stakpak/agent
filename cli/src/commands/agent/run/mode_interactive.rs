@@ -265,6 +265,7 @@ pub async fn run_interactive(
                 match output_event {
                     OutputEvent::SwitchModel(new_model) => {
                         model = new_model;
+                        continue;
                     }
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
                         // Loading will be managed by stream processing
