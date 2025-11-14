@@ -14,7 +14,8 @@ use models::*;
 use serde_json::Value;
 use serde_json::json;
 use stakpak_shared::models::integrations::openai::{
-    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
+    AgentModel, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse,
+    ChatMessage, Tool,
 };
 use uuid::Uuid;
 
@@ -429,12 +430,13 @@ impl Client {
 
     pub async fn chat_completion(
         &self,
+        model: AgentModel,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
     ) -> Result<ChatCompletionResponse, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(messages, tools, None);
+        let input = ChatCompletionRequest::new(model, messages, tools, None);
 
         let response = self
             .client
@@ -460,6 +462,7 @@ impl Client {
 
     pub async fn chat_completion_stream(
         &self,
+        model: AgentModel,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         headers: Option<HeaderMap>,
@@ -472,7 +475,7 @@ impl Client {
     > {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(messages, tools, Some(true));
+        let input = ChatCompletionRequest::new(model, messages, tools, Some(true));
 
         let response = self
             .client

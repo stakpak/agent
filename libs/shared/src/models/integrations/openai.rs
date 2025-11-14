@@ -25,9 +25,36 @@ impl std::fmt::Display for Role {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub enum AgentModel {
+    #[serde(rename = "smart")]
+    #[default]
+    Smart,
+    #[serde(rename = "eco")]
+    Eco,
+}
+
+impl std::fmt::Display for AgentModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentModel::Smart => write!(f, "smart"),
+            AgentModel::Eco => write!(f, "eco"),
+        }
+    }
+}
+
+impl From<String> for AgentModel {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "eco" => AgentModel::Eco,
+            _ => AgentModel::Smart,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionRequest {
-    pub model: String,
+    pub model: AgentModel,
     pub messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
@@ -64,9 +91,14 @@ pub struct ChatCompletionRequest {
 }
 
 impl ChatCompletionRequest {
-    pub fn new(messages: Vec<ChatMessage>, tools: Option<Vec<Tool>>, stream: Option<bool>) -> Self {
+    pub fn new(
+        model: AgentModel,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+        stream: Option<bool>,
+    ) -> Self {
         Self {
-            model: "pablo-v1".to_string(),
+            model,
             messages,
             frequency_penalty: None,
             logit_bias: None,
@@ -329,7 +361,7 @@ pub struct ChatCompletionResponse {
     pub id: String,
     pub object: String,
     pub created: u64,
-    pub model: String,
+    pub model: AgentModel,
     pub choices: Vec<ChatCompletionChoice>,
     pub usage: Usage,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -507,7 +539,7 @@ mod tests {
     #[test]
     fn test_serialize_basic_request() {
         let request = ChatCompletionRequest {
-            model: "gpt-4".to_string(),
+            model: AgentModel::Smart,
             messages: vec![
                 ChatMessage {
                     role: Role::System,
@@ -561,7 +593,7 @@ mod tests {
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "created": 1677652288,
-            "model": "gpt-3.5-turbo",
+            "model": "smart",
             "system_fingerprint": "fp_123abc",
             "choices": [{
                 "index": 0,
@@ -582,7 +614,7 @@ mod tests {
         assert_eq!(response.id, "chatcmpl-123");
         assert_eq!(response.object, "chat.completion");
         assert_eq!(response.created, 1677652288);
-        assert_eq!(response.model, "gpt-3.5-turbo");
+        assert_eq!(response.model, AgentModel::Smart);
         assert_eq!(response.system_fingerprint, Some("fp_123abc".to_string()));
 
         assert_eq!(response.choices.len(), 1);
@@ -606,7 +638,7 @@ mod tests {
     fn test_tool_calls_request_response() {
         // Test a request with tools
         let tools_request = ChatCompletionRequest {
-            model: "gpt-4".to_string(),
+            model: AgentModel::Smart,
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: Some(MessageContent::String(
@@ -754,7 +786,7 @@ mod tests {
     #[test]
     fn test_response_format() {
         let json_format_request = ChatCompletionRequest {
-            model: "gpt-4".to_string(),
+            model: AgentModel::Smart,
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: Some(MessageContent::String(

@@ -16,7 +16,7 @@ use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::local_store::LocalStore;
-use stakpak_shared::models::integrations::openai::ChatMessage;
+use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,6 +37,7 @@ pub struct RunAsyncConfig {
     pub enable_mtls: bool,
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
+    pub model: AgentModel,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -179,7 +180,11 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         // Make chat completion request
         let llm_start = Instant::now();
         let response = client
-            .chat_completion(chat_messages.clone(), Some(tools.clone()))
+            .chat_completion(
+                config.model.clone(),
+                chat_messages.clone(),
+                Some(tools.clone()),
+            )
             .await
             .map_err(|e| e.to_string())?;
         llm_response_time += llm_start.elapsed();
