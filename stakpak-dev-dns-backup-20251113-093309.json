@@ -1,0 +1,550 @@
+{
+    "ResourceRecordSets": [
+        {
+            "Name": "stakpak.dev.",
+            "Type": "A",
+            "AliasTarget": {
+                "HostedZoneId": "Z2FDTNDATAQYW2",
+                "DNSName": "d1totrudsnmg7v.cloudfront.net.",
+                "EvaluateTargetHealth": false
+            }
+        },
+        {
+            "Name": "stakpak.dev.",
+            "Type": "MX",
+            "TTL": 3600,
+            "ResourceRecords": [
+                {
+                    "Value": "5 alt1.aspmx.l.google.com."
+                },
+                {
+                    "Value": "10 alt3.aspmx.l.google.com."
+                },
+                {
+                    "Value": "5 alt2.aspmx.l.google.com."
+                },
+                {
+                    "Value": "10 alt4.aspmx.l.google.com."
+                },
+                {
+                    "Value": "1 aspmx.l.google.com."
+                }
+            ]
+        },
+        {
+            "Name": "stakpak.dev.",
+            "Type": "NS",
+            "TTL": 172800,
+            "ResourceRecords": [
+                {
+                    "Value": "ns-813.awsdns-37.net."
+                },
+                {
+                    "Value": "ns-1148.awsdns-15.org."
+                },
+                {
+                    "Value": "ns-1917.awsdns-47.co.uk."
+                },
+                {
+                    "Value": "ns-509.awsdns-63.com."
+                }
+            ]
+        },
+        {
+            "Name": "stakpak.dev.",
+            "Type": "SOA",
+            "TTL": 900,
+            "ResourceRecords": [
+                {
+                    "Value": "ns-813.awsdns-37.net. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400"
+                }
+            ]
+        },
+        {
+            "Name": "stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 3600,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=spf1 include:_spf.google.com include:144989687.spf10.hubspotemail.net -all google-site-verification=m0QIrrSX3-okWPU0iO5pt10OVIAGal0UrNaa6_fyNfk\""
+                }
+            ]
+        },
+        {
+            "Name": "\\052.stakpak.dev.",
+            "Type": "A",
+            "AliasTarget": {
+                "HostedZoneId": "Z23TAZ6LKFMNIO",
+                "DNSName": "prod-1308790774.eu-north-1.elb.amazonaws.com.",
+                "EvaluateTargetHealth": true
+            }
+        },
+        {
+            "Name": "_610644ef0598706cb737f10a9ba3b342.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 60,
+            "ResourceRecords": [
+                {
+                    "Value": "_f20b74bc5ffed58bd8aec82ede3b20df.tctzzymbbs.acm-validations.aws."
+                }
+            ]
+        },
+        {
+            "Name": "_dmarc.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=DMARC1; p=quarantine; pct=100\""
+                }
+            ]
+        },
+        {
+            "Name": "1._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "1.domainkey.u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "12._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "12.domainkey.u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "42nwm7etqj5zhryjwzhcfhn4yjc6h2hb._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "42nwm7etqj5zhryjwzhcfhn4yjc6h2hb.dkim.amazonses.com"
+                }
+            ]
+        },
+        {
+            "Name": "6e7amehjddlnbrcw7xaamhc32gilgvza._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "6e7amehjddlnbrcw7xaamhc32gilgvza.dkim.amazonses.com"
+                }
+            ]
+        },
+        {
+            "Name": "google._domainkey.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDBNBZnvFpKFHimx2XKsl0kROqD1Cm3EwukBoRhhvuaB7Fa8ZUuRs3zQGYfrYqsyv/QBL+Pf/Q0bwsbhz2gme3Pll7V2HyPFqOuKiOvvcvYHa9RqqLnh9a4feh76VN02oy4z7778CYLS5bDTyLX9LKTqcGuKX6/MTNLbkUONgvkyQIDAQAB\""
+                }
+            ]
+        },
+        {
+            "Name": "hs1-144989687._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "stakpak-dev.hs05a.dkim.hubspotemail.net."
+                }
+            ]
+        },
+        {
+            "Name": "hs2-144989687._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "stakpak-dev.hs05b.dkim.hubspotemail.net."
+                }
+            ]
+        },
+        {
+            "Name": "sbmi27nal5bch62erk4tggln5wmhwawg._domainkey.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "sbmi27nal5bch62erk4tggln5wmhwawg.dkim.amazonses.com"
+                }
+            ]
+        },
+        {
+            "Name": "_visual-studio-marketplace-stakpak.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"7ec8c044-5bf1-4d44-a84d-8275dde45dc5\""
+                }
+            ]
+        },
+        {
+            "Name": "www.alchemy.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "www-alchemy-stakpak-dev.customer.mixo.io"
+                }
+            ]
+        },
+        {
+            "Name": "_acme-challenge.www.alchemy.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"WgMiIzDZeLKzyZdmXAKhLu8XLlzgGuPAmkQq5cGChDw\""
+                }
+            ]
+        },
+        {
+            "Name": "api-finance.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "13.50.84.92"
+                }
+            ]
+        },
+        {
+            "Name": "app.stakpak.dev.",
+            "Type": "A",
+            "AliasTarget": {
+                "HostedZoneId": "Z2FDTNDATAQYW2",
+                "DNSName": "d1tl065koogwjd.cloudfront.net.",
+                "EvaluateTargetHealth": false
+            }
+        },
+        {
+            "Name": "_8e5b019269a61e2c27e025937e0a5f90.app.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "_2a9d3861e3e814c8752508159f1f910e.djqtsrsxkq.acm-validations.aws."
+                }
+            ]
+        },
+        {
+            "Name": "auth.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "d2h4fb15ob3hjv.cloudfront.net"
+                }
+            ]
+        },
+        {
+            "Name": "_690b1f0a94261c27acec26b7e6e202d2.auth.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "_44a386ad0da104fd27ad5f28bac3b270.sdgjtdhdhz.acm-validations.aws."
+                }
+            ]
+        },
+        {
+            "Name": "billing-api.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "16.170.190.132"
+                }
+            ]
+        },
+        {
+            "Name": "billing.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "16.170.190.132"
+                }
+            ]
+        },
+        {
+            "Name": "blog.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "hashnode.network"
+                }
+            ]
+        },
+        {
+            "Name": "cal.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "13.60.238.197"
+                }
+            ]
+        },
+        {
+            "Name": "develop.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "studio-wfj9.onrender.com"
+                }
+            ]
+        },
+        {
+            "Name": "devx.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "d-ik2z.onrender.com"
+                }
+            ]
+        },
+        {
+            "Name": "em4866.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "finance.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "13.50.84.92"
+                }
+            ]
+        },
+        {
+            "Name": "genaihackathon.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "13.51.13.177"
+                }
+            ]
+        },
+        {
+            "Name": "hack25egypt.stakpak.dev.",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "13.49.0.162"
+                }
+            ]
+        },
+        {
+            "Name": "hello.stakpak.dev.",
+            "Type": "MX",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "1 SMTP.GOOGLE.COM."
+                }
+            ]
+        },
+        {
+            "Name": "hello.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"google-site-verification=5LxbfAR3U8I314D8snwDeqi8ItWyK3HJrIBzyc62XoU\""
+                }
+            ]
+        },
+        {
+            "Name": "_dmarc.hello.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=DMARC1; p=quarantine; pct=100\""
+                }
+            ]
+        },
+        {
+            "Name": "1._domainkey.hello.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "1.domainkey.u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "12._domainkey.hello.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "12.domainkey.u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "em3180.hello.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "u49952427.wl178.sendgrid.net"
+                }
+            ]
+        },
+        {
+            "Name": "img.stakpak.dev.",
+            "Type": "A",
+            "AliasTarget": {
+                "HostedZoneId": "Z2FDTNDATAQYW2",
+                "DNSName": "d3tfd6t5gkk34z.cloudfront.net.",
+                "EvaluateTargetHealth": false
+            }
+        },
+        {
+            "Name": "_1e4e0c9520d943a5b7d744fcf1919cd3.img.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 60,
+            "ResourceRecords": [
+                {
+                    "Value": "_3c51aa9db99b2c62156b9adfeb48852b.zfyfvmchrl.acm-validations.aws."
+                }
+            ]
+        },
+        {
+            "Name": "resend._domainkey.mail.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkcTbcgl1DyWtre/w9SOpq5sxfHC4FKcSB7cGBSro/Kn8ory0lJTHhEJOggPjqsOBfTyIua6XAVaZBcuaLWXp1mTeS+WsL2yLT+hmuMSW5IrXNC0LBPEClJmP3ZhHl6VVqpvz5X5fdtF9LOt1ReSVF5eYHxRAi7bS+vDT5hTruhwIDAQAB\""
+                }
+            ]
+        },
+        {
+            "Name": "send.mail.stakpak.dev.",
+            "Type": "MX",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "10 feedback-smtp.eu-west-1.amazonses.com"
+                }
+            ]
+        },
+        {
+            "Name": "send.mail.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=spf1 include:amazonses.com ~all\""
+                }
+            ]
+        },
+        {
+            "Name": "noreply.stakpak.dev.",
+            "Type": "MX",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "10 feedback-smtp.eu-north-1.amazonses.com"
+                }
+            ]
+        },
+        {
+            "Name": "noreply.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"v=spf1 include:amazonses.com ~all\""
+                }
+            ]
+        },
+        {
+            "Name": "vibeops.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "target.substack-custom-domains.com"
+                }
+            ]
+        },
+        {
+            "Name": "www.stakpak.dev.",
+            "Type": "A",
+            "AliasTarget": {
+                "HostedZoneId": "Z2FDTNDATAQYW2",
+                "DNSName": "d2sk8uhhsy5cfv.cloudfront.net.",
+                "EvaluateTargetHealth": false
+            }
+        },
+        {
+            "Name": "_a0937d3c37e193c86a28d407b72309c9.www.stakpak.dev.",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "_35d4974fdf8b1558a960e42d20f249f1.sdgjtdhdhz.acm-validations.aws."
+                }
+            ]
+        },
+        {
+            "Name": "_acme-challenge.www.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"WgMiIzDZeLKzyZdmXAKhLu8XLlzgGuPAmkQq5cGChDw\""
+                }
+            ]
+        },
+        {
+            "Name": "_cf-custom-hostname.www.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"b2226f39-72c4-4469-ad4f-c70f582241b3\""
+                }
+            ]
+        },
+        {
+            "Name": "_github-challenge-devopzilla-org.www.stakpak.dev.",
+            "Type": "TXT",
+            "TTL": 300,
+            "ResourceRecords": [
+                {
+                    "Value": "\"93aa77e1a4\""
+                }
+            ]
+        }
+    ]
+}
