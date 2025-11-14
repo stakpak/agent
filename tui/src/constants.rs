@@ -1,5 +1,6 @@
 pub const CONTEXT_LESS_CHARGE_LIMIT: u32 = 200_000;
 pub const CONTEXT_MAX_UTIL_TOKENS: u32 = 1_000_000;
+pub const CONTEXT_MAX_UTIL_TOKENS_ECO: u32 = 200_000; // Claude Haiku 4.5 limit
 pub const CONTEXT_HIGH_UTIL_THRESHOLD: u32 = CONTEXT_LESS_CHARGE_LIMIT * 9 / 10;
 pub const CONTEXT_APPROACH_PERCENT: u64 = 85;
 
@@ -26,6 +27,13 @@ pub const CONTEXT_PRICING_TABLE: [ContextPricingTier; 2] = [
         upper_bound: None,
     },
 ];
+
+pub const CONTEXT_PRICING_TABLE_ECO: [ContextPricingTier; 1] = [ContextPricingTier {
+    tier_label: "0-200K tokens",
+    input_cost: "$1/1M",
+    output_cost: "$5/1M",
+    upper_bound: Some(CONTEXT_MAX_UTIL_TOKENS_ECO),
+}];
 
 pub const SUMMARIZE_PROMPT_BASE: &str = "\
 You are the Stakpak session summarizer. You have full context of the session, including workspace state, current working directory, and file activity.\n\

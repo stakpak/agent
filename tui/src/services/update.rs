@@ -1,6 +1,8 @@
 use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, LoadingOperation, OutputEvent, ToolCallStatus};
-use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, SUMMARIZE_PROMPT_BASE};
+use crate::constants::{
+    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
+};
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
@@ -1725,9 +1727,16 @@ fn handle_input_submitted(
                     state.show_helper_dropdown = false;
                 }
                 "/model" => {
-                    switch_model(state);
-                    let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
-                    push_model_message(state);
+                    match switch_model(state) {
+                        Ok(()) => {
+                            let _ =
+                                output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+                            push_model_message(state);
+                        }
+                        Err(e) => {
+                            push_error_message(state, &e, None);
+                        }
+                    }
                     state.text_area.set_text("");
                     state.show_helper_dropdown = false;
                 }
@@ -1814,12 +1823,15 @@ fn handle_input_submitted(
         }
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
-        let capped_tokens = state
-            .total_session_usage
-            .total_tokens
-            .min(CONTEXT_MAX_UTIL_TOKENS);
-        let utilization_ratio =
-            (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+
+        // Use eco limit if eco model is selected
+        let max_tokens = match state.model {
+            AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+            AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+        };
+
+        let capped_tokens = state.total_session_usage.total_tokens.min(max_tokens);
+        let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
         let user_message_text = final_input.clone();
@@ -2714,23 +2726,36 @@ fn execute_command_palette_selection(
         CommandAction::ShowUsage => {
             push_usage_message(state);
         }
-        CommandAction::SwitchModel => {
-            switch_model(state);
-            let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
-            push_model_message(state);
-        }
+        CommandAction::SwitchModel => match switch_model(state) {
+            Ok(()) => {
+                let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
+                push_model_message(state);
+            }
+            Err(e) => {
+                push_error_message(state, &e, None);
+            }
+        },
     }
     state.text_area.set_text("");
     state.show_helper_dropdown = false;
 }
 
-fn switch_model(state: &mut AppState) {
+fn switch_model(state: &mut AppState) -> Result<(), String> {
     match state.model {
         AgentModel::Smart => {
-            state.model = AgentModel::Eco;
+            if state.total_session_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
+                state.model = AgentModel::Eco;
+                Ok(())
+            } else {
+                Err(
+                    "Cannot switch model: context exceeds eco model context window size."
+                        .to_string(),
+                )
+            }
         }
         AgentModel::Eco => {
             state.model = AgentModel::Smart;
+            Ok(())
         }
-    };
+    }
 }
