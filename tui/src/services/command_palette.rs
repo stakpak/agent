@@ -27,6 +27,7 @@ pub enum CommandAction {
     GetSupport,
     NewSession,
     ShowUsage,
+    SwitchModel,
 }
 
 impl Command {
@@ -113,6 +114,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Go to Discord channel",
             "/support",
             CommandAction::GetSupport,
+        ),
+        Command::new(
+            "Switch Model",
+            "Switch model (smart/eco)",
+            "/model",
+            CommandAction::SwitchModel,
         ),
     ]
 }
