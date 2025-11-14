@@ -1,5 +1,7 @@
 use crate::app::{AppState, LoadingType};
-use crate::constants::{CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS};
+use crate::constants::{
+    CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO,
+};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -15,6 +17,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use stakpak_shared::models::integrations::openai::AgentModel;
 
 const DROPDOWN_MAX_HEIGHT: usize = 8;
 const SCROLL_BUFFER_LINES: usize = 2;
@@ -404,9 +407,15 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             let formatted =
                 crate::services::helper_block::format_number_with_separator(total_tokens);
             let suffix_text = " tokens";
-            let capped_tokens = total_tokens.min(CONTEXT_MAX_UTIL_TOKENS);
-            let utilization_ratio =
-                (capped_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64).clamp(0.0, 1.0);
+
+            // Use eco limit if eco model is selected
+            let max_tokens = match state.model {
+                AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
+                AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+            };
+
+            let capped_tokens = total_tokens.min(max_tokens);
+            let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
             let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
             let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
             let tokens_text = format!("{}{}", formatted, suffix_text);
