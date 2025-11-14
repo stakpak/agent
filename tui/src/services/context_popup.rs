@@ -183,22 +183,39 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
-    let marker_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
-        .split(area);
-
-    let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
-
     // Use eco limit if eco model is selected
     let max_tokens = match state.model {
         AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
         AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
     };
+
+    // Calculate the percentage for the cost marker
+    // For Smart: 200,000 / 1,000,000 = 20%
+    // For Eco: no middle marker needed
+    let marker_layout = match state.model {
+        AgentModel::Eco => Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(0),
+                Constraint::Percentage(0),
+                Constraint::Percentage(100),
+            ])
+            .split(area),
+        AgentModel::Smart => {
+            let cost_marker_percent =
+                ((CONTEXT_LESS_CHARGE_LIMIT as f64 / max_tokens as f64) * 100.0) as u16;
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(0),
+                    Constraint::Percentage(cost_marker_percent),
+                    Constraint::Percentage(100 - cost_marker_percent),
+                ])
+                .split(area)
+        }
+    };
+
+    let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
 
     // For eco model, don't show the middle marker since there's no pricing tier change
     let cost_marker = match state.model {
@@ -206,7 +223,7 @@ fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
         AgentModel::Smart => Paragraph::new(Line::from(
             format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
         ))
-        .alignment(Alignment::Center)
+        .alignment(Alignment::Left)
         .style(Style::default().fg(Color::Yellow)),
     };
 

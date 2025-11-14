@@ -577,7 +577,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"gpt-4\""));
+        assert!(json.contains("\"model\":\"smart\""));
         assert!(json.contains("\"messages\":["));
         assert!(json.contains("\"role\":\"system\""));
         assert!(json.contains("\"content\":\"You are a helpful assistant.\""));
@@ -696,7 +696,7 @@ mod tests {
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "created": 1677652288,
-            "model": "gpt-3.5-turbo",
+            "model": "eco",
             "choices": [{
                 "index": 0,
                 "message": {
