@@ -418,9 +418,9 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let message = match state.model {
         AgentModel::Eco => {
             if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
-                "Approaching the 200K token limit. Try /summarize."
+                "Approaching the 200K token limit. Try /summarize or /model."
             } else {
-                "Anthropic Haiku 4.5 - flat pricing, 200K context"
+                "Anthropic regular pricing"
             }
         }
         AgentModel::Smart => {
