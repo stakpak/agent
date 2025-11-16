@@ -19,7 +19,7 @@ pub async fn process_responses_stream(
         id: "".to_string(),
         object: "".to_string(),
         created: 0,
-        model: AgentModel::Smart,
+        model: AgentModel::Smart.to_string(),
         choices: vec![],
         usage: Usage {
             prompt_tokens: 0,
@@ -63,7 +63,7 @@ pub async fn process_responses_stream(
                     id: response.id.clone(),
                     object: response.object.clone(),
                     created: response.created,
-                    model: response.model.clone().into(),
+                    model: response.model.clone(),
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,

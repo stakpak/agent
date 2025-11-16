@@ -1161,7 +1161,7 @@ impl StakpakAcpAgent {
             id: "".to_string(),
             object: "".to_string(),
             created: 0,
-            model: AgentModel::Smart,
+            model: AgentModel::Smart.to_string(),
             choices: vec![],
             usage: stakpak_shared::models::integrations::openai::Usage {
                 prompt_tokens: 0,
@@ -1226,7 +1226,7 @@ impl StakpakAcpAgent {
                         id: response.id.clone(),
                         object: response.object.clone(),
                         created: response.created,
-                        model: response.model.clone().into(),
+                        model: response.model.clone(),
                         choices: vec![],
                         usage: stakpak_shared::models::integrations::openai::Usage {
                             prompt_tokens: 0,
