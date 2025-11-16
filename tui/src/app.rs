@@ -1,6 +1,8 @@
 mod events;
+mod types;
 
 pub use events::{InputEvent, OutputEvent};
+pub use types::*;
 
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
@@ -23,103 +25,6 @@ use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-
-// Type alias to reduce complexity - now stores processed lines for better performance
-type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
-
-// --- NEW: Async file_search result struct ---
-pub struct FileSearchResult {
-    pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>,
-    pub cursor_position: usize,
-    pub input: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct HelperCommand {
-    pub command: &'static str,
-    pub description: &'static str,
-}
-
-#[derive(Debug)]
-pub struct SessionInfo {
-    pub title: String,
-    pub id: String,
-    pub updated_at: String,
-    pub checkpoints: Vec<String>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum LoadingType {
-    Llm,
-    Sessions,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LoadingOperation {
-    LlmRequest,
-    ToolExecution,
-    SessionsList,
-    StreamProcessing,
-    LocalContext,
-    Rulebooks,
-    CheckpointResume,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ToolCallStatus {
-    Approved,
-    Rejected,
-    Executed,
-    Skipped,
-    Pending,
-}
-
-#[derive(Debug)]
-pub struct LoadingStateManager {
-    active_operations: std::collections::HashSet<LoadingOperation>,
-}
-
-impl Default for LoadingStateManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LoadingStateManager {
-    pub fn new() -> Self {
-        Self {
-            active_operations: std::collections::HashSet::new(),
-        }
-    }
-
-    pub fn start_operation(&mut self, operation: LoadingOperation) {
-        self.active_operations.insert(operation);
-    }
-
-    pub fn end_operation(&mut self, operation: LoadingOperation) {
-        self.active_operations.remove(&operation);
-    }
-
-    pub fn is_loading(&self) -> bool {
-        !self.active_operations.is_empty()
-    }
-
-    pub fn get_loading_type(&self) -> LoadingType {
-        if self
-            .active_operations
-            .contains(&LoadingOperation::SessionsList)
-        {
-            LoadingType::Sessions
-        } else {
-            LoadingType::Llm
-        }
-    }
-
-    pub fn clear_all(&mut self) {
-        self.active_operations.clear();
-    }
-}
 
 pub struct AppState {
     // ========== Input & TextArea State ==========
@@ -263,6 +168,27 @@ impl AppState {
         crate::services::commands::commands_to_helper_commands()
     }
 
+    /// Initialize file search channels and spawn worker
+    fn init_file_search_channels(
+        helpers: &[HelperCommand],
+    ) -> (
+        mpsc::Sender<(String, usize)>,
+        mpsc::Receiver<FileSearchResult>,
+    ) {
+        let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
+        let (result_tx, result_rx) = mpsc::channel::<FileSearchResult>(10);
+        let helpers_clone = helpers.to_vec();
+        let file_search_instance = FileSearch::default();
+        // Spawn file_search worker from file_search.rs
+        tokio::spawn(file_search_worker(
+            file_search_rx,
+            result_tx,
+            helpers_clone,
+            file_search_instance,
+        ));
+        (file_search_tx, result_rx)
+    }
+
     pub fn new(
         latest_version: Option<String>,
         redact_secrets: bool,
@@ -273,17 +199,7 @@ impl AppState {
         input_tx: Option<mpsc::Sender<InputEvent>>,
     ) -> Self {
         let helpers = Self::get_helper_commands();
-        let (file_search_tx, file_search_rx) = mpsc::channel::<(String, usize)>(10);
-        let (result_tx, result_rx) = mpsc::channel::<FileSearchResult>(10);
-        let helpers_clone = helpers.clone();
-        let file_search_instance = FileSearch::default();
-        // Spawn file_search worker from file_search.rs
-        tokio::spawn(file_search_worker(
-            file_search_rx,
-            result_tx,
-            helpers_clone,
-            file_search_instance,
-        ));
+        let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
 
         AppState {
             text_area: TextArea::new(),
