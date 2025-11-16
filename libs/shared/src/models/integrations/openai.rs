@@ -361,7 +361,7 @@ pub struct ChatCompletionResponse {
     pub id: String,
     pub object: String,
     pub created: u64,
-    pub model: AgentModel,
+    pub model: String,
     pub choices: Vec<ChatCompletionChoice>,
     pub usage: Usage,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(response.id, "chatcmpl-123");
         assert_eq!(response.object, "chat.completion");
         assert_eq!(response.created, 1677652288);
-        assert_eq!(response.model, AgentModel::Smart);
+        assert_eq!(response.model, AgentModel::Smart.to_string());
         assert_eq!(response.system_fingerprint, Some("fp_123abc".to_string()));
 
         assert_eq!(response.choices.len(), 1);
