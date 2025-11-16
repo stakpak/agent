@@ -6,6 +6,7 @@ pub mod context_popup;
 pub mod detect_term;
 pub mod file_diff;
 pub mod file_search;
+pub mod handlers;
 pub mod helper_block;
 pub mod helper_dropdown;
 pub mod hint_helper;
