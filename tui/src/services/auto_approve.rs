@@ -1,12 +1,11 @@
 use crate::app::InputEvent;
+use crate::constants::AUTO_APPROVE_CONFIG_PATH;
 use serde::{Deserialize, Serialize};
 use stakpak_shared::models::integrations::openai::ToolCall;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
-
-const AUTO_APPROVE_CONFIG_PATH: &str = ".stakpak/session/auto_approve.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum AutoApprovePolicy {

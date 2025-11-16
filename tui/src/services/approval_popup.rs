@@ -37,6 +37,7 @@
 //! // let approvals = popup_service.get_all_approvals();
 //! ```
 
+use crate::constants::APPROVAL_POPUP_WIDTH_PERCENT;
 use crate::services::bash_block::{format_text_content, preprocess_terminal_output};
 use crate::services::detect_term::{self, is_unsupported_terminal};
 use crate::services::file_diff::render_file_diff_block;
@@ -48,9 +49,6 @@ use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::ToolCall;
-
-/// Default width percentage for approval popup
-const APPROVAL_POPUP_WIDTH_PERCENT: f32 = 0.8;
 
 /// Tool call approval status
 #[derive(Debug, Clone, PartialEq)]

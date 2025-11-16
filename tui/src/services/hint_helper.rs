@@ -138,7 +138,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                     Style::default().fg(Color::Reset),
                 ));
                 spans.push(Span::styled(
-                    " | ctrl+k: rulebooks",
+                    " | ctrl+k rulebooks",
                     Style::default().fg(Color::DarkGray),
                 ));
             }

@@ -1,3 +1,7 @@
+mod events;
+
+pub use events::{InputEvent, OutputEvent};
+
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::detect_term::AdaptiveColors;
@@ -12,12 +16,9 @@ use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
-use ratatui::style::Color;
 use ratatui::text::Line;
 use stakpak_api::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{
-    AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
-};
+use stakpak_shared::models::integrations::openai::{AgentModel, ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -25,8 +26,6 @@ use uuid::Uuid;
 
 // Type alias to reduce complexity - now stores processed lines for better performance
 type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
-
-const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
 // --- NEW: Async file_search result struct ---
 pub struct FileSearchResult {
@@ -123,335 +122,145 @@ impl LoadingStateManager {
 }
 
 pub struct AppState {
+    // ========== Input & TextArea State ==========
     pub text_area: TextArea,
     pub text_area_state: TextAreaState,
     pub cursor_visible: bool,
-    pub messages: Vec<Message>,
-    pub scroll: usize,
-    pub scroll_to_bottom: bool,
-    pub stay_at_bottom: bool,
-    pub content_changed_while_scrolled_up: bool,
     pub helpers: Vec<HelperCommand>,
     pub show_helper_dropdown: bool,
     pub helper_selected: usize,
     pub helper_scroll: usize,
     pub filtered_helpers: Vec<HelperCommand>,
-    pub filtered_files: Vec<String>, // NEW: for file file_search
-    pub show_shortcuts: bool,
-    pub is_dialog_open: bool,
-    pub dialog_command: Option<ToolCall>,
-    pub dialog_selected: usize,
+    pub filtered_files: Vec<String>,
+    pub file_search: FileSearch,
+    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
+    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
+    pub is_pasting: bool,
+    pub pasted_long_text: Option<String>,
+    pub pasted_placeholder: Option<String>,
+    pub pending_pastes: Vec<(String, String)>,
+    pub interactive_commands: Vec<String>,
+
+    // ========== Messages & Scrolling State ==========
+    pub messages: Vec<Message>,
+    pub scroll: usize,
+    pub scroll_to_bottom: bool,
+    pub stay_at_bottom: bool,
+    pub content_changed_while_scrolled_up: bool,
+    pub message_lines_cache: Option<MessageLinesCache>,
+    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
+    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
+    pub show_collapsed_messages: bool,
+    pub collapsed_messages_scroll: usize,
+    pub collapsed_messages_selected: usize,
+    pub has_user_messages: bool,
+
+    // ========== Loading State ==========
     pub loading: bool,
     pub loading_type: LoadingType,
     pub spinner_frame: usize,
-    pub sessions: Vec<SessionInfo>,
-    pub show_sessions_dialog: bool,
-    pub session_selected: usize,
-    pub account_info: String,
-    pub pending_bash_message_id: Option<Uuid>,
-    pub streaming_tool_results: HashMap<Uuid, String>,
-    pub streaming_tool_result_id: Option<Uuid>,
-    pub completed_tool_calls: std::collections::HashSet<Uuid>,
+    pub loading_manager: LoadingStateManager,
+
+    // ========== Shell Mode State ==========
     pub show_shell_mode: bool,
     pub active_shell_command: Option<ShellCommand>,
     pub active_shell_command_output: Option<String>,
     pub shell_mode_input: String,
     pub waiting_for_shell_input: bool,
     pub is_tool_call_shell_command: bool,
-    pub is_pasting: bool,
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
-    pub dialog_message_id: Option<Uuid>,
-    pub file_search: FileSearch,
-    pub secret_manager: SecretManager,
-    pub latest_version: Option<String>,
-    pub ctrl_c_pressed_once: bool,
-    pub ctrl_c_timer: Option<std::time::Instant>,
-    pub pasted_long_text: Option<String>,
-    pub pasted_placeholder: Option<String>,
-    // --- NEW: FileSearch channels ---
-    pub file_search_tx: Option<mpsc::Sender<(String, usize)>>,
-    pub file_search_rx: Option<mpsc::Receiver<FileSearchResult>>,
+
+    // ========== Tool Call State ==========
+    pub pending_bash_message_id: Option<Uuid>,
+    pub streaming_tool_results: HashMap<Uuid, String>,
+    pub streaming_tool_result_id: Option<Uuid>,
+    pub completed_tool_calls: std::collections::HashSet<Uuid>,
     pub is_streaming: bool,
-    pub interactive_commands: Vec<String>,
-    pub auto_approve_manager: AutoApproveManager,
-    pub allowed_tools: Option<Vec<String>>,
-    pub dialog_focused: bool,
     pub latest_tool_call: Option<ToolCall>,
-    // Retry mechanism state
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
     pub last_user_message_for_retry: Option<String>,
     pub is_retrying: bool,
-    pub show_collapsed_messages: bool, // NEW: tracks if collapsed messages popup is open
-    pub collapsed_messages_scroll: usize, // NEW: scroll position for collapsed messages popup
-    pub collapsed_messages_selected: usize, // NEW: selected message index in collapsed messages popup
 
-    pub show_context_popup: bool,
-
-    pub is_git_repo: bool,
-    pub message_lines_cache: Option<MessageLinesCache>,
-    pub collapsed_message_lines_cache: Option<MessageLinesCache>,
-    pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
-
-    pub pending_pastes: Vec<(String, String)>,
-    pub mouse_capture_enabled: bool,
-    pub loading_manager: LoadingStateManager,
-    pub has_user_messages: bool,
-
-    pub message_tool_calls: Option<Vec<ToolCall>>,
+    // ========== Dialog & Approval State ==========
+    pub is_dialog_open: bool,
+    pub dialog_command: Option<ToolCall>,
+    pub dialog_selected: usize,
+    pub dialog_message_id: Option<Uuid>,
+    pub dialog_focused: bool,
     pub approval_popup: PopupService,
-
+    pub message_tool_calls: Option<Vec<ToolCall>>,
     pub message_approved_tools: Vec<ToolCall>,
     pub message_rejected_tools: Vec<ToolCall>,
-
     pub toggle_approved_message: bool,
-    pub terminal_size: Size,
+    pub show_shortcuts: bool,
 
-    // Session tool calls queue to track tool call status
+    // ========== Sessions Dialog State ==========
+    pub sessions: Vec<SessionInfo>,
+    pub show_sessions_dialog: bool,
+    pub session_selected: usize,
+    pub account_info: String,
+
+    // ========== Session Tool Calls Queue ==========
     pub session_tool_calls_queue: std::collections::HashMap<String, ToolCallStatus>,
     pub tool_call_execution_order: Vec<String>,
     pub last_message_tool_calls: Vec<ToolCall>,
 
-    // Profile switcher state
+    // ========== Profile Switcher State ==========
     pub show_profile_switcher: bool,
     pub available_profiles: Vec<String>,
     pub profile_switcher_selected: usize,
     pub current_profile_name: String,
     pub profile_switching_in_progress: bool,
     pub profile_switch_status_message: Option<String>,
-    pub rulebook_config: Option<crate::RulebookConfig>,
 
-    // Shortcuts popup state
-    pub show_shortcuts_popup: bool,
-    pub shortcuts_scroll: usize,
-    // Rulebook switcher state
+    // ========== Rulebook Switcher State ==========
     pub show_rulebook_switcher: bool,
     pub available_rulebooks: Vec<ListRuleBook>,
-    pub selected_rulebooks: std::collections::HashSet<String>, // URIs of selected rulebooks
+    pub selected_rulebooks: std::collections::HashSet<String>,
     pub rulebook_switcher_selected: usize,
     pub rulebook_search_input: String,
     pub filtered_rulebooks: Vec<ListRuleBook>,
+    pub rulebook_config: Option<crate::RulebookConfig>,
 
-    // Command palette state
+    // ========== Command Palette State ==========
     pub show_command_palette: bool,
     pub command_palette_selected: usize,
     pub command_palette_scroll: usize,
     pub command_palette_search: String,
-    // Usage tracking
+
+    // ========== Shortcuts Popup State ==========
+    pub show_shortcuts_popup: bool,
+    pub shortcuts_scroll: usize,
+
+    // ========== Context Popup State ==========
+    pub show_context_popup: bool,
+
+    // ========== Usage Tracking State ==========
     pub current_message_usage: stakpak_shared::models::integrations::openai::Usage,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
     pub context_usage_percent: u64,
 
-    // Model
+    // ========== Configuration State ==========
+    pub secret_manager: SecretManager,
+    pub latest_version: Option<String>,
+    pub is_git_repo: bool,
+    pub auto_approve_manager: AutoApproveManager,
+    pub allowed_tools: Option<Vec<String>>,
     pub model: AgentModel,
-}
 
-#[derive(Debug)]
-pub enum InputEvent {
-    AssistantMessage(String),
-    AddUserMessage(String),
-    StreamAssistantMessage(Uuid, String),
-    RunToolCall(ToolCall),
-    ToolResult(ToolCallResult),
-    StreamToolResult(ToolCallResultProgress),
-    StartLoadingOperation(LoadingOperation),
-    EndLoadingOperation(LoadingOperation),
-    InputChanged(char),
-    ShellMode,
-    GetStatus(String),
-    Error(String),
-    SetSessions(Vec<SessionInfo>),
-    InputBackspace,
-    InputChangedNewline,
-    InputSubmitted,
-    InputSubmittedWith(String),
-    InputSubmittedWithColor(String, Color),
-    MessageToolCalls(Vec<ToolCall>),
-    BulkAutoApproveMessage,
-    ResetAutoApproveMessage,
-    ScrollUp,
-    ScrollDown,
-    PageUp,
-    PageDown,
-    DropdownUp,
-    DropdownDown,
-    DialogUp,
-    DialogDown,
-    Up,
-    Down,
-    Quit,
-    HandleEsc,
-    HandleReject(Option<String>, bool, Option<Color>),
-    CursorLeft,
-    CursorRight,
-    ToggleCursorVisible,
-    Resized(u16, u16),
-    ShowConfirmationDialog(ToolCall),
-    DialogConfirm,
-    DialogCancel,
-    HasUserMessage,
-    Tab,
-    ToggleApprovalStatus,
-    ShellOutput(String),
-    ShellError(String),
-    ShellWaitingForInput,
-    ShellCompleted(i32),
-    ShellClear,
-    ShellKill,
-    HandlePaste(String),
-    InputDelete,
-    InputDeleteWord,
-    InputCursorStart,
-    InputCursorEnd,
-    InputCursorPrevWord,
-    InputCursorNextWord,
-    ToggleAutoApprove,
-    AutoApproveCurrentTool,
-    ToggleDialogFocus,       // NEW: toggle between messages view and dialog focus
-    RetryLastToolCall,       // Ctrl+R to retry last tool call in shell mode
-    AttemptQuit,             // First Ctrl+C press for quit sequence
-    ToggleCollapsedMessages, // Ctrl+T to toggle collapsed messages popup
-    ToggleContextPopup,      // Ctrl+G to toggle context pricing popup
-    EmergencyClearTerminal,
-    ToggleMouseCapture, // Toggle mouse capture on/off
-    // Approval popup events
-    ApprovalPopupNextTab,
-    ApprovalPopupPrevTab,
-    ApprovalPopupToggleApproval,
-    ApprovalPopupSubmit,
-    ApprovalPopupEscape,
-    // Profile switcher events
-    ShowProfileSwitcher,
-    ProfilesLoaded(Vec<String>, String), // (available_profiles, current_profile_name)
-    ProfileSwitchRequested(String),
-    ProfileSwitchProgress(String),
-    ProfileSwitchComplete(String),
-    ProfileSwitchFailed(String),
-    // Command palette events
-    ShowCommandPalette,
-    CommandPaletteSearchInputChanged(char),
-    CommandPaletteSearchBackspace,
-    ProfileSwitcherSelect,
-    ProfileSwitcherCancel,
-    // Shortcuts popup events
-    ShowShortcuts,
-    ShortcutsCancel,
-
-    // Rulebook switcher events
-    ShowRulebookSwitcher,
-    RulebooksLoaded(Vec<ListRuleBook>),
-    CurrentRulebooksLoaded(Vec<String>), // Currently active rulebook URIs
-    RulebookSwitcherSelect,
-    RulebookSwitcherToggle,
-    RulebookSwitcherCancel,
-    RulebookSwitcherConfirm,
-    RulebookSwitcherSelectAll,   // Ctrl+D to select all rulebooks
-    RulebookSwitcherDeselectAll, // Ctrl+S to deselect all rulebooks
-    RulebookSearchInputChanged(char),
-    RulebookSearchBackspace,
-    HandleCtrlS,
-    ToggleMoreShortcuts,
-    // Usage tracking events
-    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
-    RequestTotalUsage,
-    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
-}
-
-#[derive(Debug)]
-pub enum OutputEvent {
-    UserMessage(String, Option<Vec<ToolCallResult>>),
-    AcceptTool(ToolCall),
-    RejectTool(ToolCall, bool),
-    ListSessions,
-    SwitchToSession(String),
-    NewSession,
-    Memorize,
-    SendToolResult(ToolCallResult, bool, Vec<ToolCall>),
-    ResumeSession,
-    RequestProfileSwitch(String),
-    RequestRulebookUpdate(Vec<String>), // Selected rulebook URIs
-    RequestCurrentRulebooks,            // Request currently active rulebooks
-    RequestTotalUsage,                  // Request total accumulated token usage
-    SwitchModel(AgentModel),
+    // ========== Misc State ==========
+    pub ctrl_c_pressed_once: bool,
+    pub ctrl_c_timer: Option<std::time::Instant>,
+    pub mouse_capture_enabled: bool,
+    pub terminal_size: Size,
 }
 
 impl AppState {
     pub fn get_helper_commands() -> Vec<HelperCommand> {
-        vec![
-            HelperCommand {
-                command: "/help",
-                description: "Show help information and available commands",
-            },
-            HelperCommand {
-                command: "/model",
-                description: "Switch model (smart/eco)",
-            },
-            HelperCommand {
-                command: "/clear",
-                description: "Clear the screen and show welcome message",
-            },
-            HelperCommand {
-                command: "/status",
-                description: "Show account status and current working directory",
-            },
-            HelperCommand {
-                command: "/sessions",
-                description: "List available sessions to switch to",
-            },
-            HelperCommand {
-                command: "/resume",
-                description: "Resume the last session",
-            },
-            HelperCommand {
-                command: "/new",
-                description: "Start a new session",
-            },
-            HelperCommand {
-                command: "/memorize",
-                description: "Memorize the current conversation history",
-            },
-            HelperCommand {
-                command: "/summarize",
-                description: "Summarize the session into summary.md for later resume",
-            },
-            HelperCommand {
-                command: "/usage",
-                description: "Show token usage for this session",
-            },
-            HelperCommand {
-                command: "/issue",
-                description: "Submit issue on GitHub repo",
-            },
-            HelperCommand {
-                command: "/support",
-                description: "Go to Discord support channel",
-            },
-            HelperCommand {
-                command: "/list_approved_tools",
-                description: "List all tools that are auto-approved",
-            },
-            HelperCommand {
-                command: "/toggle_auto_approve",
-                description: "Toggle auto-approve for a specific tool e.g. /toggle_auto_approve view",
-            },
-            HelperCommand {
-                command: "/mouse_capture",
-                description: "Toggle mouse capture on/off",
-            },
-            HelperCommand {
-                command: "/profiles",
-                description: "Switch to a different profile",
-            },
-            HelperCommand {
-                command: "/quit",
-                description: "Quit the application",
-            },
-            HelperCommand {
-                command: "/shortcuts",
-                description: "Show keyboard shortcuts",
-            },
-        ]
+        // Use unified command system
+        crate::services::commands::commands_to_helper_commands()
     }
 
     pub fn new(
@@ -526,7 +335,10 @@ impl AppState {
             file_search_tx: Some(file_search_tx),
             file_search_rx: Some(result_rx),
             is_streaming: false,
-            interactive_commands: INTERACTIVE_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            interactive_commands: crate::constants::INTERACTIVE_COMMANDS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             auto_approve_manager: AutoApproveManager::new(auto_approve_tools, input_tx),
             allowed_tools: allowed_tools.cloned(),
             dialog_focused: false, // Default to messages view focused

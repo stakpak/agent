@@ -1,6 +1,7 @@
 use crate::app::{AppState, LoadingType};
 use crate::constants::{
     CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO,
+    DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -18,9 +19,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use stakpak_shared::models::integrations::openai::AgentModel;
-
-const DROPDOWN_MAX_HEIGHT: usize = 8;
-const SCROLL_BUFFER_LINES: usize = 2;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content
@@ -166,7 +164,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
     // Render command palette
     if state.show_command_palette {
-        crate::services::command_palette::render_command_palette(f, state);
+        crate::services::commands::render_command_palette(f, state);
     }
     // Render rulebook switcher
     if state.show_rulebook_switcher {

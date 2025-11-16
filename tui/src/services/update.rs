@@ -1,11 +1,14 @@
 use super::message::extract_truncated_command_arguments;
 use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::constants::{
-    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
+    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, MAX_PASTE_CHAR_COUNT, SCROLL_LINES,
 };
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::bash_block::{preprocess_terminal_output, render_bash_block_rejected};
+use crate::services::commands::{
+    build_summarize_prompt, list_auto_approved_tools, new_session, resume_session, switch_model,
+};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{
@@ -28,9 +31,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-
-const SCROLL_LINES: usize = 1;
-const MAX_PASTE_CHAR_COUNT: usize = 1000;
 
 /// Groups related event channel senders together to reduce function parameter counts
 struct EventChannels<'a> {
@@ -1672,6 +1672,23 @@ fn handle_input_submitted(
             return;
         }
         if !state.filtered_helpers.is_empty() {
+            let command_id = state.filtered_helpers[state.helper_selected].command;
+
+            // Use unified command executor
+            use crate::services::commands::{CommandContext, execute_command};
+            let ctx = CommandContext {
+                state,
+                input_tx,
+                output_tx,
+            };
+            if let Err(e) = execute_command(command_id, ctx) {
+                push_error_message(state, &e, None);
+            }
+            return;
+        }
+
+        // Legacy code path - should not be reached after migration
+        if false {
             let selected = &state.filtered_helpers[state.helper_selected];
 
             match selected.command {
@@ -1869,77 +1886,6 @@ fn handle_input_submitted(
     }
 }
 
-fn build_summarize_prompt(state: &AppState) -> String {
-    let usage = &state.total_session_usage;
-    let total_tokens = usage.total_tokens;
-    let prompt_tokens = usage.prompt_tokens;
-    let completion_tokens = usage.completion_tokens;
-    let context_usage_pct = if CONTEXT_MAX_UTIL_TOKENS > 0 {
-        (total_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    let recent_inputs = collect_recent_user_inputs(state, 6);
-
-    let mut prompt = String::from(SUMMARIZE_PROMPT_BASE);
-    prompt.push('\n');
-    prompt.push_str("Session snapshot:\n");
-    prompt.push_str(&format!(
-        "- Active profile: {}\n",
-        state.current_profile_name
-    ));
-    prompt.push_str(&format!(
-        "- Total tokens used: {} (prompt: {}, completion: {})\n",
-        total_tokens, prompt_tokens, completion_tokens
-    ));
-    prompt.push_str(&format!(
-        "- Context window usage: {:.1}% of {} tokens\n",
-        context_usage_pct.min(100.0),
-        CONTEXT_MAX_UTIL_TOKENS
-    ));
-    if !recent_inputs.is_empty() {
-        prompt.push('\n');
-        prompt.push_str("Recent user inputs to emphasize:\n");
-        for input in recent_inputs {
-            prompt.push_str("- ");
-            prompt.push_str(&input);
-            prompt.push('\n');
-        }
-    }
-    prompt.push('\n');
-    prompt.push_str(
-        "Be precise, note outstanding TODOs or follow-ups, and reflect any cost or context considerations mentioned earlier.\n",
-    );
-    prompt.push_str(
-        "When ready, create or overwrite `summary.md` using the tool call and populate it with the markdown summary.\n",
-    );
-
-    prompt
-}
-
-fn collect_recent_user_inputs(state: &AppState, limit: usize) -> Vec<String> {
-    let mut entries = Vec::new();
-    for message in state.messages.iter().rev() {
-        match &message.content {
-            MessageContent::Plain(text, _) | MessageContent::PlainText(text) => {
-                let trimmed = text.trim();
-                if let Some(stripped) = trimmed.strip_prefix("→ ") {
-                    entries.push(stripped.trim().to_string());
-                } else if trimmed.starts_with('/') {
-                    entries.push(trimmed.to_string());
-                }
-            }
-            _ => {}
-        }
-        if entries.len() >= limit {
-            break;
-        }
-    }
-    entries.reverse();
-    entries
-}
-
 fn handle_input_submitted_with(
     state: &mut AppState,
     s: String,
@@ -2077,7 +2023,7 @@ fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgr
 /// Updates command palette scroll position to keep selected item visible
 fn update_command_palette_scroll(state: &mut AppState) {
     let filtered_commands =
-        crate::services::command_palette::filter_commands(&state.command_palette_search);
+        crate::services::commands::filter_commands(&state.command_palette_search);
     let total_commands = filtered_commands.len();
 
     if total_commands == 0 {
@@ -2107,7 +2053,7 @@ fn update_command_palette_scroll(state: &mut AppState) {
 fn handle_up_navigation(state: &mut AppState) {
     if state.show_command_palette {
         let filtered_commands =
-            crate::services::command_palette::filter_commands(&state.command_palette_search);
+            crate::services::commands::filter_commands(&state.command_palette_search);
         if state.command_palette_selected > 0 {
             state.command_palette_selected -= 1;
         } else {
@@ -2177,7 +2123,7 @@ fn handle_down_navigation(
 ) {
     if state.show_command_palette {
         let filtered_commands =
-            crate::services::command_palette::filter_commands(&state.command_palette_search);
+            crate::services::commands::filter_commands(&state.command_palette_search);
         if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
             state.command_palette_selected += 1;
         } else {
@@ -2506,60 +2452,6 @@ fn handle_retry_tool_call(
     }
 }
 
-// auto approve current tool
-#[allow(dead_code)]
-fn list_auto_approved_tools(state: &mut AppState) {
-    // No dialog open - show current auto-approve settings and allow disabling
-    let config = state.auto_approve_manager.get_config();
-    let mut auto_approved_tools: Vec<_> = config
-        .tools
-        .iter()
-        .filter(|(_, policy)| **policy == AutoApprovePolicy::Auto)
-        .collect();
-
-    // Filter by allowed_tools if configured
-    if let Some(allowed_tools) = &state.allowed_tools
-        && !allowed_tools.is_empty()
-    {
-        auto_approved_tools.retain(|(tool_name, _)| allowed_tools.contains(tool_name));
-    }
-
-    if auto_approved_tools.is_empty() {
-        let message = if state
-            .allowed_tools
-            .as_ref()
-            .is_some_and(|tools| !tools.is_empty())
-        {
-            "No allowed tools are currently set to auto-approve."
-        } else {
-            "No tools are currently set to auto-approve."
-        };
-        push_styled_message(state, message, Color::Cyan, "", Color::Cyan);
-    } else {
-        let tool_list = auto_approved_tools
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        // add a spacing marker
-        state.messages.push(Message::plain_text(""));
-        push_styled_message(
-            state,
-            &format!("Tools currently set to auto-approve: {}", tool_list),
-            Color::Yellow,
-            "",
-            Color::Yellow,
-        );
-        // push_styled_message(
-        //     state,
-        //     "💡 To disable auto-approve for a tool, type: /disable_auto_approve <tool_name>",
-        //     Color::Cyan,
-        //     "",
-        //     Color::Cyan,
-        // );
-    }
-}
-
 pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // Normalize line endings: many terminals convert newlines to \r when pasting,
     // but textarea expects \n. This is the same fix used in Codex.
@@ -2618,60 +2510,12 @@ pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &
     }
 }
 
-fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    state.message_tool_calls = None;
-    state.message_approved_tools.clear();
-    state.message_rejected_tools.clear();
-    state.tool_call_execution_order.clear();
-    state.session_tool_calls_queue.clear();
-    state.toggle_approved_message = true;
-
-    state.messages.clear();
-    state
-        .messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
-    render_system_message(state, "Resuming last session.");
-
-    // Reset usage for the resumed session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-        prompt_tokens_details: None,
-    };
-
-    let _ = output_tx.try_send(OutputEvent::ResumeSession);
-
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
-}
-
-fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
-    let _ = output_tx.try_send(OutputEvent::NewSession);
-    state.text_area.set_text("");
-    state.messages.clear();
-    state
-        .messages
-        .extend(welcome_messages(state.latest_version.clone(), state));
-    render_system_message(state, "New session started.");
-
-    // Reset usage for the new session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-        prompt_tokens_details: None,
-    };
-
-    state.show_helper_dropdown = false;
-}
-
 fn execute_command_palette_selection(
     state: &mut AppState,
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
 ) {
-    use crate::services::command_palette::{CommandAction, filter_commands};
+    use crate::services::commands::{CommandAction, filter_commands};
 
     let filtered_commands = filter_commands(&state.command_palette_search);
     if filtered_commands.is_empty() || state.command_palette_selected >= filtered_commands.len() {
@@ -2684,73 +2528,34 @@ fn execute_command_palette_selection(
     state.show_command_palette = false;
     state.command_palette_search.clear();
 
-    // Execute the command based on its action
-    match selected_command.action {
-        CommandAction::OpenProfileSwitcher => {
-            let _ = input_tx.try_send(InputEvent::ShowProfileSwitcher);
+    // Execute the command - use unified executor for slash commands
+    if let Some(command_id) = selected_command.action.to_command_id() {
+        use crate::services::commands::{CommandContext, execute_command};
+        let ctx = CommandContext {
+            state,
+            input_tx,
+            output_tx,
+        };
+        if let Err(e) = execute_command(command_id, ctx) {
+            push_error_message(state, &e, None);
         }
-        CommandAction::OpenRulebookSwitcher => {
-            let _ = input_tx.try_send(InputEvent::ShowRulebookSwitcher);
-        }
-        CommandAction::OpenShortcuts => {
-            let _ = input_tx.try_send(InputEvent::ShowShortcuts);
-        }
-        CommandAction::NewSession => {
-            new_session(state, output_tx);
-        }
-        CommandAction::OpenSessions => {
-            state.text_area.set_text("/sessions");
-            let _ = output_tx.try_send(OutputEvent::ListSessions);
-        }
-        CommandAction::ResumeSession => {
-            resume_session(state, output_tx);
-        }
-        CommandAction::ShowStatus => {
-            push_status_message(state);
-        }
-        CommandAction::MemorizeConversation => {
-            push_memorize_message(state);
-            let _ = output_tx.try_send(OutputEvent::Memorize);
-        }
-        CommandAction::SubmitIssue => {
-            push_issue_message(state);
-        }
-        CommandAction::GetSupport => {
-            push_support_message(state);
-        }
-        CommandAction::ShowUsage => {
-            push_usage_message(state);
-        }
-        CommandAction::SwitchModel => match switch_model(state) {
-            Ok(()) => {
-                let _ = output_tx.try_send(OutputEvent::SwitchModel(state.model.clone()));
-                push_model_message(state);
+    } else {
+        // Handle non-slash commands (keyboard shortcuts)
+        match selected_command.action {
+            CommandAction::OpenProfileSwitcher => {
+                let _ = input_tx.try_send(InputEvent::ShowProfileSwitcher);
             }
-            Err(e) => {
-                push_error_message(state, &e, None);
+            CommandAction::OpenRulebookSwitcher => {
+                let _ = input_tx.try_send(InputEvent::ShowRulebookSwitcher);
             }
-        },
-    }
-    state.text_area.set_text("");
-    state.show_helper_dropdown = false;
-}
-
-fn switch_model(state: &mut AppState) -> Result<(), String> {
-    match state.model {
-        AgentModel::Smart => {
-            if state.current_message_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
-                state.model = AgentModel::Eco;
-                Ok(())
-            } else {
-                Err(
-                    "Cannot switch model: context exceeds eco model context window size."
-                        .to_string(),
-                )
+            CommandAction::OpenShortcuts => {
+                let _ = input_tx.try_send(InputEvent::ShowShortcuts);
+            }
+            _ => {
+                // Should not happen - all slash commands should be handled above
             }
         }
-        AgentModel::Eco => {
-            state.model = AgentModel::Smart;
-            Ok(())
-        }
+        state.text_area.set_text("");
+        state.show_helper_dropdown = false;
     }
 }
