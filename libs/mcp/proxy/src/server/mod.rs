@@ -258,12 +258,11 @@ impl ServerHandler for ProxyServer {
                     let restored_arguments_str = self
                         .secret_manager
                         .restore_secrets_in_string(&arguments_str);
-                    
+
                     if let Ok(restored_arguments) = serde_json::from_str(&restored_arguments_str) {
                         tool_params.arguments = Some(restored_arguments);
                     }
                 }
-
                 let mut result = client.call_tool(tool_params).await.map_err(|e| match e {
                     ServiceError::McpError(err) => err,
                     _ => ErrorData::internal_error(
