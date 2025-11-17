@@ -143,16 +143,41 @@ Stakpak can run as an [Model Context Protocol (MCP)](https://modelcontextprotoco
 
 ```bash
 # Local tools only (no API key required, mTLS enabled by default)
-stakpak mcp --tool-mode local
+stakpak mcp start --tool-mode local
 
 # Remote tools only (AI tools optimized for DevOps)
-stakpak mcp --tool-mode remote
+stakpak mcp start --tool-mode remote
 
 # Combined mode (default - all tools with full security)
-stakpak mcp
+stakpak mcp start
 
 # Disable mTLS (NOT recommended for production)
-stakpak mcp --disable-mcp-mtls
+stakpak mcp start --disable-mcp-mtls
+```
+
+Additional flags for the MCP server:
+
+- `--disable-secret-redaction` – **not recommended**; prints secrets in plaintext to the console
+- `--privacy-mode` – redacts additional private data like IP addresses and AWS account IDs
+- `--enable-slack-tools` – enables experimental Slack tools
+- `--index-big-project` – allows indexing of large projects (more than 500 supported files)
+
+#### MCP Proxy Server
+
+Stakpak also includes an MCP proxy server that can multiplex connections to multiple upstream MCP servers using a configuration file.
+
+```bash
+# Start MCP proxy with automatic config discovery
+stakpak mcp proxy
+
+# Start MCP proxy with explicit config file
+stakpak mcp proxy --config-file ~/.stakpak/mcp.toml
+
+# Disable secret redaction (NOT recommended – secrets will be printed in logs)
+stakpak mcp proxy --disable-secret-redaction
+
+# Enable privacy mode to redact IPs, account IDs, etc.
+stakpak mcp proxy --privacy-mode
 ```
 
 ### Agent Client Protocol (ACP)
