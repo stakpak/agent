@@ -189,6 +189,24 @@ fn expand_volume_path(volume: String) -> String {
     }
 }
 
+/// Helper function to escape an argument for shell usage
+/// Wraps arguments containing spaces or special characters in quotes
+fn shell_escape_arg(arg: &str) -> String {
+    // If the argument contains spaces, quotes, or other special characters, quote it
+    if arg.contains(' ')
+        || arg.contains('\'')
+        || arg.contains('"')
+        || arg.contains('$')
+        || arg.contains('\\')
+    {
+        // Escape any existing quotes and wrap in double quotes
+        let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{}\"", escaped)
+    } else {
+        arg.to_string()
+    }
+}
+
 /// Execute warden command with proper TTY handling and streaming
 fn execute_warden_command(mut cmd: Command, needs_tty: bool) -> Result<(), String> {
     if needs_tty {
@@ -370,8 +388,12 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
         cmd.args(["--env", &format!("STAKPAK_API_ENDPOINT={}", api_endpoint)]);
     }
 
-    // Join all stakpak arguments into a single command string
-    let stakpak_cmd = stakpak_args.join(" ");
+    // Join all stakpak arguments into a single command string, properly escaping arguments
+    let stakpak_cmd = stakpak_args
+        .iter()
+        .map(|arg| shell_escape_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
     cmd.arg(stakpak_cmd);
 
     // Execute the warden command with TTY support

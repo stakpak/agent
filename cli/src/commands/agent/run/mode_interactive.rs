@@ -11,6 +11,7 @@ use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
+use crate::commands::warden;
 use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
@@ -943,8 +944,31 @@ pub async fn run_interactive(
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
 
-            // Update ctx and restart
+            // Update ctx
             ctx = new_config;
+
+            // Check if warden is enabled in the new profile and we're not already inside warden
+            let should_use_warden = ctx.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
+                && std::env::var("STAKPAK_SKIP_WARDEN").is_err();
+
+            if should_use_warden {
+                // Set the profile environment variable so warden knows which profile to use
+                // This is safe because we're setting it for the current process before re-execution
+                unsafe {
+                    std::env::set_var("STAKPAK_PROFILE", &ctx.profile_name);
+                }
+
+                // Re-execute stakpak inside warden container
+                if let Err(e) =
+                    warden::run_stakpak_in_warden(ctx, &std::env::args().collect::<Vec<_>>()).await
+                {
+                    return Err(format!("Failed to run stakpak in warden: {}", e));
+                }
+                // Exit after warden execution completes (warden will handle the restart)
+                return Ok(());
+            }
+
+            // Continue the loop with the new profile
             continue 'profile_switch_loop;
         }
 
