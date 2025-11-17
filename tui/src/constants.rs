@@ -1,8 +1,26 @@
+// ========== Context & Token Limits ==========
 pub const CONTEXT_LESS_CHARGE_LIMIT: u32 = 200_000;
 pub const CONTEXT_MAX_UTIL_TOKENS: u32 = 1_000_000;
 pub const CONTEXT_MAX_UTIL_TOKENS_ECO: u32 = 200_000; // Claude Haiku 4.5 limit
 pub const CONTEXT_HIGH_UTIL_THRESHOLD: u32 = CONTEXT_LESS_CHARGE_LIMIT * 9 / 10;
 pub const CONTEXT_APPROACH_PERCENT: u64 = 85;
+
+// ========== Input & Shell Constants ==========
+pub const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
+
+// ========== UI & Scrolling Constants ==========
+pub const SCROLL_LINES: usize = 1;
+pub const SCROLL_BUFFER_LINES: usize = 2;
+pub const DROPDOWN_MAX_HEIGHT: usize = 8;
+pub const MAX_PASTE_CHAR_COUNT: usize = 1000;
+pub const APPROVAL_POPUP_WIDTH_PERCENT: f32 = 0.8;
+
+// ========== Error Messages ==========
+pub const EXCEEDED_API_LIMIT_ERROR: &str = "Exceeded API limit";
+pub const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str = "Exceeded credits plan limit. Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.";
+
+// ========== File Paths ==========
+pub const AUTO_APPROVE_CONFIG_PATH: &str = ".stakpak/session/auto_approve.json";
 
 #[derive(Clone, Copy)]
 pub struct ContextPricingTier {

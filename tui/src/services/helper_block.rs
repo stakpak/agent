@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::constants::{EXCEEDED_API_LIMIT_ERROR, EXCEEDED_API_LIMIT_ERROR_MESSAGE};
 use crate::services::message::{Message, MessageContent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -567,9 +568,6 @@ pub fn push_clear_message(state: &mut AppState) {
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
     state.messages.extend(welcome_msg);
 }
-
-const EXCEEDED_API_LIMIT_ERROR: &str = "Exceeded API limit";
-const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str = "Exceeded credits plan limit. Please top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.";
 
 pub fn handle_errors(error: String) -> String {
     if error.contains(EXCEEDED_API_LIMIT_ERROR) {

@@ -309,7 +309,6 @@ pub async fn run_interactive(
                             add_subagents(&messages, &user_input, &subagent_configs);
 
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
-                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                         tools_queue.clear();
                         messages.push(user_message(user_input));
                     }
@@ -894,8 +893,6 @@ pub async fn run_interactive(
                                 continue;
                             }
                         }
-
-                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     }
                     Err(_) => {
                         continue;
