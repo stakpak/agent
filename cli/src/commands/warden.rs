@@ -193,7 +193,12 @@ fn expand_volume_path(volume: String) -> String {
 /// Wraps arguments containing spaces or special characters in quotes
 fn shell_escape_arg(arg: &str) -> String {
     // If the argument contains spaces, quotes, or other special characters, quote it
-    if arg.contains(' ') || arg.contains('\'') || arg.contains('"') || arg.contains('$') || arg.contains('\\') {
+    if arg.contains(' ')
+        || arg.contains('\'')
+        || arg.contains('"')
+        || arg.contains('$')
+        || arg.contains('\\')
+    {
         // Escape any existing quotes and wrap in double quotes
         let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
         format!("\"{}\"", escaped)
