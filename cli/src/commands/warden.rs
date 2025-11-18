@@ -352,8 +352,17 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
     );
     cmd.args(["--image", &stakpak_image]);
 
-    // Enable TTY for interactive mode
-    cmd.arg("--tty");
+    // Determine if we need TTY (interactive mode) based on CLI args.
+    // For async/single-step modes (-a/--async or -p/--print), we avoid TTY so warden
+    // can run in non-interactive batch mode and exit cleanly.
+    let needs_tty = !args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-a" | "--async" | "-p" | "--print"));
+
+    // Enable TTY only when we are in fully interactive mode
+    if needs_tty {
+        cmd.arg("--tty");
+    }
 
     // Prepare and mount volumes (don't check enabled flag for this function)
     for volume in prepare_volumes(&config, false) {
@@ -396,6 +405,6 @@ pub async fn run_stakpak_in_warden(config: AppConfig, args: &[String]) -> Result
         .join(" ");
     cmd.arg(stakpak_cmd);
 
-    // Execute the warden command with TTY support
-    execute_warden_command(cmd, true)
+    // Execute the warden command with appropriate TTY handling
+    execute_warden_command(cmd, needs_tty)
 }
