@@ -1,0 +1,63 @@
+# git-cliff configuration for Stakpak CLI
+
+[changelog]
+header = """
+# Changelog\n
+All notable changes to Stakpak CLI will be documented in this file.\n
+"""
+body = """
+{% if version %}\
+    ## {{ version | trim_start_matches(pat="v") }}
+    Released on {{ timestamp | date(format="%Y-%m-%d") }}.
+{% else %}\
+    ## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {{ commit.message | upper_first | trim }}\
+          {% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/stakpak/cli/pull/{{ commit.remote.pr_number }}))\
+          {% endif %}\
+    {% endfor %}
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^style", group = "Code Style" },
+  { message = "^test", group = "Testing" },
+  { message = "^chore\\(release\\): prepare for", skip = true },
+  { message = "^chore\\(deps.*\\)", skip = true },
+  { message = "^chore\\(pr\\)", skip = true },
+  { message = "^chore\\(pull\\)", skip = true },
+  { message = "^chore|^ci", group = "Maintenance" },
+  { body = ".*security", group = "Security" },
+  { message = "^revert", group = "Reverts" },
+]
+protect_breaking_commits = false
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"
+
+# [remote.github]
+# owner = "stakpak"
+# repo = "cli"
+# Uncomment and set GITHUB_TOKEN to fetch PR numbers automatically
+
+[remote.github]
+owner = "stakpak"
+repo = "cli"
+
+[bump]
+features_always_bump_minor = true
+breaking_always_bump_major = true
