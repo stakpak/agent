@@ -8,6 +8,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 return None;
             }
             match key.code {
+                KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::HandleClipboardImagePaste)
+                }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::AttemptQuit)
                 }

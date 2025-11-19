@@ -54,6 +54,8 @@ pub enum InputEvent {
     ShellClear,
     ShellKill,
     HandlePaste(String),
+    /// Ctrl+V clipboard image paste (non-text, via system clipboard).
+    HandleClipboardImagePaste,
     InputDelete,
     InputDeleteWord,
     InputCursorStart,

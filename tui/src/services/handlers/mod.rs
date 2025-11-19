@@ -88,6 +88,9 @@ pub fn update(
         InputEvent::HandlePaste(text) => {
             input::handle_paste(state, text);
         }
+        InputEvent::HandleClipboardImagePaste => {
+            input::handle_clipboard_image_paste(state);
+        }
         InputEvent::InputDelete => {
             input::handle_input_delete(state);
         }

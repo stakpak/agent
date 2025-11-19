@@ -1,6 +1,7 @@
 pub mod approval_popup;
 pub mod auto_approve;
 pub mod bash_block;
+pub mod clipboard_paste;
 pub mod commands;
 pub mod context_popup;
 pub mod detect_term;

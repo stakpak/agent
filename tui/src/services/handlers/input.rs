@@ -2,9 +2,12 @@
 //!
 //! Handles all input-related events including text input, cursor movement, and paste operations.
 
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
 use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
+use crate::services::clipboard_paste::{
+    normalize_pasted_path, paste_image_to_temp_png, pasted_image_format,
+};
 use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
 use crate::services::helper_block::render_system_message;
@@ -12,6 +15,7 @@ use crate::services::helper_block::{push_clear_message, push_error_message, push
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::AgentModel;
+use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
@@ -487,7 +491,7 @@ pub fn handle_input_submitted_with(
     }
 }
 
-/// Handle paste operation
+/// Handle text paste (Event::Paste), including large text and image *paths*.
 pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // Normalize line endings: many terminals convert newlines to \r when pasting,
     // but textarea expects \n. This is the same fix used in Codex.
@@ -498,11 +502,59 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
         let placeholder = format!("[Pasted Content {char_count} chars]");
         state.text_area.insert_element(&placeholder);
         state.pending_pastes.push((placeholder, normalized_pasted));
+    } else if char_count > 1 && handle_paste_image_path(state, normalized_pasted.clone()) {
+        // When we detect and attach an image, insert a trailing space to keep typing fluid.
+        state.text_area.insert_str(" ");
     } else {
         state.text_area.insert_str(&normalized_pasted);
     }
 
     true
+}
+
+/// Handle Ctrl+V clipboard image paste (non-text clipboard images).
+pub fn handle_clipboard_image_paste(state: &mut AppState) {
+    // Show "Pasting..." hint while we try to read from the clipboard.
+    state.is_pasting = true;
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok((path, info)) = paste_image_to_temp_png() {
+            attach_image(
+                state,
+                path,
+                info.width,
+                info.height,
+                info.encoded_format.label(),
+            );
+        }
+    }
+    // On Android (or if clipboard access fails), we silently do nothing.
+    state.is_pasting = false;
+}
+
+fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
+    let Some(path_buf) = normalize_pasted_path(&pasted) else {
+        return false;
+    };
+
+    match image::image_dimensions(&path_buf) {
+        Ok((w, h)) => {
+            let format_label = pasted_image_format(&path_buf).label();
+            attach_image(state, path_buf, w, h, format_label);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, format_label: &str) {
+    let placeholder = format!("[image {width}x{height} {format_label}]");
+    // Insert as an element to match large‑paste placeholder behavior:
+    // styled distinctly and treated atomically for cursor/mutations.
+    state.text_area.insert_element(&placeholder);
+    state
+        .attached_images
+        .push(AttachedImage { placeholder, path });
 }
 
 /// Handle input delete (clear input)
