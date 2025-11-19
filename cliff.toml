@@ -58,6 +58,4 @@ sort_commits = "oldest"
 owner = "stakpak"
 repo = "cli"
 
-[bump]
-features_always_bump_minor = true
-breaking_always_bump_major = true
+
