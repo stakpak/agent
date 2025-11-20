@@ -4946,6 +4946,7 @@ version = "0.2.78"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "clap 4.5.41",
  "config",

@@ -7,6 +7,7 @@ use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
+use base64::{engine::general_purpose, Engine as _};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -68,6 +69,8 @@ pub async fn run_interactive(
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
+        // Collect image uploads that will be attached to the next user message
+        let mut pending_images: Vec<(std::path::PathBuf, u32, u32, String)> = Vec::new();
         let mut total_session_usage = stakpak_shared::models::integrations::openai::Usage {
             prompt_tokens: 0,
             completion_tokens: 0,
@@ -268,6 +271,11 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
+                    OutputEvent::ImageUpload { path, width, height, format: _format } => {
+                        // Collect image uploads to attach to the next user message
+                        pending_images.push((path, width, height, _format));
+                        continue;
+                    }
                     OutputEvent::UserMessage(user_input, tool_calls_results) => {
                         // Loading will be managed by stream processing
                         let mut user_input = user_input.clone();
@@ -309,9 +317,73 @@ pub async fn run_interactive(
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
 
+                        // Build ChatMessage with images if any
+                        let user_msg = if !pending_images.is_empty() {
+                            // Convert images to base64 data URLs and create ContentPart array
+                            let mut content_parts: Vec<stakpak_shared::models::integrations::openai::ContentPart> = Vec::new();
+                            
+                            // Add text part first
+                            if !user_input.is_empty() {
+                                content_parts.push(stakpak_shared::models::integrations::openai::ContentPart {
+                                    r#type: "text".to_string(),
+                                    text: Some(user_input),
+                                    image_url: None,
+                                });
+                            }
+                            
+                            // Add image parts
+                            for (path, _width, _height, _format) in &pending_images {
+                                match std::fs::read(path) {
+                                    Ok(image_data) => {
+                                        // Determine MIME type from file extension
+                                        let mime_type = path
+                                            .extension()
+                                            .and_then(|ext| ext.to_str())
+                                            .map(|ext| match ext.to_lowercase().as_str() {
+                                                "png" => "image/png",
+                                                "jpg" | "jpeg" => "image/jpeg",
+                                                "gif" => "image/gif",
+                                                "webp" => "image/webp",
+                                                _ => "image/png",
+                                            })
+                                            .unwrap_or("image/png");
+                                        
+                                        let base64_data = general_purpose::STANDARD.encode(&image_data);
+                                        let data_url = format!("data:{};base64,{}", mime_type, base64_data);
+                                        
+                                        content_parts.push(stakpak_shared::models::integrations::openai::ContentPart {
+                                            r#type: "image_url".to_string(),
+                                            text: None,
+                                            image_url: Some(stakpak_shared::models::integrations::openai::ImageUrl {
+                                                url: data_url,
+                                                detail: None,
+                                            }),
+                                        });
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to read image file {}: {}", path.display(), e);
+                                    }
+                                }
+                            }
+                            
+                            // Clear pending images after processing
+                            pending_images.clear();
+                            
+                            ChatMessage {
+                                role: stakpak_shared::models::integrations::openai::Role::User,
+                                content: Some(stakpak_shared::models::integrations::openai::MessageContent::Array(content_parts)),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                            }
+                        } else {
+                            // No images, use simple text message
+                            user_message(user_input)
+                        };
+
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                         tools_queue.clear();
-                        messages.push(user_message(user_input));
+                        messages.push(user_msg);
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(

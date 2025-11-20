@@ -418,10 +418,26 @@ fn handle_input_submitted(
 
         let user_message_text = final_input.clone();
         if utilization_pct < 92 {
+            // Send user message
             let _ = output_tx.try_send(OutputEvent::UserMessage(
                 final_input.clone(),
                 state.shell_tool_calls.clone(),
             ));
+            
+            // Send image upload events for each attached image
+            for img in &state.attached_images {
+                // Get image dimensions if available
+                if let Ok((width, height)) = image::image_dimensions(&img.path) {
+                    let format = crate::services::clipboard_paste::pasted_image_format(&img.path).label().to_string();
+                    let _ = output_tx.try_send(OutputEvent::ImageUpload {
+                        path: img.path.clone(),
+                        width,
+                        height,
+                        format,
+                    });
+                }
+            }
+            
             let _ = input_tx.try_send(InputEvent::AddUserMessage(user_message_text));
         }
 
@@ -444,6 +460,8 @@ fn handle_input_submitted(
         }
         state.shell_tool_calls = None;
         state.text_area.set_text("");
+        // Clear attached images after sending
+        state.attached_images.clear();
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {

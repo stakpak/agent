@@ -117,6 +117,12 @@ pub enum InputEvent {
 #[derive(Debug)]
 pub enum OutputEvent {
     UserMessage(String, Option<Vec<ToolCallResult>>),
+    ImageUpload {
+        path: std::path::PathBuf,
+        width: u32,
+        height: u32,
+        format: String,
+    },
     AcceptTool(ToolCall),
     RejectTool(ToolCall, bool),
     ListSessions,
