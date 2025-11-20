@@ -7,7 +7,6 @@ use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
-use base64::{engine::general_purpose, Engine as _};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -17,6 +16,7 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
+use base64::{Engine as _, engine::general_purpose};
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
@@ -271,7 +271,12 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
-                    OutputEvent::ImageUpload { path, width, height, format: _format } => {
+                    OutputEvent::ImageUpload {
+                        path,
+                        width,
+                        height,
+                        format: _format,
+                    } => {
                         // Collect image uploads to attach to the next user message
                         pending_images.push((path, width, height, _format));
                         continue;
@@ -320,17 +325,22 @@ pub async fn run_interactive(
                         // Build ChatMessage with images if any
                         let user_msg = if !pending_images.is_empty() {
                             // Convert images to base64 data URLs and create ContentPart array
-                            let mut content_parts: Vec<stakpak_shared::models::integrations::openai::ContentPart> = Vec::new();
-                            
+                            let mut content_parts: Vec<
+                                stakpak_shared::models::integrations::openai::ContentPart,
+                            > = Vec::new();
+
                             // Add text part first
-                            if !user_input.is_empty() {
-                                content_parts.push(stakpak_shared::models::integrations::openai::ContentPart {
-                                    r#type: "text".to_string(),
-                                    text: Some(user_input),
-                                    image_url: None,
-                                });
+                            let text_input = user_input.clone();
+                            if !text_input.is_empty() {
+                                content_parts.push(
+                                    stakpak_shared::models::integrations::openai::ContentPart {
+                                        r#type: "text".to_string(),
+                                        text: Some(text_input),
+                                        image_url: None,
+                                    },
+                                );
                             }
-                            
+
                             // Add image parts
                             for (path, _width, _height, _format) in &pending_images {
                                 match std::fs::read(path) {
@@ -347,10 +357,12 @@ pub async fn run_interactive(
                                                 _ => "image/png",
                                             })
                                             .unwrap_or("image/png");
-                                        
-                                        let base64_data = general_purpose::STANDARD.encode(&image_data);
-                                        let data_url = format!("data:{};base64,{}", mime_type, base64_data);
-                                        
+
+                                        let base64_data =
+                                            general_purpose::STANDARD.encode(&image_data);
+                                        let data_url =
+                                            format!("data:{};base64,{}", mime_type, base64_data);
+
                                         content_parts.push(stakpak_shared::models::integrations::openai::ContentPart {
                                             r#type: "image_url".to_string(),
                                             text: None,
@@ -361,20 +373,30 @@ pub async fn run_interactive(
                                         });
                                     }
                                     Err(e) => {
-                                        log::warn!("Failed to read image file {}: {}", path.display(), e);
+                                        log::warn!(
+                                            "Failed to read image file {}: {}",
+                                            path.display(),
+                                            e
+                                        );
                                     }
                                 }
                             }
-                            
+
                             // Clear pending images after processing
                             pending_images.clear();
-                            
-                            ChatMessage {
-                                role: stakpak_shared::models::integrations::openai::Role::User,
-                                content: Some(stakpak_shared::models::integrations::openai::MessageContent::Array(content_parts)),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
+
+                            // Ensure we have at least one content part
+                            if content_parts.is_empty() {
+                                // Fallback to text-only if all images failed
+                                user_message(user_input)
+                            } else {
+                                ChatMessage {
+                                    role: stakpak_shared::models::integrations::openai::Role::User,
+                                    content: Some(stakpak_shared::models::integrations::openai::MessageContent::Array(content_parts)),
+                                    name: None,
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                }
                             }
                         } else {
                             // No images, use simple text message
