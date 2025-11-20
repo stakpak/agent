@@ -237,6 +237,13 @@ fn handle_input_submitted(
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
 ) {
+    if state.show_recovery_options_popup {
+        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected) {
+            eprintln!("Selected recovery option: {}", selected.id);
+        }
+        state.show_recovery_options_popup = false;
+        return;
+    }
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
             let input = state.input().to_string();

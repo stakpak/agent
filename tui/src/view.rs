@@ -179,6 +179,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.show_context_popup {
         crate::services::context_popup::render_context_popup(f, state);
     }
+
+    if state.show_recovery_options_popup {
+        crate::services::recovery_popup::render_recovery_popup(f, state);
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped

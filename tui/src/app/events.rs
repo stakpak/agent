@@ -1,5 +1,6 @@
 use ratatui::style::Color;
 use stakpak_api::ListRuleBook;
+use stakpak_api::models::RecoveryOptionsResponse;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -28,6 +29,8 @@ pub enum InputEvent {
     InputSubmittedWith(String),
     InputSubmittedWithColor(String, Color),
     MessageToolCalls(Vec<ToolCall>),
+    BulkAutoApproveMessage,
+    ResetAutoApproveMessage,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -106,6 +109,9 @@ pub enum InputEvent {
     RulebookSearchBackspace,
     HandleCtrlS,
     ToggleMoreShortcuts,
+    // Recovery options events
+    RecoveryOptions(RecoveryOptionsResponse),
+    ExpandNotifications,
     // Usage tracking events
     StreamUsage(stakpak_shared::models::integrations::openai::Usage),
     RequestTotalUsage,

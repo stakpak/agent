@@ -297,6 +297,12 @@ pub fn update(
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
         }
+        InputEvent::RecoveryOptions(response) => {
+            popup::handle_recovery_options(state, response);
+        }
+        InputEvent::ExpandNotifications => {
+            popup::handle_expand_notifications(state);
+        }
 
         // Message handlers
         InputEvent::StreamAssistantMessage(id, s) => {

@@ -11,6 +11,7 @@ use crate::services::message::{
 };
 use ratatui::style::Style;
 use stakpak_api::ListRuleBook;
+use stakpak_api::models::RecoveryOptionsResponse;
 use tokio::sync::mpsc::Sender;
 
 /// Filter rulebooks based on search input
@@ -444,4 +445,31 @@ pub fn handle_toggle_collapsed_messages(
 /// Handle toggle context popup event
 pub fn handle_toggle_context_popup(state: &mut AppState) {
     state.show_context_popup = !state.show_context_popup;
+}
+
+// ========== Recovery Options Handlers ==========
+
+/// Handle recovery options event
+pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsResponse) {
+    eprintln!("Recovery response: {:?}", response);
+    state.recovery_options = response.recovery_options.clone();
+    state.recovery_response = Some(response);
+    state.recovery_popup_selected = 0;
+    if state.recovery_options.is_empty() {
+        state.show_recovery_options_popup = false;
+    }
+}
+
+/// Handle expand notifications event (recovery options popup toggle)
+pub fn handle_expand_notifications(state: &mut AppState) {
+    if state.recovery_options.is_empty() {
+        return;
+    }
+
+    if state.show_recovery_options_popup {
+        state.show_recovery_options_popup = false;
+    } else {
+        state.show_recovery_options_popup = true;
+        state.recovery_popup_selected = 0;
+    }
 }

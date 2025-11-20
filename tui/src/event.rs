@@ -30,7 +30,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::HandleCtrlS)
                 }
                 KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ToggleContextPopup)
+                    Some(InputEvent::ExpandNotifications)
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RulebookSwitcherDeselectAll)
