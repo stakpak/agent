@@ -1,6 +1,6 @@
 use ratatui::style::Color;
 use stakpak_api::ListRuleBook;
-use stakpak_api::models::RecoveryOptionsResponse;
+use stakpak_api::models::{RecoveryActionType, RecoveryMode, RecoveryOptionsResponse};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -116,6 +116,9 @@ pub enum InputEvent {
     StreamUsage(stakpak_shared::models::integrations::openai::Usage),
     RequestTotalUsage,
     TotalUsage(stakpak_shared::models::integrations::openai::Usage),
+    // Checkpoint message replacement
+    ReplaceMessagesFromCheckpoint(Vec<stakpak_shared::models::integrations::openai::ChatMessage>),
+    SetRenderedCheckpointMessages(Vec<crate::services::message::Message>),
 }
 
 #[derive(Debug)]
@@ -134,4 +137,10 @@ pub enum OutputEvent {
     RequestCurrentRulebooks,
     RequestTotalUsage,
     SwitchModel(AgentModel),
+    RecoveryAction {
+        action: RecoveryActionType,
+        recovery_request_id: String,
+        selected_option_id: Uuid,
+        mode: RecoveryMode,
+    },
 }

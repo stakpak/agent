@@ -13,7 +13,9 @@ use regex::Regex;
 use serde_json::Value;
 #[cfg(test)]
 use stakpak_shared::models::integrations::openai::FunctionCall;
-use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{
+    ChatMessage, ContentPart, MessageContent as ChatMessageContent, Role, ToolCall, ToolCallResult,
+};
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BubbleColors {
@@ -1094,6 +1096,121 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
                 .join(" ")
         }
     }
+}
+
+/// Convert ChatMessage vector to TUI Message vector for checkpoint restoration
+/// This function processes messages in the same way as extract_checkpoint_messages_and_tool_calls
+/// but creates Message objects directly instead of sending events
+pub fn convert_chat_messages_to_tui_messages(
+    chat_messages: Vec<ChatMessage>,
+    welcome_messages: Vec<Message>,
+) -> Vec<Message> {
+    let mut tui_messages = Vec::new();
+    tui_messages.extend(welcome_messages);
+
+    // Build a map of tool_call_id -> tool_call for efficient lookup
+    let mut tool_call_map: std::collections::HashMap<String, ToolCall> =
+        std::collections::HashMap::new();
+    for msg in &chat_messages {
+        if let Some(tool_calls) = &msg.tool_calls {
+            for tool_call in tool_calls {
+                tool_call_map.insert(tool_call.id.clone(), tool_call.clone());
+            }
+        }
+    }
+
+    for message in chat_messages {
+        match message.role {
+            Role::Assistant => {
+                if let Some(content) = &message.content {
+                    let content_str = match content {
+                        ChatMessageContent::String(s) => s.clone(),
+                        ChatMessageContent::Array(parts) => parts
+                            .iter()
+                            .filter_map(|part: &ContentPart| part.text.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    };
+
+                    // Check if this message has tool calls
+                    if let Some(tool_calls) = &message.tool_calls {
+                        for tool_call in tool_calls {
+                            tui_messages.push(Message {
+                                id: Uuid::parse_str(&tool_call.id)
+                                    .unwrap_or_else(|_| Uuid::new_v4()),
+                                content: MessageContent::RenderPendingBorderBlock(
+                                    tool_call.clone(),
+                                    false,
+                                ),
+                                is_collapsed: None,
+                            });
+                        }
+                    }
+
+                    // Add assistant message content if present
+                    if !content_str.is_empty() {
+                        tui_messages.push(Message::assistant(None, content_str, None));
+                    }
+                }
+            }
+            Role::User => {
+                if let Some(content) = &message.content {
+                    let content_str = match content {
+                        ChatMessageContent::String(s) => s.clone(),
+                        ChatMessageContent::Array(parts) => parts
+                            .iter()
+                            .filter_map(|part: &ContentPart| part.text.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    };
+
+                    if !content_str.is_empty() {
+                        // Add spacing before user message if not the first message
+                        if !tui_messages.is_empty() {
+                            tui_messages.push(Message::plain_text(""));
+                        }
+                        tui_messages.push(Message::user(content_str, None));
+                        // Add spacing after user message
+                        tui_messages.push(Message::plain_text(""));
+                    }
+                }
+            }
+            Role::Tool => {
+                // Find the corresponding tool call from the map
+                if let Some(tool_call_id) = &message.tool_call_id
+                    && tool_call_map.contains_key(tool_call_id)
+                {
+                    let result_content = message
+                        .content
+                        .as_ref()
+                        .map(|c| match c {
+                            ChatMessageContent::String(s) => s.clone(),
+                            ChatMessageContent::Array(parts) => parts
+                                .iter()
+                                .filter_map(|part: &ContentPart| part.text.clone())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        })
+                        .unwrap_or_default();
+
+                    let message_id = Uuid::parse_str(tool_call_id.as_str()).ok();
+                    tui_messages.push(Message::render_streaming_border_block(
+                        &result_content,
+                        "Tool Streaming",
+                        "Result",
+                        None,
+                        "Streaming",
+                        message_id,
+                    ));
+                }
+            }
+            _ => {
+                // System and other roles - skip or handle as needed
+            }
+        }
+    }
+
+    tui_messages
 }
 
 #[cfg(test)]

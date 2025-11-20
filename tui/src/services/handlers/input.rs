@@ -77,6 +77,29 @@ pub fn handle_input_submitted_event(
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
         return;
     }
+    if state.show_recovery_options_popup {
+        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
+            && let Some(response) = &state.recovery_response
+        {
+            let recovery_request_id = response.id.clone().unwrap_or_default();
+            let selected_option_id = selected.id;
+            let mode = selected.mode.clone();
+
+            // Send recovery action
+            let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+                action: stakpak_api::models::RecoveryActionType::Approve,
+                recovery_request_id,
+                selected_option_id,
+                mode,
+            });
+        }
+
+        state.recovery_options.clear();
+        state.recovery_response = None;
+        state.recovery_popup_selected = 0;
+        state.show_recovery_options_popup = false;
+        return;
+    }
     if state.approval_popup.is_visible() {
         // Update approved and rejected tool calls from popup
         state.message_approved_tools = state
@@ -238,9 +261,6 @@ fn handle_input_submitted(
     shell_tx: &Sender<InputEvent>,
 ) {
     if state.show_recovery_options_popup {
-        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected) {
-            eprintln!("Selected recovery option: {}", selected.id);
-        }
         state.show_recovery_options_popup = false;
         return;
     }

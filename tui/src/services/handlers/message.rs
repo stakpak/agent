@@ -2,10 +2,12 @@
 //!
 //! Handles all message-related events including streaming messages, adding user messages, and usage tracking.
 
-use crate::app::AppState;
-use crate::services::helper_block::push_usage_message;
-use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
-use stakpak_shared::models::integrations::openai::Usage;
+use crate::app::{AppState, InputEvent};
+use crate::services::helper_block::{push_usage_message, welcome_messages};
+use crate::services::message::{
+    Message, MessageContent, convert_chat_messages_to_tui_messages, invalidate_message_lines_cache,
+};
+use stakpak_shared::models::integrations::openai::{ChatMessage, Usage};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -130,4 +132,66 @@ pub fn handle_total_usage(state: &mut AppState, usage: Usage) {
         state.messages.pop(); // Remove old message
         push_usage_message(state);
     }
+}
+
+/// Handle replace messages from checkpoint event
+pub fn handle_replace_messages_from_checkpoint(
+    state: &mut AppState,
+    chat_messages: Vec<ChatMessage>,
+    input_tx: &Sender<InputEvent>,
+    _message_area_height: usize,
+    _message_area_width: usize,
+) {
+    // Clear current messages immediately
+    state.messages.clear();
+    invalidate_message_lines_cache(state);
+
+    // Clone necessary data for background thread
+    let input_tx_clone = input_tx.clone();
+    let chat_messages_clone = chat_messages.clone();
+    let latest_version = state.latest_version.clone();
+
+    // Get welcome messages before moving state
+    let welcome_messages = welcome_messages(latest_version, state);
+
+    // Spawn background thread to render messages
+    std::thread::spawn(move || {
+        let rendered_messages =
+            convert_chat_messages_to_tui_messages(chat_messages_clone, welcome_messages);
+
+        // Use tokio runtime handle to send async event
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.block_on(async {
+                input_tx_clone
+                    .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
+                    .await
+                    .ok();
+            });
+        } else {
+            // Fallback: try to create a new runtime if no handle is available
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    input_tx_clone
+                        .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
+                        .await
+                        .ok();
+                });
+            }
+        }
+    });
+}
+
+/// Handle set rendered checkpoint messages event
+pub fn handle_set_rendered_checkpoint_messages(
+    state: &mut AppState,
+    rendered_messages: Vec<Message>,
+    message_area_height: usize,
+    message_area_width: usize,
+) {
+    // Replace messages with rendered checkpoint messages
+    state.messages = rendered_messages;
+    invalidate_message_lines_cache(state);
+
+    use crate::services::handlers::navigation;
+    navigation::adjust_scroll(state, message_area_height, message_area_width);
 }

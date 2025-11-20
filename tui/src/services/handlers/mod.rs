@@ -323,6 +323,23 @@ pub fn update(
         InputEvent::TotalUsage(usage) => {
             message::handle_total_usage(state, usage);
         }
+        InputEvent::ReplaceMessagesFromCheckpoint(chat_messages) => {
+            message::handle_replace_messages_from_checkpoint(
+                state,
+                chat_messages,
+                input_tx,
+                message_area_height,
+                message_area_width,
+            );
+        }
+        InputEvent::SetRenderedCheckpointMessages(rendered_messages) => {
+            message::handle_set_rendered_checkpoint_messages(
+                state,
+                rendered_messages,
+                message_area_height,
+                message_area_width,
+            );
+        }
 
         // Misc handlers
         InputEvent::Error(err) => {

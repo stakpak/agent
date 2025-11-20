@@ -451,7 +451,6 @@ pub fn handle_toggle_context_popup(state: &mut AppState) {
 
 /// Handle recovery options event
 pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsResponse) {
-    eprintln!("Recovery response: {:?}", response);
     state.recovery_options = response.recovery_options.clone();
     state.recovery_response = Some(response);
     state.recovery_popup_selected = 0;
