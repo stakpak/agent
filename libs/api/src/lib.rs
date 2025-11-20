@@ -15,7 +15,8 @@ pub use models::{RecoveryMode, RecoveryOption, RecoveryOptionsResponse};
 use serde_json::Value;
 use serde_json::json;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
+    AgentModel, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionStreamResponse,
+    ChatMessage, Tool,
 };
 use uuid::Uuid;
 
