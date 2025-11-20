@@ -2,7 +2,7 @@
 //!
 //! Contains the main TUI event loop and related helper functions.
 
-use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::handlers::tool::{
@@ -15,7 +15,7 @@ use crossterm::event::{
 };
 use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
+use stakpak_shared::models::integrations::openai::{AgentModel, ToolCallResultStatus};
 use std::io;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{Duration, interval};
@@ -46,6 +46,7 @@ pub async fn run_tui(
     allowed_tools: Option<&Vec<String>>,
     current_profile_name: String,
     rulebook_config: Option<RulebookConfig>,
+    model: AgentModel,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -77,15 +78,16 @@ pub async fn run_tui(
     // Create internal channel for event handling (needed for error reporting during initialization)
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
 
-    let mut state = AppState::new(
+    let mut state = AppState::new(AppStateOptions {
         latest_version,
         redact_secrets,
         privacy_mode,
         is_git_repo,
         auto_approve_tools,
         allowed_tools,
-        Some(internal_tx.clone()),
-    );
+        input_tx: Some(internal_tx.clone()),
+        model,
+    });
 
     // Set the current profile name and rulebook config
     state.current_profile_name = current_profile_name;
