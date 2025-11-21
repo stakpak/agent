@@ -7,6 +7,7 @@ members = [
     "libs/api",
     "libs/mcp/client",
     "libs/mcp/server",
+    "libs/mcp/proxy",
 ]
 default-members = ["cli"]
 
