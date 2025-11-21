@@ -353,13 +353,13 @@ mod tests {
 
         assert_eq!(processed.len(), 2);
 
-        // First line should have uppercase content in cyan
+        // First line should have checkpoint content with scroll hint, highlighted
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "-----------------------------------------checkpoint test123-----------------------------------------"
+            "---------------------------------checkpoint test123 - scroll ↑ for more----------------------------------"
         );
-        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
+        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::Yellow));
 
         // Second line should be unchanged
         assert_eq!(processed[1].0.spans.len(), 1);

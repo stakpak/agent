@@ -155,6 +155,10 @@ pub struct AppState {
     pub show_recovery_options_popup: bool,
     pub recovery_popup_selected: usize,
     pub recovery_response: Option<ApiRecoveryOptionsResponse>,
+    /// Checkpoint ID associated with the current recovery options (if any)
+    pub recovery_checkpoint_id: Option<Uuid>,
+    /// Internal flag used to trigger a one-time scroll to the recovery checkpoint
+    pub recovery_scroll_pending: bool,
 
     // ========== Configuration State ==========
     pub secret_manager: SecretManager,
@@ -342,6 +346,8 @@ impl AppState {
             show_recovery_options_popup: false,
             recovery_popup_selected: 0,
             recovery_response: None,
+            recovery_checkpoint_id: None,
+            recovery_scroll_pending: false,
             model: AgentModel::Smart,
         }
     }

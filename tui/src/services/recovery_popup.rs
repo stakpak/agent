@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::services::markdown_renderer::render_markdown_to_lines_safe;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -67,7 +68,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
     let mut list_state = ListState::default();
     list_state.select(Some(state.recovery_popup_selected));
 
-    let list_width = chunks[1].width.saturating_sub(2);
+    // let list_width = chunks[1].width.saturating_sub(2);
 
     let list_items: Vec<ListItem> = state
         .recovery_options
@@ -83,13 +84,20 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
                 idx == state.recovery_popup_selected,
             )]));
 
+            // Render the option reasoning as markdown inside the popup
             let summary = summarize_option(option);
-            let wrapped = textwrap::wrap(&summary, list_width as usize);
-            for line in wrapped {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("    {} ", line),
-                    Style::default().fg(Color::Gray),
-                )]));
+            let rendered_markdown = render_markdown_to_lines_safe(&summary).unwrap_or_default();
+
+            for line in rendered_markdown {
+                // Indent markdown content slightly and render with a subtle gray color
+                let mut spans: Vec<Span> = Vec::new();
+                spans.push(Span::styled("    ", Style::default().fg(Color::Gray)));
+                spans.extend(line.spans.into_iter().map(|mut span| {
+                    // Ensure markdown content uses a consistent gray foreground
+                    span.style = span.style.fg(Color::Gray);
+                    span
+                }));
+                lines.push(Line::from(spans));
             }
 
             lines.push(Line::from(""));
@@ -107,6 +115,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
         )
         .style(Style::default().fg(Color::Reset))
         .block(Block::default().borders(Borders::NONE));
+  
 
     f.render_stateful_widget(list, chunks[1], &mut list_state);
 

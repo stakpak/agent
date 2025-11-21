@@ -18,7 +18,7 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
-use stakpak_api::models::{ApiStreamError, RecoveryActionRequest, RecoveryMode};
+use stakpak_api::models::{ApiStreamError, RecoveryActionRequest};
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
@@ -99,7 +99,6 @@ pub async fn run_interactive(
         // Create fresh channels for this iteration
         let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
         let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
-        let output_tx_for_client = output_tx.clone();
         let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
         let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
@@ -191,7 +190,6 @@ pub async fn run_interactive(
         let api_key_for_client = api_key.clone();
         let api_endpoint_for_client = api_endpoint.clone();
         let shutdown_tx_for_client = shutdown_tx.clone();
-        let output_tx_for_recovery_clone = output_tx_for_client.clone();
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
             let client = Client::new(&ClientConfig {
@@ -633,7 +631,7 @@ pub async fn run_interactive(
                         action,
                         recovery_request_id,
                         selected_option_id,
-                        mode,
+                        mode: _,
                     } => {
                         let Some(session_id) = current_session_id else {
                             send_input_event(
@@ -651,7 +649,7 @@ pub async fn run_interactive(
                             selected_option_id: Some(selected_option_id),
                         };
 
-                        match client
+                        if let Err(err) = client
                             .submit_recovery_action(
                                 session_id,
                                 &recovery_request_id,
@@ -660,33 +658,14 @@ pub async fn run_interactive(
                             )
                             .await
                         {
-                            Ok(()) => {
-                                let mode_label = match mode {
-                                    RecoveryMode::Redirection => "REDIRECTION",
-                                    RecoveryMode::Revert => "REVERT",
-                                    RecoveryMode::ModelChange => "MODELCHANGE",
-                                };
-
-                                // Send user message with recovery option label
-                                // Note: This will trigger the normal message flow which will
-                                // eventually call the API and handle history_updated if needed
-                                let _ = output_tx_for_recovery_clone.try_send(
-                                    OutputEvent::UserMessage(
-                                        format!("Proceeding with recovery option [{}]", mode_label),
-                                        None,
-                                    ),
-                                );
-                            }
-                            Err(err) => {
-                                send_input_event(
-                                    &input_tx,
-                                    InputEvent::Error(format!(
-                                        "Failed to submit recovery action: {}",
-                                        err
-                                    )),
-                                )
-                                .await?;
-                            }
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(format!(
+                                    "Failed to submit recovery action: {}",
+                                    err
+                                )),
+                            )
+                            .await?;
                         }
                         continue;
                     }

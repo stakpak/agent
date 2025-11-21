@@ -154,30 +154,16 @@ pub fn handle_replace_messages_from_checkpoint(
     // Get welcome messages before moving state
     let welcome_messages = welcome_messages(latest_version, state);
 
-    // Spawn background thread to render messages
-    std::thread::spawn(move || {
+    // Spawn an async task on the existing Tokio runtime instead of a raw thread.
+    // This avoids leaking OS threads and lets the runtime shut everything down cleanly.
+    tokio::spawn(async move {
         let rendered_messages =
             convert_chat_messages_to_tui_messages(chat_messages_clone, welcome_messages);
 
-        // Use tokio runtime handle to send async event
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.block_on(async {
-                input_tx_clone
-                    .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
-                    .await
-                    .ok();
-            });
-        } else {
-            // Fallback: try to create a new runtime if no handle is available
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                rt.block_on(async {
-                    input_tx_clone
-                        .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
-                        .await
-                        .ok();
-                });
-            }
-        }
+        // Ignore errors if the TUI has already shut down.
+        let _ = input_tx_clone
+            .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
+            .await;
     });
 }
 

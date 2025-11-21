@@ -200,7 +200,7 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
-    let processed_lines = get_wrapped_message_lines_cached(state, width);
+    let mut processed_lines = get_wrapped_message_lines_cached(state, width);
     let total_lines = processed_lines.len();
 
     // Handle edge case where we have no content
@@ -209,6 +209,47 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             Paragraph::new(Vec::<Line>::new()).wrap(ratatui::widgets::Wrap { trim: false });
         f.render_widget(message_widget, area);
         return;
+    }
+
+    // If recovery options popup is open and a checkpoint is associated, scroll to that checkpoint once
+    if state.show_recovery_options_popup && state.recovery_scroll_pending {
+        if let Some(checkpoint_id) = &state.recovery_checkpoint_id {
+            let needle = format!("checkpoint {}", checkpoint_id);
+            if let Some((line_idx, _)) = processed_lines
+                .iter()
+                .enumerate()
+                .find(|(_, line)| spans_to_string(line).contains(&needle))
+            {
+                // Highlight the matching checkpoint line with a scroll hint
+                if let Some(line) = processed_lines.get_mut(line_idx) {
+                    let checkpoint_text =
+                        format!("checkpoint {} - scroll ↑ for more", checkpoint_id);
+                    let total_len = checkpoint_text.len();
+                    let dash_total = width.saturating_sub(total_len);
+                    let dash_left = dash_total / 2;
+                    let dash_right = dash_total - dash_left;
+                    let line_str = format!(
+                        "{}{}{}",
+                        "-".repeat(dash_left),
+                        checkpoint_text,
+                        "-".repeat(dash_right)
+                    );
+                    *line = Line::from(vec![Span::styled(
+                        line_str,
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )]);
+                }
+
+                // Try to center the checkpoint line within the visible area
+                let target_scroll = line_idx.saturating_sub(height / 2);
+                state.scroll = target_scroll;
+                state.stay_at_bottom = false;
+                state.scroll_to_bottom = false;
+            }
+        }
+        state.recovery_scroll_pending = false;
     }
 
     // Use consistent scroll calculation with buffer (matching update.rs)
@@ -232,8 +273,6 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
-
-    // Add a space after the last message if we have content
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);

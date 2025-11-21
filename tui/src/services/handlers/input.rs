@@ -261,6 +261,46 @@ fn handle_input_submitted(
     shell_tx: &Sender<InputEvent>,
 ) {
     if state.show_recovery_options_popup {
+        // When recovery options popup is open, selecting an option should:
+        // 1) Send a RecoveryAction to the CLI
+        // 2) Add a user-visible message describing the chosen option
+        // 3) Trigger a normal UserMessage flow so the agent runs again and can
+        //    emit history_updated metadata for checkpoint sync.
+        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
+            && let Some(response) = &state.recovery_response
+        {
+            use stakpak_api::models::RecoveryMode;
+
+            let recovery_request_id = response.id.clone().unwrap_or_default();
+            let selected_option_id = selected.id;
+            let mode = selected.mode.clone();
+
+            // Map mode to a label consistent with the CLI
+            let mode_label = match mode {
+                RecoveryMode::Redirection => "REDIRECTION",
+                RecoveryMode::Revert => "REVERT",
+                RecoveryMode::ModelChange => "MODELCHANGE",
+            };
+            let message_text = format!("Proceeding with recovery option [{}]", mode_label);
+
+            // Send recovery action to CLI
+            let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+                action: stakpak_api::models::RecoveryActionType::Approve,
+                recovery_request_id,
+                selected_option_id,
+                mode,
+            });
+
+            // Mirror normal user submission behavior:
+            // - show the message in the TUI
+            // - send a UserMessage to the CLI so it runs the agent again
+            let _ = input_tx.try_send(InputEvent::AddUserMessage(message_text.clone()));
+            let _ = output_tx.try_send(OutputEvent::UserMessage(message_text, None));
+        }
+
+        state.recovery_options.clear();
+        state.recovery_response = None;
+        state.recovery_popup_selected = 0;
         state.show_recovery_options_popup = false;
         return;
     }

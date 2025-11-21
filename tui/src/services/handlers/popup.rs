@@ -451,9 +451,18 @@ pub fn handle_toggle_context_popup(state: &mut AppState) {
 
 /// Handle recovery options event
 pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsResponse) {
-    state.recovery_options = response.recovery_options.clone();
+    eprintln!("Recovery response: {:?}", &response);
+    
+    let recovery_options = response.recovery_options.clone();
+    state.recovery_options = recovery_options;
     state.recovery_response = Some(response);
     state.recovery_popup_selected = 0;
+    // Capture the first available checkpoint ID associated with recovery options (if any)
+    state.recovery_checkpoint_id = state
+        .recovery_options
+        .iter()
+        .find_map(|opt| opt.revert_to_checkpoint);
+
     if state.recovery_options.is_empty() {
         state.show_recovery_options_popup = false;
     }
@@ -467,8 +476,11 @@ pub fn handle_expand_notifications(state: &mut AppState) {
 
     if state.show_recovery_options_popup {
         state.show_recovery_options_popup = false;
+        state.recovery_scroll_pending = false;
     } else {
         state.show_recovery_options_popup = true;
         state.recovery_popup_selected = 0;
+        // Trigger one-time scroll to the recovery checkpoint marker in the chat
+        state.recovery_scroll_pending = true;
     }
 }
