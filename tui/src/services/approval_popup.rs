@@ -753,14 +753,17 @@ impl PopupService {
 
         let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
 
-        let old_str = args["old_str"].as_str().unwrap_or("");
+        let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
         let new_str = if tool_call.function.name == "create" {
-            args["file_text"].as_str().unwrap_or("")
+            args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
         } else {
-            args["new_str"].as_str().unwrap_or("")
+            args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")
         };
-        let path = args["path"].as_str().unwrap_or("");
-        let replace_all = args["replace_all"].as_bool().unwrap_or(false);
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let replace_all = args
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         // Get the first change index from the diff
         let (_, _, _, first_change_index) = preview_str_replace_editor_style(
