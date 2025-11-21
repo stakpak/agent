@@ -297,6 +297,12 @@ pub fn update(
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
         }
+        InputEvent::RecoveryOptions(response) => {
+            popup::handle_recovery_options(state, response);
+        }
+        InputEvent::ExpandNotifications => {
+            popup::handle_expand_notifications(state);
+        }
 
         // Message handlers
         InputEvent::StreamAssistantMessage(id, s) => {
@@ -316,6 +322,23 @@ pub fn update(
         }
         InputEvent::TotalUsage(usage) => {
             message::handle_total_usage(state, usage);
+        }
+        InputEvent::ReplaceMessagesFromCheckpoint(chat_messages) => {
+            message::handle_replace_messages_from_checkpoint(
+                state,
+                chat_messages,
+                input_tx,
+                message_area_height,
+                message_area_width,
+            );
+        }
+        InputEvent::SetRenderedCheckpointMessages(rendered_messages) => {
+            message::handle_set_rendered_checkpoint_messages(
+                state,
+                rendered_messages,
+                message_area_height,
+                message_area_width,
+            );
         }
 
         // Misc handlers

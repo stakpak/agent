@@ -1,5 +1,6 @@
 use ratatui::style::Color;
 use stakpak_api::ListRuleBook;
+use stakpak_api::models::{RecoveryActionType, RecoveryMode, RecoveryOptionsResponse};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -28,6 +29,8 @@ pub enum InputEvent {
     InputSubmittedWith(String),
     InputSubmittedWithColor(String, Color),
     MessageToolCalls(Vec<ToolCall>),
+    BulkAutoApproveMessage,
+    ResetAutoApproveMessage,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -106,10 +109,16 @@ pub enum InputEvent {
     RulebookSearchBackspace,
     HandleCtrlS,
     ToggleMoreShortcuts,
+    // Recovery options events
+    RecoveryOptions(RecoveryOptionsResponse),
+    ExpandNotifications,
     // Usage tracking events
     StreamUsage(stakpak_shared::models::integrations::openai::Usage),
     RequestTotalUsage,
     TotalUsage(stakpak_shared::models::integrations::openai::Usage),
+    // Checkpoint message replacement
+    ReplaceMessagesFromCheckpoint(Vec<stakpak_shared::models::integrations::openai::ChatMessage>),
+    SetRenderedCheckpointMessages(Vec<crate::services::message::Message>),
 }
 
 #[derive(Debug)]
@@ -128,4 +137,10 @@ pub enum OutputEvent {
     RequestCurrentRulebooks,
     RequestTotalUsage,
     SwitchModel(AgentModel),
+    RecoveryAction {
+        action: RecoveryActionType,
+        recovery_request_id: String,
+        selected_option_id: Uuid,
+        mode: RecoveryMode,
+    },
 }

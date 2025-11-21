@@ -20,6 +20,9 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
 use ratatui::text::Line;
 use stakpak_api::ListRuleBook;
+use stakpak_api::models::{
+    RecoveryOption as ApiRecoveryOption, RecoveryOptionsResponse as ApiRecoveryOptionsResponse,
+};
 use stakpak_shared::models::integrations::openai::{AgentModel, ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
@@ -146,6 +149,12 @@ pub struct AppState {
     pub current_message_usage: stakpak_shared::models::integrations::openai::Usage,
     pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
     pub context_usage_percent: u64,
+
+    // ========== Recovery Options State ==========
+    pub recovery_options: Vec<ApiRecoveryOption>,
+    pub show_recovery_options_popup: bool,
+    pub recovery_popup_selected: usize,
+    pub recovery_response: Option<ApiRecoveryOptionsResponse>,
 
     // ========== Configuration State ==========
     pub secret_manager: SecretManager,
@@ -328,6 +337,11 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
+            // ========== Recovery Options State ==========
+            recovery_options: Vec::new(),
+            show_recovery_options_popup: false,
+            recovery_popup_selected: 0,
+            recovery_response: None,
             model: AgentModel::Smart,
         }
     }
