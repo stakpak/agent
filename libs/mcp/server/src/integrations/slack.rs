@@ -5,7 +5,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use stakpak_api::ToolsCallParams;
+use stakpak_api::models::ToolsCallParams;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SlackReadMessages {

@@ -6,7 +6,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use stakpak_api::ToolsCallParams;
+use stakpak_api::models::ToolsCallParams;
 // use stakpak_api::models::CodeIndex;
 // use stakpak_shared::local_store::LocalStore;
 // use stakpak_shared::models::indexing::IndexingStatus;
