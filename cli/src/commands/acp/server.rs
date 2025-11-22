@@ -1,10 +1,15 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
+use crate::config::ProviderType;
 use crate::utils::network;
 use crate::{commands::agent::run::helpers::convert_tools_map_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{
+    AgentProvider,
+    local::LocalClient,
+    remote::{ClientConfig, RemoteClient},
+};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
@@ -23,7 +28,7 @@ use uuid::Uuid;
 
 pub struct StakpakAcpAgent {
     config: AppConfig,
-    client: Client,
+    client: Arc<dyn AgentProvider>,
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     next_session_id: Cell<u64>,
     mcp_server_host: Option<String>,
@@ -61,37 +66,46 @@ impl StakpakAcpAgent {
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
         system_prompt: Option<String>,
     ) -> Result<Self, String> {
-        let api_config: ClientConfig = config.clone().into();
-
-        // If no API key, create a dummy client that will fail on first use
-        // The user will be prompted during authenticate/new_session
-        let client = if api_config.api_key.is_none() {
-            log::warn!("No API key found. User will be prompted to authenticate.");
-            // Create a dummy client that will fail gracefully
-            Client::new(&ClientConfig {
-                api_key: Some("dummy_for_initialization".to_string()),
-                api_endpoint: api_config.api_endpoint.clone(),
-            })
-            .map_err(|e| format!("Failed to create client: {}", e))?
-        } else {
-            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?
+        let client: Arc<dyn AgentProvider> = match config.provider {
+            ProviderType::Remote => {
+                let api_config: ClientConfig = config.clone().into();
+                if api_config.api_key.is_none() {
+                    log::warn!("No API key found. User will be prompted to authenticate.");
+                    let client = RemoteClient::new(&ClientConfig {
+                        api_key: Some("dummy_for_initialization".to_string()),
+                        api_endpoint: api_config.api_endpoint.clone(),
+                    })
+                    .map_err(|e| format!("Failed to create client: {}", e))?;
+                    Arc::new(client)
+                } else {
+                    let client = RemoteClient::new(&api_config)
+                        .map_err(|e| format!("Failed to create client: {}", e))?;
+                    Arc::new(client)
+                }
+            }
+            ProviderType::Local => Arc::new(LocalClient),
         };
 
         // Initialize MCP server and tools (optional for ACP)
-        let (mcp_server_host, clients, tools) =
-            match Self::initialize_mcp_server_and_tools(&config, None).await {
-                Ok((host, client_manager, tool_list)) => {
-                    log::info!("MCP server initialized successfully");
-                    (host, Some(client_manager), tool_list)
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to initialize MCP server: {}, continuing without tools",
-                        e
-                    );
-                    (String::new(), None, Vec::new())
-                }
-            };
+        let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(
+            &config,
+            client.clone(),
+            session_update_tx.clone(),
+        )
+        .await
+        {
+            Ok((host, client_manager, tool_list)) => {
+                log::info!("MCP server initialized successfully");
+                (host, Some(client_manager), tool_list)
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to initialize MCP server: {}, continuing without tools",
+                    e
+                );
+                (String::new(), None, Vec::new())
+            }
+        };
 
         // Create cancellation channels
         let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
@@ -1081,9 +1095,10 @@ impl StakpakAcpAgent {
         Ok(results)
     }
 
-    async fn initialize_mcp_server_and_tools(
+    pub async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
-        progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
+        client: Arc<dyn AgentProvider>,
+        _session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     ) -> Result<
         (
             String,
@@ -1093,7 +1108,9 @@ impl StakpakAcpAgent {
         String,
     > {
         // Find available bind address
-        let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
+        let (bind_address, listener) = network::find_available_bind_address_with_listener()
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Generate certificates for mTLS
         let certificate_chain = Arc::new(Some(
@@ -1104,13 +1121,13 @@ impl StakpakAcpAgent {
         let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
         // Start MCP server in background
-        let api_config: ClientConfig = config.clone().into();
         let certificate_chain_for_server = certificate_chain.clone();
+        let client_for_server = client.clone();
 
         tokio::spawn(async move {
             let _ = start_server(
                 MCPServerConfig {
-                    api: api_config,
+                    client: Some(client_for_server),
                     redact_secrets: true,
                     privacy_mode: false,
                     enabled_tools: EnabledToolsConfig { slack: false },
@@ -1132,7 +1149,7 @@ impl StakpakAcpAgent {
                     .mcp_server_host
                     .clone()
                     .unwrap_or(local_mcp_server_host.clone()),
-                progress_tx, // Use regular Sender directly
+                None, // progress_tx will be set later in run_stdio
                 certificate_chain,
             )
             .await
@@ -1441,7 +1458,7 @@ impl StakpakAcpAgent {
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<ToolCallResultProgress>(100);
 
                 // Reinitialize MCP clients with progress channel
-                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, Some(progress_tx.clone())).await {
+                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, self.client.clone(), tx.clone()).await {
                     Ok((host, client_manager, tool_list)) => {
                         log::info!("MCP server reinitialized with progress channel");
                         (host, Some(client_manager), tool_list)

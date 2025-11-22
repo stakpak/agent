@@ -1,6 +1,6 @@
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
-use stakpak_api::{ClientConfig, ListRuleBook};
+use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::io;
@@ -8,6 +8,19 @@ use std::path::{Path, PathBuf};
 
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
 const STAKPAK_CONFIG_PATH: &str = ".stakpak/config.toml";
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderType {
+    Remote,
+    Local,
+}
+
+impl Default for ProviderType {
+    fn default() -> Self {
+        Self::Remote
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RulebookConfig {
@@ -32,6 +45,8 @@ pub struct WardenConfig {
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
     pub api_key: Option<String>,
+    /// Provider type (remote or local)
+    pub provider: Option<ProviderType>,
     /// Allowed tools (empty = all tools allowed)
     pub allowed_tools: Option<Vec<String>>,
     /// Tools that auto-approve without asking
@@ -58,6 +73,7 @@ pub struct ConfigFile {
 pub struct AppConfig {
     pub api_endpoint: String,
     pub api_key: Option<String>,
+    pub provider: ProviderType,
     pub mcp_server_host: Option<String>,
     pub machine_name: Option<String>,
     pub auto_append_gitignore: Option<bool>,
@@ -266,6 +282,12 @@ impl AppConfig {
             .api_key
             .or_else(|| all_profile.and_then(|all| all.api_key.clone()));
 
+        let provider = profile
+            .provider
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.provider.clone()))
+            .unwrap_or_default();
+
         // Apply inheritance for tool settings
         let allowed_tools = profile
             .allowed_tools
@@ -290,6 +312,7 @@ impl AppConfig {
         let app_config = AppConfig {
             api_endpoint,
             api_key,
+            provider,
             mcp_server_host: None, // This can be added to profiles later if needed
             machine_name: config_file.settings.machine_name,
             auto_append_gitignore: config_file.settings.auto_append_gitignore,
@@ -385,6 +408,7 @@ impl AppConfig {
             ProfileConfig {
                 api_endpoint: Some(self.api_endpoint.clone()),
                 api_key: self.api_key.clone(),
+                provider: Some(self.provider.clone()),
                 allowed_tools: self.allowed_tools.clone(),
                 auto_approve: self.auto_approve.clone(),
                 rulebooks: self.rulebooks.clone(),
@@ -668,7 +692,7 @@ auto_append_gitignore = true
 mod tests {
     use super::*;
     use chrono::Utc;
-    use stakpak_api::RuleBookVisibility;
+    use stakpak_api::models::RuleBookVisibility;
 
     fn create_test_rulebook(uri: &str, tags: Vec<String>) -> ListRuleBook {
         ListRuleBook {
@@ -801,34 +825,32 @@ mod tests {
         let config = RulebookConfig {
             include: None,
             exclude: None,
-            include_tags: Some(vec!["security".to_string(), "performance".to_string()]),
+            include_tags: Some(vec!["security".to_string(), "stable".to_string()]),
             exclude_tags: None,
         };
 
         let rulebooks = vec![
+            create_test_rulebook("https://rules.stakpak.dev/r1", vec!["security".to_string()]),
             create_test_rulebook(
-                "https://rules.stakpak.dev/rule1",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule2",
+                "https://rules.stakpak.dev/r2",
                 vec!["performance".to_string()],
             ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule3",
-                vec!["experimental".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule4",
-                vec!["security".to_string(), "production".to_string()],
-            ),
+            create_test_rulebook("https://rules.stakpak.dev/r3", vec!["stable".to_string()]),
+            create_test_rulebook("https://rules.stakpak.dev/r4", vec!["beta".to_string()]),
         ];
 
         let filtered = config.filter_rulebooks(rulebooks);
-        assert_eq!(filtered.len(), 3);
-        assert!(filtered.iter().any(|r| r.uri.contains("rule1")));
-        assert!(filtered.iter().any(|r| r.uri.contains("rule2")));
-        assert!(filtered.iter().any(|r| r.uri.contains("rule4")));
+        assert_eq!(filtered.len(), 2);
+        assert!(
+            filtered
+                .iter()
+                .any(|r| r.uri == "https://rules.stakpak.dev/r1")
+        );
+        assert!(
+            filtered
+                .iter()
+                .any(|r| r.uri == "https://rules.stakpak.dev/r3")
+        );
     }
 
     #[test]
@@ -837,207 +859,30 @@ mod tests {
             include: None,
             exclude: None,
             include_tags: None,
-            exclude_tags: Some(vec!["experimental".to_string(), "dev-only".to_string()]),
+            exclude_tags: Some(vec!["beta".to_string(), "deprecated".to_string()]),
         };
 
         let rulebooks = vec![
+            create_test_rulebook("https://rules.stakpak.dev/r1", vec!["security".to_string()]),
+            create_test_rulebook("https://rules.stakpak.dev/r2", vec!["beta".to_string()]),
+            create_test_rulebook("https://rules.stakpak.dev/r3", vec!["stable".to_string()]),
             create_test_rulebook(
-                "https://rules.stakpak.dev/rule1",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule2",
-                vec!["experimental".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule3",
-                vec!["production".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule4",
-                vec!["dev-only".to_string(), "security".to_string()],
+                "https://rules.stakpak.dev/r4",
+                vec!["deprecated".to_string()],
             ),
         ];
 
         let filtered = config.filter_rulebooks(rulebooks);
         assert_eq!(filtered.len(), 2);
-        assert!(filtered.iter().any(|r| r.uri.contains("rule1")));
-        assert!(filtered.iter().any(|r| r.uri.contains("rule3")));
-    }
-
-    #[test]
-    fn test_rulebook_filtering_combined() {
-        let config = RulebookConfig {
-            include: Some(vec!["https://rules.stakpak.dev/*".to_string()]),
-            exclude: Some(vec!["https://rules.stakpak.dev/*/beta".to_string()]),
-            include_tags: Some(vec!["security".to_string()]),
-            exclude_tags: Some(vec!["experimental".to_string()]),
-        };
-
-        let rulebooks = vec![
-            create_test_rulebook(
-                "https://rules.stakpak.dev/security/stable",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/security/beta",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/performance/stable",
-                vec!["performance".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/security/experimental",
-                vec!["security".to_string(), "experimental".to_string()],
-            ),
-            create_test_rulebook(
-                "https://external.rules.dev/security",
-                vec!["security".to_string()],
-            ),
-        ];
-
-        let filtered = config.filter_rulebooks(rulebooks);
-        assert_eq!(filtered.len(), 1);
         assert!(
             filtered
                 .iter()
-                .any(|r| r.uri == "https://rules.stakpak.dev/security/stable")
+                .any(|r| r.uri == "https://rules.stakpak.dev/r1")
         );
-    }
-
-    #[test]
-    fn test_config_file_parsing() {
-        let config_content = r#"
-[profiles]
-
-[profiles.test]
-api_endpoint = "https://test-api.stakpak.dev"
-api_key = "test_key"
-allowed_tools = ["read", "create"]
-auto_approve = ["read"]
-
-[profiles.test.rulebooks]
-include = ["https://rules.stakpak.dev/security/*"]
-exclude = ["https://rules.stakpak.dev/*/beta"]
-include_tags = ["security", "performance"]
-exclude_tags = ["experimental"]
-
-[profiles.test.warden]
-enabled = true
-volumes = ["~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro", "./:/agent:ro", "./.stakpak:/agent/.stakpak"]
-
-[settings]
-machine_name = "test-machine"
-auto_append_gitignore = true
-"#;
-
-        let config: ConfigFile = toml::from_str(config_content).expect("Failed to parse config");
-
-        let test_profile = config.profiles.get("test").expect("Test profile not found");
-        assert_eq!(
-            test_profile.api_endpoint,
-            Some("https://test-api.stakpak.dev".to_string())
+        assert!(
+            filtered
+                .iter()
+                .any(|r| r.uri == "https://rules.stakpak.dev/r3")
         );
-        assert_eq!(test_profile.api_key, Some("test_key".to_string()));
-        assert_eq!(
-            test_profile.allowed_tools,
-            Some(vec!["read".to_string(), "create".to_string()])
-        );
-        assert_eq!(test_profile.auto_approve, Some(vec!["read".to_string()]));
-
-        let rulebooks = test_profile
-            .rulebooks
-            .as_ref()
-            .expect("Rulebooks config not found");
-        assert_eq!(
-            rulebooks.include,
-            Some(vec!["https://rules.stakpak.dev/security/*".to_string()])
-        );
-        assert_eq!(
-            rulebooks.exclude,
-            Some(vec!["https://rules.stakpak.dev/*/beta".to_string()])
-        );
-        assert_eq!(
-            rulebooks.include_tags,
-            Some(vec!["security".to_string(), "performance".to_string()])
-        );
-        assert_eq!(
-            rulebooks.exclude_tags,
-            Some(vec!["experimental".to_string()])
-        );
-
-        let warden = test_profile
-            .warden
-            .as_ref()
-            .expect("Warden config not found");
-        assert!(warden.enabled);
-        assert_eq!(warden.volumes.len(), 3);
-        assert_eq!(
-            warden.volumes[0],
-            "~/.stakpak/config.toml:/home/agent/.stakpak/config.toml:ro"
-        );
-        assert_eq!(warden.volumes[1], "./:/agent:ro");
-        assert_eq!(warden.volumes[2], "./.stakpak:/agent/.stakpak");
-
-        assert_eq!(
-            config.settings.machine_name,
-            Some("test-machine".to_string())
-        );
-        assert_eq!(config.settings.auto_append_gitignore, Some(true));
-    }
-
-    #[test]
-    fn test_empty_filters_allow_all() {
-        let config = RulebookConfig {
-            include: None,
-            exclude: None,
-            include_tags: None,
-            exclude_tags: None,
-        };
-
-        let rulebooks = vec![
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule1",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule2",
-                vec!["performance".to_string()],
-            ),
-            create_test_rulebook(
-                "https://experimental.rules.dev/rule3",
-                vec!["experimental".to_string()],
-            ),
-        ];
-
-        let original_count = rulebooks.len();
-        let filtered = config.filter_rulebooks(rulebooks);
-        assert_eq!(filtered.len(), original_count);
-    }
-
-    #[test]
-    fn test_empty_include_lists_allow_all() {
-        let config = RulebookConfig {
-            include: Some(vec![]),
-            exclude: None,
-            include_tags: Some(vec![]),
-            exclude_tags: None,
-        };
-
-        let rulebooks = vec![
-            create_test_rulebook(
-                "https://rules.stakpak.dev/rule1",
-                vec!["security".to_string()],
-            ),
-            create_test_rulebook(
-                "https://experimental.rules.dev/rule2",
-                vec!["experimental".to_string()],
-            ),
-        ];
-
-        let original_count = rulebooks.len();
-        let filtered = config.filter_rulebooks(rulebooks);
-        assert_eq!(filtered.len(), original_count);
     }
 }

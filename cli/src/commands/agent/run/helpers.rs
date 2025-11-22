@@ -1,5 +1,5 @@
 use crate::utils::local_context::LocalContext;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, FunctionDefinition, MessageContent, Role, Tool, ToolCallResult,
 };

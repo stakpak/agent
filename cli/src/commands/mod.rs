@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     // code_index::{get_or_build_local_code_index, start_code_index_watcher},
-    config::AppConfig,
+    config::{AppConfig, ProviderType},
     utils::network,
 };
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{AgentProvider, local::LocalClient, remote::ClientConfig, remote::RemoteClient};
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 
 pub mod acp;
@@ -169,6 +169,16 @@ pub enum Commands {
     Update,
 }
 
+fn get_client(config: &AppConfig) -> Result<Box<dyn AgentProvider>, String> {
+    match config.provider {
+        ProviderType::Remote => {
+            let client = RemoteClient::new(&config.clone().into())?;
+            Ok(Box::new(client))
+        }
+        ProviderType::Local => Ok(Box::new(LocalClient)),
+    }
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -250,9 +260,19 @@ impl Commands {
                 let protocol = if !disable_mcp_mtls { "https" } else { "http" };
                 println!("MCP server started at {}://{}/mcp", protocol, bind_address);
 
+                // Create AgentProvider instance
+                let client: Arc<dyn AgentProvider> = match config.provider {
+                    ProviderType::Remote => {
+                        let remote_client =
+                            RemoteClient::new(&config.clone().into()).map_err(|e| e.to_string())?;
+                        Arc::new(remote_client)
+                    }
+                    ProviderType::Local => Arc::new(LocalClient),
+                };
+
                 start_server(
                     MCPServerConfig {
-                        api: config.into(),
+                        client: Some(client),
                         redact_secrets: !disable_secret_redaction,
                         privacy_mode,
                         enabled_tools: EnabledToolsConfig {
@@ -342,7 +362,7 @@ impl Commands {
                 }
             },
             Commands::Rulebooks(rulebook_command) => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
+                let client = get_client(&config)?;
                 match rulebook_command {
                     RulebookCommands::Get { uri } => {
                         if let Some(uri) = uri {
@@ -405,7 +425,7 @@ impl Commands {
                 }
             }
             Commands::Account => {
-                let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
+                let client = get_client(&config)?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }
