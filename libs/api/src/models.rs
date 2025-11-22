@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
+use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 use uuid::Uuid;
 
@@ -469,4 +471,117 @@ pub struct ToolUsageCounts {
     pub failed: u32,
     pub successful: u32,
     pub total: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum RuleBookVisibility {
+    #[default]
+    Public,
+    Private,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RuleBook {
+    pub id: String,
+    pub uri: String,
+    pub description: String,
+    pub content: String,
+    pub visibility: RuleBookVisibility,
+    pub tags: Vec<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToolsCallParams {
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToolsCallResponse {
+    pub content: Vec<Content>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GetMyAccountResponse {
+    pub username: String,
+    pub id: String,
+    pub first_name: String,
+    pub last_name: String,
+}
+
+impl GetMyAccountResponse {
+    pub fn to_text(&self) -> String {
+        format!(
+            "ID: {}\nUsername: {}\nName: {} {}",
+            self.id, self.username, self.first_name, self.last_name
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ListRuleBook {
+    pub id: String,
+    pub uri: String,
+    pub description: String,
+    pub visibility: RuleBookVisibility,
+    pub tags: Vec<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ListRulebooksResponse {
+    pub results: Vec<ListRuleBook>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateRuleBookInput {
+    pub uri: String,
+    pub description: String,
+    pub content: String,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<RuleBookVisibility>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateRuleBookResponse {
+    pub id: String,
+}
+
+impl ListRuleBook {
+    pub fn to_text(&self) -> String {
+        format!(
+            "URI: {}\nDescription: {}\nTags: {}\n",
+            self.uri,
+            self.description,
+            self.tags.join(", ")
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SimpleLLMMessage {
+    #[serde(rename = "role")]
+    pub role: SimpleLLMRole,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SimpleLLMRole {
+    User,
+    Assistant,
+}
+
+impl std::fmt::Display for SimpleLLMRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SimpleLLMRole::User => write!(f, "user"),
+            SimpleLLMRole::Assistant => write!(f, "assistant"),
+        }
+    }
 }
