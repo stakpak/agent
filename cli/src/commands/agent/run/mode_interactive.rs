@@ -157,6 +157,8 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+
+        let model_clone = model.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -172,6 +174,7 @@ pub async fn run_interactive(
                 allowed_tools.as_ref(),
                 current_profile_for_tui,
                 rulebook_config_for_tui,
+                model_clone,
             )
             .await
             .map_err(|e| e.to_string())
