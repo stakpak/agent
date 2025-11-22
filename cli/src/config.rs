@@ -41,6 +41,18 @@ pub struct WardenConfig {
     pub volumes: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct OpenAIConfig {
+    pub api_endpoint: Option<String>,
+    pub api_key: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct AnthropicConfig {
+    pub api_endpoint: Option<String>,
+    pub api_key: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
@@ -55,6 +67,8 @@ pub struct ProfileConfig {
     pub rulebooks: Option<RulebookConfig>,
     /// Warden (runtime security) configuration
     pub warden: Option<WardenConfig>,
+    pub openai: Option<OpenAIConfig>,
+    pub anthropic: Option<AnthropicConfig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -88,6 +102,8 @@ pub struct AppConfig {
     pub rulebooks: Option<RulebookConfig>,
     /// Warden (runtime security) configuration
     pub warden: Option<WardenConfig>,
+    pub openai: Option<OpenAIConfig>,
+    pub anthropic: Option<AnthropicConfig>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -305,6 +321,16 @@ impl AppConfig {
             .warden
             .or_else(|| all_profile.and_then(|all| all.warden.clone()));
 
+        let openai = profile
+            .openai
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.openai.clone()));
+
+        let anthropic = profile
+            .anthropic
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.anthropic.clone()));
+
         // Override with environment variables if present
         let api_key = std::env::var("STAKPAK_API_KEY").ok().or(api_key);
         let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(api_endpoint);
@@ -322,6 +348,8 @@ impl AppConfig {
             auto_approve,
             rulebooks,
             warden,
+            openai,
+            anthropic,
         };
 
         if is_config_file_dirty {
@@ -413,6 +441,8 @@ impl AppConfig {
                 auto_approve: self.auto_approve.clone(),
                 rulebooks: self.rulebooks.clone(),
                 warden: self.warden.clone(),
+                openai: self.openai.clone(),
+                anthropic: self.anthropic.clone(),
             },
         );
 
