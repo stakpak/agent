@@ -5,17 +5,17 @@
 use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
 use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
-use crate::services::clipboard_paste::{
-    normalize_pasted_path, paste_image_to_temp_png, pasted_image_format,
-};
+use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
 use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
+use image::{GenericImageView, ImageFormat};
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::AgentModel;
 use std::path::PathBuf;
+use tempfile::Builder;
 use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
@@ -375,9 +375,8 @@ fn handle_input_submitted(
                 push_error_message(state, &e, None);
             }
         }
-    } else if !state.input().trim().is_empty() {
-        // PERFORMANCE FIX: Simplified condition for submission
-        // Allow submission of any non-empty input that's not a recognized helper command
+    } else if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
+        // Allow submission if there's text input OR attached images
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -406,6 +405,15 @@ fn handle_input_submitted(
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
 
+        // Keep original input with placeholders for display
+        let user_message_text = final_input.clone();
+
+        // Strip image placeholders from text (images are sent separately to server)
+        for img in &state.attached_images {
+            final_input = final_input.replace(&img.placeholder, "");
+        }
+        final_input = final_input.trim().to_string();
+
         // Use eco limit if eco model is selected
         let max_tokens = match state.model {
             AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
@@ -416,34 +424,45 @@ fn handle_input_submitted(
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
-        let user_message_text = final_input.clone();
         if utilization_pct < 92 {
-            // Send user message
-            let _ = output_tx.try_send(OutputEvent::UserMessage(
-                final_input.clone(),
-                state.shell_tool_calls.clone(),
-            ));
+            // Process all images and create ContentParts
+            let attached_paths: Vec<_> = state
+                .attached_images
+                .iter()
+                .map(|img| img.path.clone())
+                .collect();
+            let image_parts =
+                crate::services::image_upload::process_all_images(&final_input, &attached_paths);
 
-            // Send image upload events for each attached image
+            // Clean text from image URLs and paths
+            let cleaned_text = crate::services::image_upload::clean_text_from_images(&final_input);
+
+            // Check for image processing errors
+            let mut image_errors = Vec::new();
             for img in &state.attached_images {
-                // Get image dimensions if available
-                if let Ok((width, height)) = image::image_dimensions(&img.path) {
-                    let format = crate::services::clipboard_paste::pasted_image_format(&img.path)
-                        .label()
-                        .to_string();
-                    let _ = output_tx.try_send(OutputEvent::ImageUpload {
-                        path: img.path.clone(),
-                        width,
-                        height,
-                        format,
-                    });
+                if !img.path.exists() {
+                    image_errors.push(format!("Image file not found: {}", img.path.display()));
                 }
             }
 
-            let _ = input_tx.try_send(InputEvent::AddUserMessage(user_message_text));
-        }
+            if !image_errors.is_empty() {
+                for error in image_errors {
+                    push_error_message(state, &error, None);
+                }
+            }
 
-        if utilization_pct >= 92 {
+            if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
+                cleaned_text,
+                state.shell_tool_calls.clone(),
+                image_parts,
+            )) {
+                log::warn!("Failed to send UserMessage event: {}", e);
+            }
+
+            if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
+                log::warn!("Failed to send AddUserMessage event: {}", e);
+            }
+        } else {
             if !state.messages.is_empty() {
                 state.messages.push(Message::plain_text(""));
             }
@@ -460,9 +479,10 @@ fn handle_input_submitted(
             ));
             state.messages.push(Message::plain_text(""));
         }
+
+        // Always clear attached images and reset state after submission
         state.shell_tool_calls = None;
         state.text_area.set_text("");
-        // Clear attached images after sending
         state.attached_images.clear();
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
@@ -513,6 +533,23 @@ pub fn handle_input_submitted_with(
 
 /// Handle text paste (Event::Paste), including large text and image *paths*.
 pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
+    // On macOS, Cmd+V might paste text even when an image is on clipboard.
+    // First, try to check if there's an image on the clipboard (for Cmd+V on macOS).
+    #[cfg(not(target_os = "android"))]
+    {
+        // Try to get image from clipboard - if successful, use that instead of text
+        if let Ok((path, info)) = paste_image_to_temp_png() {
+            attach_image(
+                state,
+                path,
+                info.width,
+                info.height,
+                info.encoded_format.label(),
+            );
+            return true;
+        }
+    }
+
     // Normalize line endings: many terminals convert newlines to \r when pasting,
     // but textarea expects \n. This is the same fix used in Codex.
     let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
@@ -534,47 +571,175 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
 
 /// Handle Ctrl+V clipboard image paste (non-text clipboard images).
 pub fn handle_clipboard_image_paste(state: &mut AppState) {
-    // Show "Pasting..." hint while we try to read from the clipboard.
     state.is_pasting = true;
     #[cfg(not(target_os = "android"))]
     {
-        if let Ok((path, info)) = paste_image_to_temp_png() {
-            attach_image(
-                state,
-                path,
-                info.width,
-                info.height,
-                info.encoded_format.label(),
-            );
+        match paste_image_to_temp_png() {
+            Ok((path, info)) => {
+                attach_image(
+                    state,
+                    path,
+                    info.width,
+                    info.height,
+                    info.encoded_format.label(),
+                );
+            }
+            Err(e) => {
+                log::warn!("Failed to paste image from clipboard: {}", e);
+                let error_msg = match e.to_string().as_str() {
+                    s if s.contains("clipboard unavailable") => {
+                        "Clipboard is not available. Please check system permissions.".to_string()
+                    }
+                    s if s.contains("no image") => {
+                        "No image found on clipboard. Please copy an image first.".to_string()
+                    }
+                    s if s.contains("encode") => {
+                        "Failed to process clipboard image. The image format may not be supported."
+                            .to_string()
+                    }
+                    s if s.contains("io error") => {
+                        "Failed to save clipboard image. Please try again.".to_string()
+                    }
+                    _ => format!("Failed to paste image: {}", e),
+                };
+                push_error_message(state, &error_msg, None);
+            }
         }
     }
-    // On Android (or if clipboard access fails), we silently do nothing.
+    #[cfg(target_os = "android")]
+    {
+        push_error_message(state, "Image paste is not supported on Android.", None);
+    }
     state.is_pasting = false;
 }
 
 fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
-    let Some(path_buf) = normalize_pasted_path(&pasted) else {
-        return false;
+    // First, try to normalize as a direct path
+    if let Some(path_buf) = normalize_pasted_path(&pasted)
+        && let Ok((w, h)) = image::image_dimensions(&path_buf)
+    {
+        // Use JPEG label since we'll compress it
+        attach_image(state, path_buf, w, h, "JPEG");
+        return true;
+    }
+
+    // If that didn't work, check if it looks like a filename (no slashes, might be a bare filename)
+    let trimmed = pasted.trim();
+    if !trimmed.is_empty() && !trimmed.contains('/') && !trimmed.contains('\\') {
+        // Search common directories for image files matching this name
+        if let Some(path_buf) = find_image_file_by_name(trimmed) {
+            // Process and compress the image (resize if needed, save to temp file)
+            if let Ok((compressed_path, width, height)) = process_and_compress_image_file(&path_buf)
+            {
+                attach_image(state, compressed_path, width, height, "JPEG");
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Search common directories for an image file matching the given name (with various extensions)
+pub fn find_image_file_by_name(name: &str) -> Option<PathBuf> {
+    // Common image extensions to try
+    const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"];
+
+    // Common directories to search (Desktop, Downloads, Documents, Pictures)
+    let common_dirs = [
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Desktop")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Downloads")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Documents")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Pictures")),
+        // Also try current directory
+        std::env::current_dir().ok(),
+    ];
+
+    for dir_opt in common_dirs.iter().flatten() {
+        for ext in IMAGE_EXTENSIONS {
+            let candidate = dir_opt.join(format!("{}.{}", name, ext));
+            if candidate.exists() && candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+/// Process and compress an image file: load, resize to max 768px if needed, save to temp JPEG file
+fn process_and_compress_image_file(path: &PathBuf) -> Result<(PathBuf, u32, u32), String> {
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", path.display()));
+    }
+
+    if !path.is_file() {
+        return Err(format!("Path is not a file: {}", path.display()));
+    }
+
+    let mut dyn_img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
+    let (width, height) = dyn_img.dimensions();
+
+    const MAX_DIMENSION: u32 = 768;
+    let (final_width, final_height) = if width > MAX_DIMENSION || height > MAX_DIMENSION {
+        let (new_width, new_height) = if width > height {
+            let ratio = MAX_DIMENSION as f32 / width as f32;
+            (MAX_DIMENSION, (height as f32 * ratio) as u32)
+        } else {
+            let ratio = MAX_DIMENSION as f32 / height as f32;
+            ((width as f32 * ratio) as u32, MAX_DIMENSION)
+        };
+        dyn_img =
+            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+        (new_width, new_height)
+    } else {
+        (width, height)
     };
 
-    match image::image_dimensions(&path_buf) {
-        Ok((w, h)) => {
-            let format_label = pasted_image_format(&path_buf).label();
-            attach_image(state, path_buf, w, h, format_label);
-            true
-        }
-        Err(_) => false,
+    // Always save to temp file as JPEG for better compression
+    let tmp = Builder::new()
+        .prefix("stakpak-filename-image-")
+        .suffix(".jpg")
+        .tempfile()
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+    let mut jpeg_data = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut jpeg_data);
+        dyn_img
+            .write_to(&mut cursor, ImageFormat::Jpeg)
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
     }
+
+    std::fs::write(tmp.path(), &jpeg_data)
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    let (_file, temp_path) = tmp
+        .keep()
+        .map_err(|e| format!("Failed to persist temp file: {}", e.error))?;
+
+    let canonical_path = temp_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize path: {}", e))?;
+
+    Ok((canonical_path, final_width, final_height))
 }
 
 fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, format_label: &str) {
     let placeholder = format!("[image {width}x{height} {format_label}]");
-    // Insert as an element to match large‑paste placeholder behavior:
-    // styled distinctly and treated atomically for cursor/mutations.
     state.text_area.insert_element(&placeholder);
-    state
-        .attached_images
-        .push(AttachedImage { placeholder, path });
+    state.attached_images.push(AttachedImage {
+        placeholder: placeholder.clone(),
+        path: path.clone(),
+    });
 }
 
 /// Handle input delete (clear input)

@@ -5085,6 +5085,7 @@ version = "0.2.78"
 dependencies = [
  "ansi-to-tui",
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "console",
  "crossterm 0.29.0",

@@ -1,5 +1,7 @@
+use crate::services::handlers::find_image_file_by_name;
+use image::{GenericImageView, ImageFormat};
 use log;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::Builder;
 
 /// Errors that can occur while reading or materializing a clipboard image.
@@ -26,18 +28,14 @@ impl std::error::Error for PasteImageError {}
 /// Encoded image format inferred from a file extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodedImageFormat {
-    Png,
     Jpeg,
-    Other,
 }
 
 impl EncodedImageFormat {
-    /// Short label used in UI placeholders (e.g., `[image 32x16 PNG]`).
+    /// Short label used in UI placeholders (e.g., `[image 32x16 JPEG]`).
     pub fn label(self) -> &'static str {
         match self {
-            EncodedImageFormat::Png => "PNG",
             EncodedImageFormat::Jpeg => "JPEG",
-            EncodedImageFormat::Other => "IMG",
         }
     }
 }
@@ -98,52 +96,223 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     None
 }
 
-/// Infer an image format for the provided path based on its extension.
-pub fn pasted_image_format(path: &Path) -> EncodedImageFormat {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => EncodedImageFormat::Png,
-        Some("jpg") | Some("jpeg") => EncodedImageFormat::Jpeg,
-        _ => EncodedImageFormat::Other,
-    }
-}
-
 /// Capture image from system clipboard, encode to PNG, and return bytes + info.
 #[cfg(not(target_os = "android"))]
 pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
+    // Note: Function name says "png" but we now encode as JPEG for better compression
     log::info!("attempting clipboard image read");
     let mut cb = arboard::Clipboard::new()
         .map_err(|e| PasteImageError::ClipboardUnavailable(e.to_string()))?;
-    let img = cb
-        .get_image()
-        .map_err(|e| PasteImageError::NoImage(e.to_string()))?;
+
+    // On macOS, when copying a file from Finder, the clipboard might contain:
+    // 1. Image data (which could be the file icon/preview, not the actual image)
+    // 2. File path/reference in clipboard text
+    // We should check for file paths FIRST and prefer reading the actual file
+    // over clipboard image data, because the clipboard image might just be an icon.
+
+    // First, check if there's a file path in clipboard text (prefer this over clipboard image)
+    if let Ok(text) = cb.get_text() {
+        let trimmed = text.trim();
+
+        // Try to normalize as a full path first
+        let path_opt = normalize_pasted_path(trimmed).and_then(|path_buf| {
+            let path = path_buf.as_path();
+            // Check if it's an image file and exists
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if matches!(
+                    ext_lower.as_str(),
+                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
+                ) && path.exists()
+                    && path.is_file()
+                {
+                    Some(path.to_path_buf())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
+        // If no full path found, try searching for filename in common directories
+        // (macOS Finder copies often put just the filename in clipboard)
+        let path_opt = if path_opt.is_none() && !trimmed.contains('/') && !trimmed.contains('\\') {
+            find_image_file_by_name(trimmed)
+        } else {
+            path_opt
+        };
+
+        if let Some(path) = path_opt {
+            log::info!("Found image file path in clipboard: {}", path.display());
+            // Process the file directly - this avoids getting the icon/preview
+            let canonical_path = match path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => path.to_path_buf(),
+            };
+
+            // Read and load the image file, then process it through resize logic
+            match image::open(&canonical_path) {
+                Ok(mut dyn_img) => {
+                    let (w, h) = dyn_img.dimensions();
+                    log::info!("Loaded image file: {}x{}", w, h);
+
+                    // Resize image if it exceeds max dimension (768px for better compression)
+                    const MAX_DIMENSION: u32 = 768;
+                    let (final_width, final_height) = if w > MAX_DIMENSION || h > MAX_DIMENSION {
+                        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
+                        let (new_width, new_height) = if w > h {
+                            let ratio = MAX_DIMENSION as f32 / w as f32;
+                            (MAX_DIMENSION, (h as f32 * ratio) as u32)
+                        } else {
+                            let ratio = MAX_DIMENSION as f32 / h as f32;
+                            ((w as f32 * ratio) as u32, MAX_DIMENSION)
+                        };
+                        log::info!("Resizing to {new_width}x{new_height}");
+                        dyn_img = dyn_img.resize_exact(
+                            new_width,
+                            new_height,
+                            image::imageops::FilterType::Lanczos3,
+                        );
+                        (new_width, new_height)
+                    } else {
+                        log::info!("Image is already within size limit, no resize needed");
+                        (w, h)
+                    };
+
+                    // Encode resized image to JPEG for better compression
+                    let mut jpeg: Vec<u8> = Vec::new();
+                    {
+                        let mut cursor = std::io::Cursor::new(&mut jpeg);
+                        dyn_img
+                            .write_to(&mut cursor, ImageFormat::Jpeg)
+                            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
+                    }
+
+                    if jpeg.is_empty() {
+                        return Err(PasteImageError::EncodeFailed(
+                            "encoded JPEG is empty".into(),
+                        ));
+                    }
+
+                    log::info!(
+                        "clipboard image from file encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
+                        jpeg.len()
+                    );
+                    return Ok((
+                        jpeg,
+                        PastedImageInfo {
+                            width: final_width,
+                            height: final_height,
+                            encoded_format: EncodedImageFormat::Jpeg,
+                        },
+                    ));
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to open image file {}: {}",
+                        canonical_path.display(),
+                        e
+                    );
+                    // Fall through to try clipboard image data
+                }
+            }
+        }
+    }
+
+    // If no file path found or file processing failed, try clipboard image data
+    let img_result = cb.get_image();
+
+    let img = match img_result {
+        Ok(img) => img,
+        Err(_) => {
+            log::info!("No direct image data in clipboard");
+            return Err(PasteImageError::NoImage(
+                "The clipboard contents were not available in the requested format or the clipboard is empty.".to_string(),
+            ));
+        }
+    };
     let w = img.width as u32;
     let h = img.height as u32;
 
-    let mut png: Vec<u8> = Vec::new();
+    // Validate image dimensions
+    if w == 0 || h == 0 {
+        return Err(PasteImageError::EncodeFailed(
+            "invalid image dimensions".into(),
+        ));
+    }
+
+    // Validate we have enough bytes for the image
+    let expected_bytes = (w as usize) * (h as usize) * 4; // RGBA = 4 bytes per pixel
+    let actual_bytes = img.bytes.len();
+    if actual_bytes < expected_bytes {
+        log::warn!(
+            "Image buffer size mismatch: expected {} bytes, got {} bytes",
+            expected_bytes,
+            actual_bytes
+        );
+        return Err(PasteImageError::EncodeFailed(format!(
+            "invalid image buffer size: expected {} bytes, got {} bytes",
+            expected_bytes, actual_bytes
+        )));
+    }
+
     let Some(rgba_img) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
         return Err(PasteImageError::EncodeFailed("invalid RGBA buffer".into()));
     };
-    let dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
-    log::info!("clipboard image decoded RGBA {w}x{h}");
+    let mut dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
+    log::info!(
+        "clipboard image decoded RGBA {w}x{h} ({} bytes)",
+        actual_bytes
+    );
+
+    // Resize image if it exceeds max dimension (768px for better compression)
+    const MAX_DIMENSION: u32 = 768;
+    let (final_width, final_height) = if w > MAX_DIMENSION || h > MAX_DIMENSION {
+        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
+        // Calculate new dimensions maintaining aspect ratio
+        let (new_width, new_height) = if w > h {
+            let ratio = MAX_DIMENSION as f32 / w as f32;
+            (MAX_DIMENSION, (h as f32 * ratio) as u32)
+        } else {
+            let ratio = MAX_DIMENSION as f32 / h as f32;
+            ((w as f32 * ratio) as u32, MAX_DIMENSION)
+        };
+        log::info!("Resizing to {new_width}x{new_height}");
+        dyn_img =
+            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+        (new_width, new_height)
+    } else {
+        log::info!("Image is already within size limit, no resize needed");
+        (w, h)
+    };
+
+    // Encode resized image to JPEG for better compression
+    let mut jpeg: Vec<u8> = Vec::new();
     {
-        let mut cursor = std::io::Cursor::new(&mut png);
+        let mut cursor = std::io::Cursor::new(&mut jpeg);
         dyn_img
-            .write_to(&mut cursor, image::ImageFormat::Png)
+            .write_to(&mut cursor, image::ImageFormat::Jpeg)
             .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
     }
 
-    log::info!("clipboard image encoded to PNG ({}) bytes", png.len());
+    // Verify we actually encoded something
+    if jpeg.is_empty() {
+        return Err(PasteImageError::EncodeFailed(
+            "encoded JPEG is empty".into(),
+        ));
+    }
+
+    log::info!(
+        "clipboard image encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
+        jpeg.len()
+    );
     Ok((
-        png,
+        jpeg,
         PastedImageInfo {
-            width: w,
-            height: h,
-            encoded_format: EncodedImageFormat::Png,
+            width: final_width,
+            height: final_height,
+            encoded_format: EncodedImageFormat::Jpeg,
         },
     ))
 }
@@ -156,22 +325,27 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
     ))
 }
 
-/// Convenience: write clipboard image to a temp PNG file and return its path + info.
+/// Convenience: write clipboard image to a temp JPEG file and return its path + info.
 #[cfg(not(target_os = "android"))]
 pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
-    let (png, info) = paste_image_as_png()?;
-    // Create a unique temporary file with a .png suffix to avoid collisions.
+    let (jpeg, info) = paste_image_as_png()?;
+    // Create a unique temporary file with a .jpg suffix to avoid collisions.
     let tmp = Builder::new()
         .prefix("stakpak-clipboard-")
-        .suffix(".png")
+        .suffix(".jpg")
         .tempfile()
         .map_err(|e| PasteImageError::IoError(e.to_string()))?;
-    std::fs::write(tmp.path(), &png).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    std::fs::write(tmp.path(), &jpeg).map_err(|e| PasteImageError::IoError(e.to_string()))?;
     // Persist the file (so it remains after the handle is dropped) and return its PathBuf.
     let (_file, path) = tmp
         .keep()
         .map_err(|e| PasteImageError::IoError(e.error.to_string()))?;
-    Ok((path, info))
+    // Canonicalize the path to ensure it's absolute and resolves any symlinks
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|e| PasteImageError::IoError(format!("Failed to canonicalize path: {}", e)))?;
+    log::info!("Clipboard image saved to: {}", canonical_path.display());
+    Ok((canonical_path, info))
 }
 
 #[cfg(target_os = "android")]

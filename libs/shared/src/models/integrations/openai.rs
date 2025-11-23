@@ -759,7 +759,7 @@ mod tests {
                     image_url: None,
                 },
                 ContentPart {
-                    r#type: "image_url".to_string(),
+                    r#type: "input_image".to_string(),
                     text: None,
                     image_url: Some(ImageUrl {
                         url: "data:image/jpeg;base64,/9j/4AAQSkZ...".to_string(),
@@ -778,7 +778,7 @@ mod tests {
         assert!(json.contains("\"role\":\"user\""));
         assert!(json.contains("\"type\":\"text\""));
         assert!(json.contains("\"text\":\"What's in this image?\""));
-        assert!(json.contains("\"type\":\"image_url\""));
+        assert!(json.contains("\"type\":\"input_image\""));
         assert!(json.contains("\"url\":\"data:image/jpeg;base64,/9j/4AAQSkZ...\""));
         assert!(json.contains("\"detail\":\"low\""));
     }

@@ -200,3 +200,4 @@ pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String>
         .join("\n");
     Some(format!("Here's my shell history:\n{}", history))
 }
+

@@ -46,21 +46,45 @@ struct ApiErrorDetail {
 
 impl Client {
     async fn handle_response_error(&self, response: Response) -> Result<Response, String> {
+        eprintln!(
+            "[DEBUG] handle_response_error: Status: {:?}",
+            response.status()
+        );
         if response.status().is_success() {
+            eprintln!("[DEBUG] handle_response_error: Status is success");
             Ok(response)
         } else {
+            eprintln!(
+                "[DEBUG] handle_response_error: Status is NOT success, reading error body..."
+            );
+            let status = response.status();
+            let headers = response.headers().clone();
             match response.json::<ApiError>().await {
-                Ok(response) => {
-                    if response.error.key == "EXCEEDED_API_LIMIT" {
+                Ok(error_response) => {
+                    eprintln!(
+                        "[DEBUG] handle_response_error: Error key: {}, message: {}",
+                        error_response.error.key, error_response.error.message
+                    );
+                    if error_response.error.key == "EXCEEDED_API_LIMIT" {
                         Err(format!(
                             "{}.\n\nPlease top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.",
-                            response.error.message
+                            error_response.error.message
                         ))
                     } else {
-                        Err(response.error.message)
+                        Err(error_response.error.message)
                     }
                 }
-                Err(e) => Err(e.to_string()),
+                Err(e) => {
+                    eprintln!(
+                        "[DEBUG] handle_response_error: Failed to parse error JSON: {}",
+                        e
+                    );
+                    eprintln!(
+                        "[DEBUG] handle_response_error: Status: {:?}, Headers: {:?}",
+                        status, headers
+                    );
+                    Err(format!("HTTP {}: {}", status, e))
+                }
             }
         }
     }
@@ -474,17 +498,23 @@ impl Client {
         String,
     > {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
-
-        let input = ChatCompletionRequest::new(model, messages, tools, Some(true));
-
+        let input =
+            ChatCompletionRequest::new(model.clone(), messages.clone(), tools.clone(), Some(true));
         let response = self
             .client
             .post(&url)
-            .headers(headers.unwrap_or_default())
+            .headers(headers.clone().unwrap_or_default())
             .json(&input)
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
+
+        // Check content-type before processing
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
 
         // Extract x-request-id from headers
         let request_id = response
@@ -493,13 +523,23 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
+        // If content-type is not event-stream, it's likely an error message
+        if !content_type.contains("event-stream") && !content_type.contains("text/event-stream") {
+            let status = response.status();
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            return Err(format!(
+                "Server returned non-stream response ({}): {}",
+                status, error_body
+            ));
+        }
+
         let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {
             event
-                .map_err(|err| {
-                    eprintln!("stream: failed to read response: {:?}", err);
-                    ApiStreamError::Unknown("Failed to read response".to_string())
-                })
+                .map_err(|_| ApiStreamError::Unknown("Failed to read response".to_string()))
                 .and_then(|event| match event.event.as_str() {
                     "error" => Err(ApiStreamError::from(event.data)),
                     _ => serde_json::from_str::<ChatCompletionStreamResponse>(&event.data).map_err(

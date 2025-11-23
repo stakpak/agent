@@ -16,7 +16,6 @@ use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use base64::{Engine as _, engine::general_purpose};
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{Client, ClientConfig, ListRuleBook};
@@ -25,7 +24,7 @@ use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_se
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatMessage, ToolCall, ToolCallResultStatus,
+    AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
@@ -69,8 +68,6 @@ pub async fn run_interactive(
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
-        // Collect image uploads that will be attached to the next user message
-        let mut pending_images: Vec<(std::path::PathBuf, u32, u32, String)> = Vec::new();
         let mut total_session_usage = stakpak_shared::models::integrations::openai::Usage {
             prompt_tokens: 0,
             completion_tokens: 0,
@@ -271,18 +268,7 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
-                    OutputEvent::ImageUpload {
-                        path,
-                        width,
-                        height,
-                        format: _format,
-                    } => {
-                        // Collect image uploads to attach to the next user message
-                        pending_images.push((path, width, height, _format));
-                        continue;
-                    }
-                    OutputEvent::UserMessage(user_input, tool_calls_results) => {
-                        // Loading will be managed by stream processing
+                    OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
                         let mut user_input = user_input.clone();
 
                         // Add user shell history to the user input
@@ -292,13 +278,9 @@ pub async fn run_interactive(
                             user_input = format!("{}\n\n{}", history_str, user_input);
                         }
 
-                        // Add local context to the user input
-                        // Add local context and rulebooks only in specific cases:
-                        // 1. First message of new session (messages.is_empty())
-                        // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
+                        // Add local context and rulebooks only in specific cases
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
-                                // Add local context first
                                 let (user_input_with_context, _) =
                                     add_local_context(&messages, &user_input, &local_context, true)
                                         .await
@@ -306,101 +288,42 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                // Then add rulebooks
                                 let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
                                     &user_input_with_context,
                                     &rulebooks,
                                     true,
                                 );
-                                should_update_rulebooks_on_next_message = false; // Reset the flag
+                                should_update_rulebooks_on_next_message = false;
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
-                                // Don't add local context or rulebooks for regular messages
                                 (user_input.to_string(), None::<String>)
                             };
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
 
-                        // Build ChatMessage with images if any
-                        let user_msg = if !pending_images.is_empty() {
-                            // Convert images to base64 data URLs and create ContentPart array
-                            let mut content_parts: Vec<
-                                stakpak_shared::models::integrations::openai::ContentPart,
-                            > = Vec::new();
-
-                            // Add text part first
-                            let text_input = user_input.clone();
-                            if !text_input.is_empty() {
-                                content_parts.push(
+                        // Create message with ContentParts from TUI
+                        let user_msg = if image_parts.is_empty() {
+                            user_message(user_input)
+                        } else {
+                            let mut parts = Vec::new();
+                            if !user_input.trim().is_empty() {
+                                parts.push(
                                     stakpak_shared::models::integrations::openai::ContentPart {
                                         r#type: "text".to_string(),
-                                        text: Some(text_input),
+                                        text: Some(user_input),
                                         image_url: None,
                                     },
                                 );
                             }
-
-                            // Add image parts
-                            for (path, _width, _height, _format) in &pending_images {
-                                match std::fs::read(path) {
-                                    Ok(image_data) => {
-                                        // Determine MIME type from file extension
-                                        let mime_type = path
-                                            .extension()
-                                            .and_then(|ext| ext.to_str())
-                                            .map(|ext| match ext.to_lowercase().as_str() {
-                                                "png" => "image/png",
-                                                "jpg" | "jpeg" => "image/jpeg",
-                                                "gif" => "image/gif",
-                                                "webp" => "image/webp",
-                                                _ => "image/png",
-                                            })
-                                            .unwrap_or("image/png");
-
-                                        let base64_data =
-                                            general_purpose::STANDARD.encode(&image_data);
-                                        let data_url =
-                                            format!("data:{};base64,{}", mime_type, base64_data);
-
-                                        content_parts.push(stakpak_shared::models::integrations::openai::ContentPart {
-                                            r#type: "image_url".to_string(),
-                                            text: None,
-                                            image_url: Some(stakpak_shared::models::integrations::openai::ImageUrl {
-                                                url: data_url,
-                                                detail: None,
-                                            }),
-                                        });
-                                    }
-                                    Err(e) => {
-                                        log::warn!(
-                                            "Failed to read image file {}: {}",
-                                            path.display(),
-                                            e
-                                        );
-                                    }
-                                }
+                            parts.extend(image_parts);
+                            ChatMessage {
+                                role: Role::User,
+                                content: Some(MessageContent::Array(parts)),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
                             }
-
-                            // Clear pending images after processing
-                            pending_images.clear();
-
-                            // Ensure we have at least one content part
-                            if content_parts.is_empty() {
-                                // Fallback to text-only if all images failed
-                                user_message(user_input)
-                            } else {
-                                ChatMessage {
-                                    role: stakpak_shared::models::integrations::openai::Role::User,
-                                    content: Some(stakpak_shared::models::integrations::openai::MessageContent::Array(content_parts)),
-                                    name: None,
-                                    tool_calls: None,
-                                    tool_call_id: None,
-                                }
-                            }
-                        } else {
-                            // No images, use simple text message
-                            user_message(user_input)
                         };
 
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
@@ -836,7 +759,13 @@ pub async fn run_interactive(
                 } else {
                     None
                 };
+                eprintln!("[DEBUG] mode_interactive: About to call chat_completion_stream");
+                eprintln!(
+                    "[DEBUG] mode_interactive: Messages count: {}",
+                    messages.len()
+                );
                 let response_result = loop {
+                    eprintln!("[DEBUG] mode_interactive: Calling chat_completion_stream...");
                     let stream_result = client
                         .chat_completion_stream(
                             model.clone(),
@@ -847,10 +776,33 @@ pub async fn run_interactive(
                         .await;
 
                     let (mut stream, current_request_id) = match stream_result {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            let req_id = result.1.clone();
+                            eprintln!(
+                                "[DEBUG] mode_interactive: chat_completion_stream SUCCESS, request_id: {:?}",
+                                req_id
+                            );
+                            result
+                        }
                         Err(e) => {
-                            send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
-                            break Err(ApiStreamError::Unknown(e));
+                            eprintln!(
+                                "[DEBUG] mode_interactive: chat_completion_stream FAILED: {}",
+                                e
+                            );
+                            // Extract a user-friendly error message
+                            let error_msg = if e.contains("Server returned non-stream response") {
+                                // Extract the actual error from the server response
+                                if let Some(start) = e.find(": ") {
+                                    e[start + 2..].to_string()
+                                } else {
+                                    e.clone()
+                                }
+                            } else {
+                                e.clone()
+                            };
+                            send_input_event(&input_tx, InputEvent::Error(error_msg.clone()))
+                                .await?;
+                            break Err(ApiStreamError::Unknown(error_msg));
                         }
                     };
 
