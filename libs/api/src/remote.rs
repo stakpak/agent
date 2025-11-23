@@ -346,41 +346,6 @@ impl AgentProvider for RemoteClient {
         }
     }
 
-    async fn create_agent_session(
-        &self,
-        agent_id: AgentID,
-        visibility: AgentSessionVisibility,
-        input: Option<AgentInput>,
-    ) -> Result<AgentSession, String> {
-        let url = format!("{}/agents/sessions", self.base_url);
-
-        let input = serde_json::json!({
-            "agent_id": agent_id,
-            "visibility": visibility,
-            "input": input,
-        });
-
-        let response = self
-            .client
-            .post(&url)
-            .json(&input)
-            .send()
-            .await
-            .map_err(|e: ReqwestError| e.to_string())?;
-
-        let response = self.handle_response_error(response).await?;
-
-        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        match serde_json::from_value::<AgentSession>(value.clone()) {
-            Ok(response) => Ok(response),
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
-                Err("Failed to deserialize response:".into())
-            }
-        }
-    }
-
     async fn get_agent_checkpoint(&self, checkpoint_id: Uuid) -> Result<RunAgentOutput, String> {
         let url = format!("{}/agents/checkpoints/{}", self.base_url, checkpoint_id);
 

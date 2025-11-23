@@ -29,12 +29,6 @@ pub trait AgentProvider: Send + Sync {
     async fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, String>;
     async fn get_agent_session(&self, session_id: Uuid) -> Result<AgentSession, String>;
     async fn get_agent_session_stats(&self, session_id: Uuid) -> Result<AgentSessionStats, String>;
-    async fn create_agent_session(
-        &self,
-        agent_id: AgentID,
-        visibility: AgentSessionVisibility,
-        input: Option<AgentInput>,
-    ) -> Result<AgentSession, String>;
     async fn get_agent_checkpoint(&self, checkpoint_id: Uuid) -> Result<RunAgentOutput, String>;
     async fn get_agent_session_latest_checkpoint(
         &self,

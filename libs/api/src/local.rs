@@ -56,15 +56,6 @@ impl AgentProvider for LocalClient {
         Err("Local provider does not support sessions yet".to_string())
     }
 
-    async fn create_agent_session(
-        &self,
-        _agent_id: AgentID,
-        _visibility: AgentSessionVisibility,
-        _input: Option<AgentInput>,
-    ) -> Result<AgentSession, String> {
-        Err("Local provider does not support sessions yet".to_string())
-    }
-
     async fn get_agent_checkpoint(&self, _checkpoint_id: Uuid) -> Result<RunAgentOutput, String> {
         Err("Local provider does not support checkpoints yet".to_string())
     }
