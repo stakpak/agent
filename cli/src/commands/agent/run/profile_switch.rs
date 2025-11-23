@@ -1,5 +1,9 @@
 use crate::config::{AppConfig, ProviderType};
-use stakpak_api::{AgentProvider, local::LocalClient, remote::RemoteClient};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::RemoteClient,
+};
 use tokio::time::Duration;
 
 const MAX_RETRIES: u32 = 2;
@@ -39,7 +43,12 @@ pub async fn validate_profile_switch(
                 .map_err(|e| format!("Failed to create API client: {}", e))?;
             Box::new(client)
         }
-        ProviderType::Local => Box::new(LocalClient),
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig { store_path: None })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Box::new(client)
+        }
     };
 
     let mut last_error = String::new();

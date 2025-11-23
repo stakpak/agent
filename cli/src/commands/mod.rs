@@ -7,7 +7,12 @@ use crate::{
 };
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
-use stakpak_api::{AgentProvider, local::LocalClient, remote::ClientConfig, remote::RemoteClient};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::ClientConfig,
+    remote::RemoteClient,
+};
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 
 pub mod acp;
@@ -169,13 +174,18 @@ pub enum Commands {
     Update,
 }
 
-fn get_client(config: &AppConfig) -> Result<Box<dyn AgentProvider>, String> {
+async fn get_client(config: &AppConfig) -> Result<Box<dyn AgentProvider>, String> {
     match config.provider {
         ProviderType::Remote => {
             let client = RemoteClient::new(&config.clone().into())?;
             Ok(Box::new(client))
         }
-        ProviderType::Local => Ok(Box::new(LocalClient)),
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig { store_path: None })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Ok(Box::new(client))
+        }
     }
 }
 
@@ -267,7 +277,12 @@ impl Commands {
                             RemoteClient::new(&config.clone().into()).map_err(|e| e.to_string())?;
                         Arc::new(remote_client)
                     }
-                    ProviderType::Local => Arc::new(LocalClient),
+                    ProviderType::Local => {
+                        let client = LocalClient::new(LocalClientConfig { store_path: None })
+                            .await
+                            .map_err(|e| format!("Failed to create local client: {}", e))?;
+                        Arc::new(client)
+                    }
                 };
 
                 start_server(
@@ -362,7 +377,7 @@ impl Commands {
                 }
             },
             Commands::Rulebooks(rulebook_command) => {
-                let client = get_client(&config)?;
+                let client = get_client(&config).await?;
                 match rulebook_command {
                     RulebookCommands::Get { uri } => {
                         if let Some(uri) = uri {
@@ -425,7 +440,7 @@ impl Commands {
                 }
             }
             Commands::Account => {
-                let client = get_client(&config)?;
+                let client = get_client(&config).await?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }

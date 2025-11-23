@@ -13,7 +13,7 @@ use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use stakpak_api::{
     AgentProvider,
-    local::LocalClient,
+    local::{LocalClient, LocalClientConfig},
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
@@ -85,7 +85,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             .map_err(|e| e.to_string())?;
             Arc::new(remote_client)
         }
-        ProviderType::Local => Arc::new(LocalClient),
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig { store_path: None })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Arc::new(client)
+        }
     };
 
     tokio::spawn(async move {
@@ -126,7 +131,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             .map_err(|e| e.to_string())?;
             Box::new(client)
         }
-        ProviderType::Local => Box::new(LocalClient),
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig { store_path: None })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Box::new(client)
+        }
     };
 
     // Load checkpoint messages if provided

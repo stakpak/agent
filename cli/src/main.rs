@@ -1,7 +1,11 @@
 use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
-use stakpak_api::{AgentProvider, local::LocalClient, remote::RemoteClient};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::RemoteClient,
+};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::{integrations::openai::AgentModel, subagent::SubagentConfigs};
 use std::sync::Arc;
@@ -233,7 +237,15 @@ async fn main() {
                                 });
                             Arc::new(client)
                         }
-                        ProviderType::Local => Arc::new(LocalClient),
+                        ProviderType::Local => {
+                            let client = LocalClient::new(LocalClientConfig { store_path: None })
+                                .await
+                                .unwrap_or_else(|e| {
+                                    eprintln!("Failed to create local client: {}", e);
+                                    std::process::exit(1);
+                                });
+                            Arc::new(client)
+                        }
                     };
 
                     // Parallelize HTTP calls for faster startup

@@ -7,7 +7,7 @@ use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{
     AgentProvider,
-    local::LocalClient,
+    local::{LocalClient, LocalClientConfig},
     remote::{ClientConfig, RemoteClient},
 };
 use stakpak_mcp_client::ClientManager;
@@ -83,7 +83,12 @@ impl StakpakAcpAgent {
                     Arc::new(client)
                 }
             }
-            ProviderType::Local => Arc::new(LocalClient),
+            ProviderType::Local => {
+                let client = LocalClient::new(LocalClientConfig { store_path: None })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                Arc::new(client)
+            }
         };
 
         // Initialize MCP server and tools (optional for ACP)

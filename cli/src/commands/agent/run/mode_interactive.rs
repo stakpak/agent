@@ -20,7 +20,7 @@ use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{
     AgentProvider,
-    local::LocalClient,
+    local::{LocalClient, LocalClientConfig},
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
@@ -162,7 +162,12 @@ pub async fn run_interactive(
                     .map_err(|e| e.to_string())?;
                     Arc::new(client)
                 }
-                ProviderType::Local => Arc::new(LocalClient),
+                ProviderType::Local => {
+                    let client = LocalClient::new(LocalClientConfig { store_path: None })
+                        .await
+                        .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    Arc::new(client)
+                }
             };
 
             let (_mcp_server_host, clients, _tools) = match initialize_mcp_server_and_tools(
@@ -942,7 +947,12 @@ pub async fn run_interactive(
                     .map_err(|e| e.to_string())?;
                     Box::new(client)
                 }
-                ProviderType::Local => Box::new(LocalClient),
+                ProviderType::Local => {
+                    let client = LocalClient::new(LocalClientConfig { store_path: None })
+                        .await
+                        .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    Box::new(client)
+                }
             };
 
             let new_rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
@@ -1001,7 +1011,12 @@ pub async fn run_interactive(
                 .map_err(|e| e.to_string())?;
                 Box::new(client)
             }
-            ProviderType::Local => Box::new(LocalClient),
+            ProviderType::Local => {
+                let client = LocalClient::new(LocalClientConfig { store_path: None })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                Box::new(client)
+            }
         };
 
         // Display session stats
