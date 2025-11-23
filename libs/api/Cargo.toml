@@ -15,4 +15,4 @@ rmcp = { workspace = true }
 eventsource-stream = "0.2.3"
 url = "2.5.0"
 urlencoding = "2.1"
-async-trait.workspace = true
+async-trait = { workspace = true }

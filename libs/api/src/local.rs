@@ -114,8 +114,33 @@ impl AgentProvider for LocalClient {
         Err("Local provider does not support code indexing yet".to_string())
     }
 
-    async fn call_mcp_tool(&self, _input: &ToolsCallParams) -> Result<Vec<Content>, String> {
-        Err("Local provider does not support MCP tools yet".to_string())
+    async fn search_docs(&self, _input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
+        Err("Local provider does not support search docs yet".to_string())
+    }
+
+    async fn search_memory(&self, _input: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
+        Err("Local provider does not support search memory yet".to_string())
+    }
+
+    async fn slack_read_messages(
+        &self,
+        _input: &SlackReadMessagesRequest,
+    ) -> Result<Vec<Content>, String> {
+        Err("Local provider does not support slack read messages yet".to_string())
+    }
+
+    async fn slack_read_replies(
+        &self,
+        _input: &SlackReadRepliesRequest,
+    ) -> Result<Vec<Content>, String> {
+        Err("Local provider does not support slack read replies yet".to_string())
+    }
+
+    async fn slack_send_message(
+        &self,
+        _input: &SlackSendMessageRequest,
+    ) -> Result<Vec<Content>, String> {
+        Err("Local provider does not support slack send message yet".to_string())
     }
 
     async fn memorize_session(&self, _checkpoint_id: Uuid) -> Result<(), String> {
