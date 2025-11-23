@@ -83,7 +83,7 @@ pub async fn add_local_context<'a>(
         if is_first_message || force_add {
             let context_display = local_context.format_display().await?;
             let formatted_input = format!(
-                "{}\n\n<local_context>\n{}\n</local_context>",
+                "{}\n<local_context>\n{}\n</local_context>",
                 user_input, context_display
             );
             Ok((formatted_input, Some(local_context)))
@@ -121,7 +121,7 @@ pub fn add_rulebooks(user_input: &str, rulebooks: &[ListRuleBook]) -> (String, O
     };
 
     let formatted_input = format!(
-        "{}\n\n<rulebooks>\n{}\n</rulebooks>",
+        "{}\n<rulebooks>\n{}\n</rulebooks>",
         user_input, rulebooks_text
     );
     (formatted_input, Some(rulebooks_text))
@@ -137,7 +137,7 @@ pub fn add_subagents(
 
         if messages.is_empty() {
             let formatted_input = format!(
-                "{}\n\n<subagents>\n{}\n</subagents>",
+                "{}\n<subagents>\n{}\n</subagents>",
                 user_input, subagents_text
             );
             (formatted_input, Some(subagents_text))
