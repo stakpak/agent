@@ -172,6 +172,35 @@ jobs:
             ghcr.io/${{ github.repository }}-warden:${{ steps.get_version.outputs.VERSION }}
             ghcr.io/${{ github.repository }}-warden:latest
 
+  update-release-notes:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git-cliff
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
+      - name: Generate release notes with git-cliff
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          git-cliff --tag "$VERSION" --unreleased --strip all > release_notes.md || {
+            echo "git-cliff failed, skipping release notes update"
+            exit 0
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update GitHub Release
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          gh release edit "$VERSION" --notes-file release_notes.md || echo "Failed to update release notes, continuing anyway"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   homebrew:
     needs: release
     if: startsWith(github.ref, 'refs/tags/')
