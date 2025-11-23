@@ -62,6 +62,41 @@ impl RemoteClient {
         }
     }
 
+    async fn call_mcp_tool(&self, input: &ToolsCallParams) -> Result<Vec<Content>, String> {
+        let url = format!("{}/mcp", self.base_url);
+
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": input.name,
+                "arguments": input.arguments,
+            },
+            "id": Uuid::new_v4().to_string(),
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let response = self.handle_response_error(response).await?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<JsonRpcResponse<ToolsCallResponse>>(value.clone()) {
+            Ok(response) => Ok(response.result.content),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
     pub fn new(config: &ClientConfig) -> Result<Self, String> {
         if config.api_key.is_none() {
             return Err("API Key not found, please login".into());
@@ -525,39 +560,74 @@ impl AgentProvider for RemoteClient {
         }
     }
 
-    async fn call_mcp_tool(&self, input: &ToolsCallParams) -> Result<Vec<Content>, String> {
-        let url = format!("{}/mcp", self.base_url);
+    async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
+        self.call_mcp_tool(&ToolsCallParams {
+            name: "search_docs".to_string(),
+            arguments: serde_json::to_value(input).map_err(|e| e.to_string())?,
+        })
+        .await
+    }
 
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": input.name,
-                "arguments": input.arguments,
-            },
-            "id": Uuid::new_v4().to_string(),
+    async fn search_memory(&self, input: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
+        self.call_mcp_tool(&ToolsCallParams {
+            name: "search_memory".to_string(),
+            arguments: serde_json::to_value(input).map_err(|e| e.to_string())?,
+        })
+        .await
+    }
+
+    async fn slack_read_messages(
+        &self,
+        input: &SlackReadMessagesRequest,
+    ) -> Result<Vec<Content>, String> {
+        self.call_mcp_tool(&ToolsCallParams {
+            name: "slack_read_messages".to_string(),
+            arguments: serde_json::to_value(input).map_err(|e| e.to_string())?,
+        })
+        .await
+    }
+
+    async fn slack_read_replies(
+        &self,
+        input: &SlackReadRepliesRequest,
+    ) -> Result<Vec<Content>, String> {
+        self.call_mcp_tool(&ToolsCallParams {
+            name: "slack_read_replies".to_string(),
+            arguments: serde_json::to_value(input).map_err(|e| e.to_string())?,
+        })
+        .await
+    }
+
+    async fn slack_send_message(
+        &self,
+        input: &SlackSendMessageRequest,
+    ) -> Result<Vec<Content>, String> {
+        // Note: The remote tool expects "markdown_text" but the struct has "mrkdwn_text".
+        // We need to map this correctly. The struct in models.rs has mrkdwn_text.
+        // The remote tool likely expects what was previously passed.
+        // In slack.rs, it was mapping "mrkdwn_text" to "markdown_text".
+        // So we should construct the arguments manually or use a custom serializer if we want to match exactly.
+        // However, since we are sending `input` which is `SlackSendMessageRequest`, let's check its definition.
+        // It has `mrkdwn_text`.
+        // The previous implementation in slack.rs did:
+        // arguments: json!({
+        //     "channel": channel,
+        //     "markdown_text": mrkdwn_text,
+        //     "thread_ts": thread_ts,
+        // }),
+        // So we need to replicate this mapping.
+
+        let arguments = json!({
+            "channel": input.channel,
+            "markdown_text": input.mrkdwn_text,
+            "thread_ts": input.thread_ts,
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e: ReqwestError| e.to_string())?;
-
-        let response = self.handle_response_error(response).await?;
-
-        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-
-        match serde_json::from_value::<JsonRpcResponse<ToolsCallResponse>>(value.clone()) {
-            Ok(response) => Ok(response.result.content),
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
-                Err("Failed to deserialize response:".into())
-            }
-        }
+        self.call_mcp_tool(&ToolsCallParams {
+            name: "slack_send_message".to_string(),
+            arguments,
+        })
+        .await
     }
 
     async fn memorize_session(&self, checkpoint_id: Uuid) -> Result<(), String> {

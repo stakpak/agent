@@ -585,3 +585,36 @@ impl std::fmt::Display for SimpleLLMRole {
         }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SearchDocsRequest {
+    pub keywords: String,
+    pub exclude_keywords: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SearchMemoryRequest {
+    pub keywords: Vec<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SlackReadMessagesRequest {
+    pub channel: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SlackReadRepliesRequest {
+    pub channel: String,
+    pub ts: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SlackSendMessageRequest {
+    pub channel: String,
+    pub mrkdwn_text: String,
+    pub thread_ts: Option<String>,
+}

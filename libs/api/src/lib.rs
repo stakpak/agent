@@ -66,6 +66,19 @@ pub trait AgentProvider: Send + Sync {
         &self,
         input: &BuildCodeIndexInput,
     ) -> Result<BuildCodeIndexOutput, String>;
-    async fn call_mcp_tool(&self, input: &ToolsCallParams) -> Result<Vec<Content>, String>;
+    async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String>;
+    async fn search_memory(&self, input: &SearchMemoryRequest) -> Result<Vec<Content>, String>;
+    async fn slack_read_messages(
+        &self,
+        input: &SlackReadMessagesRequest,
+    ) -> Result<Vec<Content>, String>;
+    async fn slack_read_replies(
+        &self,
+        input: &SlackReadRepliesRequest,
+    ) -> Result<Vec<Content>, String>;
+    async fn slack_send_message(
+        &self,
+        input: &SlackSendMessageRequest,
+    ) -> Result<Vec<Content>, String>;
     async fn memorize_session(&self, checkpoint_id: Uuid) -> Result<(), String>;
 }
