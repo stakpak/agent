@@ -83,7 +83,7 @@ pub async fn add_local_context<'a>(
         if is_first_message || force_add {
             let context_display = local_context.format_display().await?;
             let formatted_input = format!(
-                "{}\n\n<local_context>\n{}\n</local_context>",
+                "{}\n<local_context>\n{}\n</local_context>",
                 user_input, context_display
             );
             Ok((formatted_input, Some(local_context)))
@@ -137,7 +137,7 @@ pub fn add_rulebooks_with_force(
         // Add rulebooks only if explicitly requested via force_add
         if force_add {
             let formatted_input = format!(
-                "{}\n\n<rulebooks>\n{}\n</rulebooks>",
+                "{}\n<rulebooks>\n{}\n</rulebooks>",
                 user_input, rulebooks_text
             );
             (formatted_input, Some(rulebooks_text))
