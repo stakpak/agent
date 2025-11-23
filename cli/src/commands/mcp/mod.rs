@@ -47,7 +47,29 @@ fn find_mcp_proxy_config_file() -> Result<String, String> {
         return Ok("mcp.json".to_string());
     }
 
-    Err("No MCP proxy config file found. Searched in:\n  1. ~/.stakpak/mcp.toml or ~/.stakpak/mcp.json\n  2. .stakpak/mcp.toml or .stakpak/mcp.json\n  3. mcp.toml or mcp.json".to_string())
+    Err("No MCP proxy config file found. Searched in:\n  \
+        1. ~/.stakpak/mcp.toml or ~/.stakpak/mcp.json\n  \
+        2. .stakpak/mcp.toml or .stakpak/mcp.json\n  \
+        3. mcp.toml or mcp.json\n\n\
+        Create a config file with your MCP servers. Example TOML format:\n\n\
+        [mcpServers.filesystem]\n\
+        command = \"npx\"\n\
+        args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path/to/allowed/files\"]\n\n\
+        [mcpServers.github]\n\
+        command = \"npx\"\n\
+        args = [\"-y\", \"@modelcontextprotocol/server-github\"]\n\n\
+        [mcpServers.github.env]\n\
+        GITHUB_PERSONAL_ACCESS_TOKEN = \"your-token-here\"\n\n\
+        Or JSON format (Claude Desktop compatible):\n\n\
+        {\n  \
+          \"mcpServers\": {\n    \
+            \"filesystem\": {\n      \
+              \"command\": \"npx\",\n      \
+              \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path/to/allowed/files\"]\n    \
+            }\n  \
+          }\n\
+        }\n\n\
+        For more details, visit: https://stakpak.gitbook.io/docs".to_string())
 }
 
 #[derive(Subcommand, PartialEq)]
