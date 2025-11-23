@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -157,6 +157,8 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+
+        let model_clone = model.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -172,6 +174,7 @@ pub async fn run_interactive(
                 allowed_tools.as_ref(),
                 current_profile_for_tui,
                 rulebook_config_for_tui,
+                model_clone,
             )
             .await
             .map_err(|e| e.to_string())
@@ -278,7 +281,8 @@ pub async fn run_interactive(
                             user_input = format!("{}\n\n{}", history_str, user_input);
                         }
 
-                        // Add local context and rulebooks only in specific cases
+                        // Add local context to user input for new sessions
+                        // Add rulebooks to user input for new sessions or when rulebook settings change
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
                                 let (user_input_with_context, _) =
@@ -288,12 +292,14 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
-                                    &user_input_with_context,
-                                    &rulebooks,
-                                    true,
-                                );
-                                should_update_rulebooks_on_next_message = false;
+                                let (user_input_with_rulebooks, _) =
+                                    if let Some(rulebooks) = &rulebooks {
+                                        add_rulebooks(&user_input_with_context, rulebooks)
+                                    } else {
+                                        (user_input_with_context, None)
+                                    };
+
+                                should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
                                 (user_input.to_string(), None::<String>)
@@ -759,13 +765,7 @@ pub async fn run_interactive(
                 } else {
                     None
                 };
-                eprintln!("[DEBUG] mode_interactive: About to call chat_completion_stream");
-                eprintln!(
-                    "[DEBUG] mode_interactive: Messages count: {}",
-                    messages.len()
-                );
                 let response_result = loop {
-                    eprintln!("[DEBUG] mode_interactive: Calling chat_completion_stream...");
                     let stream_result = client
                         .chat_completion_stream(
                             model.clone(),
@@ -776,19 +776,8 @@ pub async fn run_interactive(
                         .await;
 
                     let (mut stream, current_request_id) = match stream_result {
-                        Ok(result) => {
-                            let req_id = result.1.clone();
-                            eprintln!(
-                                "[DEBUG] mode_interactive: chat_completion_stream SUCCESS, request_id: {:?}",
-                                req_id
-                            );
-                            result
-                        }
+                        Ok(result) => result,
                         Err(e) => {
-                            eprintln!(
-                                "[DEBUG] mode_interactive: chat_completion_stream FAILED: {}",
-                                e
-                            );
                             // Extract a user-friendly error message
                             let error_msg = if e.contains("Server returned non-stream response") {
                                 // Extract the actual error from the server response

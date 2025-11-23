@@ -80,19 +80,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
-                " . Fn/Option/Shift + drag to select"
+                "Fn/Option/Shift + drag to select"
             } else {
                 ""
             };
 
-            // Create spans for left and right alignment
-            #[cfg(unix)]
-            let left_text = format!(
-                "ctrl+p palette . @ files . / commands . ctrl+s shortcuts{}",
-                select_hint
-            );
-            #[cfg(not(unix))]
-            let left_text = format!("ctrl+p palette . @ files . / commands . ctrl+s shortcuts");
+            // Create spans for left and right alignment on first line
+            let left_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
@@ -143,7 +137,19 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 ));
             }
 
-            let hint = Paragraph::new(Line::from(spans));
+            // Create lines - first line with shortcuts and profile info
+            let mut lines = vec![Line::from(spans)];
+
+            // Add second line with select hint if available (Unix only)
+            #[cfg(unix)]
+            if !select_hint.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    select_hint,
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
+
+            let hint = Paragraph::new(lines);
             f.render_widget(hint, area);
         }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
