@@ -10,7 +10,7 @@ use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines_cached, invalidate_message_lines_cache,
 };
 use ratatui::style::Style;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use tokio::sync::mpsc::Sender;
 
 /// Filter rulebooks based on search input

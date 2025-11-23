@@ -1,5 +1,5 @@
 use ratatui::style::Color;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };

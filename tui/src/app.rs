@@ -19,7 +19,7 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent}
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
 use ratatui::text::Line;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{AgentModel, ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;

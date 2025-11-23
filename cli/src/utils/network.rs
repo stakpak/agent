@@ -10,11 +10,12 @@ const MAX_ATTEMPTS: u32 = 100;
 /// Finds an available port using random selection to minimize collisions.
 /// Returns a bound TcpListener that the caller must use immediately to avoid races.
 async fn find_available_port_with_listener(host: &str) -> Result<(TcpListener, u16), String> {
-    let mut rng = rand::rng();
-
     for _attempt in 0..MAX_ATTEMPTS {
         // Use random port selection to minimize collision probability
-        let port = rng.random_range(MIN_EPHEMERAL_PORT..=MAX_EPHEMERAL_PORT);
+        let port = {
+            let mut rng = rand::rng();
+            rng.random_range(MIN_EPHEMERAL_PORT..=MAX_EPHEMERAL_PORT)
+        }; // rng is dropped here before the await
         let addr = format!("{}:{}", host, port);
 
         match TcpListener::bind(&addr).await {

@@ -1,5 +1,5 @@
 use stakpak_api::models::{BuildCodeIndexInput, BuildCodeIndexOutput, CodeIndex, SimpleDocument};
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{AgentProvider, ClientConfig, LocalClient, RemoteClient};
 use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::indexing::IndexingStatus;
@@ -14,6 +14,7 @@ use stakpak_shared::utils::{
     self, is_supported_file, read_gitignore_patterns, should_include_entry,
 };
 
+use crate::config::{AppConfig, ProviderType};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -46,7 +47,7 @@ const DEBOUNCE_DURATION_SECONDS: u64 = 15;
 struct PendingUpdate {
     operation: FileOperation,
     file_uri: String,
-    api_config: ClientConfig,
+    app_config: AppConfig,
     directory: Option<String>,
     last_update_time: Instant,
 }
@@ -134,7 +135,7 @@ impl DebounceActor {
             );
 
             if let Err(e) = execute_code_index_update(
-                &update.api_config,
+                &update.app_config,
                 &update.directory,
                 update.operation,
                 &update.file_uri,
@@ -166,7 +167,7 @@ fn get_debounce_actor_sender() -> &'static mpsc::Sender<DebounceMessage> {
 }
 
 pub async fn get_or_build_local_code_index(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: Option<String>,
     index_big_project: bool,
 ) -> Result<CodeIndex, String> {
@@ -213,11 +214,11 @@ pub async fn get_or_build_local_code_index(
         Ok(_) => {
             // Index exists but is stale, rebuild it
             warn!("Code index is older than 10 minutes, rebuilding...");
-            rebuild_and_load_index(api_config, Some(dir), file_count).await
+            rebuild_and_load_index(app_config, Some(dir), file_count).await
         }
         Err(_) => {
             // No index exists or failed to load, build a new one
-            rebuild_and_load_index(api_config, Some(dir), file_count).await
+            rebuild_and_load_index(app_config, Some(dir), file_count).await
         }
     }
 }
@@ -282,11 +283,11 @@ fn is_index_fresh(index: &CodeIndex) -> bool {
 
 /// Rebuild the index and load it from storage
 async fn rebuild_and_load_index(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: Option<String>,
     file_count: usize,
 ) -> Result<CodeIndex, String> {
-    build_local_code_index(api_config, directory).await?;
+    build_local_code_index(app_config, directory).await?;
     let index = load_existing_index()?;
 
     // Store successful indexing status
@@ -303,7 +304,7 @@ async fn rebuild_and_load_index(
 
 /// Build local code index
 async fn build_local_code_index(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: Option<String>,
 ) -> Result<usize, String> {
     let directory = directory.unwrap_or_else(|| {
@@ -312,7 +313,17 @@ async fn build_local_code_index(
             .unwrap_or_else(|_| ".".to_string())
     });
 
-    let client = Client::new(api_config)?;
+    let client: Box<dyn AgentProvider> = match app_config.provider {
+        ProviderType::Remote => {
+            let client = RemoteClient::new(&ClientConfig {
+                api_key: app_config.api_key.clone(),
+                api_endpoint: app_config.api_endpoint.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+            Box::new(client)
+        }
+        ProviderType::Local => Box::new(LocalClient),
+    };
 
     let documents = process_directory(&directory)?;
 
@@ -368,7 +379,7 @@ fn process_directory(base_dir: &str) -> Result<Vec<SimpleDocument>, String> {
 }
 
 pub fn start_code_index_watcher(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: Option<String>,
 ) -> Result<JoinHandle<Result<(), String>>, String> {
     let watch_dir = directory.clone().unwrap_or_else(|| {
@@ -408,7 +419,7 @@ pub fn start_code_index_watcher(
         watch_dir
     );
 
-    let api_config = api_config.clone();
+    let app_config = app_config.clone();
     // Spawn background task
     let handle = tokio::spawn(async move {
         // Create the file watcher with channel
@@ -421,7 +432,7 @@ pub fn start_code_index_watcher(
         // Main event loop - handle processed file watch events
         while let Some(watch_event) = event_receiver.recv().await {
             if let Err(e) =
-                handle_code_index_update_event(&api_config, &directory, watch_event).await
+                handle_code_index_update_event(&app_config, &directory, watch_event).await
             {
                 error!("Error handling code index update: {}", e);
             }
@@ -436,20 +447,20 @@ pub fn start_code_index_watcher(
 }
 
 async fn handle_code_index_update_event(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: &Option<String>,
     event: FileWatchEvent,
 ) -> Result<(), String> {
     match event {
         FileWatchEvent::Created { file } => {
-            update_code_index(api_config, directory, FileOperation::Created, &file.uri).await
+            update_code_index(app_config, directory, FileOperation::Created, &file.uri).await
         }
         FileWatchEvent::Modified {
             file,
             old_content: _,
-        } => update_code_index(api_config, directory, FileOperation::Modified, &file.uri).await,
+        } => update_code_index(app_config, directory, FileOperation::Modified, &file.uri).await,
         FileWatchEvent::Deleted { file } => {
-            update_code_index(api_config, directory, FileOperation::Deleted, &file.uri).await
+            update_code_index(app_config, directory, FileOperation::Deleted, &file.uri).await
         }
         FileWatchEvent::Raw { event } => {
             debug!("Raw filesystem event: {:?}", event);
@@ -569,7 +580,7 @@ fn merge_index_results(
 }
 
 async fn update_code_index(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     directory: &Option<String>,
     operation: FileOperation,
     file_uri: &str,
@@ -580,7 +591,7 @@ async fn update_code_index(
     let pending_update = PendingUpdate {
         operation,
         file_uri: file_uri.to_string(),
-        api_config: api_config.clone(),
+        app_config: app_config.clone(),
         directory: directory.clone(),
         last_update_time: Instant::now(),
     };
@@ -599,7 +610,7 @@ async fn update_code_index(
 }
 
 async fn execute_code_index_update(
-    api_config: &ClientConfig,
+    app_config: &AppConfig,
     _directory: &Option<String>,
     operation: FileOperation,
     file_uri: &str,
@@ -667,7 +678,18 @@ async fn execute_code_index_update(
             }
 
             // Call the indexing API
-            let client = Client::new(api_config)?;
+            let client: Box<dyn AgentProvider> = match app_config.provider {
+                ProviderType::Remote => {
+                    let client = RemoteClient::new(&ClientConfig {
+                        api_key: app_config.api_key.clone(),
+                        api_endpoint: app_config.api_endpoint.clone(),
+                    })
+                    .map_err(|e| e.to_string())?;
+                    Box::new(client)
+                }
+                ProviderType::Local => Box::new(LocalClient),
+            };
+
             let new_index = client
                 .build_code_index(&BuildCodeIndexInput { documents })
                 .await?;
@@ -746,12 +768,3 @@ async fn execute_code_index_update(
     );
     Ok(())
 }
-
-// pub fn stop_code_index_watcher(handle: JoinHandle<Result<(), String>>) {
-//     info!("Stopping code index file watcher");
-//     handle.abort();
-// }
-
-// pub fn is_code_index_watcher_running(handle: &JoinHandle<Result<(), String>>) -> bool {
-//     !handle.is_finished()
-// }

@@ -5,8 +5,9 @@ use rmcp::{
     tool_router,
 };
 use serde::Deserialize;
-use serde_json::json;
-use stakpak_api::ToolsCallParams;
+use stakpak_api::models::{
+    SearchDocsRequest as ApiSearchDocsRequest, SearchMemoryRequest as ApiSearchMemoryRequest,
+};
 // use stakpak_api::models::CodeIndex;
 // use stakpak_shared::local_store::LocalStore;
 // use stakpak_shared::models::indexing::IndexingStatus;
@@ -42,6 +43,16 @@ pub struct SearchDocsRequest {
     pub limit: Option<u32>,
 }
 
+impl From<SearchDocsRequest> for ApiSearchDocsRequest {
+    fn from(req: SearchDocsRequest) -> Self {
+        Self {
+            keywords: req.keywords,
+            exclude_keywords: req.exclude_keywords,
+            limit: req.limit,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchMemoryRequest {
     #[schemars(
@@ -58,6 +69,19 @@ pub struct SearchMemoryRequest {
     pub end_time: Option<DateTime<Utc>>,
 }
 
+impl From<SearchMemoryRequest> for ApiSearchMemoryRequest {
+    fn from(req: SearchMemoryRequest) -> Self {
+        Self {
+            keywords: req
+                .keywords
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect(),
+            start_time: req.start_time,
+            end_time: req.end_time,
+        }
+    }
+}
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReadRulebookRequest {
     #[schemars(
@@ -367,20 +391,10 @@ If your goal requires understanding multiple distinct topics or technologies, ma
     )]
     pub async fn search_docs(
         &self,
-        Parameters(SearchDocsRequest {
-            keywords,
-            exclude_keywords,
-            limit,
-        }): Parameters<SearchDocsRequest>,
+        Parameters(mut request): Parameters<SearchDocsRequest>,
     ) -> Result<CallToolResult, McpError> {
         // Cap the limit to a maximum of 5
-        let limit = limit.map(|l| l.min(5)).or(Some(5));
-
-        // Split keywords into array
-        let keywords_array: Vec<String> =
-            keywords.split_whitespace().map(|s| s.to_string()).collect();
-        let exclude_keywords_array: Option<Vec<String>> =
-            exclude_keywords.map(|s| s.split_whitespace().map(|word| word.to_string()).collect());
+        request.limit = request.limit.map(|l| l.min(5)).or(Some(5));
 
         let client = match self.get_client() {
             Some(client) => client,
@@ -392,17 +406,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "search_docs".to_string(),
-                arguments: json!({
-                    "keywords": keywords_array,
-                    "exclude_keywords": exclude_keywords_array,
-                    "limit": limit,
-                }),
-            })
-            .await
-        {
+        let response = match client.search_docs(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -420,19 +424,8 @@ If your goal requires understanding multiple distinct topics or technologies, ma
     )]
     pub async fn search_memory(
         &self,
-        Parameters(SearchMemoryRequest {
-            keywords,
-            start_time,
-            end_time,
-        }): Parameters<SearchMemoryRequest>,
+        Parameters(request): Parameters<SearchMemoryRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // // Cap the limit to a maximum of 5
-        // let limit = limit.map(|l| l.min(5)).or(Some(5));
-
-        // Split keywords into array
-        let keywords_array: Vec<String> =
-            keywords.split_whitespace().map(|s| s.to_string()).collect();
-
         let client = match self.get_client() {
             Some(client) => client,
             None => {
@@ -443,18 +436,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "search_memory".to_string(),
-                arguments: json!({
-                    "keywords": keywords_array,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    // "limit": limit,
-                }),
-            })
-            .await
-        {
+        let response = match client.search_memory(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -484,16 +466,8 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "read_rulebook".to_string(),
-                arguments: json!({
-                    "uri": uri,
-                }),
-            })
-            .await
-        {
-            Ok(response) => response,
+        let response = match client.get_rulebook_by_uri(&uri).await {
+            Ok(rulebook) => vec![Content::text(rulebook.content)],
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
                     Content::text("READ_RULEBOOK_ERROR"),

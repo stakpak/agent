@@ -8,7 +8,7 @@ use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
 use tracing::error;
 
-use stakpak_api::ClientConfig;
+use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::TaskManager;
@@ -83,7 +83,7 @@ impl AuthConfig {
 }
 
 pub struct MCPServerConfig {
-    pub api: ClientConfig,
+    pub client: Option<Arc<dyn AgentProvider>>,
     pub bind_address: String,
     pub redact_secrets: bool,
     pub privacy_mode: bool,
@@ -218,7 +218,7 @@ async fn start_server_internal(
             }
 
             ToolContainer::new(
-                Some(config.api),
+                config.client.clone(),
                 config.redact_secrets,
                 config.privacy_mode,
                 config.enabled_tools.clone(),
@@ -240,7 +240,7 @@ async fn start_server_internal(
             }
 
             ToolContainer::new(
-                Some(config.api),
+                config.client.clone(),
                 config.redact_secrets,
                 config.privacy_mode,
                 config.enabled_tools.clone(),

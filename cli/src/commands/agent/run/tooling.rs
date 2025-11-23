@@ -2,7 +2,7 @@ use rmcp::model::{
     CallToolRequestParam, CallToolResult, CancelledNotification, CancelledNotificationParam,
     ServerResult,
 };
-use stakpak_api::Client;
+use stakpak_api::AgentProvider;
 use stakpak_api::models::AgentSession;
 use stakpak_mcp_client::ClientManager;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
@@ -10,7 +10,7 @@ use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_tui::SessionInfo;
 use uuid::Uuid;
 
-pub async fn list_sessions(client: &Client) -> Result<Vec<SessionInfo>, String> {
+pub async fn list_sessions(client: &dyn AgentProvider) -> Result<Vec<SessionInfo>, String> {
     let sessions: Vec<AgentSession> = client.list_agent_sessions().await?;
 
     let mut session_infos: Vec<(SessionInfo, chrono::DateTime<chrono::Utc>)> = sessions

@@ -4753,6 +4753,7 @@ dependencies = [
 name = "stakpak-api"
 version = "0.2.78"
 dependencies = [
+ "async-trait",
  "chrono",
  "eventsource-stream",
  "futures-util",
