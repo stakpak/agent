@@ -136,7 +136,7 @@ impl From<AgentSession> for AgentSessionListItem {
 pub struct AgentParentCheckpoint {
     pub id: Uuid,
 }
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub enum AgentStatus {
     #[serde(rename = "RUNNING")]
     Running,
