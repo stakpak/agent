@@ -16,3 +16,10 @@ eventsource-stream = "0.2.3"
 url = "2.5.0"
 urlencoding = "2.1"
 async-trait = { workspace = true }
+turso = "0.3.2"
+libsql = "0.9.29"
+async-stream = "0.3.6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros"] }
+tempfile = { workspace = true }
