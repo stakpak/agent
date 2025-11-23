@@ -659,7 +659,7 @@ pub fn render_file_diff_full(
     let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
-    let path = args["path"].as_str().unwrap_or("");
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
 
     if full_diff_lines.is_empty() && !do_show.unwrap_or(false) {
         return Vec::new();
