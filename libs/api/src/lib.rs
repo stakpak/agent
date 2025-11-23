@@ -14,7 +14,10 @@ pub mod remote;
 
 #[async_trait]
 pub trait AgentProvider: Send + Sync {
+    // Account
     async fn get_my_account(&self) -> Result<GetMyAccountResponse, String>;
+
+    // Rulebooks
     async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String>;
     async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String>;
     async fn create_rulebook(
@@ -26,6 +29,8 @@ pub trait AgentProvider: Send + Sync {
         visibility: Option<RuleBookVisibility>,
     ) -> Result<CreateRuleBookResponse, String>;
     async fn delete_rulebook(&self, uri: &str) -> Result<(), String>;
+
+    // Agent Sessions
     async fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, String>;
     async fn get_agent_session(&self, session_id: Uuid) -> Result<AgentSession, String>;
     async fn get_agent_session_stats(&self, session_id: Uuid) -> Result<AgentSessionStats, String>;
@@ -34,6 +39,8 @@ pub trait AgentProvider: Send + Sync {
         &self,
         session_id: Uuid,
     ) -> Result<RunAgentOutput, String>;
+
+    // Chat
     async fn chat_completion(
         &self,
         model: AgentModel,
@@ -56,12 +63,21 @@ pub trait AgentProvider: Send + Sync {
         String,
     >;
     async fn cancel_stream(&self, request_id: String) -> Result<(), String>;
+
+    // Code Index
     async fn build_code_index(
         &self,
         input: &BuildCodeIndexInput,
     ) -> Result<BuildCodeIndexOutput, String>;
+
+    // Search Docs
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String>;
+
+    // Memory
+    async fn memorize_session(&self, checkpoint_id: Uuid) -> Result<(), String>;
     async fn search_memory(&self, input: &SearchMemoryRequest) -> Result<Vec<Content>, String>;
+
+    // Slack
     async fn slack_read_messages(
         &self,
         input: &SlackReadMessagesRequest,
@@ -74,5 +90,4 @@ pub trait AgentProvider: Send + Sync {
         &self,
         input: &SlackSendMessageRequest,
     ) -> Result<Vec<Content>, String>;
-    async fn memorize_session(&self, checkpoint_id: Uuid) -> Result<(), String>;
 }
