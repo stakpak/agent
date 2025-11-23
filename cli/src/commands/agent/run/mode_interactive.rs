@@ -4,13 +4,14 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
+use crate::commands::warden;
 use crate::config::AppConfig;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
@@ -278,13 +279,10 @@ pub async fn run_interactive(
                             user_input = format!("{}\n\n{}", history_str, user_input);
                         }
 
-                        // Add local context to the user input
-                        // Add local context and rulebooks only in specific cases:
-                        // 1. First message of new session (messages.is_empty())
-                        // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
+                        // Add local context to user input for new sessions
+                        // Add rulebooks to user input for new sessions or when rulebook settings change
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
-                                // Add local context first
                                 let (user_input_with_context, _) =
                                     add_local_context(&messages, &user_input, &local_context, true)
                                         .await
@@ -292,12 +290,13 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                // Then add rulebooks
-                                let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
-                                    &user_input_with_context,
-                                    &rulebooks,
-                                    true,
-                                );
+                                let (user_input_with_rulebooks, _) =
+                                    if let Some(rulebooks) = &rulebooks {
+                                        add_rulebooks(&user_input_with_context, rulebooks)
+                                    } else {
+                                        (user_input_with_context, None)
+                                    };
+
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
@@ -309,7 +308,6 @@ pub async fn run_interactive(
                             add_subagents(&messages, &user_input, &subagent_configs);
 
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
-                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                         tools_queue.clear();
                         messages.push(user_message(user_input));
                     }
@@ -894,8 +892,6 @@ pub async fn run_interactive(
                                 continue;
                             }
                         }
-
-                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     }
                     Err(_) => {
                         continue;
@@ -946,8 +942,31 @@ pub async fn run_interactive(
             config.allowed_tools = new_config.allowed_tools.clone();
             config.auto_approve = new_config.auto_approve.clone();
 
-            // Update ctx and restart
+            // Update ctx
             ctx = new_config;
+
+            // Check if warden is enabled in the new profile and we're not already inside warden
+            let should_use_warden = ctx.warden.as_ref().map(|w| w.enabled).unwrap_or(false)
+                && std::env::var("STAKPAK_SKIP_WARDEN").is_err();
+
+            if should_use_warden {
+                // Set the profile environment variable so warden knows which profile to use
+                // This is safe because we're setting it for the current process before re-execution
+                unsafe {
+                    std::env::set_var("STAKPAK_PROFILE", &ctx.profile_name);
+                }
+
+                // Re-execute stakpak inside warden container
+                if let Err(e) =
+                    warden::run_stakpak_in_warden(ctx, &std::env::args().collect::<Vec<_>>()).await
+                {
+                    return Err(format!("Failed to run stakpak in warden: {}", e));
+                }
+                // Exit after warden execution completes (warden will handle the restart)
+                return Ok(());
+            }
+
+            // Continue the loop with the new profile
             continue 'profile_switch_loop;
         }
 

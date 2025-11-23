@@ -1,0 +1,133 @@
+//! Message Event Handlers
+//!
+//! Handles all message-related events including streaming messages, adding user messages, and usage tracking.
+
+use crate::app::AppState;
+use crate::services::helper_block::push_usage_message;
+use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
+use stakpak_shared::models::integrations::openai::Usage;
+use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
+
+use crate::app::OutputEvent;
+
+/// Handle streaming assistant message
+pub fn handle_stream_message(
+    state: &mut AppState,
+    id: Uuid,
+    s: String,
+    message_area_height: usize,
+) {
+    if let Some(message) = state.messages.iter_mut().find(|m| m.id == id) {
+        state.is_streaming = true;
+        if !state.loading {
+            state.loading = true;
+        }
+        if let MessageContent::AssistantMD(text, _) = &mut message.content {
+            text.push_str(&s);
+        }
+        invalidate_message_lines_cache(state);
+
+        // If content changed while user is scrolled up, mark it
+        if !state.stay_at_bottom {
+            state.content_changed_while_scrolled_up = true;
+        }
+
+        // During streaming, only adjust scroll if we're staying at bottom
+        if state.stay_at_bottom {
+            let input_height = 3;
+            let total_lines = state.messages.len() * 2;
+            let max_visible_lines =
+                std::cmp::max(1, message_area_height.saturating_sub(input_height));
+            let max_scroll = total_lines.saturating_sub(max_visible_lines);
+            state.scroll = max_scroll;
+        }
+        state.is_streaming = false;
+    } else {
+        let input_height = 3;
+        let total_lines = state.messages.len() * 2;
+        let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
+        let max_scroll = total_lines.saturating_sub(max_visible_lines);
+        let was_at_bottom = state.scroll == max_scroll;
+        state
+            .messages
+            .push(Message::assistant(Some(id), s.clone(), None));
+        state.text_area.set_text("");
+
+        // If content changed while user is scrolled up, mark it
+        if !was_at_bottom {
+            state.content_changed_while_scrolled_up = true;
+        }
+
+        let total_lines = state.messages.len() * 2;
+        let max_scroll = total_lines.saturating_sub(max_visible_lines);
+        if was_at_bottom {
+            state.scroll = max_scroll;
+            state.scroll_to_bottom = true;
+            state.stay_at_bottom = true;
+        }
+        state.is_streaming = false;
+    }
+}
+
+/// Handle adding user message
+pub fn handle_add_user_message(state: &mut AppState, s: String) {
+    // Add spacing before user message if not the first message
+    if !state.messages.is_empty() {
+        state.messages.push(Message::plain_text(""));
+    }
+    state.messages.push(Message::user(s, None));
+    // Add spacing after user message
+    state.messages.push(Message::plain_text(""));
+
+    // Invalidate cache since messages changed
+    invalidate_message_lines_cache(state);
+}
+
+/// Handle has user message event
+pub fn handle_has_user_message(state: &mut AppState) {
+    state.has_user_messages = true;
+    state.toggle_approved_message = true;
+    state.message_approved_tools.clear();
+    state.message_rejected_tools.clear();
+    state.message_tool_calls = None;
+    state.tool_call_execution_order.clear();
+    state.is_dialog_open = false;
+}
+
+/// Handle stream usage event
+pub fn handle_stream_usage(state: &mut AppState, usage: Usage) {
+    state.current_message_usage = usage;
+}
+
+/// Handle request total usage event
+pub fn handle_request_total_usage(output_tx: &Sender<OutputEvent>) {
+    // Request total usage from CLI
+    let _ = output_tx.try_send(OutputEvent::RequestTotalUsage);
+}
+
+/// Handle total usage event
+pub fn handle_total_usage(state: &mut AppState, usage: Usage) {
+    // Update total session usage from CLI
+    state.total_session_usage = usage;
+    // If cost message was just displayed, update it
+    let should_update = state
+        .messages
+        .last()
+        .and_then(|msg| {
+            if let MessageContent::StyledBlock(lines) = &msg.content {
+                lines
+                    .first()
+                    .and_then(|l| l.spans.first())
+                    .map(|s| s.content.contains("Token Usage & Costs"))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false);
+
+    if should_update {
+        state.messages.pop(); // Remove old message
+        push_usage_message(state);
+    }
+}

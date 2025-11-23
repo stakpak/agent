@@ -4623,7 +4623,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stakpak"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
@@ -4668,7 +4668,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-api"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "chrono",
  "eventsource-stream",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "anyhow",
  "futures",
@@ -4715,7 +4715,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "anyhow",
  "axum",
@@ -4741,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4777,7 +4777,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.2.77"
+version = "0.2.78"
 dependencies = [
  "ansi-to-tui",
  "chrono",
