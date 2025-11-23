@@ -115,6 +115,10 @@ struct Cli {
     #[arg(long = "profile")]
     profile: Option<String>,
 
+    /// Choose agent model on startup (smart or eco)
+    #[arg(long = "model")]
+    model: Option<AgentModel>,
+
     /// Custom path to config file (overrides default ~/.stakpak/config.toml)
     #[arg(long = "config")]
     config_path: Option<PathBuf>,
@@ -393,7 +397,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
-                                model: AgentModel::Smart,
+                                model: cli.model.unwrap_or(AgentModel::Smart),
                             },
                         )
                         .await
@@ -424,7 +428,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
-                                model: AgentModel::Smart,
+                                model: cli.model.unwrap_or(AgentModel::Smart),
                             },
                         )
                         .await
