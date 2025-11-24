@@ -22,9 +22,9 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use uuid::Uuid;
 
+mod context_manager;
 mod db;
 pub mod integrations;
-mod state;
 
 #[cfg(test)]
 mod tests;
@@ -364,7 +364,7 @@ impl LocalClient {
                 },
                 LLMMessage {
                     role: Role::User.to_string(),
-                    content: LLMMessageContent::String(state::project_messages(messages)),
+                    content: LLMMessageContent::String(context_manager::project_messages(messages)),
                 },
             ];
 
