@@ -13,6 +13,8 @@ async fn test_local_db_operations() {
 
     let config = LocalClientConfig {
         store_path: Some(db_path.clone()),
+        anthropic_config: None,
+        openai_config: None,
     };
 
     let client = LocalClient::new(config)

@@ -223,7 +223,7 @@ async fn main() {
                     }
                 }
                 None => {
-                    if config.api_key.is_none() {
+                    if config.api_key.is_none() && config.provider == ProviderType::Remote {
                         prompt_for_api_key(&mut config).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
@@ -238,12 +238,16 @@ async fn main() {
                             Arc::new(client)
                         }
                         ProviderType::Local => {
-                            let client = LocalClient::new(LocalClientConfig { store_path: None })
-                                .await
-                                .unwrap_or_else(|e| {
-                                    eprintln!("Failed to create local client: {}", e);
-                                    std::process::exit(1);
-                                });
+                            let client = LocalClient::new(LocalClientConfig {
+                                store_path: None,
+                                anthropic_config: config.anthropic.clone(),
+                                openai_config: config.openai.clone(),
+                            })
+                            .await
+                            .unwrap_or_else(|e| {
+                                eprintln!("Failed to create local client: {}", e);
+                                std::process::exit(1);
+                            });
                             Arc::new(client)
                         }
                     };

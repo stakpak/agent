@@ -233,6 +233,11 @@ impl AgentOutput {
             AgentOutput::PabloV1 { .. } => AgentID::PabloV1,
         }
     }
+    pub fn set_messages(&mut self, new_messages: Vec<ChatMessage>) {
+        match self {
+            AgentOutput::PabloV1 { messages, .. } => *messages = new_messages,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -454,6 +459,24 @@ pub struct AgentSessionStats {
     pub total_sessions: u32,
     pub total_time_saved_seconds: Option<u32>,
     pub total_tool_calls: u32,
+}
+
+impl Default for AgentSessionStats {
+    fn default() -> Self {
+        Self {
+            aborted_tool_calls: 0,
+            analysis_period: None,
+            failed_tool_calls: 0,
+            from_date: None,
+            sessions_with_activity: 0,
+            successful_tool_calls: 0,
+            to_date: None,
+            tools_usage: Vec::new(),
+            total_sessions: 0,
+            total_time_saved_seconds: None,
+            total_tool_calls: 0,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

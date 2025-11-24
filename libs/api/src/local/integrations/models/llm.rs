@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use stakpak_shared::models::llm::LLMTokenUsage;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LLMMessage {
@@ -46,6 +47,7 @@ impl ToString for LLMMessageContent {
                 .map(|c| match c {
                     LLMMessageTypedContent::Text { text } => text.clone(),
                     LLMMessageTypedContent::ToolCall { .. } => String::new(),
+                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -62,14 +64,19 @@ impl From<String> for LLMMessageContent {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum LLMMessageTypedContent {
-    #[serde(alias = "text")]
+    #[serde(rename = "text")]
     Text { text: String },
-    #[serde(alias = "tool_use")]
+    #[serde(rename = "tool_use")]
     ToolCall {
         id: String,
         name: String,
-        #[serde(alias = "args", alias = "input")]
+        #[serde(alias = "input")]
         args: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
     },
 }
 
@@ -116,81 +123,9 @@ pub struct LLMCompletionStreamResponse {
     pub citations: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct LLMTool {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,
-}
-
-#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct LLMTokenUsage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_tokens_details: Option<PromptTokensDetails>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TokenType {
-    InputTokens,
-    OutputTokens,
-    CacheReadInputTokens,
-    CacheWriteInputTokens,
-}
-
-#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct PromptTokensDetails {
-    #[serde(default)]
-    pub input_tokens: u32,
-    #[serde(default)]
-    pub output_tokens: u32,
-    #[serde(default)]
-    pub cache_read_input_tokens: u32,
-    #[serde(default)]
-    pub cache_write_input_tokens: u32,
-}
-
-impl PromptTokensDetails {
-    /// Returns an iterator over the token types and their values
-    pub fn iter(&self) -> impl Iterator<Item = (TokenType, u32)> {
-        [
-            (TokenType::InputTokens, self.input_tokens),
-            (TokenType::OutputTokens, self.output_tokens),
-            (
-                TokenType::CacheReadInputTokens,
-                self.cache_read_input_tokens,
-            ),
-            (
-                TokenType::CacheWriteInputTokens,
-                self.cache_write_input_tokens,
-            ),
-        ]
-        .into_iter()
-    }
-}
-
-impl std::ops::Add for PromptTokensDetails {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            input_tokens: self.input_tokens + rhs.input_tokens,
-            output_tokens: self.output_tokens + rhs.output_tokens,
-            cache_read_input_tokens: self.cache_read_input_tokens + rhs.cache_read_input_tokens,
-            cache_write_input_tokens: self.cache_write_input_tokens + rhs.cache_write_input_tokens,
-        }
-    }
-}
-
-impl std::ops::AddAssign for PromptTokensDetails {
-    fn add_assign(&mut self, rhs: Self) {
-        self.input_tokens += rhs.input_tokens;
-        self.output_tokens += rhs.output_tokens;
-        self.cache_read_input_tokens += rhs.cache_read_input_tokens;
-        self.cache_write_input_tokens += rhs.cache_write_input_tokens;
-    }
 }

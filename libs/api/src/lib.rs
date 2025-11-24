@@ -8,6 +8,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use uuid::Uuid;
 
+pub mod error;
 pub mod local;
 pub mod models;
 pub mod remote;

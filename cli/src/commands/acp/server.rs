@@ -84,9 +84,13 @@ impl StakpakAcpAgent {
                 }
             }
             ProviderType::Local => {
-                let client = LocalClient::new(LocalClientConfig { store_path: None })
-                    .await
-                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                let client = LocalClient::new(LocalClientConfig {
+                    store_path: None,
+                    anthropic_config: config.anthropic.clone(),
+                    openai_config: config.openai.clone(),
+                })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
                 Arc::new(client)
             }
         };

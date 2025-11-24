@@ -1,5 +1,6 @@
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
+use stakpak_api::local::integrations::{anthropic::AnthropicConfig, openai::OpenAIConfig};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
@@ -41,18 +42,6 @@ pub struct WardenConfig {
     pub volumes: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct OpenAIConfig {
-    pub api_endpoint: Option<String>,
-    pub api_key: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct AnthropicConfig {
-    pub api_endpoint: Option<String>,
-    pub api_key: Option<String>,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
@@ -67,7 +56,9 @@ pub struct ProfileConfig {
     pub rulebooks: Option<RulebookConfig>,
     /// Warden (runtime security) configuration
     pub warden: Option<WardenConfig>,
+    /// OpenAI configuration
     pub openai: Option<OpenAIConfig>,
+    /// Anthropic configuration
     pub anthropic: Option<AnthropicConfig>,
 }
 
@@ -220,8 +211,11 @@ impl AppConfig {
         config_path: P,
         content: &str,
     ) -> Result<ConfigFile, ConfigError> {
-        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
-            ConfigError::Message("Failed to parse config file in both old and new formats".into())
+        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|e| {
+            ConfigError::Message(format!(
+                "Failed to parse config file in both old and new formats: {}",
+                e
+            ))
         })?;
         let config_file = old_config.into();
 

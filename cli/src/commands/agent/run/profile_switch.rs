@@ -44,9 +44,13 @@ pub async fn validate_profile_switch(
             Box::new(client)
         }
         ProviderType::Local => {
-            let client = LocalClient::new(LocalClientConfig { store_path: None })
-                .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: new_config.anthropic.clone(),
+                openai_config: new_config.openai.clone(),
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
             Box::new(client)
         }
     };

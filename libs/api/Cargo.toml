@@ -19,7 +19,10 @@ async-trait = { workspace = true }
 turso = "0.3.2"
 libsql = "0.9.29"
 async-stream = "0.3.6"
+reqwest-middleware = { version = "0.4.2", features = ["json"] }
+reqwest-retry = "0.7.0"
+itertools = "0.14.0"
+tokio = { workspace = true, features = ["macros"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros"] }
 tempfile = { workspace = true }

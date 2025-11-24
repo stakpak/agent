@@ -163,9 +163,13 @@ pub async fn run_interactive(
                     Arc::new(client)
                 }
                 ProviderType::Local => {
-                    let client = LocalClient::new(LocalClientConfig { store_path: None })
-                        .await
-                        .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    let client = LocalClient::new(LocalClientConfig {
+                        store_path: None,
+                        anthropic_config: ctx_clone.anthropic.clone(),
+                        openai_config: ctx_clone.openai.clone(),
+                    })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
                     Arc::new(client)
                 }
             };
@@ -948,9 +952,13 @@ pub async fn run_interactive(
                     Box::new(client)
                 }
                 ProviderType::Local => {
-                    let client = LocalClient::new(LocalClientConfig { store_path: None })
-                        .await
-                        .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    let client = LocalClient::new(LocalClientConfig {
+                        store_path: None,
+                        anthropic_config: new_config.anthropic.clone(),
+                        openai_config: new_config.openai.clone(),
+                    })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
                     Box::new(client)
                 }
             };
@@ -1012,9 +1020,13 @@ pub async fn run_interactive(
                 Box::new(client)
             }
             ProviderType::Local => {
-                let client = LocalClient::new(LocalClientConfig { store_path: None })
-                    .await
-                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                let client = LocalClient::new(LocalClientConfig {
+                    store_path: None,
+                    anthropic_config: ctx.anthropic.clone(),
+                    openai_config: ctx.openai.clone(),
+                })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
                 Box::new(client)
             }
         };
