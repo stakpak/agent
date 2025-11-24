@@ -632,7 +632,6 @@ pub async fn run_interactive(
                         action,
                         recovery_request_id,
                         selected_option_id,
-                        mode: _,
                     } => {
                         let Some(session_id) = current_session_id else {
                             send_input_event(
@@ -644,6 +643,10 @@ pub async fn run_interactive(
                             .await?;
                             continue;
                         };
+                        eprintln!("session_id: {:?}", session_id);
+                        eprintln!("recovery_request_id: {:?}", recovery_request_id);
+                        eprintln!("selected_option_id: {:?}", selected_option_id);
+                        eprintln!("Recovery action: {:?}", action);
 
                         let request = RecoveryActionRequest {
                             action,

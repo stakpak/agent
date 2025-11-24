@@ -29,12 +29,27 @@ pub struct RecoveryOption {
     pub system_prompt_key: Option<String>,
 }
 
+// Helper struct for source_checkpoint which comes as {"id": "uuid"}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SourceCheckpoint {
+    pub id: Uuid,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Session {
+    pub id: Uuid,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RecoveryOptionsResponse {
     #[serde(default)]
     pub recovery_options: Vec<RecoveryOption>,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub source_checkpoint: Option<SourceCheckpoint>,
+    #[serde(default)]
+    pub session: Option<Session>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]

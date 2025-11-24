@@ -56,6 +56,16 @@ pub fn handle_stream_message(
             .push(Message::assistant(Some(id), s.clone(), None));
         state.text_area.set_text("");
 
+        // Decrement model change countdown if active (for new assistant messages)
+        if let Some(remaining) = &mut state.model_change_messages_remaining
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            if *remaining == 0 {
+                state.model_change_messages_remaining = None;
+            }
+        }
+
         // If content changed while user is scrolled up, mark it
         if !was_at_bottom {
             state.content_changed_while_scrolled_up = true;
@@ -81,6 +91,16 @@ pub fn handle_add_user_message(state: &mut AppState, s: String) {
     state.messages.push(Message::user(s, None));
     // Add spacing after user message
     state.messages.push(Message::plain_text(""));
+
+    // Decrement model change countdown if active
+    if let Some(remaining) = &mut state.model_change_messages_remaining
+        && *remaining > 0
+    {
+        *remaining -= 1;
+        if *remaining == 0 {
+            state.model_change_messages_remaining = None;
+        }
+    }
 
     // Invalidate cache since messages changed
     invalidate_message_lines_cache(state);

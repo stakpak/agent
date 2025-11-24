@@ -140,13 +140,34 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Create lines - first line with shortcuts and profile info
             let mut lines = vec![Line::from(spans)];
 
-            // Add second line with select hint if available (Unix only)
+            // Add second line with model change countdown or select hint
+            let mut second_line_spans = Vec::new();
+
+            // Model change countdown (right-aligned)
+            if let Some(remaining) = state.model_change_messages_remaining {
+                let countdown_text = format!(
+                    "Switching back to Claude 4.5 Sonnet in {} messages",
+                    remaining
+                );
+                let total_width = area.width as usize;
+                let countdown_len = countdown_text.len();
+                let spacing = total_width.saturating_sub(countdown_len);
+
+                second_line_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
+                second_line_spans.push(Span::styled(
+                    countdown_text,
+                    Style::default().fg(Color::Blue),
+                ));
+            }
+
+            // Select hint (Unix only) - only show if no countdown
             #[cfg(unix)]
-            if !select_hint.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    select_hint,
-                    Style::default().fg(Color::Cyan),
-                )));
+            if second_line_spans.is_empty() && !select_hint.is_empty() {
+                second_line_spans.push(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
+            }
+
+            if !second_line_spans.is_empty() {
+                lines.push(Line::from(second_line_spans));
             }
 
             let hint = Paragraph::new(lines);

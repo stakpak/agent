@@ -200,7 +200,7 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
-    let mut processed_lines = get_wrapped_message_lines_cached(state, width);
+    let processed_lines = get_wrapped_message_lines_cached(state, width);
     let total_lines = processed_lines.len();
 
     // Handle edge case where we have no content
@@ -211,42 +211,78 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         return;
     }
 
-    // If recovery options popup is open and a checkpoint is associated, scroll to that checkpoint once
-    if state.show_recovery_options_popup && state.recovery_scroll_pending {
+    // If recovery scroll is pending, scroll to the source_checkpoint and highlight it BEFORE popup opens
+    if state.recovery_scroll_pending {
         if let Some(checkpoint_id) = &state.recovery_checkpoint_id {
             let needle = format!("checkpoint {}", checkpoint_id);
-            if let Some((line_idx, _)) = processed_lines
-                .iter()
-                .enumerate()
-                .find(|(_, line)| spans_to_string(line).contains(&needle))
-            {
-                // Highlight the matching checkpoint line with a scroll hint
-                if let Some(line) = processed_lines.get_mut(line_idx) {
-                    let checkpoint_text =
-                        format!("checkpoint {} - scroll ↑ for more", checkpoint_id);
-                    let total_len = checkpoint_text.len();
-                    let dash_total = width.saturating_sub(total_len);
-                    let dash_left = dash_total / 2;
-                    let dash_right = dash_total - dash_left;
-                    let line_str = format!(
-                        "{}{}{}",
-                        "-".repeat(dash_left),
-                        checkpoint_text,
-                        "-".repeat(dash_right)
-                    );
-                    *line = Line::from(vec![Span::styled(
-                        line_str,
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )]);
+
+            // First, find which message contains the checkpoint ID
+            let message_with_checkpoint_idx =
+                state.messages.iter().position(|msg| match &msg.content {
+                    crate::services::message::MessageContent::AssistantMD(text, _) => {
+                        text.contains(&format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id))
+                    }
+                    crate::services::message::MessageContent::Plain(text, _) => {
+                        text.contains(&format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id))
+                    }
+                    _ => false,
+                });
+
+            if let Some(msg_idx) = message_with_checkpoint_idx {
+                // Calculate how many lines come before this message
+                // We need to process messages up to (but not including) this one
+                let messages_before: Vec<_> = state.messages[..msg_idx]
+                    .iter()
+                    .filter(|m| m.is_collapsed.is_none())
+                    .cloned()
+                    .collect();
+
+                // Get wrapped lines for messages before the checkpoint message
+                let lines_before =
+                    crate::services::message::get_wrapped_message_lines(&messages_before, width);
+
+                // Process these lines to match the same processing as processed_lines
+                // This matches the logic in get_processed_message_lines
+                let mut message_start_line: usize = 0;
+                for (line, _style) in &lines_before {
+                    let line_text = spans_to_string(line);
+                    if line_text.contains("<checkpoint_id>") {
+                        // Checkpoint processing adds empty line before and after
+                        message_start_line += 3; // empty + checkpoint + empty
+                    } else if line_text.trim() == "SPACING_MARKER" {
+                        message_start_line += 1; // spacing marker becomes empty line
+                    } else {
+                        message_start_line += 1;
+                    }
                 }
 
-                // Try to center the checkpoint line within the visible area
-                let target_scroll = line_idx.saturating_sub(height / 2);
-                state.scroll = target_scroll;
-                state.stay_at_bottom = false;
-                state.scroll_to_bottom = false;
+                // Find the checkpoint line to scroll to it
+                // Note: Colorization is handled in process_checkpoint_patterns based on has_faulty_checkpoint
+                if processed_lines
+                    .iter()
+                    .any(|line| spans_to_string(line).contains(&needle))
+                {
+                    // Scroll to the top of the message containing the checkpoint
+                    // Position the message start near the top of the visible area
+                    let target_scroll = message_start_line.saturating_sub(2);
+                    state.scroll = target_scroll;
+                    state.stay_at_bottom = false;
+                    state.scroll_to_bottom = false;
+                }
+            } else {
+                // Fallback: if we can't find the message, just find the checkpoint line
+                // Note: Colorization is handled in process_checkpoint_patterns based on has_faulty_checkpoint
+                if let Some((line_idx, _)) = processed_lines
+                    .iter()
+                    .enumerate()
+                    .find(|(_, line)| spans_to_string(line).contains(&needle))
+                {
+                    // Try to center the checkpoint line within the visible area
+                    let target_scroll = line_idx.saturating_sub(height / 2);
+                    state.scroll = target_scroll;
+                    state.stay_at_bottom = false;
+                    state.scroll_to_bottom = false;
+                }
             }
         }
         state.recovery_scroll_pending = false;
@@ -509,13 +545,41 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
                 final_spans.push(Span::styled(" ".repeat(space_before_mid), Style::default()));
             }
 
-            final_spans.push(Span::styled(
-                message.to_string(),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            // Create shimmering effect for recovery message (yellow, no background, infinite animation)
+            // Use spinner_frame to create animated shimmer pattern (multiply by 2 for faster animation)
+            let shimmer_offset = (state.spinner_frame * 2) % (message.len() + 4);
+            let shimmer_width = 3;
+
+            // Create spans with shimmer effect - alternating bright and normal yellow
+            let message_chars: Vec<char> = message.chars().collect();
+            let mut shimmer_spans = Vec::new();
+
+            let use_rgb = crate::services::detect_term::should_use_rgb_colors();
+
+            for (i, ch) in message_chars.iter().enumerate() {
+                let distance_from_shimmer = i.abs_diff(shimmer_offset);
+                let is_shimmer = distance_from_shimmer < shimmer_width;
+
+                let color = if use_rgb {
+                    if is_shimmer {
+                        // Bright yellow for shimmer
+                        Color::Rgb(255, 255, 0) // Bright yellow
+                    } else {
+                        // Normal yellow
+                        Color::Rgb(200, 200, 0) // Dimmer yellow
+                    }
+                } else {
+                    // Fallback for terminals without RGB support - use standard yellow
+                    Color::Yellow
+                };
+
+                shimmer_spans.push(Span::styled(
+                    ch.to_string(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ));
+            }
+
+            final_spans.extend(shimmer_spans);
 
             if let (Some(tokens_text), Some(percentage_text)) = (tokens_text, percentage_text) {
                 let mut space_before_right = total_adjusted_width

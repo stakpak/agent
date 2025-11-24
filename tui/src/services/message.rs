@@ -403,7 +403,9 @@ pub fn get_wrapped_message_lines(
 
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
     let messages = state.messages.clone();
-    // Check if cache is valid
+    let faulty_checkpoint_id = state.recovery_checkpoint_id.as_ref();
+
+    // Check if cache is valid (including faulty checkpoint ID)
     let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
         cached_messages.len() == messages.len()
             && *cached_width == width
@@ -411,13 +413,15 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
                 .iter()
                 .zip(messages.iter())
                 .all(|(a, b)| a.id == b.id)
+            // Also check if faulty checkpoint ID matches (cache needs invalidation if it changed)
+            && state.has_faulty_checkpoint == (faulty_checkpoint_id.is_some())
     } else {
         false
     };
 
     if !cache_valid {
         // Calculate and cache the processed lines directly
-        let processed_lines = get_processed_message_lines(&messages, width);
+        let processed_lines = get_processed_message_lines(&messages, width, faulty_checkpoint_id);
         state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
         processed_lines
     } else {
@@ -426,13 +430,17 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             cached_lines.clone()
         } else {
             // Fallback if cache is somehow invalid
-            get_processed_message_lines(&messages, width)
+            get_processed_message_lines(&messages, width, faulty_checkpoint_id)
         }
     }
 }
 
 // New function that does all the heavy processing once and caches the result
-pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
+pub fn get_processed_message_lines(
+    messages: &[Message],
+    width: usize,
+    faulty_checkpoint_id: Option<&uuid::Uuid>,
+) -> Vec<Line<'static>> {
     use crate::services::message_pattern::{process_checkpoint_patterns, spans_to_string};
 
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
@@ -445,7 +453,11 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
         let line_text = spans_to_string(line);
         if line_text.contains("<checkpoint_id>") {
             processed_lines.push(Line::from(""));
-            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
+            let processed = process_checkpoint_patterns(
+                &[(line.clone(), Style::default())],
+                width,
+                faulty_checkpoint_id,
+            );
             for (processed_line, _) in processed {
                 processed_lines.push(processed_line);
             }

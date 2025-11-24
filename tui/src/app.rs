@@ -159,6 +159,10 @@ pub struct AppState {
     pub recovery_checkpoint_id: Option<Uuid>,
     /// Internal flag used to trigger a one-time scroll to the recovery checkpoint
     pub recovery_scroll_pending: bool,
+    /// Flag indicating if there's a faulty checkpoint that should be highlighted
+    pub has_faulty_checkpoint: bool,
+    /// Number of messages remaining before switching back to original model (None if not active)
+    pub model_change_messages_remaining: Option<u32>,
 
     // ========== Configuration State ==========
     pub secret_manager: SecretManager,
@@ -362,6 +366,8 @@ impl AppState {
             recovery_response: None,
             recovery_checkpoint_id: None,
             recovery_scroll_pending: false,
+            has_faulty_checkpoint: false,
+            model_change_messages_remaining: None,
             model,
         }
     }

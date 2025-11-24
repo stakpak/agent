@@ -455,22 +455,35 @@ pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsRe
 
     let recovery_options = response.recovery_options.clone();
     state.recovery_options = recovery_options;
-    state.recovery_response = Some(response);
+    state.recovery_response = Some(response.clone());
     state.recovery_popup_selected = 0;
-    // Capture the first available checkpoint ID associated with recovery options (if any)
-    state.recovery_checkpoint_id = state
-        .recovery_options
-        .iter()
-        .find_map(|opt| opt.revert_to_checkpoint);
+    // Capture the source_checkpoint (faulty checkpoint) ID from the response
+    state.recovery_checkpoint_id = response.source_checkpoint.map(|sc| sc.id);
+    // Set flag if we have a faulty checkpoint
+    state.has_faulty_checkpoint =
+        state.recovery_checkpoint_id.is_some() && !state.recovery_options.is_empty();
+
+    // Invalidate message cache to redraw checkpoints with new colorization
+    if state.has_faulty_checkpoint {
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
 
     if state.recovery_options.is_empty() {
         state.show_recovery_options_popup = false;
+        state.has_faulty_checkpoint = false;
+        state.recovery_checkpoint_id = None;
+        // Invalidate cache to revert checkpoint appearance
+        crate::services::message::invalidate_message_lines_cache(state);
     }
 }
 
 /// Handle expand notifications event (recovery options popup toggle)
 pub fn handle_expand_notifications(state: &mut AppState) {
     if state.recovery_options.is_empty() {
+        state.has_faulty_checkpoint = false;
+        state.recovery_checkpoint_id = None;
+        // Invalidate cache to revert checkpoint appearance
+        crate::services::message::invalidate_message_lines_cache(state);
         return;
     }
 

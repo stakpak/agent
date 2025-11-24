@@ -108,9 +108,25 @@ where
 pub fn process_checkpoint_patterns(
     lines: &[(Line, Style)],
     terminal_width: usize,
+    faulty_checkpoint_id: Option<&uuid::Uuid>,
 ) -> Vec<(Line<'static>, Style)> {
     let checkpoint_formatter = |content: &str| -> (String, Style) {
-        let checkpoint_text = format!("checkpoint {}", content);
+        // Check if this checkpoint is the faulty one
+        let is_faulty = if let Some(faulty_id) = faulty_checkpoint_id {
+            uuid::Uuid::parse_str(content)
+                .map(|id| id == *faulty_id)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        // Add "- Faulty checkpoint" text if this is the faulty checkpoint
+        let checkpoint_text = if is_faulty {
+            format!("checkpoint {} - Faulty", content)
+        } else {
+            format!("checkpoint {}", content)
+        };
+
         let total_len = checkpoint_text.len();
         let terminal_width = terminal_width.max(total_len + 2); // Ensure at least enough space
 
@@ -125,7 +141,16 @@ pub fn process_checkpoint_patterns(
             checkpoint_text,
             "-".repeat(dash_right)
         );
-        (line, Style::default().fg(Color::DarkGray))
+
+        let style = if is_faulty {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        (line, style)
     };
     process_lines_with_pattern(
         lines,
@@ -171,9 +196,10 @@ pub fn _process_section_title_patterns(
 pub fn apply_all_pattern_transformations(
     lines: &[(Line, Style)],
     terminal_width: usize,
+    faulty_checkpoint_id: Option<&uuid::Uuid>,
 ) -> Vec<(Line<'static>, Style)> {
     // Only process checkpoint patterns for now to avoid the styling loss issue
-    process_checkpoint_patterns(lines, terminal_width)
+    process_checkpoint_patterns(lines, terminal_width, faulty_checkpoint_id)
 }
 
 #[cfg(test)]
@@ -349,7 +375,7 @@ mod tests {
             (Line::from("No checkpoint here"), Style::default()),
         ];
 
-        let processed = process_checkpoint_patterns(&lines, 100);
+        let processed = process_checkpoint_patterns(&lines, 100, None);
 
         assert_eq!(processed.len(), 2);
 
@@ -376,7 +402,7 @@ mod tests {
             (Line::from("Normal line"), Style::default()),
         ];
 
-        let processed = apply_all_pattern_transformations(&lines, 100);
+        let processed = apply_all_pattern_transformations(&lines, 100, None);
 
         assert_eq!(processed.len(), 2);
 
@@ -403,7 +429,7 @@ mod tests {
             Style::default(),
         )];
 
-        let processed = apply_all_pattern_transformations(&lines, 100);
+        let processed = apply_all_pattern_transformations(&lines, 100, None);
 
         assert_eq!(processed.len(), 1);
 

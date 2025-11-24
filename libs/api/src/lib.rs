@@ -11,7 +11,7 @@ pub mod models;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use models::*;
-pub use models::{RecoveryMode, RecoveryOption, RecoveryOptionsResponse};
+pub use models::{RecoveryMode, RecoveryOption, RecoveryOptionsResponse, SourceCheckpoint};
 use serde_json::Value;
 use serde_json::json;
 use stakpak_shared::models::integrations::openai::{
@@ -456,6 +456,8 @@ impl Client {
             return Ok(RecoveryOptionsResponse {
                 recovery_options: Vec::new(),
                 id: None,
+                source_checkpoint: None,
+                session: None,
             });
         }
 
@@ -464,6 +466,8 @@ impl Client {
                 return Ok(RecoveryOptionsResponse {
                     recovery_options: Vec::new(),
                     id: None,
+                    source_checkpoint: None,
+                    session: None,
                 });
             }
 
@@ -482,6 +486,8 @@ impl Client {
             return Ok(RecoveryOptionsResponse {
                 recovery_options: Vec::new(),
                 id: None,
+                source_checkpoint: None,
+                session: None,
             });
         }
 
@@ -507,10 +513,17 @@ impl Client {
             self.base_url, session_id, recovery_id
         );
 
+        eprintln!("url: {:?}", url);
+        eprintln!("session_id: {:?}", session_id);
+        eprintln!("recovery_id: {:?}", recovery_id);
+        eprintln!("action: {:?}", action);
+        eprintln!("selected_option_id: {:?}", selected_option_id);
+
         let payload = RecoveryActionRequest {
             action,
             selected_option_id,
         };
+        eprintln!("payload: {:?}", payload);
 
         let response = self
             .client
@@ -519,6 +532,7 @@ impl Client {
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
+        eprintln!("response: {:?}", response);
 
         self.handle_response_error(response).await?;
         Ok(())

@@ -7,6 +7,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
+use regex;
 
 pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
     if state.recovery_options.is_empty() {
@@ -180,9 +181,23 @@ fn summarize_option(option: &stakpak_api::models::RecoveryOption) -> String {
     let primary = option.reasoning.clone();
     let sanitized = primary.replace('\n', " ").trim().to_string();
 
-    if sanitized.len() > 140 {
-        format!("{}...", sanitized.chars().take(140).collect::<String>())
+    // Convert *{content}* to **{content}** for proper bold markdown formatting
+    let markdown_formatted = regex::Regex::new(r"\*([^*]+)\*")
+        .ok()
+        .map(|re| {
+            re.replace_all(&sanitized, |caps: &regex::Captures| {
+                format!("**{}**", &caps[1])
+            })
+            .to_string()
+        })
+        .unwrap_or_else(|| sanitized.clone());
+
+    if markdown_formatted.len() > 140 {
+        format!(
+            "{}...",
+            markdown_formatted.chars().take(140).collect::<String>()
+        )
     } else {
-        sanitized
+        markdown_formatted
     }
 }

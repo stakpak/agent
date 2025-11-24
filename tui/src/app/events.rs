@@ -1,6 +1,6 @@
 use ratatui::style::Color;
 use stakpak_api::ListRuleBook;
-use stakpak_api::models::{RecoveryActionType, RecoveryMode, RecoveryOptionsResponse};
+use stakpak_api::models::{RecoveryActionType, RecoveryOptionsResponse};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
 };
@@ -141,6 +141,5 @@ pub enum OutputEvent {
         action: RecoveryActionType,
         recovery_request_id: String,
         selected_option_id: Uuid,
-        mode: RecoveryMode,
     },
 }
