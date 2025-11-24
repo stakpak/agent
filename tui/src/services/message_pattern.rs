@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "---------------------------------checkpoint test123 - scroll ↑ for more----------------------------------"
+            "---------------------------------checkpoint test123----------------------------------"
         );
         assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::Yellow));
 
