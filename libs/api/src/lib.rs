@@ -46,25 +46,12 @@ struct ApiErrorDetail {
 
 impl Client {
     async fn handle_response_error(&self, response: Response) -> Result<Response, String> {
-        eprintln!(
-            "[DEBUG] handle_response_error: Status: {:?}",
-            response.status()
-        );
         if response.status().is_success() {
-            eprintln!("[DEBUG] handle_response_error: Status is success");
             Ok(response)
         } else {
-            eprintln!(
-                "[DEBUG] handle_response_error: Status is NOT success, reading error body..."
-            );
             let status = response.status();
-            let headers = response.headers().clone();
             match response.json::<ApiError>().await {
                 Ok(error_response) => {
-                    eprintln!(
-                        "[DEBUG] handle_response_error: Error key: {}, message: {}",
-                        error_response.error.key, error_response.error.message
-                    );
                     if error_response.error.key == "EXCEEDED_API_LIMIT" {
                         Err(format!(
                             "{}.\n\nPlease top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.",
@@ -74,17 +61,7 @@ impl Client {
                         Err(error_response.error.message)
                     }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[DEBUG] handle_response_error: Failed to parse error JSON: {}",
-                        e
-                    );
-                    eprintln!(
-                        "[DEBUG] handle_response_error: Status: {:?}, Headers: {:?}",
-                        status, headers
-                    );
-                    Err(format!("HTTP {}: {}", status, e))
-                }
+                Err(e) => Err(format!("HTTP {}: {}", status, e)),
             }
         }
     }
