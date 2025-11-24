@@ -12,10 +12,72 @@ use stakpak_shared::models::integrations::openai::{ContentPart, ImageUrl};
 use std::path::{Path, PathBuf};
 use tempfile::Builder;
 
+/// Supported image file extensions
+const IMAGE_EXTENSIONS: &str = r"(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)";
+
+/// Check if a file extension is a supported image format.
+fn is_image_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
+    )
+}
+
+/// Resize an image if it exceeds the maximum dimension, maintaining aspect ratio.
+///
+/// Returns the resized image and its final dimensions (width, height).
+/// If the image is already within the size limit, returns the original image unchanged.
+fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicImage, u32, u32) {
+    const MAX_DIMENSION: u32 = 768;
+    let (w, h) = dyn_img.dimensions();
+
+    if w > MAX_DIMENSION || h > MAX_DIMENSION {
+        let (new_width, new_height) = if w > h {
+            let ratio = MAX_DIMENSION as f32 / w as f32;
+            (MAX_DIMENSION, (h as f32 * ratio) as u32)
+        } else {
+            let ratio = MAX_DIMENSION as f32 / h as f32;
+            ((w as f32 * ratio) as u32, MAX_DIMENSION)
+        };
+        dyn_img =
+            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+        (dyn_img, new_width, new_height)
+    } else {
+        (dyn_img, w, h)
+    }
+}
+
+/// Encode a DynamicImage to JPEG format.
+///
+/// Returns the JPEG bytes or an error if encoding fails.
+fn encode_image_to_jpeg(dyn_img: &image::DynamicImage) -> Result<Vec<u8>, String> {
+    let mut jpeg_data = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut jpeg_data);
+        dyn_img
+            .write_to(&mut cursor, ImageFormat::Jpeg)
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+    }
+
+    if jpeg_data.is_empty() {
+        return Err("encoded JPEG is empty".to_string());
+    }
+
+    Ok(jpeg_data)
+}
+
+/// Check if image data matches known image format magic bytes.
+fn is_valid_image_data(data: &[u8]) -> bool {
+    data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) // PNG
+        || data.starts_with(&[0xFF, 0xD8, 0xFF]) // JPEG
+        || data.starts_with(b"GIF8") // GIF
+        || (data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP") // WebP
+}
+
 /// Extract image URLs from text
 pub fn extract_image_urls(text: &str) -> Vec<String> {
-    let pattern = r"https?://[^\s]+\.(png|jpg|jpeg|gif|webp|bmp|tiff|tif)(\?[^\s]*)?";
-    let re = match Regex::new(pattern) {
+    let pattern = format!(r"https?://[^\s]+\.{}(\?[^\s]*)?", IMAGE_EXTENSIONS);
+    let re = match Regex::new(&pattern) {
         Ok(re) => re,
         Err(_) => return Vec::new(),
     };
@@ -27,8 +89,8 @@ pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // Pattern 1: Quoted paths (single or double quotes)
-    let single_quote_pattern = r"'([^']+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)[^']*)'";
-    if let Ok(re) = Regex::new(single_quote_pattern) {
+    let single_quote_pattern = format!(r"'([^']+\.{}[^']*)'", IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&single_quote_pattern) {
         for cap in re.captures_iter(text) {
             if let Some(path_match) = cap.get(1) {
                 let path = PathBuf::from(path_match.as_str());
@@ -39,8 +101,8 @@ pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
         }
     }
 
-    let double_quote_pattern = r#""([^"]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)[^"]*)""#;
-    if let Ok(re) = Regex::new(double_quote_pattern) {
+    let double_quote_pattern = format!(r#""([^"]+\.{}[^"]*)""#, IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&double_quote_pattern) {
         for cap in re.captures_iter(text) {
             if let Some(path_match) = cap.get(1) {
                 let path = PathBuf::from(path_match.as_str());
@@ -52,8 +114,8 @@ pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
     }
 
     // Pattern 2: Unquoted absolute paths (Unix/Mac style)
-    let unix_pattern = r"/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp|tiff|tif)";
-    if let Ok(re) = Regex::new(unix_pattern) {
+    let unix_pattern = format!(r"/[^\s]+\.{}", IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&unix_pattern) {
         for cap in re.find_iter(text) {
             let path = PathBuf::from(cap.as_str());
             if path.exists() && path.is_file() && !paths.contains(&path) {
@@ -63,8 +125,11 @@ pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
     }
 
     // Pattern 3: Windows-style paths
-    let windows_pattern = r#"(?:[A-Za-z]:\\[^\s]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)|\\\\[^\s]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif))"#;
-    if let Ok(re) = Regex::new(windows_pattern) {
+    let windows_pattern = format!(
+        r#"(?:[A-Za-z]:\\[^\s]+\.{}|\\\\[^\s]+\.{})"#,
+        IMAGE_EXTENSIONS, IMAGE_EXTENSIONS
+    );
+    if let Ok(re) = Regex::new(&windows_pattern) {
         for cap in re.find_iter(text) {
             let path = PathBuf::from(cap.as_str());
             if path.exists() && path.is_file() && !paths.contains(&path) {
@@ -74,8 +139,8 @@ pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
     }
 
     // Pattern 4: Tilde-expanded paths
-    let tilde_pattern = r"~[^\s]+\.(png|jpg|jpeg|gif|webp|bmp|tiff|tif)";
-    if let Ok(re) = Regex::new(tilde_pattern) {
+    let tilde_pattern = format!(r"~[^\s]+\.{}", IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&tilde_pattern) {
         for cap in re.find_iter(text) {
             let path_str = cap.as_str();
             if let Some(home) = std::env::var("HOME")
@@ -104,38 +169,19 @@ pub fn process_and_compress_image_file(path: &Path) -> Result<(PathBuf, u32, u32
         return Err(format!("Path is not a file: {}", path.display()));
     }
 
-    let mut dyn_img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
-    let (width, height) = dyn_img.dimensions();
+    let dyn_img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
 
-    const MAX_DIMENSION: u32 = 768;
-    let (final_width, final_height) = if width > MAX_DIMENSION || height > MAX_DIMENSION {
-        let (new_width, new_height) = if width > height {
-            let ratio = MAX_DIMENSION as f32 / width as f32;
-            (MAX_DIMENSION, (height as f32 * ratio) as u32)
-        } else {
-            let ratio = MAX_DIMENSION as f32 / height as f32;
-            ((width as f32 * ratio) as u32, MAX_DIMENSION)
-        };
-        dyn_img =
-            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
-        (new_width, new_height)
-    } else {
-        (width, height)
-    };
+    // Resize image if it exceeds max dimension (768px for better compression)
+    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
+
+    // Encode resized image to JPEG for better compression
+    let jpeg_data = encode_image_to_jpeg(&dyn_img)?;
 
     let tmp = Builder::new()
         .prefix("stakpak-image-")
         .suffix(".jpg")
         .tempfile()
         .map_err(|e| format!("Failed to create temp file: {}", e))?;
-
-    let mut jpeg_data = Vec::new();
-    {
-        let mut cursor = std::io::Cursor::new(&mut jpeg_data);
-        dyn_img
-            .write_to(&mut cursor, ImageFormat::Jpeg)
-            .map_err(|e| format!("Failed to encode image: {}", e))?;
-    }
 
     std::fs::write(tmp.path(), &jpeg_data)
         .map_err(|e| format!("Failed to write temp file: {}", e))?;
@@ -165,6 +211,11 @@ pub fn create_image_part_from_url(url: &str) -> ContentPart {
 
 /// Create an image content part from a file path
 pub fn create_image_part_from_path(path: &Path) -> Option<ContentPart> {
+    // Early validation: check if path has a valid image extension
+    if !has_image_extension(path) {
+        return None;
+    }
+
     let canonical_path = match path.canonicalize() {
         Ok(p) => p,
         Err(_) => path.to_path_buf(),
@@ -180,12 +231,7 @@ pub fn create_image_part_from_path(path: &Path) -> Option<ContentPart> {
     }
 
     // Validate image data (check magic bytes)
-    if !(image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) // PNG
-        || image_data.starts_with(&[0xFF, 0xD8, 0xFF]) // JPEG
-        || image_data.starts_with(b"GIF8") // GIF
-        || (image_data.len() >= 12 && image_data.starts_with(b"RIFF") && &image_data[8..12] == b"WEBP"))
-    // WebP
-    {
+    if !is_valid_image_data(&image_data) {
         return None;
     }
 
@@ -220,6 +266,14 @@ fn detect_mime_type_from_content(data: &[u8], path: &Path) -> &'static str {
         }
     }
     mime_type_from_path(path)
+}
+
+/// Check if a path has a valid image extension.
+fn has_image_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(is_image_extension)
+        .unwrap_or(false)
 }
 
 fn mime_type_from_path(path: &Path) -> &'static str {
@@ -277,19 +331,19 @@ pub fn clean_text_from_images(text: &str) -> String {
     }
 
     // Remove local paths (quoted)
-    let single_quote_pattern = r"'[^']+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)[^']*'";
-    if let Ok(re) = Regex::new(single_quote_pattern) {
+    let single_quote_pattern = format!(r"'[^']+\.{}[^']*'", IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&single_quote_pattern) {
         cleaned = re.replace_all(&cleaned, "").to_string();
     }
 
-    let double_quote_pattern = r#""[^"]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)[^"]*""#;
-    if let Ok(re) = Regex::new(double_quote_pattern) {
+    let double_quote_pattern = format!(r#""[^"]+\.{}[^"]*""#, IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&double_quote_pattern) {
         cleaned = re.replace_all(&cleaned, "").to_string();
     }
 
     // Remove unquoted paths
-    let unix_pattern = r"/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp|tiff|tif)";
-    if let Ok(re) = Regex::new(unix_pattern) {
+    let unix_pattern = format!(r"/[^\s]+\.{}", IMAGE_EXTENSIONS);
+    if let Ok(re) = Regex::new(&unix_pattern) {
         cleaned = re.replace_all(&cleaned, "").to_string();
     }
 

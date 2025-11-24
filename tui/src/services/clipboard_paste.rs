@@ -45,7 +45,7 @@ impl EncodedImageFormat {
 pub struct PastedImageInfo {
     pub width: u32,
     pub height: u32,
-    pub encoded_format: EncodedImageFormat, // Always PNG for now.
+    pub encoded_format: EncodedImageFormat,
 }
 
 /// Normalize pasted text that may represent a filesystem path.
@@ -96,6 +96,62 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     None
 }
 
+/// Check if a file extension is a supported image format.
+fn is_image_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
+    )
+}
+
+/// Resize an image if it exceeds the maximum dimension, maintaining aspect ratio.
+///
+/// Returns the resized image and its final dimensions (width, height).
+/// If the image is already within the size limit, returns the original image unchanged.
+fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicImage, u32, u32) {
+    const MAX_DIMENSION: u32 = 768;
+    let (w, h) = dyn_img.dimensions();
+
+    if w > MAX_DIMENSION || h > MAX_DIMENSION {
+        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
+        let (new_width, new_height) = if w > h {
+            let ratio = MAX_DIMENSION as f32 / w as f32;
+            (MAX_DIMENSION, (h as f32 * ratio) as u32)
+        } else {
+            let ratio = MAX_DIMENSION as f32 / h as f32;
+            ((w as f32 * ratio) as u32, MAX_DIMENSION)
+        };
+        log::info!("Resizing to {new_width}x{new_height}");
+        dyn_img =
+            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+        (dyn_img, new_width, new_height)
+    } else {
+        log::info!("Image is already within size limit, no resize needed");
+        (dyn_img, w, h)
+    }
+}
+
+/// Encode a DynamicImage to JPEG format.
+///
+/// Returns the JPEG bytes or an error if encoding fails.
+fn encode_image_to_jpeg(dyn_img: &image::DynamicImage) -> Result<Vec<u8>, PasteImageError> {
+    let mut jpeg: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut jpeg);
+        dyn_img
+            .write_to(&mut cursor, ImageFormat::Jpeg)
+            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
+    }
+
+    if jpeg.is_empty() {
+        return Err(PasteImageError::EncodeFailed(
+            "encoded JPEG is empty".into(),
+        ));
+    }
+
+    Ok(jpeg)
+}
+
 /// Capture image from system clipboard, encode to PNG, and return bytes + info.
 #[cfg(not(target_os = "android"))]
 pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
@@ -119,13 +175,7 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
             let path = path_buf.as_path();
             // Check if it's an image file and exists
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                let ext_lower = ext.to_lowercase();
-                if matches!(
-                    ext_lower.as_str(),
-                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
-                ) && path.exists()
-                    && path.is_file()
-                {
+                if is_image_extension(ext) && path.exists() && path.is_file() {
                     Some(path.to_path_buf())
                 } else {
                     None
@@ -153,47 +203,15 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
 
             // Read and load the image file, then process it through resize logic
             match image::open(&canonical_path) {
-                Ok(mut dyn_img) => {
+                Ok(dyn_img) => {
                     let (w, h) = dyn_img.dimensions();
                     log::info!("Loaded image file: {}x{}", w, h);
 
                     // Resize image if it exceeds max dimension (768px for better compression)
-                    const MAX_DIMENSION: u32 = 768;
-                    let (final_width, final_height) = if w > MAX_DIMENSION || h > MAX_DIMENSION {
-                        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
-                        let (new_width, new_height) = if w > h {
-                            let ratio = MAX_DIMENSION as f32 / w as f32;
-                            (MAX_DIMENSION, (h as f32 * ratio) as u32)
-                        } else {
-                            let ratio = MAX_DIMENSION as f32 / h as f32;
-                            ((w as f32 * ratio) as u32, MAX_DIMENSION)
-                        };
-                        log::info!("Resizing to {new_width}x{new_height}");
-                        dyn_img = dyn_img.resize_exact(
-                            new_width,
-                            new_height,
-                            image::imageops::FilterType::Lanczos3,
-                        );
-                        (new_width, new_height)
-                    } else {
-                        log::info!("Image is already within size limit, no resize needed");
-                        (w, h)
-                    };
+                    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
 
                     // Encode resized image to JPEG for better compression
-                    let mut jpeg: Vec<u8> = Vec::new();
-                    {
-                        let mut cursor = std::io::Cursor::new(&mut jpeg);
-                        dyn_img
-                            .write_to(&mut cursor, ImageFormat::Jpeg)
-                            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
-                    }
-
-                    if jpeg.is_empty() {
-                        return Err(PasteImageError::EncodeFailed(
-                            "encoded JPEG is empty".into(),
-                        ));
-                    }
+                    let jpeg = encode_image_to_jpeg(&dyn_img)?;
 
                     log::info!(
                         "clipboard image from file encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
@@ -260,48 +278,17 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
     let Some(rgba_img) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
         return Err(PasteImageError::EncodeFailed("invalid RGBA buffer".into()));
     };
-    let mut dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
+    let dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
     log::info!(
         "clipboard image decoded RGBA {w}x{h} ({} bytes)",
         actual_bytes
     );
 
     // Resize image if it exceeds max dimension (768px for better compression)
-    const MAX_DIMENSION: u32 = 768;
-    let (final_width, final_height) = if w > MAX_DIMENSION || h > MAX_DIMENSION {
-        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
-        // Calculate new dimensions maintaining aspect ratio
-        let (new_width, new_height) = if w > h {
-            let ratio = MAX_DIMENSION as f32 / w as f32;
-            (MAX_DIMENSION, (h as f32 * ratio) as u32)
-        } else {
-            let ratio = MAX_DIMENSION as f32 / h as f32;
-            ((w as f32 * ratio) as u32, MAX_DIMENSION)
-        };
-        log::info!("Resizing to {new_width}x{new_height}");
-        dyn_img =
-            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
-        (new_width, new_height)
-    } else {
-        log::info!("Image is already within size limit, no resize needed");
-        (w, h)
-    };
+    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
 
     // Encode resized image to JPEG for better compression
-    let mut jpeg: Vec<u8> = Vec::new();
-    {
-        let mut cursor = std::io::Cursor::new(&mut jpeg);
-        dyn_img
-            .write_to(&mut cursor, image::ImageFormat::Jpeg)
-            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
-    }
-
-    // Verify we actually encoded something
-    if jpeg.is_empty() {
-        return Err(PasteImageError::EncodeFailed(
-            "encoded JPEG is empty".into(),
-        ));
-    }
+    let jpeg = encode_image_to_jpeg(&dyn_img)?;
 
     log::info!(
         "clipboard image encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
