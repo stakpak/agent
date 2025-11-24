@@ -187,10 +187,22 @@ jobs:
       - name: Generate release notes with git-cliff
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          git-cliff --tag "$VERSION" --unreleased --strip all > release_notes.md || {
-            echo "git-cliff failed, skipping release notes update"
+          # Get the previous tag to generate notes between tags
+          PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, skipping release notes generation"
             exit 0
-          }
+          fi
+          
+          # Generate notes between previous and current tag
+          git-cliff "$PREV_TAG..$VERSION" --strip all > release_notes.md
+          
+          # Check if release notes are empty
+          if [ ! -s release_notes.md ]; then
+            echo "No commits found between $PREV_TAG and $VERSION"
+            exit 0
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
