@@ -357,9 +357,9 @@ mod tests {
         assert_eq!(processed[0].0.spans.len(), 3);
         assert_eq!(
             processed[0].0.spans[1].content,
-            "---------------------------------checkpoint test123----------------------------------"
+            "-----------------------------------------checkpoint test123-----------------------------------------"
         );
-        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::Yellow));
+        assert_eq!(processed[0].0.spans[1].style.fg, Some(Color::DarkGray));
 
         // Second line should be unchanged
         assert_eq!(processed[1].0.spans.len(), 1);
