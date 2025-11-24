@@ -115,7 +115,6 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
         )
         .style(Style::default().fg(Color::Reset))
         .block(Block::default().borders(Borders::NONE));
-  
 
     f.render_stateful_widget(list, chunks[1], &mut list_state);
 

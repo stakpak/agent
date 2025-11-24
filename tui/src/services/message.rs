@@ -433,9 +433,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
 
 // New function that does all the heavy processing once and caches the result
 pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
-    use crate::services::message_pattern::{
-        process_checkpoint_patterns, process_section_title_patterns, spans_to_string,
-    };
+    use crate::services::message_pattern::{process_checkpoint_patterns, spans_to_string};
 
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
 
@@ -453,34 +451,11 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
             }
             processed_lines.push(Line::from(""));
         } else {
-            let section_tags = ["local_context", "rulebooks"];
-            let mut found = false;
-
-            for tag in &section_tags {
-                let closing_tag = format!("</{}>", tag);
-                if line_text.trim() == closing_tag {
-                    found = true;
-                    break;
-                }
-                if line_text.contains(&format!("<{}>", tag)) {
-                    processed_lines.push(Line::from(""));
-                    let processed =
-                        process_section_title_patterns(&[(line.clone(), Style::default())], tag);
-                    for (processed_line, _) in processed {
-                        processed_lines.push(processed_line);
-                    }
-                    processed_lines.push(Line::from(""));
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                if line_text.trim() == "SPACING_MARKER" {
-                    processed_lines.push(Line::from(""));
-                } else {
-                    processed_lines.push(line.clone());
-                }
+            // local_context and rulebooks are stripped earlier in Plain message processing
+            if line_text.trim() == "SPACING_MARKER" {
+                processed_lines.push(Line::from(""));
+            } else {
+                processed_lines.push(line.clone());
             }
         }
     }
@@ -611,7 +586,27 @@ fn get_wrapped_message_lines_internal(
                 }
             }
             MessageContent::Plain(text, style) => {
-                let cleaned = text.to_string();
+                let mut cleaned = text.to_string();
+
+                // Strip local_context blocks from user messages
+                while let Some(start) = cleaned.find("<local_context>") {
+                    if let Some(end) = cleaned[start..].find("</local_context>") {
+                        let end_pos = start + end + "</local_context>".len();
+                        cleaned.replace_range(start..end_pos, "");
+                    } else {
+                        break;
+                    }
+                }
+
+                // Strip rulebooks blocks from user messages
+                while let Some(start) = cleaned.find("<rulebooks>") {
+                    if let Some(end) = cleaned[start..].find("</rulebooks>") {
+                        let end_pos = start + end + "</rulebooks>".len();
+                        cleaned.replace_range(start..end_pos, "");
+                    } else {
+                        break;
+                    }
+                }
 
                 // Check for shell history first (before newline processing)
                 if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {

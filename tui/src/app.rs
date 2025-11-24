@@ -175,6 +175,17 @@ pub struct AppState {
     pub terminal_size: Size,
 }
 
+pub struct AppStateOptions<'a> {
+    pub latest_version: Option<String>,
+    pub redact_secrets: bool,
+    pub privacy_mode: bool,
+    pub is_git_repo: bool,
+    pub auto_approve_tools: Option<&'a Vec<String>>,
+    pub allowed_tools: Option<&'a Vec<String>>,
+    pub input_tx: Option<mpsc::Sender<InputEvent>>,
+    pub model: AgentModel,
+}
+
 impl AppState {
     pub fn get_helper_commands() -> Vec<HelperCommand> {
         // Use unified command system
@@ -202,15 +213,18 @@ impl AppState {
         (file_search_tx, result_rx)
     }
 
-    pub fn new(
-        latest_version: Option<String>,
-        redact_secrets: bool,
-        privacy_mode: bool,
-        is_git_repo: bool,
-        auto_approve_tools: Option<&Vec<String>>,
-        allowed_tools: Option<&Vec<String>>,
-        input_tx: Option<mpsc::Sender<InputEvent>>,
-    ) -> Self {
+    pub fn new(options: AppStateOptions) -> Self {
+        let AppStateOptions {
+            latest_version,
+            redact_secrets,
+            privacy_mode,
+            is_git_repo,
+            auto_approve_tools,
+            allowed_tools,
+            input_tx,
+            model,
+        } = options;
+
         let helpers = Self::get_helper_commands();
         let (file_search_tx, result_rx) = Self::init_file_search_channels(&helpers);
 
@@ -348,7 +362,7 @@ impl AppState {
             recovery_response: None,
             recovery_checkpoint_id: None,
             recovery_scroll_pending: false,
-            model: AgentModel::Smart,
+            model,
         }
     }
 

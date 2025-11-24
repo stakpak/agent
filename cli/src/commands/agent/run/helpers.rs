@@ -83,7 +83,7 @@ pub async fn add_local_context<'a>(
         if is_first_message || force_add {
             let context_display = local_context.format_display().await?;
             let formatted_input = format!(
-                "{}\n\n<local_context>\n{}\n</local_context>",
+                "{}\n<local_context>\n{}\n</local_context>",
                 user_input, context_display
             );
             Ok((formatted_input, Some(local_context)))
@@ -95,58 +95,36 @@ pub async fn add_local_context<'a>(
     }
 }
 
-pub fn add_rulebooks(
-    messages: &[ChatMessage],
-    user_input: &str,
-    rulebooks: &Option<Vec<ListRuleBook>>,
-) -> (String, Option<String>) {
-    let force = messages.is_empty();
-    add_rulebooks_with_force(user_input, rulebooks, force)
-}
-
-pub fn add_rulebooks_with_force(
-    user_input: &str,
-    rulebooks: &Option<Vec<ListRuleBook>>,
-    force_add: bool,
-) -> (String, Option<String>) {
-    if let Some(rulebooks) = rulebooks {
-        let rulebooks_text = if !rulebooks.is_empty() {
-            format!(
-                "\n\n# My Rule Books:\n\n{}",
-                rulebooks
-                    .iter()
-                    .map(|rulebook| {
-                        let text = rulebook.to_text();
-                        let mut lines = text.lines();
-                        let mut result = String::new();
-                        if let Some(first) = lines.next() {
-                            result.push_str(&format!("  - {}", first));
-                            for line in lines {
-                                result.push_str(&format!("\n    {}", line));
-                            }
+pub fn add_rulebooks(user_input: &str, rulebooks: &[ListRuleBook]) -> (String, Option<String>) {
+    let rulebooks_text = if !rulebooks.is_empty() {
+        format!(
+            "\n\n# My Rule Books:\n\n{}",
+            rulebooks
+                .iter()
+                .map(|rulebook| {
+                    let text = rulebook.to_text();
+                    let mut lines = text.lines();
+                    let mut result = String::new();
+                    if let Some(first) = lines.next() {
+                        result.push_str(&format!("  - {}", first));
+                        for line in lines {
+                            result.push_str(&format!("\n    {}", line));
                         }
-                        result
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n")
-            )
-        } else {
-            "# No Rule Books Available".to_string()
-        };
-
-        // Add rulebooks only if explicitly requested via force_add
-        if force_add {
-            let formatted_input = format!(
-                "{}\n\n<rulebooks>\n{}\n</rulebooks>",
-                user_input, rulebooks_text
-            );
-            (formatted_input, Some(rulebooks_text))
-        } else {
-            (user_input.to_string(), None)
-        }
+                    }
+                    result
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        )
     } else {
-        (user_input.to_string(), None)
-    }
+        "# No Rule Books Available".to_string()
+    };
+
+    let formatted_input = format!(
+        "{}\n<rulebooks>\n{}\n</rulebooks>",
+        user_input, rulebooks_text
+    );
+    (formatted_input, Some(rulebooks_text))
 }
 
 pub fn add_subagents(
@@ -159,7 +137,7 @@ pub fn add_subagents(
 
         if messages.is_empty() {
             let formatted_input = format!(
-                "{}\n\n<subagents>\n{}\n</subagents>",
+                "{}\n<subagents>\n{}\n</subagents>",
                 user_input, subagents_text
             );
             (formatted_input, Some(subagents_text))
