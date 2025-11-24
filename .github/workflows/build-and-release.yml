@@ -209,6 +209,20 @@ jobs:
       - name: Update GitHub Release
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
+          
+          # Check if release notes file exists and has content
+          if [ ! -f release_notes.md ]; then
+            echo "Release notes file not found, skipping update"
+            exit 0
+          fi
+          
+          # Check if file is empty or only contains whitespace
+          if [ ! -s release_notes.md ] || ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "Release notes file is empty, skipping update"
+            exit 0
+          fi
+          
+          echo "Updating release notes for $VERSION"
           gh release edit "$VERSION" --notes-file release_notes.md || echo "Failed to update release notes, continuing anyway"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
