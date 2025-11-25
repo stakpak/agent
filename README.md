@@ -5,7 +5,7 @@ You can't trust most AI agents with your DevOps. One mistake, and your productio
 Stakpak is built different:
 - **Secret Substitution** - The LLM works with your credentials without ever seeing them
 - **Warden Guardrails** - Network-level policies block destructive operations before they run
-- **DevOps Playbooks Baked-in** - Curated knowledge library of DevOps knowledge in Stakpak Rulebooks
+- **DevOps Playbooks Baked-in** - Curated library of DevOps knowledge in Stakpak Rulebooks
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
