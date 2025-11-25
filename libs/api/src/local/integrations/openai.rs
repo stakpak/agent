@@ -529,7 +529,6 @@ async fn process_openai_stream(
                 continue;
             }
 
-            // First try to parse as ChatCompletionStreamResponse (OpenAI format)
             match serde_json::from_str::<ChatCompletionStreamResponse>(json_str) {
                 Ok(stream_response) => {
                     // Update completion response metadata
@@ -618,50 +617,24 @@ async fn process_openai_stream(
                             });
                         }
                     }
-                }
-                Err(_) => {
-                    // Try parsing as LLMCompletionStreamResponse (fallback format)
-                    match serde_json::from_str::<LLMCompletionStreamResponse>(json_str) {
-                        Ok(stream_response) => {
-                            // Update completion response metadata
-                            if completion_response.id.is_empty() {
-                                completion_response.id = stream_response.id.clone();
-                                completion_response.model = stream_response.model.clone();
-                                completion_response.object = stream_response.object.clone();
-                                completion_response.created = stream_response.created;
-                            }
 
-                            // Process choices
-                            for choice in &stream_response.choices {
-                                if let Some(content) = &choice.delta.content {
-                                    // Send content delta
-                                    stream_channel_tx
-                                        .send(GenerationDelta::Content {
-                                            content: content.clone(),
-                                        })
-                                        .await
-                                        .map_err(|e| {
-                                            AgentError::BadRequest(
-                                                BadRequestErrorMessage::ApiError(e.to_string()),
-                                            )
-                                        })?;
-                                    accumulated_content.push_str(content);
-                                }
-
-                                if let Some(reason) = &choice.finish_reason {
-                                    finish_reason = Some(reason.clone());
-                                }
-                            }
-
-                            // Update usage if available
-                            if let Some(usage) = stream_response.usage {
-                                completion_response.usage = Some(usage);
-                            }
-                        }
-                        Err(_) => {
-                            // Continue processing other messages
-                        }
+                    // Update usage if available
+                    if let Some(usage) = &stream_response.usage {
+                        stream_channel_tx
+                            .send(GenerationDelta::Usage {
+                                usage: usage.clone(),
+                            })
+                            .await
+                            .map_err(|e| {
+                                AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                                    e.to_string(),
+                                ))
+                            })?;
+                        completion_response.usage = Some(usage.clone());
                     }
+                }
+                Err(e) => {
+                    eprintln!("Error parsing response: {}", e);
                 }
             }
         }
@@ -711,6 +684,7 @@ async fn process_openai_stream(
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     System,
     Developer,
