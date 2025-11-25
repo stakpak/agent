@@ -17,6 +17,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionStreamResponse, ChatMessage, ChatMessageDelta, FinishReason, FunctionCall,
     FunctionCallDelta, MessageContent, Role, Tool, ToolCall, ToolCallDelta, Usage,
 };
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::pin::Pin;
 use uuid::Uuid;
 
@@ -162,7 +163,7 @@ impl AgentProvider for LocalClient {
     ) -> Result<ChatCompletionResponse, String> {
         let current_checkpoint = self.initialize_session(&messages).await?;
 
-        let new_message = self
+        let (new_message, usage) = self
             .run_agent_completion(model.clone(), messages.clone(), tools, None)
             .await?;
 
@@ -186,12 +187,19 @@ impl AgentProvider for LocalClient {
                 logprobs: None,
                 finish_reason: FinishReason::Stop,
             }],
-            usage: Usage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-                prompt_tokens_details: None,
-            },
+            usage: usage
+                .map(|u| Usage {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                    total_tokens: u.total_tokens,
+                    prompt_tokens_details: None,
+                })
+                .unwrap_or(Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    prompt_tokens_details: None,
+                }),
             system_fingerprint: None,
         })
     }
@@ -239,7 +247,7 @@ impl AgentProvider for LocalClient {
                 Err(e) => {
                     let _ = tx.send(Err(e)).await;
                 }
-                Ok(new_message) => {
+                Ok((new_message, _usage)) => {
                     let mut new_messages = messages.clone();
                     new_messages.push(new_message);
 
@@ -271,18 +279,31 @@ impl AgentProvider for LocalClient {
             let completion_id = Uuid::new_v4().to_string();
             while let Some(delta_result) = rx.recv().await {
                 match delta_result {
-                    Ok(delta) => yield Ok(ChatCompletionStreamResponse {
-                        id: completion_id.clone(),
-                        object: "chat.completion.chunk".to_string(),
-                        created: chrono::Utc::now().timestamp() as u64,
-                        model: model_name.to_owned(),
-                        choices: vec![ChatCompletionStreamChoice {
-                            index: 0,
-                            delta: delta.into(),
-                            finish_reason: None,
-                        }],
-                        usage: None,
-                    }),
+                    Ok(delta) => {
+                        let usage = if let GenerationDelta::Usage { usage } = &delta {
+                            Some(Usage {
+                                prompt_tokens: usage.prompt_tokens,
+                                completion_tokens: usage.completion_tokens,
+                                total_tokens: usage.total_tokens,
+                                prompt_tokens_details: None,
+                            })
+                        } else {
+                            None
+                        };
+
+                        yield Ok(ChatCompletionStreamResponse {
+                            id: completion_id.clone(),
+                            object: "chat.completion.chunk".to_string(),
+                            created: chrono::Utc::now().timestamp() as u64,
+                            model: model_name.to_owned(),
+                            choices: vec![ChatCompletionStreamChoice {
+                                index: 0,
+                                delta: delta.into(),
+                                finish_reason: None,
+                            }],
+                            usage,
+                        })
+                    }
                     Err(e) => yield Err(ApiStreamError::Unknown(e)),
                 }
             }
@@ -368,7 +389,7 @@ impl LocalClient {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         stream_channel_tx: Option<tokio::sync::mpsc::Sender<Result<GenerationDelta, String>>>,
-    ) -> Result<ChatMessage, String> {
+    ) -> Result<(ChatMessage, Option<LLMTokenUsage>), String> {
         let inference_config = self.get_inference_config();
         let inference_model = self.get_inference_model(model);
 
@@ -385,7 +406,7 @@ impl LocalClient {
 
         let llm_tools = tools.map(|t| t.into_iter().map(Into::into).collect());
 
-        let response = if let Some(tx) = stream_channel_tx {
+        let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<GenerationDelta>(100);
 
             let input = crate::local::integrations::InferenceStreamInput {
@@ -411,7 +432,8 @@ impl LocalClient {
             };
 
             let (chat_result, _) = tokio::join!(chat_future, receive_future);
-            chat_result?
+            let response = chat_result?;
+            (response.choices[0].message.clone(), response.usage)
         } else {
             let input = crate::local::integrations::InferenceInput {
                 model: inference_model,
@@ -419,13 +441,25 @@ impl LocalClient {
                 max_tokens: 16000,
                 tools: llm_tools,
             };
-            integrations::chat(&inference_config, input)
+            let response = integrations::chat(&inference_config, input)
                 .await
-                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            (response.choices[0].message.clone(), response.usage)
         };
 
-        let message_content = response.choices[0].message.content.clone();
-        let tool_calls = if let LLMMessageContent::List(items) = &message_content {
+        let message_content_string = match &response_message.content {
+            LLMMessageContent::String(s) => s.clone(),
+            LLMMessageContent::List(l) => l
+                .iter()
+                .map(|c| match c {
+                    LLMMessageTypedContent::Text { text } => text.clone(),
+                    LLMMessageTypedContent::ToolCall { .. } => String::new(),
+                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        let tool_calls = if let LLMMessageContent::List(items) = &response_message.content {
             let calls: Vec<ToolCall> = items
                 .iter()
                 .filter_map(|item| {
@@ -449,13 +483,16 @@ impl LocalClient {
             None
         };
 
-        Ok(ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(message_content.to_string())),
-            name: None,
-            tool_calls,
-            tool_call_id: None,
-        })
+        Ok((
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some(MessageContent::String(message_content_string)),
+                name: None,
+                tool_calls,
+                tool_call_id: None,
+            },
+            usage,
+        ))
     }
 
     async fn initialize_session(&self, messages: &[ChatMessage]) -> Result<RunAgentOutput, String> {
