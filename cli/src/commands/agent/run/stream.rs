@@ -143,6 +143,12 @@ pub async fn process_responses_stream(
                 }
             }
             Err(e) => {
+                // End stream processing loading when error occurs
+                let _ = send_input_event(
+                    input_tx,
+                    InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing),
+                )
+                .await;
                 return Err(e.clone());
             }
         }

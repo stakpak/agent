@@ -533,11 +533,16 @@ pub fn handle_input_submitted_with(
 
 /// Handle text paste (Event::Paste), including large text and image *paths*.
 pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
+    // Normalize line endings: many terminals convert newlines to \r when pasting,
+    // but textarea expects \n. This is the same fix used in Codex.
+    let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+
     // On macOS, Cmd+V might paste text even when an image is on clipboard.
     // First, try to check if there's an image on the clipboard (for Cmd+V on macOS).
     #[cfg(not(target_os = "android"))]
     {
         // Try to get image from clipboard - if successful, use that instead of text
+        // This also checks for file paths in clipboard text
         if let Ok((path, info)) = paste_image_to_temp_png() {
             attach_image(
                 state,
@@ -550,10 +555,8 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
         }
     }
 
-    // Normalize line endings: many terminals convert newlines to \r when pasting,
-    // but textarea expects \n. This is the same fix used in Codex.
-    let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
-
+    // Also check if the pasted text itself contains file paths
+    // (e.g., user pastes "check this out /path/to/image.png")
     let char_count = normalized_pasted.chars().count();
     if char_count > MAX_PASTE_CHAR_COUNT {
         let placeholder = format!("[Pasted Content {char_count} chars]");
@@ -621,6 +624,21 @@ fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
         // Use JPEG label since we'll compress it
         attach_image(state, path_buf, w, h, "JPEG");
         return true;
+    }
+
+    // Try to extract file paths from text that may contain other content
+    // (e.g., "check this out /path/to/image.png")
+    let extracted_paths = crate::services::clipboard_paste::extract_file_paths_from_text(&pasted);
+    for path_buf in extracted_paths {
+        // Verify it's a valid image file
+        if image::image_dimensions(&path_buf).is_ok() {
+            // Process and compress the image (resize if needed, save to temp file)
+            if let Ok((compressed_path, width, height)) = process_and_compress_image_file(&path_buf)
+            {
+                attach_image(state, compressed_path, width, height, "JPEG");
+                return true;
+            }
+        }
     }
 
     // If that didn't work, check if it looks like a filename (no slashes, might be a bare filename)

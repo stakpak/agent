@@ -1,4 +1,5 @@
 use crate::services::handlers::find_image_file_by_name;
+use crate::services::image_upload::process_and_compress_image_file;
 use image::{GenericImageView, ImageFormat};
 use log;
 use std::path::PathBuf;
@@ -48,12 +49,173 @@ pub struct PastedImageInfo {
     pub encoded_format: EncodedImageFormat,
 }
 
+/// Extract file paths from text that may contain other content.
+///
+/// This function looks for file paths in text, handling:
+/// - Absolute paths (starting with / or ~)
+/// - Windows paths (C:\ or \\)
+/// - Paths with spaces (even unquoted)
+/// - file:// URLs
+pub fn extract_file_paths_from_text(text: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let text = text.trim();
+
+    // First, try to normalize the entire text as a single path
+    if let Some(path) = normalize_pasted_path(text) {
+        paths.push(path);
+        return paths;
+    }
+
+    // Try to find paths within the text
+    // Look for absolute Unix paths (starting with /)
+    let image_exts = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"];
+
+    // First, try to find image extensions and work backwards to find the path start
+    for ext in &image_exts {
+        let ext_pattern = format!(".{}", ext);
+        let mut search_start = 0;
+
+        while let Some(ext_pos) = text[search_start..]
+            .to_lowercase()
+            .find(&ext_pattern.to_lowercase())
+        {
+            let ext_start = search_start + ext_pos;
+            let ext_end = ext_start + ext_pattern.len();
+
+            // Check if extension is followed by whitespace, newline, or end of string
+            let is_valid_end = ext_end >= text.len()
+                || text
+                    .chars()
+                    .nth(ext_end)
+                    .map(|c| c.is_whitespace() || c == '\n' || c == '\r')
+                    .unwrap_or(true);
+
+            if is_valid_end {
+                // Work backwards to find where the path starts
+                // Look for the last / before the extension, or ~, or beginning of text
+                // Note: We continue through spaces because filenames can contain spaces
+                let mut path_start = ext_start;
+                let mut found_slash = false;
+
+                // Look backwards for / or ~, continuing through spaces (filenames can have spaces)
+                while path_start > 0 {
+                    let prev_char = text.chars().nth(path_start - 1);
+                    if let Some(c) = prev_char {
+                        if c == '/' {
+                            found_slash = true;
+                            break;
+                        } else if c == '~' {
+                            path_start -= 1;
+                            found_slash = true;
+                            break;
+                        }
+                        // Continue through spaces and other characters - don't stop at whitespace
+                        // because filenames can contain spaces
+                    }
+                    path_start -= 1;
+                }
+
+                // Only accept paths that start with / or ~, or start at beginning of text
+                let is_valid_start = path_start == 0
+                    || text
+                        .chars()
+                        .nth(path_start)
+                        .map(|c| c == '/' || c == '~')
+                        .unwrap_or(false)
+                    || found_slash;
+
+                if is_valid_start {
+                    let path_str = text[path_start..ext_end].trim();
+                    let path = PathBuf::from(path_str);
+                    if path.exists() && path.is_file() {
+                        paths.push(path);
+                        search_start = ext_end;
+                        continue; // Try to find more paths
+                    }
+                }
+            }
+
+            search_start = ext_end;
+        }
+    }
+
+    // Try to find Windows paths (C:\ or C:/)
+    let mut start = 0;
+    while start < text.len() {
+        // Look for drive letter pattern: [A-Za-z]:[/\\]
+        if let Some(colon_pos) = text[start..].find(':') {
+            let drive_start = start + colon_pos;
+            if drive_start > 0 {
+                let before_colon = text.chars().nth(drive_start - 1);
+                if let Some(c) = before_colon {
+                    if c.is_ascii_alphabetic() && drive_start + 1 < text.len() {
+                        let after_colon = &text[drive_start + 1..];
+                        if after_colon.starts_with('\\') || after_colon.starts_with('/') {
+                            // Found potential Windows path
+                            let path_start = drive_start - 1;
+
+                            // Find where path ends - look for image extensions
+                            let image_exts =
+                                ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"];
+                            let mut found_path = false;
+
+                            for ext in &image_exts {
+                                let ext_lower = ext.to_lowercase();
+                                let text_lower = text[path_start..].to_lowercase();
+
+                                if let Some(ext_pos) = text_lower.find(&format!(".{}", ext_lower)) {
+                                    let ext_start = path_start + ext_pos + 1;
+                                    let ext_end = ext_start + ext.len();
+
+                                    if ext_end >= text.len()
+                                        || text
+                                            .chars()
+                                            .nth(ext_end)
+                                            .map(|c| c.is_whitespace() || c == '\n' || c == '\r')
+                                            .unwrap_or(true)
+                                    {
+                                        let path_str = text[path_start..ext_end].trim();
+                                        let path = PathBuf::from(path_str);
+                                        if path.exists() && path.is_file() {
+                                            paths.push(path);
+                                            found_path = true;
+                                            start = ext_end;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !found_path {
+                                start = drive_start + 1;
+                            }
+                        } else {
+                            start = drive_start + 1;
+                        }
+                    } else {
+                        start = drive_start + 1;
+                    }
+                } else {
+                    start = drive_start + 1;
+                }
+            } else {
+                start = drive_start + 1;
+            }
+        } else {
+            break;
+        }
+    }
+
+    paths
+}
+
 /// Normalize pasted text that may represent a filesystem path.
 ///
 /// Supports:
 /// - `file://` URLs (converted to local paths)
 /// - Windows/UNC paths
 /// - shell‑escaped single paths (via `shlex`)
+/// - Unquoted paths with spaces (tries direct path first)
 pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     let pasted = pasted.trim();
 
@@ -84,30 +246,39 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
         drive || unc
     };
     if looks_like_windows_path {
-        return Some(PathBuf::from(pasted));
+        let path = PathBuf::from(pasted);
+        if path.exists() && path.is_file() {
+            return Some(path);
+        }
+    }
+
+    // Try direct path first (handles unquoted paths with spaces)
+    if pasted.starts_with('/') || pasted.starts_with('~') {
+        let path = PathBuf::from(pasted);
+        if path.exists() && path.is_file() {
+            return Some(path);
+        }
     }
 
     // shell‑escaped single path → unescaped
     let parts: Vec<String> = shlex::Shlex::new(pasted).collect();
     if parts.len() == 1 {
-        return parts.into_iter().next().map(PathBuf::from);
+        let path = PathBuf::from(&parts[0]);
+        if path.exists() && path.is_file() {
+            return Some(path);
+        }
     }
 
     None
-}
-
-/// Check if a file extension is a supported image format.
-fn is_image_extension(ext: &str) -> bool {
-    matches!(
-        ext.to_lowercase().as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
-    )
 }
 
 /// Resize an image if it exceeds the maximum dimension, maintaining aspect ratio.
 ///
 /// Returns the resized image and its final dimensions (width, height).
 /// If the image is already within the size limit, returns the original image unchanged.
+///
+/// Note: This is kept here for clipboard image data processing (raw RGBA data),
+/// which is different from file-based processing handled by image_upload module.
 fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicImage, u32, u32) {
     const MAX_DIMENSION: u32 = 768;
     let (w, h) = dyn_img.dimensions();
@@ -134,6 +305,9 @@ fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicIm
 /// Encode a DynamicImage to JPEG format.
 ///
 /// Returns the JPEG bytes or an error if encoding fails.
+///
+/// Note: This is kept here for clipboard image data processing (raw RGBA data),
+/// which is different from file-based processing handled by image_upload module.
 fn encode_image_to_jpeg(dyn_img: &image::DynamicImage) -> Result<Vec<u8>, PasteImageError> {
     let mut jpeg: Vec<u8> = Vec::new();
     {
@@ -174,12 +348,20 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
         let path_opt = normalize_pasted_path(trimmed).and_then(|path_buf| {
             let path = path_buf.as_path();
             // Check if it's an image file and exists
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if is_image_extension(ext) && path.exists() && path.is_file() {
-                    Some(path.to_path_buf())
-                } else {
-                    None
-                }
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|ext| {
+                    matches!(
+                        ext.to_lowercase().as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
+                    )
+                })
+                .unwrap_or(false)
+                && path.exists()
+                && path.is_file()
+            {
+                Some(path.to_path_buf())
             } else {
                 None
             }
@@ -195,43 +377,38 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
 
         if let Some(path) = path_opt {
             log::info!("Found image file path in clipboard: {}", path.display());
-            // Process the file directly - this avoids getting the icon/preview
-            let canonical_path = match path.canonicalize() {
-                Ok(p) => p,
-                Err(_) => path.to_path_buf(),
-            };
 
-            // Read and load the image file, then process it through resize logic
-            match image::open(&canonical_path) {
-                Ok(dyn_img) => {
-                    let (w, h) = dyn_img.dimensions();
-                    log::info!("Loaded image file: {}x{}", w, h);
-
-                    // Resize image if it exceeds max dimension (768px for better compression)
-                    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
-
-                    // Encode resized image to JPEG for better compression
-                    let jpeg = encode_image_to_jpeg(&dyn_img)?;
-
-                    log::info!(
-                        "clipboard image from file encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
-                        jpeg.len()
-                    );
-                    return Ok((
-                        jpeg,
-                        PastedImageInfo {
-                            width: final_width,
-                            height: final_height,
-                            encoded_format: EncodedImageFormat::Jpeg,
-                        },
-                    ));
+            // Use the shared image processing function from image_upload module
+            match process_and_compress_image_file(path.as_path()) {
+                Ok((processed_path, final_width, final_height)) => {
+                    // Read the processed JPEG file
+                    match std::fs::read(&processed_path) {
+                        Ok(jpeg) => {
+                            log::info!(
+                                "clipboard image from file processed (resized: {final_width}x{final_height}, {} bytes)",
+                                jpeg.len()
+                            );
+                            return Ok((
+                                jpeg,
+                                PastedImageInfo {
+                                    width: final_width,
+                                    height: final_height,
+                                    encoded_format: EncodedImageFormat::Jpeg,
+                                },
+                            ));
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to read processed image file {}: {}",
+                                processed_path.display(),
+                                e
+                            );
+                            // Fall through to try clipboard image data
+                        }
+                    }
                 }
                 Err(e) => {
-                    log::warn!(
-                        "Failed to open image file {}: {}",
-                        canonical_path.display(),
-                        e
-                    );
+                    log::warn!("Failed to process image file {}: {}", path.display(), e);
                     // Fall through to try clipboard image data
                 }
             }

@@ -789,6 +789,12 @@ pub async fn run_interactive(
                             } else {
                                 e.clone()
                             };
+                            // End loading operation before sending error
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing),
+                            )
+                            .await?;
                             send_input_event(&input_tx, InputEvent::Error(error_msg.clone()))
                                 .await?;
                             break Err(ApiStreamError::Unknown(error_msg));
@@ -832,6 +838,14 @@ pub async fn run_interactive(
                                     // Loading will be managed by stream processing on retry
                                     continue;
                                 } else {
+                                    // End loading operation before sending error
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::EndLoadingOperation(
+                                            LoadingOperation::StreamProcessing,
+                                        ),
+                                    )
+                                    .await?;
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::Error("MAX_RETRY_REACHED".to_string()),
@@ -840,6 +854,14 @@ pub async fn run_interactive(
                                     break Err(e);
                                 }
                             } else {
+                                // End loading operation before sending error
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::EndLoadingOperation(
+                                        LoadingOperation::StreamProcessing,
+                                    ),
+                                )
+                                .await?;
                                 send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
                                     .await?;
                                 break Err(e);

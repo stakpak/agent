@@ -300,7 +300,23 @@ pub fn process_all_images(text: &str, attached_image_paths: &[PathBuf]) -> Vec<C
     }
 
     // Process local image paths from text
-    let local_paths = extract_local_image_paths(text);
+    // Use extract_file_paths_from_text which handles paths with spaces better
+    // than the regex-based extract_local_image_paths
+    let local_paths = {
+        use crate::services::clipboard_paste::extract_file_paths_from_text;
+        let extracted = extract_file_paths_from_text(text);
+        // Also try the regex-based approach for quoted paths and other patterns
+        let regex_paths = extract_local_image_paths(text);
+        // Combine and deduplicate
+        let mut all_paths = extracted;
+        for path in regex_paths {
+            if !all_paths.contains(&path) {
+                all_paths.push(path);
+            }
+        }
+        all_paths
+    };
+
     for local_path in local_paths {
         // Process and compress local image
         if let Ok((processed_path, _, _)) = process_and_compress_image_file(&local_path)
