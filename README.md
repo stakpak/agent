@@ -2,10 +2,10 @@
 Most AI agents need full access to everything. One mistake and your production is toast.
 Stakpak is built different:
 
-Secret Redaction - The AI works with your credentials without ever seeing them
-Warden Sandbox - Network-level policies block destructive operations before they run
-Encrypted Everything - All communication between components uses mTLS
-Rust-powered - Fast and memory-safe when you need it most
+- **Secret Redaction** - The AI works with your credentials without ever seeing them
+- **Warden Sandbox** - Network-level policies block destructive operations before they run
+- **Encrypted Everything** - All communication between components uses mTLS
+- **Rust-powered** - Fast and memory-safe when you need it most
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
 <img src="assets/TUIOverview.png" width="800">
