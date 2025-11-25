@@ -1,4 +1,7 @@
 # Stakpak
+
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
 Most AI agents need full access to everything. One mistake and your production is toast.
 Stakpak is built different:
 
