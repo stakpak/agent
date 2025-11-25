@@ -60,6 +60,9 @@ pub struct ProfileConfig {
     pub openai: Option<OpenAIConfig>,
     /// Anthropic configuration
     pub anthropic: Option<AnthropicConfig>,
+    pub eco_model: Option<String>,
+    pub smart_model: Option<String>,
+    pub recovery_model: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -95,6 +98,9 @@ pub struct AppConfig {
     pub warden: Option<WardenConfig>,
     pub openai: Option<OpenAIConfig>,
     pub anthropic: Option<AnthropicConfig>,
+    pub smart_model: Option<String>,
+    pub eco_model: Option<String>,
+    pub recovery_model: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -325,6 +331,21 @@ impl AppConfig {
             .clone()
             .or_else(|| all_profile.and_then(|all| all.anthropic.clone()));
 
+        let eco_model = profile
+            .eco_model
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.eco_model.clone()));
+
+        let smart_model = profile
+            .smart_model
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.smart_model.clone()));
+
+        let recovery_model = profile
+            .recovery_model
+            .clone()
+            .or_else(|| all_profile.and_then(|all| all.recovery_model.clone()));
+
         // Override with environment variables if present
         let api_key = std::env::var("STAKPAK_API_KEY").ok().or(api_key);
         let api_endpoint = std::env::var("STAKPAK_API_ENDPOINT").unwrap_or(api_endpoint);
@@ -344,6 +365,9 @@ impl AppConfig {
             warden,
             openai,
             anthropic,
+            eco_model,
+            smart_model,
+            recovery_model,
         };
 
         if is_config_file_dirty {
@@ -437,6 +461,9 @@ impl AppConfig {
                 warden: self.warden.clone(),
                 openai: self.openai.clone(),
                 anthropic: self.anthropic.clone(),
+                eco_model: self.eco_model.clone(),
+                smart_model: self.smart_model.clone(),
+                recovery_model: self.recovery_model.clone(),
             },
         );
 
