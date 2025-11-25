@@ -11,7 +11,7 @@ Stakpak is built different:
 - **Rust-powered** - Fast and memory-safe when you need it most
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
-<img src="assets/TUIOverview.png" width="800">
+<img src="stakpak-overview.gif" width="800">
 
 ## 🔒 Security Hardened
 
