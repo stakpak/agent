@@ -1,12 +1,11 @@
-use crate::local::integrations::anthropic::{
-    Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel,
-};
+use crate::local::integrations::anthropic::{AnthropicConfig, AnthropicModel};
 use crate::local::integrations::models::{
     generation::GenerationDelta,
     llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTool},
 };
 use crate::local::integrations::openai::{OpenAIConfig, OpenAIModel};
-use crate::{AgentProvider, GetMyAccountResponse};
+use crate::local::integrations::{InferenceConfig, InferenceModel};
+use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -18,7 +17,6 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionStreamResponse, ChatMessage, ChatMessageDelta, FinishReason, FunctionCall,
     FunctionCallDelta, MessageContent, Role, Tool, ToolCall, ToolCallDelta, Usage,
 };
-use std::collections::BTreeMap;
 use std::pin::Pin;
 use uuid::Uuid;
 
@@ -34,12 +32,18 @@ pub struct LocalClient {
     pub db: Connection,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
+    pub smart_model: InferenceModel,
+    pub eco_model: InferenceModel,
+    pub recovery_model: InferenceModel,
 }
 
 pub struct LocalClientConfig {
     pub store_path: Option<String>,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
+    pub smart_model: Option<String>,
+    pub eco_model: Option<String>,
+    pub recovery_model: Option<String>,
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
@@ -71,25 +75,19 @@ impl LocalClient {
             db: conn,
             anthropic_config: config.anthropic_config,
             openai_config: config.openai_config,
+            smart_model: config
+                .smart_model
+                .map(InferenceModel::from)
+                .unwrap_or(InferenceModel::Anthropic(AnthropicModel::Claude45Sonnet)),
+            eco_model: config
+                .eco_model
+                .map(InferenceModel::from)
+                .unwrap_or(InferenceModel::Anthropic(AnthropicModel::Claude45Haiku)),
+            recovery_model: config
+                .recovery_model
+                .map(InferenceModel::from)
+                .unwrap_or(InferenceModel::OpenAI(OpenAIModel::GPT5)),
         })
-    }
-}
-
-impl From<AgentModel> for AnthropicModel {
-    fn from(model: AgentModel) -> Self {
-        match model {
-            AgentModel::Smart => AnthropicModel::Claude45Sonnet,
-            AgentModel::Eco => AnthropicModel::Claude45Haiku,
-        }
-    }
-}
-
-impl From<AgentModel> for OpenAIModel {
-    fn from(model: AgentModel) -> Self {
-        match model {
-            AgentModel::Smart => OpenAIModel::GPT5,
-            AgentModel::Eco => OpenAIModel::GPT5Mini,
-        }
     }
 }
 
@@ -179,7 +177,7 @@ impl AgentProvider for LocalClient {
             id: result.checkpoint.id.to_string(),
             object: "chat.completion".to_string(),
             created: result.checkpoint.created_at.timestamp() as u64,
-            model: AnthropicModel::from(model).to_string(),
+            model: self.get_inference_model(model).to_string(),
             choices: vec![ChatCompletionChoice {
                 index: 0,
                 message: match result.output {
@@ -268,6 +266,7 @@ impl AgentProvider for LocalClient {
             }
         });
 
+        let model_name = self.get_inference_model(model.clone()).to_string();
         let stream = async_stream::stream! {
             let completion_id = Uuid::new_v4().to_string();
             while let Some(delta_result) = rx.recv().await {
@@ -276,7 +275,7 @@ impl AgentProvider for LocalClient {
                         id: completion_id.clone(),
                         object: "chat.completion.chunk".to_string(),
                         created: chrono::Utc::now().timestamp() as u64,
-                        model: AnthropicModel::from(model.clone()).to_string(),
+                        model: model_name.to_owned(),
                         choices: vec![ChatCompletionStreamChoice {
                             index: 0,
                             delta: delta.into(),
@@ -349,6 +348,20 @@ impl AgentProvider for LocalClient {
 }
 
 impl LocalClient {
+    fn get_inference_model(&self, model: AgentModel) -> InferenceModel {
+        match model {
+            AgentModel::Smart => self.smart_model.clone(),
+            AgentModel::Eco => self.eco_model.clone(),
+        }
+    }
+
+    fn get_inference_config(&self) -> InferenceConfig {
+        InferenceConfig {
+            anthropic_config: self.anthropic_config.clone(),
+            openai_config: self.openai_config.clone(),
+        }
+    }
+
     async fn run_agent_completion(
         &self,
         model: AgentModel,
@@ -356,158 +369,95 @@ impl LocalClient {
         tools: Option<Vec<Tool>>,
         stream_channel_tx: Option<tokio::sync::mpsc::Sender<Result<GenerationDelta, String>>>,
     ) -> Result<ChatMessage, String> {
-        let (response_content, tool_calls) = if let Some(config) = &self.anthropic_config {
-            let llm_messages = vec![
-                LLMMessage {
-                    role: Role::System.to_string(),
-                    content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
-                },
-                LLMMessage {
-                    role: Role::User.to_string(),
-                    content: LLMMessageContent::String(context_manager::project_messages(messages)),
-                },
-            ];
+        let inference_config = self.get_inference_config();
+        let inference_model = self.get_inference_model(model);
 
-            let model_anthropic: AnthropicModel = model.into();
+        let llm_messages = vec![
+            LLMMessage {
+                role: Role::System.to_string(),
+                content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
+            },
+            LLMMessage {
+                role: Role::User.to_string(),
+                content: LLMMessageContent::String(context_manager::project_messages(messages)),
+            },
+        ];
 
-            if let Some(tx) = stream_channel_tx {
-                let input = AnthropicInput {
-                    model: model_anthropic.clone(),
-                    messages: llm_messages.clone(),
-                    grammar: None,
-                    max_tokens: 16000,
-                    stop_sequences: None,
-                    tools: tools
-                        .clone()
-                        .map(|t| t.into_iter().map(Into::into).collect()),
-                    thinking: Default::default(),
-                };
+        let llm_tools = tools.map(|t| t.into_iter().map(Into::into).collect());
 
-                let (internal_tx, mut internal_rx) =
-                    tokio::sync::mpsc::channel::<GenerationDelta>(100);
-                let config_clone = config.clone();
+        let response = if let Some(tx) = stream_channel_tx {
+            let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<GenerationDelta>(100);
 
-                let chat_future = async move {
-                    Anthropic::chat_stream(&config_clone, internal_tx, input)
-                        .await
-                        .map_err(|e| e.to_string())
-                };
+            let input = crate::local::integrations::InferenceStreamInput {
+                model: inference_model,
+                messages: llm_messages,
+                max_tokens: 16000,
+                stream_channel_tx: internal_tx,
+                tools: llm_tools,
+            };
 
-                let receive_future = async move {
-                    let mut full_content = String::new();
-                    let mut tool_calls_acc: BTreeMap<
-                        usize,
-                        (Option<String>, Option<String>, String),
-                    > = BTreeMap::new();
-
-                    while let Some(delta) = internal_rx.recv().await {
-                        if tx.send(Ok(delta.clone())).await.is_err() {
-                            break;
-                        }
-                        match delta {
-                            GenerationDelta::Content { content } => full_content.push_str(&content),
-                            GenerationDelta::ToolUse { tool_use } => {
-                                let entry = tool_calls_acc.entry(tool_use.index).or_insert((
-                                    None,
-                                    None,
-                                    String::new(),
-                                ));
-                                if let Some(id) = tool_use.id {
-                                    entry.0 = Some(id);
-                                }
-                                if let Some(name) = tool_use.name {
-                                    entry.1 = Some(name);
-                                }
-                                if let Some(input) = tool_use.input {
-                                    entry.2.push_str(&input);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    (full_content, tool_calls_acc)
-                };
-
-                let (chat_result, (full_content, tool_calls_acc)) =
-                    tokio::join!(chat_future, receive_future);
-
-                chat_result?;
-
-                let tool_calls = if tool_calls_acc.is_empty() {
-                    None
-                } else {
-                    Some(
-                        tool_calls_acc
-                            .into_values()
-                            .map(|(id, name, input)| ToolCall {
-                                id: id.unwrap_or_default(),
-                                r#type: "function".to_string(),
-                                function: FunctionCall {
-                                    name: name.unwrap_or_default(),
-                                    arguments: input,
-                                },
-                            })
-                            .collect(),
-                    )
-                };
-                (full_content, tool_calls)
-            } else {
-                let input = AnthropicInput {
-                    model: model_anthropic.clone(),
-                    messages: llm_messages,
-                    grammar: None,
-                    max_tokens: 16000,
-                    stop_sequences: None,
-                    tools: tools
-                        .clone()
-                        .map(|t| t.into_iter().map(Into::into).collect()),
-                    thinking: Default::default(),
-                };
-                let response = Anthropic::chat(config, input)
+            let chat_future = async move {
+                integrations::chat_stream(&inference_config, input)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())
+            };
 
-                let message_content = response.choices[0].message.content.clone();
-                let text_content = message_content.to_string();
+            let receive_future = async move {
+                while let Some(delta) = internal_rx.recv().await {
+                    if tx.send(Ok(delta)).await.is_err() {
+                        break;
+                    }
+                }
+            };
 
-                let tool_calls = if let LLMMessageContent::List(items) = message_content {
-                    let calls: Vec<ToolCall> = items
-                        .into_iter()
-                        .filter_map(|item| {
-                            if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
-                                Some(ToolCall {
-                                    id,
-                                    r#type: "function".to_string(),
-                                    function: FunctionCall {
-                                        name,
-                                        arguments: args.to_string(),
-                                    },
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    if calls.is_empty() { None } else { Some(calls) }
-                } else {
-                    None
-                };
-
-                (text_content, tool_calls)
-            }
+            let (chat_result, _) = tokio::join!(chat_future, receive_future);
+            chat_result?
         } else {
-            return Err("Local LLM provider not configured.".to_string());
+            let input = crate::local::integrations::InferenceInput {
+                model: inference_model,
+                messages: llm_messages,
+                max_tokens: 16000,
+                tools: llm_tools,
+            };
+            integrations::chat(&inference_config, input)
+                .await
+                .map_err(|e| e.to_string())?
+        };
+
+        let message_content = response.choices[0].message.content.clone();
+        let tool_calls = if let LLMMessageContent::List(items) = &message_content {
+            let calls: Vec<ToolCall> = items
+                .iter()
+                .filter_map(|item| {
+                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                        Some(ToolCall {
+                            id: id.clone(),
+                            r#type: "function".to_string(),
+                            function: FunctionCall {
+                                name: name.clone(),
+                                arguments: args.to_string(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if calls.is_empty() { None } else { Some(calls) }
+        } else {
+            None
         };
 
         Ok(ChatMessage {
             role: Role::Assistant,
-            content: Some(MessageContent::String(response_content.clone())),
+            content: Some(MessageContent::String(message_content.to_string())),
             name: None,
-            tool_calls: tool_calls.clone(),
+            tool_calls,
             tool_call_id: None,
         })
     }
+
     async fn initialize_session(&self, messages: &[ChatMessage]) -> Result<RunAgentOutput, String> {
         // 1. Validate input
         if messages.is_empty() {
@@ -603,46 +553,43 @@ impl LocalClient {
     }
 
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        if let Some(config) = &self.anthropic_config {
-            let messages = vec![
-                LLMMessage {
-                    role: "system".to_string(),
-                    content: LLMMessageContent::String(TITLE_GENERATOR_PROMPT.into()),
-                },
-                LLMMessage {
-                    role: "user".to_string(),
-                    content: LLMMessageContent::String(
-                        messages
-                            .iter()
-                            .map(|msg| {
-                                msg.content
-                                    .as_ref()
-                                    .unwrap_or(&MessageContent::String("".to_string()))
-                                    .to_string()
-                            })
-                            .collect(),
-                    ),
-                },
-            ];
-            let response = Anthropic::chat(
-                config,
-                AnthropicInput {
-                    model: AnthropicModel::Claude45Haiku,
-                    messages,
-                    grammar: None,
-                    max_tokens: 100,
-                    stop_sequences: None,
-                    tools: None,
-                    thinking: Default::default(),
-                },
-            )
+        let inference_config = self.get_inference_config();
+        // Use eco model for title generation
+        let inference_model = self.eco_model.clone();
+
+        let messages = vec![
+            LLMMessage {
+                role: "system".to_string(),
+                content: LLMMessageContent::String(TITLE_GENERATOR_PROMPT.into()),
+            },
+            LLMMessage {
+                role: "user".to_string(),
+                content: LLMMessageContent::String(
+                    messages
+                        .iter()
+                        .map(|msg| {
+                            msg.content
+                                .as_ref()
+                                .unwrap_or(&MessageContent::String("".to_string()))
+                                .to_string()
+                        })
+                        .collect(),
+                ),
+            },
+        ];
+
+        let input = crate::local::integrations::InferenceInput {
+            model: inference_model,
+            messages,
+            max_tokens: 100,
+            tools: None,
+        };
+
+        let response = integrations::chat(&inference_config, input)
             .await
             .map_err(|e| e.to_string())?;
 
-            Ok(response.choices[0].message.content.to_string())
-        } else {
-            Err("Failed to generate session title".to_string())
-        }
+        Ok(response.choices[0].message.content.to_string())
     }
 }
 

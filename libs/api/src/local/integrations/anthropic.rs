@@ -23,12 +23,15 @@ pub enum AnthropicModel {
     Claude45Haiku,
     #[serde(rename = "claude-sonnet-4-5-20250929")]
     Claude45Sonnet,
+    #[serde(rename = "claude-opus-4-5-20251101")]
+    Claude45Opus,
 }
 impl std::fmt::Display for AnthropicModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AnthropicModel::Claude45Haiku => write!(f, "claude-haiku-4-5-20251001"),
             AnthropicModel::Claude45Sonnet => write!(f, "claude-sonnet-4-5-20250929"),
+            AnthropicModel::Claude45Opus => write!(f, "claude-opus-4-5-20251101"),
         }
     }
 }
