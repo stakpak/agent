@@ -643,10 +643,6 @@ pub async fn run_interactive(
                             .await?;
                             continue;
                         };
-                        eprintln!("session_id: {:?}", session_id);
-                        eprintln!("recovery_request_id: {:?}", recovery_request_id);
-                        eprintln!("selected_option_id: {:?}", selected_option_id);
-                        eprintln!("Recovery action: {:?}", action);
 
                         let request = RecoveryActionRequest {
                             action,

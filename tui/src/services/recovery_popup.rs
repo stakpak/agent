@@ -94,8 +94,27 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
                 let mut spans: Vec<Span> = Vec::new();
                 spans.push(Span::styled("    ", Style::default().fg(Color::Gray)));
                 spans.extend(line.spans.into_iter().map(|mut span| {
-                    // Ensure markdown content uses a consistent gray foreground
-                    span.style = span.style.fg(Color::Gray);
+                    // Check if this span is code-formatted (backticks) - these were converted from *text*
+                    // The markdown renderer applies code_style to inline code spans, which typically
+                    // has a background color set. Code spans also usually have non-gray foreground colors.
+                    let has_code_background = span.style.bg.is_some();
+                    let has_non_gray_fg = span.style.fg.is_some()
+                        && span.style.fg != Some(Color::Gray)
+                        && span.style.fg != Some(Color::Reset)
+                        && span.style.fg != Some(Color::Rgb(220, 220, 220)) // text_style color
+                        && span.style.fg != Some(Color::Rgb(180, 180, 180)); // quote_style color
+
+                    let is_code_span = has_code_background || has_non_gray_fg;
+
+                    if is_code_span {
+                        // Colorize code spans (converted from *text*) with cyan and bold
+                        span.style = Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD);
+                    } else {
+                        // Regular markdown content uses gray foreground
+                        span.style = span.style.fg(Color::Gray);
+                    }
                     span
                 }));
                 lines.push(Line::from(spans));
@@ -186,7 +205,7 @@ fn summarize_option(option: &stakpak_api::models::RecoveryOption) -> String {
         .ok()
         .map(|re| {
             re.replace_all(&sanitized, |caps: &regex::Captures| {
-                format!("**{}**", &caps[1])
+                format!("`{}`", &caps[1])
             })
             .to_string()
         })

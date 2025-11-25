@@ -11,20 +11,11 @@ use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
+use regex;
 use stakpak_shared::models::integrations::openai::AgentModel;
 use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
-use regex::Regex;
-
-/// Parse the number of messages from recovery option reasoning text
-/// Looks for pattern *{number}* and extracts the number, defaulting to 5 if not found
-fn parse_model_change_messages_count(reasoning: &str) -> Option<u32> {
-    let re = Regex::new(r"\*(\d+)\*").ok()?;
-    re.captures(reasoning)
-        .and_then(|caps| caps.get(1))
-        .and_then(|m| m.as_str().parse::<u32>().ok())
-}
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
@@ -112,9 +103,17 @@ pub fn handle_input_submitted_event(
 
             // If ModelChange is selected, parse the number of messages from the option description
             if matches!(mode, RecoveryMode::ModelChange) {
-                // Parse *{number}* from the reasoning field, default to 5 if not found
-                let messages_count =
-                    parse_model_change_messages_count(&selected.reasoning).unwrap_or(5);
+                // Parse `{number}` (backticks) from the reasoning field, default to 5 if not found
+                // The reasoning has been converted from *{number}* to `{number}` by summarize_option
+                // Use regex to find the number between backticks
+                let messages_count = regex::Regex::new(r"`(\d+)`")
+                    .ok()
+                    .and_then(|re| {
+                        re.captures(&selected.reasoning)
+                            .and_then(|caps| caps.get(1))
+                            .and_then(|m| m.as_str().parse::<u32>().ok())
+                    })
+                    .unwrap_or(5);
                 state.model_change_messages_remaining = Some(messages_count);
             }
 
@@ -141,6 +140,10 @@ pub fn handle_input_submitted_event(
         // Note: Don't reset model_change_messages_remaining here - let it count down naturally
         // Invalidate cache to redraw checkpoints without yellow colorization
         crate::services::message::invalidate_message_lines_cache(state);
+
+        // Scroll to bottom after selecting recovery option
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
         return;
     }
     if state.approval_popup.is_visible() {

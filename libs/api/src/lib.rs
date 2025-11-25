@@ -513,17 +513,10 @@ impl Client {
             self.base_url, session_id, recovery_id
         );
 
-        eprintln!("url: {:?}", url);
-        eprintln!("session_id: {:?}", session_id);
-        eprintln!("recovery_id: {:?}", recovery_id);
-        eprintln!("action: {:?}", action);
-        eprintln!("selected_option_id: {:?}", selected_option_id);
-
         let payload = RecoveryActionRequest {
             action,
             selected_option_id,
         };
-        eprintln!("payload: {:?}", payload);
 
         let response = self
             .client
@@ -532,7 +525,6 @@ impl Client {
             .send()
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
-        eprintln!("response: {:?}", response);
 
         self.handle_response_error(response).await?;
         Ok(())
