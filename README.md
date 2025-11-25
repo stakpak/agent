@@ -1,16 +1,14 @@
 # Stakpak
 
-[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
-
 Most AI agents need full access to everything. One mistake and your production is toast.
 Stakpak is built different:
-
-- **Secret Redaction** - The AI works with your credentials without ever seeing them
-- **Warden Sandbox** - Network-level policies block destructive operations before they run
-- **Encrypted Everything** - All communication between components uses mTLS
-- **Rust-powered** - Fast and memory-safe when you need it most
+- **Secret Substitution** - The LLM works with your credentials without ever seeing them
+- **Warden Guardrails** - Network-level policies block destructive operations before they run
+- **DevOps Playbooks Baked-in** - Curated knowledge library of DevOps knowledge in Stakpak Rulebooks
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
+
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/) and Rust 🦀
 
 ![til](./assets/stakpak-overview.gif)
 
