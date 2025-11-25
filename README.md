@@ -1,3 +1,4 @@
+
 # Stakpak
 
 Most AI agents need full access to everything. One mistake and your production is toast.
@@ -6,9 +7,9 @@ Stakpak is built different:
 - **Warden Guardrails** - Network-level policies block destructive operations before they run
 - **DevOps Playbooks Baked-in** - Curated knowledge library of DevOps knowledge in Stakpak Rulebooks
 
-Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
+Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
-[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/) 🦀
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
 ![til](./assets/stakpak-overview.gif)
 
