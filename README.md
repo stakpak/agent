@@ -1,7 +1,7 @@
 
 # Stakpak
 
-You can't trust most AI agent to touch production. One mistake and your production is toast.
+You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
 Stakpak is built different:
 - **Secret Substitution** - The LLM works with your credentials without ever seeing them
 - **Warden Guardrails** - Network-level policies block destructive operations before they run
