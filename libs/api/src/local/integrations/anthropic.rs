@@ -1,12 +1,3 @@
-use std::collections::HashMap;
-
-use super::models::{
-    generation::{GenerationDelta, GenerationDeltaToolUse},
-    llm::{
-        LLMChoice, LLMCompletionResponse, LLMMessage, LLMMessageContent, LLMMessageTypedContent,
-        LLMTool,
-    },
-};
 use crate::error::{AgentError, BadRequestErrorMessage};
 use futures_util::StreamExt;
 use itertools::Itertools;
@@ -15,7 +6,12 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use stakpak_shared::models::llm::{
+    GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
+    LLMMessageContent, LLMMessageTypedContent, LLMTool,
+};
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AnthropicModel {

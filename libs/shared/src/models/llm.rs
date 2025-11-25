@@ -46,6 +46,7 @@ impl ToString for LLMMessageContent {
                 .map(|c| match c {
                     LLMMessageTypedContent::Text { text } => text.clone(),
                     LLMMessageTypedContent::ToolCall { .. } => String::new(),
+                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -62,14 +63,19 @@ impl From<String> for LLMMessageContent {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum LLMMessageTypedContent {
-    #[serde(alias = "text")]
+    #[serde(rename = "text")]
     Text { text: String },
-    #[serde(alias = "tool_use")]
+    #[serde(rename = "tool_use")]
     ToolCall {
         id: String,
         name: String,
-        #[serde(alias = "args", alias = "input")]
+        #[serde(alias = "input")]
         args: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
     },
 }
 
@@ -116,7 +122,7 @@ pub struct LLMCompletionStreamResponse {
     pub citations: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct LLMTool {
     pub name: String,
     pub description: String,
@@ -193,4 +199,22 @@ impl std::ops::AddAssign for PromptTokensDetails {
         self.cache_read_input_tokens += rhs.cache_read_input_tokens;
         self.cache_write_input_tokens += rhs.cache_write_input_tokens;
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum GenerationDelta {
+    Content { content: String },
+    Thinking { thinking: String },
+    ToolUse { tool_use: GenerationDeltaToolUse },
+    Usage { usage: LLMTokenUsage },
+    Metadata { metadata: serde_json::Value },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GenerationDeltaToolUse {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub input: Option<String>,
+    pub index: usize,
 }

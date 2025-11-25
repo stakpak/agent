@@ -2,17 +2,13 @@ use crate::{
     error::{AgentError, BadRequestErrorMessage},
     local::integrations::{
         anthropic::{Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel},
-        models::{
-            generation::GenerationDelta,
-            llm::{LLMCompletionResponse, LLMMessage, LLMTool},
-        },
         openai::{OpenAI, OpenAIConfig, OpenAIInput, OpenAIModel},
     },
 };
+use stakpak_shared::models::llm::{GenerationDelta, LLMCompletionResponse, LLMMessage, LLMTool};
 use std::fmt::Display;
 
 pub mod anthropic;
-pub mod models;
 pub mod openai;
 
 #[derive(Clone, Debug)]

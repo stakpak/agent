@@ -1,10 +1,3 @@
-use super::models::{
-    generation::{GenerationDelta, GenerationDeltaToolUse},
-    llm::{
-        LLMChoice, LLMCompletionResponse, LLMCompletionStreamResponse, LLMMessage,
-        LLMMessageContent, LLMMessageTypedContent, LLMTool,
-    },
-};
 use crate::error::{AgentError, BadRequestErrorMessage};
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -13,7 +6,13 @@ use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
+use stakpak_shared::models::llm::GenerationDelta;
+use stakpak_shared::models::llm::GenerationDeltaToolUse;
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::llm::{
+    LLMChoice, LLMCompletionResponse, LLMCompletionStreamResponse, LLMMessage, LLMMessageContent,
+    LLMMessageTypedContent, LLMTool,
+};
 use uuid::Uuid;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1/chat/completions";
