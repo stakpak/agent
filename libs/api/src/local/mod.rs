@@ -1,10 +1,7 @@
+use crate::local::context_manager::{ContextManager, SimpleContextManager};
 use crate::local::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use crate::local::integrations::models::{
-    generation::GenerationDelta,
-    llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTool},
-};
 use crate::local::integrations::openai::{OpenAIConfig, OpenAIModel};
-use crate::local::integrations::{InferenceConfig, InferenceModel};
+use crate::local::integrations::{InferenceConfig, InferenceModel, InferenceStreamInput};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -14,11 +11,14 @@ use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, ChatMessageDelta, FinishReason, FunctionCall,
-    FunctionCallDelta, MessageContent, Role, Tool, ToolCall, ToolCallDelta, Usage,
+    ChatCompletionStreamResponse, ChatMessage, FinishReason, FunctionCall, MessageContent, Role,
+    Tool, ToolCall, Usage,
 };
-use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::llm::{
+    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage,
+};
 use std::pin::Pin;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 mod context_manager;
@@ -392,24 +392,20 @@ impl LocalClient {
     ) -> Result<(ChatMessage, Option<LLMTokenUsage>), String> {
         let inference_config = self.get_inference_config();
         let inference_model = self.get_inference_model(model);
+        let context_manager = SimpleContextManager;
 
-        let llm_messages = vec![
-            LLMMessage {
-                role: Role::System.to_string(),
-                content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
-            },
-            LLMMessage {
-                role: Role::User.to_string(),
-                content: LLMMessageContent::String(context_manager::project_messages(messages)),
-            },
-        ];
+        let mut llm_messages = vec![LLMMessage {
+            role: Role::System.to_string(),
+            content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
+        }];
+        llm_messages.extend(context_manager.reduce_context(messages));
 
         let llm_tools = tools.map(|t| t.into_iter().map(Into::into).collect());
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
-            let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<GenerationDelta>(100);
+            let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
 
-            let input = crate::local::integrations::InferenceStreamInput {
+            let input = InferenceStreamInput {
                 model: inference_model,
                 messages: llm_messages,
                 max_tokens: 16000,
@@ -627,56 +623,5 @@ impl LocalClient {
             .map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
-    }
-}
-
-impl From<Tool> for LLMTool {
-    fn from(tool: Tool) -> Self {
-        LLMTool {
-            name: tool.function.name,
-            description: tool.function.description.unwrap_or_default(),
-            input_schema: tool.function.parameters,
-        }
-    }
-}
-
-impl From<integrations::models::generation::GenerationDelta> for ChatMessageDelta {
-    fn from(delta: integrations::models::generation::GenerationDelta) -> Self {
-        match delta {
-            integrations::models::generation::GenerationDelta::Content { content } => {
-                ChatMessageDelta {
-                    role: Some(Role::Assistant),
-                    content: Some(content),
-                    tool_calls: None,
-                }
-            }
-            integrations::models::generation::GenerationDelta::Thinking { thinking: _ } => {
-                ChatMessageDelta {
-                    role: Some(Role::Assistant),
-                    content: None,
-                    tool_calls: None,
-                }
-            }
-            integrations::models::generation::GenerationDelta::ToolUse { tool_use } => {
-                ChatMessageDelta {
-                    role: Some(Role::Assistant),
-                    content: None,
-                    tool_calls: Some(vec![ToolCallDelta {
-                        index: tool_use.index,
-                        id: tool_use.id,
-                        r#type: Some("function".to_string()),
-                        function: Some(FunctionCallDelta {
-                            name: tool_use.name,
-                            arguments: tool_use.input,
-                        }),
-                    }]),
-                }
-            }
-            _ => ChatMessageDelta {
-                role: Some(Role::Assistant),
-                content: None,
-                tool_calls: None,
-            },
-        }
     }
 }
