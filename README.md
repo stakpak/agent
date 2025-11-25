@@ -8,7 +8,7 @@ Stakpak is built different:
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
 
-[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/) and Rust 🦀
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/) 🦀
 
 ![til](./assets/stakpak-overview.gif)
 
