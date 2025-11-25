@@ -1,12 +1,18 @@
-# Stakpak Agent
+# Stakpak
+Most AI agents need full access to everything. One mistake and your production is toast.
+Stakpak is built different:
 
-**The most secure agent built for operations & DevOps.** Designed for the grittiest parts of software development with enterprise-grade security features including mutual TLS (mTLS) encryption, dynamic secret redaction, and privacy-first architecture.
+Secret Redaction - The AI works with your credentials without ever seeing them
+Warden Sandbox - Network-level policies block destructive operations before they run
+Encrypted Everything - All communication between components uses mTLS
+Rust-powered - Fast and memory-safe when you need it most
 
+Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments—without giving an LLM the keys to production.
 <img src="assets/TUIOverview.png" width="800">
 
 ## 🔒 Security Hardened
 
-- **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
+- **Mutual TLS (mTLS)** - End-to-end encrypted MCP
 - **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
