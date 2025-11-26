@@ -4700,7 +4700,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-proxy"
-version = "0.2.77"
+version = "0.2.79"
 dependencies = [
  "anyhow",
  "reqwest",
