@@ -267,7 +267,7 @@ impl OpenAI {
             .send()
             .await;
 
-        if let Err(_) = &response {
+        if response.is_err() {
             return Err(AgentError::InternalError);
         }
 

@@ -148,10 +148,10 @@ impl From<AnthropicOutputUsage> for LLMTokenUsage {
             prompt_tokens: input_tokens,
             total_tokens: input_tokens + output_tokens,
             prompt_tokens_details: Some(PromptTokensDetails {
-                input_tokens: usage.input_tokens,
-                output_tokens,
-                cache_read_input_tokens: usage.cache_read_input_tokens.unwrap_or(0),
-                cache_write_input_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
+                input_tokens: Some(input_tokens),
+                output_tokens: Some(output_tokens),
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                cache_write_input_tokens: usage.cache_creation_input_tokens,
             }),
         }
     }
@@ -360,11 +360,10 @@ impl Anthropic {
                     .iter()
                     .map(|tool| {
                         let mut tool_json = json!(tool);
-                        if let Some(last_tool) = tools.last() {
-                            if tool == last_tool {
-                                tool_json["cache_control"] =
-                                    json!({"type": "ephemeral", "ttl": "1h"});
-                            }
+                        if let Some(last_tool) = tools.last()
+                            && tool == last_tool
+                        {
+                            tool_json["cache_control"] = json!({"type": "ephemeral", "ttl": "1h"});
                         }
                         tool_json
                     })
@@ -632,14 +631,13 @@ pub async fn process_stream(
                         AnthropicStreamEventData::ContentBlockStop { index } => {
                             if let Some(LLMMessageTypedContent::ToolCall { args, .. }) =
                                 contents.get_mut(index)
+                                && let serde_json::Value::String(json_str) = args
                             {
-                                if let serde_json::Value::String(json_str) = args {
-                                    // Try to parse the accumulated JSON string
-                                    *args = serde_json::from_str(json_str).unwrap_or_else(|_| {
-                                        // If parsing fails, keep as string
-                                        serde_json::Value::String(json_str.clone())
-                                    });
-                                }
+                                // Try to parse the accumulated JSON string
+                                *args = serde_json::from_str(json_str).unwrap_or_else(|_| {
+                                    // If parsing fails, keep as string
+                                    serde_json::Value::String(json_str.clone())
+                                });
                             }
                         }
                         AnthropicStreamEventData::MessageDelta { delta, usage } => {
@@ -658,14 +656,10 @@ pub async fn process_stream(
                                     completion_tokens: usage.output_tokens,
                                     total_tokens: usage.input_tokens + usage.output_tokens,
                                     prompt_tokens_details: Some(PromptTokensDetails {
-                                        input_tokens: usage.input_tokens,
-                                        output_tokens: usage.output_tokens,
-                                        cache_read_input_tokens: usage
-                                            .cache_read_input_tokens
-                                            .unwrap_or(0),
-                                        cache_write_input_tokens: usage
-                                            .cache_creation_input_tokens
-                                            .unwrap_or(0),
+                                        input_tokens: Some(usage.input_tokens),
+                                        output_tokens: Some(usage.output_tokens),
+                                        cache_read_input_tokens: usage.cache_read_input_tokens,
+                                        cache_write_input_tokens: usage.cache_creation_input_tokens,
                                     }),
                                 };
 

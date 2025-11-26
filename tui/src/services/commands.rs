@@ -28,6 +28,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
@@ -452,7 +453,7 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     render_system_message(state, "Resuming last session.");
 
     // Reset usage for the resumed session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+    state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
@@ -475,7 +476,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     render_system_message(state, "New session started.");
 
     // Reset usage for the new session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+    state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,

@@ -1,7 +1,9 @@
 use crate::local::context_manager::{ContextManager, SimpleContextManager};
 use crate::local::integrations::anthropic::{AnthropicConfig, AnthropicModel};
 use crate::local::integrations::openai::{OpenAIConfig, OpenAIModel};
-use crate::local::integrations::{InferenceConfig, InferenceModel, InferenceStreamInput};
+use crate::local::integrations::{
+    InferenceConfig, InferenceInput, InferenceModel, InferenceStreamInput,
+};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -9,15 +11,17 @@ use futures_util::Stream;
 use libsql::{Builder, Connection};
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
+use stakpak_shared::hooks::{AgentState, Hook, HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, FunctionCall, MessageContent, Role,
-    Tool, ToolCall, Usage,
+    Tool, ToolCall,
 };
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage,
 };
 use std::pin::Pin;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -36,6 +40,7 @@ pub struct LocalClient {
     pub smart_model: InferenceModel,
     pub eco_model: InferenceModel,
     pub recovery_model: InferenceModel,
+    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
 }
 
 pub struct LocalClientConfig {
@@ -45,6 +50,13 @@ pub struct LocalClientConfig {
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
+    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+}
+
+#[derive(Debug)]
+enum StreamMessage {
+    Delta(GenerationDelta),
+    Ctx(HookContext<AgentState>),
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
@@ -62,7 +74,7 @@ impl LocalClient {
                 .map_err(|e| format!("Failed to create database directory: {}", e))?;
         }
 
-        let db = Builder::new_local(&default_store_path.display().to_string())
+        let db = Builder::new_local(default_store_path.display().to_string())
             .build()
             .await
             .map_err(|e| e.to_string())?;
@@ -88,6 +100,7 @@ impl LocalClient {
                 .recovery_model
                 .map(InferenceModel::from)
                 .unwrap_or(InferenceModel::OpenAI(OpenAIModel::GPT5)),
+            hook_registry: config.hook_registry,
         })
     }
 }
@@ -161,45 +174,67 @@ impl AgentProvider for LocalClient {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
     ) -> Result<ChatCompletionResponse, String> {
-        let current_checkpoint = self.initialize_session(&messages).await?;
+        let mut ctx = HookContext::new(None, AgentState::new(model, messages, tools));
 
-        let (new_message, usage) = self
-            .run_agent_completion(model.clone(), messages.clone(), tools, None)
-            .await?;
+        if let Some(hook_registry) = &self.hook_registry {
+            hook_registry
+                .execute_hooks(&mut ctx, &LifecycleEvent::BeforeRequest)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok()?;
+        }
 
-        let mut new_messages = messages;
-        new_messages.push(new_message);
+        let current_checkpoint = self.initialize_session(&ctx.state.messages).await?;
+        ctx.set_session_id(current_checkpoint.session.id);
+
+        let (new_message, usage) = self.run_agent_completion(&mut ctx, None).await?;
+        ctx.state.messages.push(new_message);
+        ctx.set_usage(usage);
 
         let result = self
-            .update_session(&current_checkpoint, new_messages)
+            .update_session(&current_checkpoint, ctx.state.messages.clone())
             .await?;
+        let checkpoint_created_at = result.checkpoint.created_at.timestamp() as u64;
+        ctx.set_new_checkpoint_id(result.checkpoint.id);
+
+        if let Some(hook_registry) = &self.hook_registry {
+            hook_registry
+                .execute_hooks(&mut ctx, &LifecycleEvent::AfterRequest)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok()?;
+        }
+
+        let model_name = self
+            .get_inference_model(ctx.state.agent_model.clone())
+            .to_string();
+        let usage = ctx
+            .usage
+            .map(|u| LLMTokenUsage {
+                prompt_tokens: u.prompt_tokens,
+                completion_tokens: u.completion_tokens,
+                total_tokens: u.total_tokens,
+                prompt_tokens_details: None,
+            })
+            .unwrap_or(LLMTokenUsage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_tokens_details: None,
+            });
 
         Ok(ChatCompletionResponse {
-            id: result.checkpoint.id.to_string(),
+            id: ctx.new_checkpoint_id.unwrap().to_string(),
             object: "chat.completion".to_string(),
-            created: result.checkpoint.created_at.timestamp() as u64,
-            model: self.get_inference_model(model).to_string(),
+            created: checkpoint_created_at,
+            model: model_name,
             choices: vec![ChatCompletionChoice {
                 index: 0,
-                message: match result.output {
-                    AgentOutput::PabloV1 { messages, .. } => messages.last().cloned().unwrap(),
-                },
+                message: ctx.state.messages.last().cloned().unwrap(),
                 logprobs: None,
                 finish_reason: FinishReason::Stop,
             }],
-            usage: usage
-                .map(|u| Usage {
-                    prompt_tokens: u.prompt_tokens,
-                    completion_tokens: u.completion_tokens,
-                    total_tokens: u.total_tokens,
-                    prompt_tokens_details: None,
-                })
-                .unwrap_or(Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                    prompt_tokens_details: None,
-                }),
+            usage,
             system_fingerprint: None,
         })
     }
@@ -219,40 +254,49 @@ impl AgentProvider for LocalClient {
         ),
         String,
     > {
-        let current_checkpoint = self.initialize_session(&messages).await?;
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<GenerationDelta, String>>(100);
+        let mut ctx = HookContext::new(None, AgentState::new(model, messages, tools));
 
-        let client = self.clone();
-        let model_clone = model.clone();
-        let messages_clone = messages.clone();
-        let tools_clone = tools.clone();
+        if let Some(hook_registry) = &self.hook_registry {
+            hook_registry
+                .execute_hooks(&mut ctx, &LifecycleEvent::BeforeRequest)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok()?;
+        }
 
-        // Send initial checkpoint ID
+        let current_checkpoint = self.initialize_session(&ctx.state.messages).await?;
+        ctx.set_session_id(current_checkpoint.session.id);
+
+        let (tx, mut rx) = mpsc::channel::<Result<StreamMessage, String>>(100);
+
         let _ = tx
-            .send(Ok(GenerationDelta::Content {
+            .send(Ok(StreamMessage::Delta(GenerationDelta::Content {
                 content: format!(
                     "\n<checkpoint_id>{}</checkpoint_id>\n",
                     current_checkpoint.checkpoint.id
                 ),
-            }))
+            })))
             .await;
 
+        let client = self.clone();
         let self_clone = self.clone();
+        let mut ctx_clone = ctx.clone();
         tokio::spawn(async move {
             let result = client
-                .run_agent_completion(model_clone, messages_clone, tools_clone, Some(tx.clone()))
+                .run_agent_completion(&mut ctx_clone, Some(tx.clone()))
                 .await;
 
             match result {
                 Err(e) => {
                     let _ = tx.send(Err(e)).await;
                 }
-                Ok((new_message, _usage)) => {
-                    let mut new_messages = messages.clone();
-                    new_messages.push(new_message);
+                Ok((new_message, usage)) => {
+                    ctx_clone.state.messages.push(new_message);
+                    ctx_clone.set_usage(usage);
+                    let _ = tx.send(Ok(StreamMessage::Ctx(ctx_clone.clone()))).await;
 
                     let output = self_clone
-                        .update_session(&current_checkpoint, new_messages)
+                        .update_session(&current_checkpoint, ctx_clone.state.messages.clone())
                         .await;
 
                     match output {
@@ -260,13 +304,16 @@ impl AgentProvider for LocalClient {
                             let _ = tx.send(Err(e)).await;
                         }
                         Ok(output) => {
+                            ctx_clone.set_new_checkpoint_id(output.checkpoint.id);
+                            let _ = tx.send(Ok(StreamMessage::Ctx(ctx_clone.clone()))).await;
+
                             let _ = tx
-                                .send(Ok(GenerationDelta::Content {
+                                .send(Ok(StreamMessage::Delta(GenerationDelta::Content {
                                     content: format!(
                                         "\n<checkpoint_id>{}</checkpoint_id>\n",
                                         output.checkpoint.id
                                     ),
-                                }))
+                                })))
                                 .await;
                         }
                     }
@@ -274,38 +321,51 @@ impl AgentProvider for LocalClient {
             }
         });
 
-        let model_name = self.get_inference_model(model.clone()).to_string();
+        let hook_registry = self.hook_registry.clone();
+        let model_name = self
+            .get_inference_model(ctx.state.agent_model.clone())
+            .to_string();
         let stream = async_stream::stream! {
-            let completion_id = Uuid::new_v4().to_string();
             while let Some(delta_result) = rx.recv().await {
                 match delta_result {
-                    Ok(delta) => {
-                        let usage = if let GenerationDelta::Usage { usage } = &delta {
-                            Some(Usage {
-                                prompt_tokens: usage.prompt_tokens,
-                                completion_tokens: usage.completion_tokens,
-                                total_tokens: usage.total_tokens,
-                                prompt_tokens_details: None,
-                            })
-                        } else {
-                            None
-                        };
-
-                        yield Ok(ChatCompletionStreamResponse {
-                            id: completion_id.clone(),
-                            object: "chat.completion.chunk".to_string(),
-                            created: chrono::Utc::now().timestamp() as u64,
-                            model: model_name.to_owned(),
-                            choices: vec![ChatCompletionStreamChoice {
-                                index: 0,
-                                delta: delta.into(),
-                                finish_reason: None,
-                            }],
-                            usage,
-                        })
-                    }
+                    Ok(delta) => match delta {
+                            StreamMessage::Ctx(updated_ctx) => {
+                                ctx = updated_ctx;
+                            }
+                            StreamMessage::Delta(delta) => {
+                        //    if let GenerationDelta::Usage { usage } = &delta {
+                        //     let usage = Some(LLMTokenUsage {
+                        //         prompt_tokens: usage.prompt_tokens,
+                        //         completion_tokens: usage.completion_tokens,
+                        //         total_tokens: usage.total_tokens,
+                        //         prompt_tokens_details: usage.prompt_tokens_details.to_owned(),
+                        //     });
+                        //     ctx.set_usage(usage);
+                        // }
+                                yield Ok(ChatCompletionStreamResponse {
+                                    id: ctx.request_id.to_string(),
+                                    object: "chat.completion.chunk".to_string(),
+                                    created: chrono::Utc::now().timestamp() as u64,
+                                    model: model_name.to_owned(),
+                                    choices: vec![ChatCompletionStreamChoice {
+                                        index: 0,
+                                        delta: delta.into(),
+                                        finish_reason: None,
+                                    }],
+                                    usage: ctx.usage.clone(),
+                                })
+                            }
+                        }
                     Err(e) => yield Err(ApiStreamError::Unknown(e)),
                 }
+            }
+
+            if let Some(hook_registry) = hook_registry {
+                hook_registry
+                    .execute_hooks(&mut ctx, &LifecycleEvent::AfterRequest)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .ok()?;
             }
         };
 
@@ -385,22 +445,32 @@ impl LocalClient {
 
     async fn run_agent_completion(
         &self,
-        model: AgentModel,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
-        stream_channel_tx: Option<tokio::sync::mpsc::Sender<Result<GenerationDelta, String>>>,
+        ctx: &mut HookContext<AgentState>,
+        stream_channel_tx: Option<mpsc::Sender<Result<StreamMessage, String>>>,
     ) -> Result<(ChatMessage, Option<LLMTokenUsage>), String> {
+        if let Some(hook_registry) = &self.hook_registry {
+            hook_registry
+                .execute_hooks(ctx, &LifecycleEvent::BeforeInference)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok()?;
+        }
+
         let inference_config = self.get_inference_config();
-        let inference_model = self.get_inference_model(model);
+        let inference_model = self.get_inference_model(ctx.state.agent_model.clone());
         let context_manager = SimpleContextManager;
 
         let mut llm_messages = vec![LLMMessage {
             role: Role::System.to_string(),
             content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
         }];
-        llm_messages.extend(context_manager.reduce_context(messages));
+        llm_messages.extend(context_manager.reduce_context(ctx.state.messages.clone()));
 
-        let llm_tools = tools.map(|t| t.into_iter().map(Into::into).collect());
+        let llm_tools = ctx
+            .state
+            .tools
+            .clone()
+            .map(|t| t.into_iter().map(Into::into).collect());
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
@@ -421,7 +491,7 @@ impl LocalClient {
 
             let receive_future = async move {
                 while let Some(delta) = internal_rx.recv().await {
-                    if tx.send(Ok(delta)).await.is_err() {
+                    if tx.send(Ok(StreamMessage::Delta(delta))).await.is_err() {
                         break;
                     }
                 }
@@ -431,7 +501,7 @@ impl LocalClient {
             let response = chat_result?;
             (response.choices[0].message.clone(), response.usage)
         } else {
-            let input = crate::local::integrations::InferenceInput {
+            let input = InferenceInput {
                 model: inference_model,
                 messages: llm_messages,
                 max_tokens: 16000,
@@ -442,6 +512,14 @@ impl LocalClient {
                 .map_err(|e| e.to_string())?;
             (response.choices[0].message.clone(), response.usage)
         };
+
+        if let Some(hook_registry) = &self.hook_registry {
+            hook_registry
+                .execute_hooks(ctx, &LifecycleEvent::AfterInference)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok()?;
+        }
 
         let message_content_string = match &response_message.content {
             LLMMessageContent::String(s) => s.clone(),
@@ -498,7 +576,7 @@ impl LocalClient {
         }
 
         // 2. Extract session/checkpoint ID or create new session
-        let checkpoint_id = ChatMessage::last_server_message(&messages).and_then(|message| {
+        let checkpoint_id = ChatMessage::last_server_message(messages).and_then(|message| {
             message
                 .content
                 .as_ref()
@@ -552,10 +630,8 @@ impl LocalClient {
         new_messages: Vec<ChatMessage>,
     ) -> Result<RunAgentOutput, String> {
         let now = chrono::Utc::now();
-        // 6. Create "Complete" checkpoint
-        let complete_checkpoint_id = Uuid::new_v4();
         let complete_checkpoint = AgentCheckpointListItem {
-            id: complete_checkpoint_id,
+            id: Uuid::new_v4(),
             status: AgentStatus::Complete,
             execution_depth: checkpoint_info.checkpoint.execution_depth + 1,
             parent: Some(AgentParentCheckpoint {
@@ -565,7 +641,6 @@ impl LocalClient {
             updated_at: now,
         };
 
-        // Update state with the new assistant message
         let mut new_state = checkpoint_info.output.clone();
         new_state.set_messages(new_messages);
 
@@ -577,7 +652,6 @@ impl LocalClient {
         )
         .await?;
 
-        // Return the new checkpoint info
         Ok(RunAgentOutput {
             checkpoint: complete_checkpoint,
             session: checkpoint_info.session.clone(),

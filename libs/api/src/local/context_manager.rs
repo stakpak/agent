@@ -17,7 +17,7 @@ impl ContextManager for SimpleContextManager {
             content: LLMMessageContent::String(
                 messages
                     .into_iter()
-                    .map(|m| format!("{}: {}", m.role, m.content.unwrap().to_string()))
+                    .map(|m| format!("{}: {}", m.role, m.content.unwrap()))
                     .reduce(|a, b| a + "\n" + &b)
                     .unwrap(),
             ),

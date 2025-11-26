@@ -18,6 +18,7 @@ async fn test_local_db_operations() {
         smart_model: None,
         eco_model: None,
         recovery_model: None,
+        hook_registry: None,
     };
 
     let client = LocalClient::new(config)

@@ -148,31 +148,31 @@ pub enum TokenType {
     CacheWriteInputTokens,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PromptTokensDetails {
-    #[serde(default)]
-    pub input_tokens: u32,
-    #[serde(default)]
-    pub output_tokens: u32,
-    #[serde(default)]
-    pub cache_read_input_tokens: u32,
-    #[serde(default)]
-    pub cache_write_input_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_input_tokens: Option<u32>,
 }
 
 impl PromptTokensDetails {
     /// Returns an iterator over the token types and their values
     pub fn iter(&self) -> impl Iterator<Item = (TokenType, u32)> {
         [
-            (TokenType::InputTokens, self.input_tokens),
-            (TokenType::OutputTokens, self.output_tokens),
+            (TokenType::InputTokens, self.input_tokens.unwrap_or(0)),
+            (TokenType::OutputTokens, self.output_tokens.unwrap_or(0)),
             (
                 TokenType::CacheReadInputTokens,
-                self.cache_read_input_tokens,
+                self.cache_read_input_tokens.unwrap_or(0),
             ),
             (
                 TokenType::CacheWriteInputTokens,
-                self.cache_write_input_tokens,
+                self.cache_write_input_tokens.unwrap_or(0),
             ),
         ]
         .into_iter()
@@ -184,20 +184,30 @@ impl std::ops::Add for PromptTokensDetails {
 
     fn add(self, rhs: Self) -> Self::Output {
         Self {
-            input_tokens: self.input_tokens + rhs.input_tokens,
-            output_tokens: self.output_tokens + rhs.output_tokens,
-            cache_read_input_tokens: self.cache_read_input_tokens + rhs.cache_read_input_tokens,
-            cache_write_input_tokens: self.cache_write_input_tokens + rhs.cache_write_input_tokens,
+            input_tokens: Some(self.input_tokens.unwrap_or(0) + rhs.input_tokens.unwrap_or(0)),
+            output_tokens: Some(self.output_tokens.unwrap_or(0) + rhs.output_tokens.unwrap_or(0)),
+            cache_read_input_tokens: Some(
+                self.cache_read_input_tokens.unwrap_or(0)
+                    + rhs.cache_read_input_tokens.unwrap_or(0),
+            ),
+            cache_write_input_tokens: Some(
+                self.cache_write_input_tokens.unwrap_or(0)
+                    + rhs.cache_write_input_tokens.unwrap_or(0),
+            ),
         }
     }
 }
 
 impl std::ops::AddAssign for PromptTokensDetails {
     fn add_assign(&mut self, rhs: Self) {
-        self.input_tokens += rhs.input_tokens;
-        self.output_tokens += rhs.output_tokens;
-        self.cache_read_input_tokens += rhs.cache_read_input_tokens;
-        self.cache_write_input_tokens += rhs.cache_write_input_tokens;
+        self.input_tokens = Some(self.input_tokens.unwrap_or(0) + rhs.input_tokens.unwrap_or(0));
+        self.output_tokens = Some(self.output_tokens.unwrap_or(0) + rhs.output_tokens.unwrap_or(0));
+        self.cache_read_input_tokens = Some(
+            self.cache_read_input_tokens.unwrap_or(0) + rhs.cache_read_input_tokens.unwrap_or(0),
+        );
+        self.cache_write_input_tokens = Some(
+            self.cache_write_input_tokens.unwrap_or(0) + rhs.cache_write_input_tokens.unwrap_or(0),
+        );
     }
 }
 

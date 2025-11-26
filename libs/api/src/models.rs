@@ -233,6 +233,11 @@ impl AgentOutput {
             AgentOutput::PabloV1 { .. } => AgentID::PabloV1,
         }
     }
+    pub fn get_messages(&self) -> Vec<ChatMessage> {
+        match self {
+            AgentOutput::PabloV1 { messages, .. } => messages.clone(),
+        }
+    }
     pub fn set_messages(&mut self, new_messages: Vec<ChatMessage>) {
         match self {
             AgentOutput::PabloV1 { messages, .. } => *messages = new_messages,
@@ -446,7 +451,7 @@ pub struct CodeIndex {
     pub index: BuildCodeIndexOutput,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct AgentSessionStats {
     pub aborted_tool_calls: u32,
     pub analysis_period: Option<String>,
@@ -459,24 +464,6 @@ pub struct AgentSessionStats {
     pub total_sessions: u32,
     pub total_time_saved_seconds: Option<u32>,
     pub total_tool_calls: u32,
-}
-
-impl Default for AgentSessionStats {
-    fn default() -> Self {
-        Self {
-            aborted_tool_calls: 0,
-            analysis_period: None,
-            failed_tool_calls: 0,
-            from_date: None,
-            sessions_with_activity: 0,
-            successful_tool_calls: 0,
-            to_date: None,
-            tools_usage: Vec::new(),
-            total_sessions: 0,
-            total_time_saved_seconds: None,
-            total_tool_calls: 0,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -1,5 +1,5 @@
 use crate::models::llm::{
-    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTool,
+    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -374,7 +374,7 @@ pub struct ChatCompletionResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<ChatCompletionChoice>,
-    pub usage: Usage,
+    pub usage: LLMTokenUsage,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
 }
@@ -417,27 +417,6 @@ pub struct TokenLogprob {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct PromptTokensDetails {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_read_input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_write_input_tokens: Option<u32>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_tokens_details: Option<PromptTokensDetails>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamResponse {
     pub id: String,
     pub object: String,
@@ -445,7 +424,7 @@ pub struct ChatCompletionStreamResponse {
     pub model: String,
     pub choices: Vec<ChatCompletionStreamChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<Usage>,
+    pub usage: Option<LLMTokenUsage>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamChoice {
