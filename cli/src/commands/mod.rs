@@ -188,6 +188,7 @@ async fn get_client(config: &AppConfig) -> Result<Box<dyn AgentProvider>, String
                 eco_model: config.eco_model.clone(),
                 recovery_model: config.recovery_model.clone(),
                 smart_model: config.smart_model.clone(),
+                hook_registry: None,
             })
             .await
             .map_err(|e| format!("Failed to create local client: {}", e))?;
@@ -292,6 +293,7 @@ impl Commands {
                             eco_model: config.eco_model.clone(),
                             recovery_model: config.recovery_model.clone(),
                             smart_model: config.smart_model.clone(),
+                            hook_registry: None,
                         })
                         .await
                         .map_err(|e| format!("Failed to create local client: {}", e))?;

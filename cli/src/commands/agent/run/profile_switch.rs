@@ -51,6 +51,7 @@ pub async fn validate_profile_switch(
                 eco_model: new_config.eco_model.clone(),
                 recovery_model: new_config.recovery_model.clone(),
                 smart_model: new_config.smart_model.clone(),
+                hook_registry: None,
             })
             .await
             .map_err(|e| format!("Failed to create local client: {}", e))?;

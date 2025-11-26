@@ -1,7 +1,7 @@
 use crossterm::style::{Color, Stylize};
 use serde_json::Value;
 use stakpak_api::models::{AgentSessionStats, ToolUsageStats};
-use stakpak_shared::models::integrations::openai::ChatMessage;
+use stakpak_shared::models::{integrations::openai::ChatMessage, llm::LLMTokenUsage};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -586,10 +586,7 @@ fn truncate_yaml_value(value: &Value, max_length: usize) -> Value {
 }
 
 impl OutputRenderer {
-    pub fn render_token_usage_stats(
-        &self,
-        usage: &stakpak_shared::models::integrations::openai::Usage,
-    ) -> String {
+    pub fn render_token_usage_stats(&self, usage: &LLMTokenUsage) -> String {
         match &self.format {
             OutputFormat::Json => {
                 serde_json::to_string_pretty(usage).unwrap_or_else(|_| "{}".to_string())

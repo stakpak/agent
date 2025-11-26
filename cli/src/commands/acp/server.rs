@@ -18,6 +18,7 @@ use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionResponse, ChatCompletionStreamResponse, Role, ToolCall,
     ToolCallResultProgress,
 };
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -91,6 +92,7 @@ impl StakpakAcpAgent {
                     eco_model: config.eco_model.clone(),
                     recovery_model: config.recovery_model.clone(),
                     smart_model: config.smart_model.clone(),
+                    hook_registry: None,
                 })
                 .await
                 .map_err(|e| format!("Failed to create local client: {}", e))?;
@@ -1192,7 +1194,7 @@ impl StakpakAcpAgent {
             created: 0,
             model: AgentModel::Smart.to_string(),
             choices: vec![],
-            usage: stakpak_shared::models::integrations::openai::Usage {
+            usage: LLMTokenUsage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
@@ -1257,7 +1259,7 @@ impl StakpakAcpAgent {
                         created: response.created,
                         model: response.model.clone(),
                         choices: vec![],
-                        usage: stakpak_shared::models::integrations::openai::Usage {
+                        usage: LLMTokenUsage {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,

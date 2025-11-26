@@ -93,6 +93,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 eco_model: ctx_clone.eco_model.clone(),
                 recovery_model: ctx_clone.recovery_model.clone(),
                 smart_model: ctx_clone.smart_model.clone(),
+                hook_registry: None,
             })
             .await
             .map_err(|e| format!("Failed to create local client: {}", e))?;
@@ -146,6 +147,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 eco_model: ctx.eco_model.clone(),
                 recovery_model: ctx.recovery_model.clone(),
                 smart_model: ctx.smart_model.clone(),
+                hook_registry: None,
             })
             .await
             .map_err(|e| format!("Failed to create local client: {}", e))?;

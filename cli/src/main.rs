@@ -245,6 +245,7 @@ async fn main() {
                                 eco_model: config.eco_model.clone(),
                                 recovery_model: config.recovery_model.clone(),
                                 smart_model: config.smart_model.clone(),
+                                hook_registry: None,
                             })
                             .await
                             .unwrap_or_else(|e| {

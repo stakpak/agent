@@ -31,6 +31,7 @@ use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatMessage, ToolCall, ToolCallResultStatus,
 };
+use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::collections::HashMap;
@@ -42,7 +43,7 @@ type ClientTaskResult = Result<
         Vec<ChatMessage>,
         Option<Uuid>,
         Option<AppConfig>,
-        stakpak_shared::models::integrations::openai::Usage,
+        LLMTokenUsage,
     ),
     String,
 >;
@@ -74,7 +75,7 @@ pub async fn run_interactive(
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
-        let mut total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        let mut total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
@@ -170,6 +171,7 @@ pub async fn run_interactive(
                         eco_model: ctx_clone.eco_model.clone(),
                         recovery_model: ctx_clone.recovery_model.clone(),
                         smart_model: ctx_clone.smart_model.clone(),
+                        hook_registry: None,
                     })
                     .await
                     .map_err(|e| format!("Failed to create local client: {}", e))?;
@@ -448,7 +450,7 @@ pub async fn run_interactive(
                         // Clear the current session and start fresh
                         current_session_id = None;
                         messages.clear();
-                        total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+                        total_session_usage = LLMTokenUsage {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,
@@ -492,13 +494,12 @@ pub async fn run_interactive(
                                     should_update_rulebooks_on_next_message = true;
 
                                     // Reset usage for the resumed session
-                                    total_session_usage =
-                                        stakpak_shared::models::integrations::openai::Usage {
-                                            prompt_tokens: 0,
-                                            completion_tokens: 0,
-                                            total_tokens: 0,
-                                            prompt_tokens_details: None,
-                                        };
+                                    total_session_usage = LLMTokenUsage {
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        total_tokens: 0,
+                                        prompt_tokens_details: None,
+                                    };
 
                                     messages.extend(chat_messages);
                                     tools_queue.extend(tool_calls.clone());
@@ -562,13 +563,12 @@ pub async fn run_interactive(
                                 should_update_rulebooks_on_next_message = true;
 
                                 // Reset usage for the switched session
-                                total_session_usage =
-                                    stakpak_shared::models::integrations::openai::Usage {
-                                        prompt_tokens: 0,
-                                        completion_tokens: 0,
-                                        total_tokens: 0,
-                                        prompt_tokens_details: None,
-                                    };
+                                total_session_usage = LLMTokenUsage {
+                                    prompt_tokens: 0,
+                                    completion_tokens: 0,
+                                    total_tokens: 0,
+                                    prompt_tokens_details: None,
+                                };
 
                                 messages.extend(chat_messages);
                                 tools_queue.extend(tool_calls.clone());
@@ -846,14 +846,15 @@ pub async fn run_interactive(
                         // Accumulate prompt token details if available
                         if let Some(response_details) = &response.usage.prompt_tokens_details {
                             if total_session_usage.prompt_tokens_details.is_none() {
-                                total_session_usage.prompt_tokens_details = Some(
-                                    stakpak_shared::models::integrations::openai::PromptTokensDetails {
+                                total_session_usage.prompt_tokens_details =
+                                    Some(PromptTokensDetails {
                                         input_tokens: response_details.input_tokens,
                                         output_tokens: response_details.output_tokens,
-                                        cache_read_input_tokens: response_details.cache_read_input_tokens,
-                                        cache_write_input_tokens: response_details.cache_write_input_tokens,
-                                    },
-                                );
+                                        cache_read_input_tokens: response_details
+                                            .cache_read_input_tokens,
+                                        cache_write_input_tokens: response_details
+                                            .cache_write_input_tokens,
+                                    });
                             } else if let Some(details) =
                                 total_session_usage.prompt_tokens_details.as_mut()
                             {
@@ -962,6 +963,7 @@ pub async fn run_interactive(
                         eco_model: new_config.eco_model.clone(),
                         recovery_model: new_config.recovery_model.clone(),
                         smart_model: new_config.smart_model.clone(),
+                        hook_registry: None,
                     })
                     .await
                     .map_err(|e| format!("Failed to create local client: {}", e))?;
@@ -1033,6 +1035,7 @@ pub async fn run_interactive(
                     eco_model: ctx.eco_model.clone(),
                     recovery_model: ctx.recovery_model.clone(),
                     smart_model: ctx.smart_model.clone(),
+                    hook_registry: None,
                 })
                 .await
                 .map_err(|e| format!("Failed to create local client: {}", e))?;
