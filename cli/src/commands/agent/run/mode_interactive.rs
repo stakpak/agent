@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks_with_force, add_subagents, convert_tools_map_with_filter,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -119,6 +119,8 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+
+        let model_clone = model.clone();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -134,6 +136,7 @@ pub async fn run_interactive(
                 allowed_tools.as_ref(),
                 current_profile_for_tui,
                 rulebook_config_for_tui,
+                model_clone,
             )
             .await
             .map_err(|e| e.to_string())
@@ -286,13 +289,10 @@ pub async fn run_interactive(
                             user_input = format!("{}\n\n{}", history_str, user_input);
                         }
 
-                        // Add local context to the user input
-                        // Add local context and rulebooks only in specific cases:
-                        // 1. First message of new session (messages.is_empty())
-                        // 2. Session resume or rulebook update (should_update_rulebooks_on_next_message)
+                        // Add local context to user input for new sessions
+                        // Add rulebooks to user input for new sessions or when rulebook settings change
                         let (user_input, _) =
                             if messages.is_empty() || should_update_rulebooks_on_next_message {
-                                // Add local context first
                                 let (user_input_with_context, _) =
                                     add_local_context(&messages, &user_input, &local_context, true)
                                         .await
@@ -300,12 +300,13 @@ pub async fn run_interactive(
                                             format!("Failed to format local context: {}", e)
                                         })?;
 
-                                // Then add rulebooks
-                                let (user_input_with_rulebooks, _) = add_rulebooks_with_force(
-                                    &user_input_with_context,
-                                    &rulebooks,
-                                    true,
-                                );
+                                let (user_input_with_rulebooks, _) =
+                                    if let Some(rulebooks) = &rulebooks {
+                                        add_rulebooks(&user_input_with_context, rulebooks)
+                                    } else {
+                                        (user_input_with_context, None)
+                                    };
+
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {

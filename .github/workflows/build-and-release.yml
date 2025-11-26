@@ -187,16 +187,42 @@ jobs:
       - name: Generate release notes with git-cliff
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          git-cliff --tag "$VERSION" --unreleased --strip all > release_notes.md || {
-            echo "git-cliff failed, skipping release notes update"
+          # Get the previous tag to generate notes between tags
+          PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, skipping release notes generation"
             exit 0
-          }
+          fi
+          
+          # Generate notes between previous and current tag
+          git-cliff "$PREV_TAG..$VERSION" --strip all > release_notes.md
+          
+          # Check if release notes are empty
+          if [ ! -s release_notes.md ]; then
+            echo "No commits found between $PREV_TAG and $VERSION"
+            exit 0
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update GitHub Release
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
+          
+          # Check if release notes file exists and has content
+          if [ ! -f release_notes.md ]; then
+            echo "Release notes file not found, skipping update"
+            exit 0
+          fi
+          
+          # Check if file is empty or only contains whitespace
+          if [ ! -s release_notes.md ] || ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "Release notes file is empty, skipping update"
+            exit 0
+          fi
+          
+          echo "Updating release notes for $VERSION"
           gh release edit "$VERSION" --notes-file release_notes.md || echo "Failed to update release notes, continuing anyway"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

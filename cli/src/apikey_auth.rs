@@ -3,7 +3,7 @@ use std::io::Write;
 use tokio::sync::mpsc;
 
 const CLIENT_ID: &str = "stakpak-cli";
-const GENERATE_API_KEY_URL: &str = "https://stakpak.dev/generate-api-keys";
+const GENERATE_API_KEY_URL: &str = "https://stakpak.dev/generate-api-key";
 
 fn open_browser(url: &str) -> bool {
     match open::that(url) {

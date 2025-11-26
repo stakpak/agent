@@ -63,19 +63,41 @@ pub async fn run_tool_call(
         .map(|(name, _)| name.clone());
 
     if let Some(client_name) = client_name {
-        let handle = client_manager
+        // Parse arguments safely
+        let arguments = match serde_json::from_str(&tool_call.function.arguments) {
+            Ok(args) => Some(args),
+            Err(e) => {
+                let error_msg = format!("Failed to parse tool arguments as JSON: {}", e);
+                log::error!("{}", error_msg);
+                return Ok(Some(CallToolResult::error(vec![
+                    rmcp::model::Content::text("INVALID_ARGUMENTS"),
+                    rmcp::model::Content::text(error_msg),
+                ])));
+            }
+        };
+
+        // Call tool and handle errors gracefully
+        let handle = match client_manager
             .call_tool(
                 &client_name,
                 CallToolRequestParam {
                     name: tool_name.clone().into(),
-                    arguments: Some(
-                        serde_json::from_str(&tool_call.function.arguments)
-                            .map_err(|e| e.to_string())?,
-                    ),
+                    arguments,
                 },
                 session_id,
             )
-            .await?;
+            .await
+        {
+            Ok(handle) => handle,
+            Err(e) => {
+                let error_msg = format!("Failed to call MCP tool '{}': {}", tool_name, e);
+                log::error!("{}", error_msg);
+                return Ok(Some(CallToolResult::error(vec![
+                    rmcp::model::Content::text("MCP_TOOL_CALL_ERROR"),
+                    rmcp::model::Content::text(error_msg),
+                ])));
+            }
+        };
 
         let peer_for_cancel = handle.peer.clone();
         let request_id = handle.id.clone();
@@ -83,11 +105,32 @@ pub async fn run_tool_call(
         if let Some(mut cancel_rx) = cancel_rx {
             tokio::select! {
                 result = handle.await_response() => {
-                    let result = match result.map_err(|e| e.to_string())? {
-                        ServerResult::CallToolResult(result) => result,
-                        _ => return Err("Unexpected response".to_string()),
-                    };
-                    return Ok(Some(result))
+                    match result {
+                        Ok(server_result) => {
+                            match server_result {
+                                ServerResult::CallToolResult(result) => {
+                                    return Ok(Some(result));
+                                },
+                                _ => {
+                                    let error_msg = "Unexpected response type from MCP server".to_string();
+                                    log::error!("{}", error_msg);
+                                    return Ok(Some(CallToolResult::error(vec![
+                                        rmcp::model::Content::text("UNEXPECTED_RESPONSE"),
+                                        rmcp::model::Content::text(error_msg),
+                                    ])));
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            let error_msg = format!("MCP tool execution error: {}", e);
+                            log::error!("{}", error_msg);
+                            // Return error result instead of panicking
+                            return Ok(Some(CallToolResult::error(vec![
+                                rmcp::model::Content::text("MCP_ERROR"),
+                                rmcp::model::Content::text(error_msg),
+                            ])));
+                        }
+                    }
                 },
                 _ = cancel_rx.recv() => {
                     let notification = CancelledNotification {
@@ -103,11 +146,30 @@ pub async fn run_tool_call(
                 }
             }
         } else {
-            let result = match handle.await_response().await.map_err(|e| e.to_string())? {
-                ServerResult::CallToolResult(result) => result,
-                _ => return Err("Unexpected response".to_string()),
-            };
-            return Ok(Some(result));
+            match handle.await_response().await {
+                Ok(server_result) => match server_result {
+                    ServerResult::CallToolResult(result) => {
+                        return Ok(Some(result));
+                    }
+                    _ => {
+                        let error_msg = "Unexpected response type from MCP server".to_string();
+                        log::error!("{}", error_msg);
+                        return Ok(Some(CallToolResult::error(vec![
+                            rmcp::model::Content::text("UNEXPECTED_RESPONSE"),
+                            rmcp::model::Content::text(error_msg),
+                        ])));
+                    }
+                },
+                Err(e) => {
+                    let error_msg = format!("MCP tool execution error: {}", e);
+                    log::error!("{}", error_msg);
+                    // Return error result instead of panicking
+                    return Ok(Some(CallToolResult::error(vec![
+                        rmcp::model::Content::text("MCP_ERROR"),
+                        rmcp::model::Content::text(error_msg),
+                    ])));
+                }
+            }
         }
     }
 

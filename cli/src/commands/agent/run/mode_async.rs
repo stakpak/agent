@@ -198,8 +198,15 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             add_local_context(&chat_messages, &config.prompt, &config.local_context, false)
                 .await
                 .map_err(|e| e.to_string())?;
-        let (user_input, _rulebooks_text) =
-            add_rulebooks(&chat_messages, &user_input, &config.rulebooks);
+
+        let (user_input, _rulebooks_text) = if let Some(rulebooks) = &config.rulebooks
+            && chat_messages.is_empty()
+        {
+            add_rulebooks(&user_input, rulebooks)
+        } else {
+            (user_input, None)
+        };
+
         let (user_input, _subagents_text) =
             add_subagents(&chat_messages, &user_input, &config.subagent_configs);
         chat_messages.push(user_message(user_input));
