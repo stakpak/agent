@@ -11,7 +11,7 @@ use futures_util::Stream;
 use libsql::{Builder, Connection};
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
-use stakpak_shared::hooks::{AgentState, Hook, HookContext, HookRegistry, LifecycleEvent};
+use stakpak_shared::hooks::{AgentState, HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, FunctionCall, MessageContent, Role,
