@@ -4,12 +4,13 @@ use crate::models::llm::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     System,
     Developer,
     User,
+    #[default]
     Assistant,
     Tool,
     // Function,
@@ -122,7 +123,7 @@ impl ChatCompletionRequest {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: Option<MessageContent>,

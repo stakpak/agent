@@ -5,13 +5,14 @@ use crate::{
         openai::{OpenAI, OpenAIConfig, OpenAIInput, OpenAIModel},
     },
 };
+use serde::Serialize;
 use stakpak_shared::models::llm::{GenerationDelta, LLMCompletionResponse, LLMMessage, LLMTool};
 use std::fmt::Display;
 
 pub mod anthropic;
 pub mod openai;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum InferenceModel {
     Anthropic(AnthropicModel),
     OpenAI(OpenAIModel),
@@ -46,6 +47,7 @@ impl Display for InferenceModel {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
 pub struct InferenceInput {
     pub model: InferenceModel,
     pub messages: Vec<LLMMessage>,
@@ -59,6 +61,17 @@ pub struct InferenceStreamInput {
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
+}
+
+impl From<&InferenceStreamInput> for InferenceInput {
+    fn from(value: &InferenceStreamInput) -> Self {
+        InferenceInput {
+            model: value.model.clone(),
+            messages: value.messages.clone(),
+            max_tokens: value.max_tokens,
+            tools: value.tools.clone(),
+        }
+    }
 }
 
 pub async fn chat(

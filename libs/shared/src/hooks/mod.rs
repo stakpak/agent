@@ -1,7 +1,3 @@
-use crate::models::{
-    integrations::openai::{AgentModel, ChatMessage, Tool},
-    llm::LLMTokenUsage,
-};
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Display};
 use tokio::task::JoinSet;
@@ -23,7 +19,6 @@ pub struct HookContext<State: Clone + Serialize> {
     pub session_id: Option<Uuid>,
     pub new_checkpoint_id: Option<Uuid>,
     pub request_id: Uuid,
-    pub usage: Option<LLMTokenUsage>,
     pub state: State,
 
     #[serde(skip)]
@@ -36,7 +31,6 @@ impl<State: Clone + Serialize> Clone for HookContext<State> {
             session_id: self.session_id,
             new_checkpoint_id: self.new_checkpoint_id,
             request_id: self.request_id,
-            usage: self.usage.clone(),
             state: self.state.clone(),
             background_tasks: JoinSet::new(),
         }
@@ -49,7 +43,6 @@ impl<State: Clone + Serialize> HookContext<State> {
             session_id,
             new_checkpoint_id: None,
             request_id: Uuid::new_v4(),
-            usage: None,
             state,
             background_tasks: JoinSet::new(),
         }
@@ -61,10 +54,6 @@ impl<State: Clone + Serialize> HookContext<State> {
 
     pub fn set_new_checkpoint_id(&mut self, new_checkpoint_id: Uuid) {
         self.new_checkpoint_id = Some(new_checkpoint_id);
-    }
-
-    pub fn set_usage(&mut self, usage: Option<LLMTokenUsage>) {
-        self.usage = usage;
     }
 }
 
@@ -184,41 +173,6 @@ impl<State: Clone + Serialize> HookRegistry<State> {
         }
 
         Ok(HookAction::Continue)
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct AgentState {
-    pub agent_model: AgentModel,
-    pub messages: Vec<ChatMessage>,
-    pub tools: Option<Vec<Tool>>,
-    // // New fields for hooks
-    // pub hook_registry: Option<Arc<HookRegistry<Self>>>,
-}
-
-impl AgentState {
-    pub fn new(
-        agent_model: AgentModel,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
-    ) -> Self {
-        Self {
-            agent_model,
-            messages,
-            tools,
-        }
-    }
-
-    pub fn set_messages(&mut self, messages: Vec<ChatMessage>) {
-        self.messages = messages;
-    }
-
-    pub fn set_tools(&mut self, tools: Option<Vec<Tool>>) {
-        self.tools = tools;
-    }
-
-    pub fn set_agent_model(&mut self, agent_model: AgentModel) {
-        self.agent_model = agent_model;
     }
 }
 

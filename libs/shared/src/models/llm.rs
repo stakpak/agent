@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LLMMessage {
     pub role: String,
     pub content: LLMMessageContent,
@@ -60,6 +60,12 @@ impl From<String> for LLMMessageContent {
     }
 }
 
+impl Default for LLMMessageContent {
+    fn default() -> Self {
+        LLMMessageContent::String(String::new())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum LLMMessageTypedContent {
@@ -77,6 +83,14 @@ pub enum LLMMessageTypedContent {
         tool_use_id: String,
         content: String,
     },
+}
+
+impl Default for LLMMessageTypedContent {
+    fn default() -> Self {
+        LLMMessageTypedContent::Text {
+            text: String::new(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

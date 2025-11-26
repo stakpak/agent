@@ -1,8 +1,12 @@
+use crate::local::integrations::InferenceInput;
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
+use stakpak_shared::models::{
+    integrations::openai::{AgentModel, ChatMessage, MessageContent, Role, Tool},
+    llm::{LLMMessage, LLMTokenUsage},
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -627,4 +631,67 @@ pub struct SlackSendMessageRequest {
     pub channel: String,
     pub mrkdwn_text: String,
     pub thread_ts: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AgentState {
+    pub agent_model: AgentModel,
+    pub messages: Vec<ChatMessage>,
+    pub tools: Option<Vec<Tool>>,
+
+    pub inference_input: Option<InferenceInput>,
+    pub inference_output: Option<InferenceOutput>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct InferenceOutput {
+    pub new_message: LLMMessage,
+    pub usage: LLMTokenUsage,
+}
+
+impl AgentState {
+    pub fn new(
+        agent_model: AgentModel,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+    ) -> Self {
+        Self {
+            agent_model,
+            messages,
+            tools,
+            inference_input: None,
+            inference_output: None,
+        }
+    }
+
+    pub fn set_messages(&mut self, messages: Vec<ChatMessage>) {
+        self.messages = messages;
+    }
+
+    pub fn set_tools(&mut self, tools: Option<Vec<Tool>>) {
+        self.tools = tools;
+    }
+
+    pub fn set_agent_model(&mut self, agent_model: AgentModel) {
+        self.agent_model = agent_model;
+    }
+
+    pub fn set_inference_input(&mut self, inference_input: Option<InferenceInput>) {
+        self.inference_input = inference_input;
+    }
+
+    pub fn set_inference_output(
+        &mut self,
+        new_message: LLMMessage,
+        new_usage: Option<LLMTokenUsage>,
+    ) {
+        self.inference_output = Some(InferenceOutput {
+            new_message,
+            usage: new_usage.unwrap_or_default(),
+        });
+    }
+
+    pub fn append_new_message(&mut self, new_message: ChatMessage) {
+        self.messages.push(new_message);
+    }
 }
