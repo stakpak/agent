@@ -56,7 +56,7 @@ pub struct LocalClientConfig {
 #[derive(Debug)]
 enum StreamMessage {
     Delta(GenerationDelta),
-    Ctx(HookContext<AgentState>),
+    Ctx(Box<HookContext<AgentState>>),
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
@@ -280,7 +280,9 @@ impl AgentProvider for LocalClient {
                 }
                 Ok(new_message) => {
                     ctx_clone.state.append_new_message(new_message.clone());
-                    let _ = tx.send(Ok(StreamMessage::Ctx(ctx_clone.clone()))).await;
+                    let _ = tx
+                        .send(Ok(StreamMessage::Ctx(Box::new(ctx_clone.clone()))))
+                        .await;
 
                     let output = self_clone
                         .update_session(&current_checkpoint, ctx_clone.state.messages.clone())
@@ -292,7 +294,7 @@ impl AgentProvider for LocalClient {
                         }
                         Ok(output) => {
                             ctx_clone.set_new_checkpoint_id(output.checkpoint.id);
-                            let _ = tx.send(Ok(StreamMessage::Ctx(ctx_clone.clone()))).await;
+                            let _ = tx.send(Ok(StreamMessage::Ctx(Box::new(ctx_clone)))).await;
                             let _ = tx
                                 .send(Ok(StreamMessage::Delta(GenerationDelta::Content {
                                     content: format!(
@@ -316,7 +318,7 @@ impl AgentProvider for LocalClient {
                 match delta_result {
                     Ok(delta) => match delta {
                             StreamMessage::Ctx(updated_ctx) => {
-                                ctx = updated_ctx;
+                                ctx = *updated_ctx;
                             }
                             StreamMessage::Delta(delta) => {
                                 yield Ok(ChatCompletionStreamResponse {
@@ -482,8 +484,7 @@ impl LocalClient {
             (response.choices[0].message.clone(), response.usage)
         };
 
-        ctx.state
-            .set_inference_output(response_message.clone(), usage.clone());
+        ctx.state.set_inference_output(response_message, usage);
 
         if let Some(hook_registry) = &self.hook_registry {
             hook_registry
@@ -493,7 +494,13 @@ impl LocalClient {
                 .ok()?;
         }
 
-        let message_content = match &response_message.content {
+        let inference_output = ctx
+            .state
+            .inference_output
+            .as_ref()
+            .ok_or_else(|| "Inference output is missing from state".to_string())?;
+
+        let message_content = match &inference_output.new_message.content {
             LLMMessageContent::String(s) => s.clone(),
             LLMMessageContent::List(l) => l
                 .iter()
@@ -505,29 +512,30 @@ impl LocalClient {
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
-        let tool_calls = if let LLMMessageContent::List(items) = &response_message.content {
-            let calls: Vec<ToolCall> = items
-                .iter()
-                .filter_map(|item| {
-                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
-                        Some(ToolCall {
-                            id: id.clone(),
-                            r#type: "function".to_string(),
-                            function: FunctionCall {
-                                name: name.clone(),
-                                arguments: args.to_string(),
-                            },
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        let tool_calls =
+            if let LLMMessageContent::List(items) = &inference_output.new_message.content {
+                let calls: Vec<ToolCall> = items
+                    .iter()
+                    .filter_map(|item| {
+                        if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                            Some(ToolCall {
+                                id: id.clone(),
+                                r#type: "function".to_string(),
+                                function: FunctionCall {
+                                    name: name.clone(),
+                                    arguments: args.to_string(),
+                                },
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-            if calls.is_empty() { None } else { Some(calls) }
-        } else {
-            None
-        };
+                if calls.is_empty() { None } else { Some(calls) }
+            } else {
+                None
+            };
 
         let new_message = ChatMessage {
             role: Role::Assistant,
