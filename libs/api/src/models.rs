@@ -1,11 +1,13 @@
-use crate::local::integrations::InferenceInput;
+use crate::local::integrations::LLMInput;
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stakpak_shared::models::{
-    integrations::openai::{AgentModel, ChatMessage, MessageContent, Role, Tool},
-    llm::{LLMMessage, LLMTokenUsage},
+    integrations::openai::{
+        AgentModel, ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall,
+    },
+    llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
 };
 use uuid::Uuid;
 
@@ -639,14 +641,61 @@ pub struct AgentState {
     pub messages: Vec<ChatMessage>,
     pub tools: Option<Vec<Tool>>,
 
-    pub inference_input: Option<InferenceInput>,
-    pub inference_output: Option<InferenceOutput>,
+    pub llm_input: Option<LLMInput>,
+    pub llm_output: Option<InferenceOutput>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct InferenceOutput {
     pub new_message: LLMMessage,
     pub usage: LLMTokenUsage,
+}
+
+impl From<&InferenceOutput> for ChatMessage {
+    fn from(value: &InferenceOutput) -> Self {
+        let message_content = match &value.new_message.content {
+            LLMMessageContent::String(s) => s.clone(),
+            LLMMessageContent::List(l) => l
+                .iter()
+                .map(|c| match c {
+                    LLMMessageTypedContent::Text { text } => text.clone(),
+                    LLMMessageTypedContent::ToolCall { .. } => String::new(),
+                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        let tool_calls = if let LLMMessageContent::List(items) = &value.new_message.content {
+            let calls: Vec<ToolCall> = items
+                .iter()
+                .filter_map(|item| {
+                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                        Some(ToolCall {
+                            id: id.clone(),
+                            r#type: "function".to_string(),
+                            function: FunctionCall {
+                                name: name.clone(),
+                                arguments: args.to_string(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if calls.is_empty() { None } else { Some(calls) }
+        } else {
+            None
+        };
+        ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String(message_content)),
+            name: None,
+            tool_calls,
+            tool_call_id: None,
+        }
+    }
 }
 
 impl AgentState {
@@ -659,8 +708,8 @@ impl AgentState {
             agent_model,
             messages,
             tools,
-            inference_input: None,
-            inference_output: None,
+            llm_input: None,
+            llm_output: None,
         }
     }
 
@@ -676,16 +725,12 @@ impl AgentState {
         self.agent_model = agent_model;
     }
 
-    pub fn set_inference_input(&mut self, inference_input: Option<InferenceInput>) {
-        self.inference_input = inference_input;
+    pub fn set_llm_input(&mut self, llm_input: Option<LLMInput>) {
+        self.llm_input = llm_input;
     }
 
-    pub fn set_inference_output(
-        &mut self,
-        new_message: LLMMessage,
-        new_usage: Option<LLMTokenUsage>,
-    ) {
-        self.inference_output = Some(InferenceOutput {
+    pub fn set_llm_output(&mut self, new_message: LLMMessage, new_usage: Option<LLMTokenUsage>) {
+        self.llm_output = Some(InferenceOutput {
             new_message,
             usage: new_usage.unwrap_or_default(),
         });

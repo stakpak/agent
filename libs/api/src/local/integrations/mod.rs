@@ -13,59 +13,59 @@ pub mod anthropic;
 pub mod openai;
 
 #[derive(Clone, Debug, Serialize)]
-pub enum InferenceModel {
+pub enum LLMModel {
     Anthropic(AnthropicModel),
     OpenAI(OpenAIModel),
     Custom(String),
 }
 
-pub struct InferenceConfig {
+pub struct LLMProviderConfig {
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
 }
 
-impl From<String> for InferenceModel {
+impl From<String> for LLMModel {
     fn from(value: String) -> Self {
         match value.as_str() {
-            "claude-haiku-4-5" => InferenceModel::Anthropic(AnthropicModel::Claude45Haiku),
-            "claude-sonnet-4-5" => InferenceModel::Anthropic(AnthropicModel::Claude45Sonnet),
-            "claude-opus-4-5" => InferenceModel::Anthropic(AnthropicModel::Claude45Opus),
-            "gpt-5" => InferenceModel::OpenAI(OpenAIModel::GPT5),
-            "gpt-5-mini" => InferenceModel::OpenAI(OpenAIModel::GPT5Mini),
-            _ => InferenceModel::Custom(value),
+            "claude-haiku-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
+            "claude-sonnet-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Sonnet),
+            "claude-opus-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Opus),
+            "gpt-5" => LLMModel::OpenAI(OpenAIModel::GPT5),
+            "gpt-5-mini" => LLMModel::OpenAI(OpenAIModel::GPT5Mini),
+            _ => LLMModel::Custom(value),
         }
     }
 }
 
-impl Display for InferenceModel {
+impl Display for LLMModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InferenceModel::Anthropic(model) => write!(f, "{}", model),
-            InferenceModel::OpenAI(model) => write!(f, "{}", model),
-            InferenceModel::Custom(model) => write!(f, "{}", model),
+            LLMModel::Anthropic(model) => write!(f, "{}", model),
+            LLMModel::OpenAI(model) => write!(f, "{}", model),
+            LLMModel::Custom(model) => write!(f, "{}", model),
         }
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct InferenceInput {
-    pub model: InferenceModel,
+pub struct LLMInput {
+    pub model: LLMModel,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub tools: Option<Vec<LLMTool>>,
 }
 
-pub struct InferenceStreamInput {
-    pub model: InferenceModel,
+pub struct LLMStreamInput {
+    pub model: LLMModel,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
 }
 
-impl From<&InferenceStreamInput> for InferenceInput {
-    fn from(value: &InferenceStreamInput) -> Self {
-        InferenceInput {
+impl From<&LLMStreamInput> for LLMInput {
+    fn from(value: &LLMStreamInput) -> Self {
+        LLMInput {
             model: value.model.clone(),
             messages: value.messages.clone(),
             max_tokens: value.max_tokens,
@@ -75,11 +75,11 @@ impl From<&InferenceStreamInput> for InferenceInput {
 }
 
 pub async fn chat(
-    config: &InferenceConfig,
-    input: InferenceInput,
+    config: &LLMProviderConfig,
+    input: LLMInput,
 ) -> Result<LLMCompletionResponse, AgentError> {
     match input.model {
-        InferenceModel::Anthropic(model) => {
+        LLMModel::Anthropic(model) => {
             if let Some(anthropic_config) = &config.anthropic_config {
                 let anthropic_input = AnthropicInput {
                     model,
@@ -99,7 +99,7 @@ pub async fn chat(
                 ))
             }
         }
-        InferenceModel::OpenAI(model) => {
+        LLMModel::OpenAI(model) => {
             if let Some(openai_config) = &config.openai_config {
                 let openai_input = OpenAIInput {
                     model,
@@ -118,18 +118,18 @@ pub async fn chat(
                 ))
             }
         }
-        InferenceModel::Custom(_) => Err(AgentError::BadRequest(
+        LLMModel::Custom(_) => Err(AgentError::BadRequest(
             BadRequestErrorMessage::InvalidAgentInput("Custom model not supported".to_string()),
         )),
     }
 }
 
 pub async fn chat_stream(
-    config: &InferenceConfig,
-    input: InferenceStreamInput,
+    config: &LLMProviderConfig,
+    input: LLMStreamInput,
 ) -> Result<LLMCompletionResponse, AgentError> {
     match input.model {
-        InferenceModel::Anthropic(model) => {
+        LLMModel::Anthropic(model) => {
             if let Some(anthropic_config) = &config.anthropic_config {
                 let anthropic_input = AnthropicInput {
                     model,
@@ -150,7 +150,7 @@ pub async fn chat_stream(
                 ))
             }
         }
-        InferenceModel::OpenAI(model) => {
+        LLMModel::OpenAI(model) => {
             if let Some(openai_config) = &config.openai_config {
                 let openai_input = OpenAIInput {
                     model,
@@ -169,7 +169,7 @@ pub async fn chat_stream(
                 ))
             }
         }
-        InferenceModel::Custom(_) => Err(AgentError::BadRequest(
+        LLMModel::Custom(_) => Err(AgentError::BadRequest(
             BadRequestErrorMessage::InvalidAgentInput("Custom model not supported".to_string()),
         )),
     }

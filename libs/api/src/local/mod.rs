@@ -1,9 +1,7 @@
 use crate::local::context_manager::{ContextManager, SimpleContextManager};
 use crate::local::integrations::anthropic::{AnthropicConfig, AnthropicModel};
 use crate::local::integrations::openai::{OpenAIConfig, OpenAIModel};
-use crate::local::integrations::{
-    InferenceConfig, InferenceInput, InferenceModel, InferenceStreamInput,
-};
+use crate::local::integrations::{LLMInput, LLMModel, LLMProviderConfig, LLMStreamInput};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -14,12 +12,9 @@ use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, FinishReason, FunctionCall, MessageContent, Role,
-    Tool, ToolCall,
+    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, Role, Tool,
 };
-use stakpak_shared::models::llm::{
-    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent,
-};
+use stakpak_shared::models::llm::{GenerationDelta, LLMMessage, LLMMessageContent};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -37,9 +32,9 @@ pub struct LocalClient {
     pub db: Connection,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
-    pub smart_model: InferenceModel,
-    pub eco_model: InferenceModel,
-    pub recovery_model: InferenceModel,
+    pub smart_model: LLMModel,
+    pub eco_model: LLMModel,
+    pub recovery_model: LLMModel,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
 }
 
@@ -90,16 +85,16 @@ impl LocalClient {
             openai_config: config.openai_config,
             smart_model: config
                 .smart_model
-                .map(InferenceModel::from)
-                .unwrap_or(InferenceModel::Anthropic(AnthropicModel::Claude45Sonnet)),
+                .map(LLMModel::from)
+                .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)),
             eco_model: config
                 .eco_model
-                .map(InferenceModel::from)
-                .unwrap_or(InferenceModel::Anthropic(AnthropicModel::Claude45Haiku)),
+                .map(LLMModel::from)
+                .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku)),
             recovery_model: config
                 .recovery_model
-                .map(InferenceModel::from)
-                .unwrap_or(InferenceModel::OpenAI(OpenAIModel::GPT5)),
+                .map(LLMModel::from)
+                .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5)),
             hook_registry: config.hook_registry,
         })
     }
@@ -219,7 +214,7 @@ impl AgentProvider for LocalClient {
             }],
             usage: ctx
                 .state
-                .inference_output
+                .llm_output
                 .as_ref()
                 .map(|u| u.usage.clone())
                 .unwrap_or_default(),
@@ -331,7 +326,7 @@ impl AgentProvider for LocalClient {
                                         delta: delta.into(),
                                         finish_reason: None,
                                     }],
-                                    usage: ctx.state.inference_output.as_ref().map(|u| u.usage.clone()),
+                                    usage: ctx.state.llm_output.as_ref().map(|u| u.usage.clone()),
                                 })
                             }
                         }
@@ -396,15 +391,15 @@ impl AgentProvider for LocalClient {
 }
 
 impl LocalClient {
-    fn get_inference_model(&self, model: AgentModel) -> InferenceModel {
+    fn get_inference_model(&self, model: AgentModel) -> LLMModel {
         match model {
             AgentModel::Smart => self.smart_model.clone(),
             AgentModel::Eco => self.eco_model.clone(),
         }
     }
 
-    fn get_inference_config(&self) -> InferenceConfig {
-        InferenceConfig {
+    fn get_inference_config(&self) -> LLMProviderConfig {
+        LLMProviderConfig {
             anthropic_config: self.anthropic_config.clone(),
             openai_config: self.openai_config.clone(),
         }
@@ -423,8 +418,8 @@ impl LocalClient {
                 .ok()?;
         }
 
-        let input = if let Some(inference_input) = ctx.state.inference_input.clone() {
-            inference_input
+        let input = if let Some(llm_input) = ctx.state.llm_input.clone() {
+            llm_input
         } else {
             let inference_model = self.get_inference_model(ctx.state.agent_model.clone());
             let context_manager = SimpleContextManager;
@@ -440,7 +435,7 @@ impl LocalClient {
                 .clone()
                 .map(|t| t.into_iter().map(Into::into).collect());
 
-            InferenceInput {
+            LLMInput {
                 model: inference_model,
                 messages: llm_messages,
                 max_tokens: 16000,
@@ -452,7 +447,7 @@ impl LocalClient {
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
-            let input = InferenceStreamInput {
+            let input = LLMStreamInput {
                 model: input.model,
                 messages: input.messages,
                 max_tokens: input.max_tokens,
@@ -484,7 +479,7 @@ impl LocalClient {
             (response.choices[0].message.clone(), response.usage)
         };
 
-        ctx.state.set_inference_output(response_message, usage);
+        ctx.state.set_llm_output(response_message, usage);
 
         if let Some(hook_registry) = &self.hook_registry {
             hook_registry
@@ -494,58 +489,13 @@ impl LocalClient {
                 .ok()?;
         }
 
-        let inference_output = ctx
+        let llm_output = ctx
             .state
-            .inference_output
+            .llm_output
             .as_ref()
-            .ok_or_else(|| "Inference output is missing from state".to_string())?;
+            .ok_or_else(|| "LLM output is missing from state".to_string())?;
 
-        let message_content = match &inference_output.new_message.content {
-            LLMMessageContent::String(s) => s.clone(),
-            LLMMessageContent::List(l) => l
-                .iter()
-                .map(|c| match c {
-                    LLMMessageTypedContent::Text { text } => text.clone(),
-                    LLMMessageTypedContent::ToolCall { .. } => String::new(),
-                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
-        let tool_calls =
-            if let LLMMessageContent::List(items) = &inference_output.new_message.content {
-                let calls: Vec<ToolCall> = items
-                    .iter()
-                    .filter_map(|item| {
-                        if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
-                            Some(ToolCall {
-                                id: id.clone(),
-                                r#type: "function".to_string(),
-                                function: FunctionCall {
-                                    name: name.clone(),
-                                    arguments: args.to_string(),
-                                },
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if calls.is_empty() { None } else { Some(calls) }
-            } else {
-                None
-            };
-
-        let new_message = ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(message_content)),
-            name: None,
-            tool_calls,
-            tool_call_id: None,
-        };
-
-        Ok(new_message)
+        Ok(ChatMessage::from(llm_output))
     }
 
     async fn initialize_session(&self, messages: &[ChatMessage]) -> Result<RunAgentOutput, String> {
@@ -664,7 +614,7 @@ impl LocalClient {
             },
         ];
 
-        let input = crate::local::integrations::InferenceInput {
+        let input = crate::local::integrations::LLMInput {
             model: inference_model,
             messages,
             max_tokens: 100,
