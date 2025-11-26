@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Debug, fmt::Display};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -176,43 +176,60 @@ impl<State: Clone + Serialize> HookRegistry<State> {
     }
 }
 
-// Example of a hook
-// pub struct LoggerHook;
+/**
+Usage Example
 
-// #[async_trait::async_trait]
-// impl<State: Clone + Serialize + std::fmt::Debug + Send + Sync + 'static> Hook<State>
-//     for LoggerHook
-// {
-//     fn name(&self) -> &str {
-//         "logger"
-//     }
+```rust
+pub struct LoggerHook;
 
-//     async fn execute(
-//         &self,
-//         ctx: &mut HookContext<State>,
-//         event: &LifecycleEvent,
-//     ) -> Result<HookAction, HookError> {
-//         use chrono::{DateTime, Local};
-//         use std::fs::OpenOptions;
-//         use std::io::Write;
+impl LoggerHook {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
-//         let timestamp: DateTime<Local> = Local::now();
-//         let log_message = format!(
-//             "[{}] LoggerHook event: {:?}, {}\n",
-//             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-//             event,
-//             serde_json::to_string(&ctx).unwrap_or_default(),
-//         );
+define_hook!(LoggerHook, "logger", async |ctx, event| {
+    let timestamp: DateTime<Local> = Local::now();
+    let log_message = format!(
+        "[{}] LoggerHook event: {:?}, {}\n",
+        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+        event,
+        serde_json::to_string(&ctx).unwrap_or_default(),
+    );
 
-//         let mut file = OpenOptions::new()
-//             .create(true)
-//             .append(true)
-//             .open("hook_events.log")
-//             .map_err(|e| HookError::ExecutionError(e.to_string()))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("hook_events.log")
+        .await
+        .map_err(|e| HookError::ExecutionError(e.to_string()))?;
 
-//         file.write_all(log_message.as_bytes())
-//             .map_err(|e| HookError::ExecutionError(e.to_string()))?;
+    file.write_all(log_message.as_bytes())
+        .await
+        .map_err(|e| HookError::ExecutionError(e.to_string()))?;
 
-//         Ok(HookAction::Continue)
-//     }
-// }
+    Ok(HookAction::Continue)
+});
+```
+*/
+#[macro_export]
+macro_rules! define_hook {
+    ($name:ident, $hook_name:expr, async |$ctx:ident, $event:ident| $body:block) => {
+        #[async_trait::async_trait]
+        impl<State> Hook<State> for $name
+        where
+            State: Clone + Serialize + Debug + Send + Sync,
+        {
+            fn name(&self) -> &str {
+                $hook_name
+            }
+            async fn execute(
+                &self,
+                $ctx: &mut HookContext<State>,
+                $event: &LifecycleEvent,
+            ) -> Result<HookAction, HookError> {
+                $body
+            }
+        }
+    };
+}
