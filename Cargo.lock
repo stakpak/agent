@@ -5450,6 +5450,7 @@ dependencies = [
  "serde_yaml",
  "stakpak-api",
  "stakpak-mcp-client",
+ "stakpak-mcp-proxy",
  "stakpak-mcp-server",
  "stakpak-shared",
  "stakpak-tui",
@@ -5504,6 +5505,21 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "stakpak-mcp-proxy"
+version = "0.2.79"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "stakpak-shared",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]
