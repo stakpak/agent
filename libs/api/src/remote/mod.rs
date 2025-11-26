@@ -498,32 +498,32 @@ impl AgentProvider for RemoteClient {
         Ok(())
     }
 
-    async fn build_code_index(
-        &self,
-        input: &BuildCodeIndexInput,
-    ) -> Result<BuildCodeIndexOutput, String> {
-        let url = format!("{}/commands/build_code_index", self.base_url,);
+    // async fn build_code_index(
+    //     &self,
+    //     input: &BuildCodeIndexInput,
+    // ) -> Result<BuildCodeIndexOutput, String> {
+    //     let url = format!("{}/commands/build_code_index", self.base_url,);
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&input)
-            .send()
-            .await
-            .map_err(|e: ReqwestError| e.to_string())?;
+    //     let response = self
+    //         .client
+    //         .post(&url)
+    //         .json(&input)
+    //         .send()
+    //         .await
+    //         .map_err(|e: ReqwestError| e.to_string())?;
 
-        let response = self.handle_response_error(response).await?;
+    //     let response = self.handle_response_error(response).await?;
 
-        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        match serde_json::from_value::<BuildCodeIndexOutput>(value.clone()) {
-            Ok(response) => Ok(response),
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
-                Err("Failed to deserialize response:".into())
-            }
-        }
-    }
+    //     let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    //     match serde_json::from_value::<BuildCodeIndexOutput>(value.clone()) {
+    //         Ok(response) => Ok(response),
+    //         Err(e) => {
+    //             eprintln!("Failed to deserialize response: {}", e);
+    //             eprintln!("Raw response: {}", value);
+    //             Err("Failed to deserialize response:".into())
+    //         }
+    //     }
+    // }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {

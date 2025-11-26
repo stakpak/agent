@@ -376,18 +376,6 @@ impl AgentProvider for LocalClient {
         Ok(())
     }
 
-    async fn build_code_index(
-        &self,
-        _input: &BuildCodeIndexInput,
-    ) -> Result<BuildCodeIndexOutput, String> {
-        // TODO: Implement build code index
-        Ok(BuildCodeIndexOutput {
-            blocks: Vec::new(),
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        })
-    }
-
     async fn search_docs(&self, _input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
         // TODO: Implement search docs
         Ok(Vec::new())
