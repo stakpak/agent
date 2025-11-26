@@ -34,7 +34,7 @@ impl LocalClient {
             .join(DEFAULT_STORE_PATH);
 
         let db = Builder::new_local(
-            &config
+            config
                 .store_path
                 .unwrap_or(default_store_path.display().to_string()),
         )
