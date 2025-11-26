@@ -1,12 +1,21 @@
-# Stakpak Agent
 
-**The most secure agent built for operations & DevOps.** Designed for the grittiest parts of software development with enterprise-grade security features including mutual TLS (mTLS) encryption, dynamic secret redaction, and privacy-first architecture.
+# Stakpak
 
-<img src="assets/TUIOverview.png" width="800">
+You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
+Stakpak is built different:
+- **Secret Substitution** - The LLM works with your credentials without ever seeing them
+- **Warden Guardrails** - Network-level policies block destructive operations before they run
+- **DevOps Playbooks Baked-in** - Curated library of DevOps knowledge in Stakpak Rulebooks
+
+Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
+
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
+![til](./assets/stakpak-overview.gif)
 
 ## 🔒 Security Hardened
 
-- **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
+- **Mutual TLS (mTLS)** - End-to-end encrypted MCP
 - **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
