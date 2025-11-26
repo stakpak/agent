@@ -9,7 +9,7 @@
 //! Run with: cargo bench --bench gitleaks_memory
 
 use divan::AllocProfiler;
-use stakpak_shared::secrets::gitleaks::{detect_secrets, GITLEAKS_CONFIG, GITLEAKS_CONFIG_WITH_PRIVACY};
+use stakpak_shared::secrets::gitleaks::{create_gitleaks_config, detect_secrets};
 
 #[global_allocator]
 static ALLOC: AllocProfiler = AllocProfiler::system();
@@ -80,32 +80,32 @@ fn generate_content_without_secrets(lines: usize) -> String {
 mod config_initialization {
     use super::*;
 
-    /// Measure memory allocated when first accessing the default GITLEAKS_CONFIG.
-    /// This benchmark will only show allocations on the first run since LazyLock
-    /// caches the result.
+    /// Measure memory allocated when creating the default gitleaks config.
     #[divan::bench]
     fn load_default_config() {
-        // Force config initialization by accessing it
-        let _ = divan::black_box(&*GITLEAKS_CONFIG);
+        let config = divan::black_box(create_gitleaks_config(false));
+        drop(config);
     }
 
-    /// Measure memory allocated when first accessing GITLEAKS_CONFIG_WITH_PRIVACY.
+    /// Measure memory allocated when creating gitleaks config with privacy rules.
     #[divan::bench]
     fn load_privacy_config() {
-        // Force config initialization by accessing it
-        let _ = divan::black_box(&*GITLEAKS_CONFIG_WITH_PRIVACY);
+        let config = divan::black_box(create_gitleaks_config(true));
+        drop(config);
     }
 
     /// Count the number of rules in the default config
     #[divan::bench]
     fn count_default_rules() -> usize {
-        GITLEAKS_CONFIG.rules.len()
+        let config = create_gitleaks_config(false);
+        config.rules.len()
     }
 
     /// Count the number of rules in the privacy config
     #[divan::bench]
     fn count_privacy_rules() -> usize {
-        GITLEAKS_CONFIG_WITH_PRIVACY.rules.len()
+        let config = create_gitleaks_config(true);
+        config.rules.len()
     }
 }
 
@@ -116,48 +116,44 @@ mod secret_detection {
     #[divan::bench(args = [1, 5, 10, 20, 50])]
     fn detect_with_secrets(bencher: divan::Bencher, num_secrets: usize) {
         let content = generate_content_with_secrets(num_secrets);
+        let config = create_gitleaks_config(false);
 
         bencher
             .with_inputs(|| content.clone())
-            .bench_values(|content| {
-                divan::black_box(detect_secrets(&content, None, false))
-            });
+            .bench_values(|content| divan::black_box(detect_secrets(&content, None, &config)));
     }
 
     /// Benchmark memory allocations during secret detection with varying content sizes (no secrets)
     #[divan::bench(args = [10, 100, 500, 1000])]
     fn detect_varying_content_size(bencher: divan::Bencher, lines: usize) {
         let content = generate_content_without_secrets(lines);
+        let config = create_gitleaks_config(false);
 
         bencher
             .with_inputs(|| content.clone())
-            .bench_values(|content| {
-                divan::black_box(detect_secrets(&content, None, false))
-            });
+            .bench_values(|content| divan::black_box(detect_secrets(&content, None, &config)));
     }
 
     /// Benchmark memory with privacy mode enabled
     #[divan::bench(args = [1, 5, 10])]
     fn detect_with_privacy_mode(bencher: divan::Bencher, num_secrets: usize) {
         let content = generate_content_with_secrets(num_secrets);
+        let config = create_gitleaks_config(true);
 
         bencher
             .with_inputs(|| content.clone())
-            .bench_values(|content| {
-                divan::black_box(detect_secrets(&content, None, true))
-            });
+            .bench_values(|content| divan::black_box(detect_secrets(&content, None, &config)));
     }
 
     /// Compare privacy mode on vs off
     #[divan::bench(consts = [false, true])]
     fn privacy_mode_comparison<const PRIVACY_MODE: bool>(bencher: divan::Bencher) {
         let content = generate_content_with_secrets(5);
+        let config = create_gitleaks_config(PRIVACY_MODE);
 
         bencher
             .with_inputs(|| content.clone())
-            .bench_values(|content| {
-                divan::black_box(detect_secrets(&content, None, PRIVACY_MODE))
-            });
+            .bench_values(|content| divan::black_box(detect_secrets(&content, None, &config)));
     }
 }
 
@@ -188,10 +184,9 @@ APP_NAME=MyApp
 APP_ENV=production
 LOG_LEVEL=info
 "#;
+        let config = create_gitleaks_config(false);
 
-        bencher.bench(|| {
-            divan::black_box(detect_secrets(content, Some("config.env"), false))
-        });
+        bencher.bench(|| divan::black_box(detect_secrets(content, Some("config.env"), &config)));
     }
 
     /// Simulate scanning a large log file
@@ -214,11 +209,12 @@ LOG_LEVEL=info
                 ));
             }
         }
+        let config = create_gitleaks_config(false);
 
         bencher
             .with_inputs(|| content.clone())
             .bench_values(|content| {
-                divan::black_box(detect_secrets(&content, Some("app.log"), false))
+                divan::black_box(detect_secrets(&content, Some("app.log"), &config))
             });
     }
 
@@ -246,10 +242,9 @@ func main() {
     fmt.Println("Starting application...")
 }
 "#;
+        let config = create_gitleaks_config(false);
 
-        bencher.bench(|| {
-            divan::black_box(detect_secrets(content, Some("main.go"), false))
-        });
+        bencher.bench(|| divan::black_box(detect_secrets(content, Some("main.go"), &config)));
     }
 }
 
@@ -262,32 +257,28 @@ mod batch_processing {
         let files: Vec<String> = (0..num_files)
             .map(|i| generate_content_with_secrets(i + 1))
             .collect();
+        let config = create_gitleaks_config(false);
 
-        bencher
-            .with_inputs(|| files.clone())
-            .bench_values(|files| {
-                let mut total_secrets = 0;
-                for (i, content) in files.iter().enumerate() {
-                    let secrets = detect_secrets(
-                        content,
-                        Some(&format!("file_{}.txt", i)),
-                        false
-                    );
-                    total_secrets += secrets.len();
-                }
-                divan::black_box(total_secrets)
-            });
+        bencher.with_inputs(|| files.clone()).bench_values(|files| {
+            let mut total_secrets = 0;
+            for (i, content) in files.iter().enumerate() {
+                let secrets = detect_secrets(content, Some(&format!("file_{}.txt", i)), &config);
+                total_secrets += secrets.len();
+            }
+            divan::black_box(total_secrets)
+        });
     }
 
     /// Simulate repeated scans of the same content (cache behavior)
     #[divan::bench(args = [10, 50, 100])]
     fn repeated_scans(bencher: divan::Bencher, num_scans: usize) {
         let content = generate_content_with_secrets(5);
+        let config = create_gitleaks_config(false);
 
         bencher.bench(|| {
             let mut total_secrets = 0;
             for _ in 0..num_scans {
-                let secrets = detect_secrets(&content, None, false);
+                let secrets = detect_secrets(&content, None, &config);
                 total_secrets += secrets.len();
             }
             divan::black_box(total_secrets)

@@ -44,7 +44,7 @@ axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
 divan = "0.1"
 
 [[bench]]
-name = "secret_manager"
+name = "actor_model_memory"
 harness = false
 
 [[bench]]
