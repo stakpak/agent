@@ -150,7 +150,7 @@ impl<State: Clone + Serialize> HookRegistry<State> {
         hooks.push(hook);
 
         // Sort by priority (lower = earlier execution)
-        hooks.sort_by_key(|h| h.priority());
+        hooks.sort_unstable_by_key(|h| h.priority());
     }
 
     pub async fn execute_hooks(
