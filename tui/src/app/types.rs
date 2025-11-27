@@ -28,6 +28,10 @@ pub struct HelperCommand {
 pub struct AttachedImage {
     pub placeholder: String,
     pub path: PathBuf,
+    pub filename: String,
+    pub dimensions: (u32, u32),
+    pub start_pos: usize,
+    pub end_pos: usize,
 }
 
 #[derive(Debug)]

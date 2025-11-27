@@ -6,11 +6,9 @@
 //! - Processing images (resize, compress)
 //! - Creating ContentParts for API communication
 
-use image::{GenericImageView, ImageFormat};
 use regex::Regex;
 use stakpak_shared::models::integrations::openai::{ContentPart, ImageUrl};
 use std::path::{Path, PathBuf};
-use tempfile::Builder;
 
 /// Supported image file extensions
 const IMAGE_EXTENSIONS: &str = r"(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)";
@@ -23,47 +21,15 @@ fn is_image_extension(ext: &str) -> bool {
     )
 }
 
-/// Resize an image if it exceeds the maximum dimension, maintaining aspect ratio.
-///
-/// Returns the resized image and its final dimensions (width, height).
-/// If the image is already within the size limit, returns the original image unchanged.
-fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicImage, u32, u32) {
-    const MAX_DIMENSION: u32 = 768;
-    let (w, h) = dyn_img.dimensions();
-
-    if w > MAX_DIMENSION || h > MAX_DIMENSION {
-        let (new_width, new_height) = if w > h {
-            let ratio = MAX_DIMENSION as f32 / w as f32;
-            (MAX_DIMENSION, (h as f32 * ratio) as u32)
-        } else {
-            let ratio = MAX_DIMENSION as f32 / h as f32;
-            ((w as f32 * ratio) as u32, MAX_DIMENSION)
-        };
-        dyn_img =
-            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
-        (dyn_img, new_width, new_height)
-    } else {
-        (dyn_img, w, h)
-    }
-}
-
-/// Encode a DynamicImage to JPEG format.
-///
-/// Returns the JPEG bytes or an error if encoding fails.
-fn encode_image_to_jpeg(dyn_img: &image::DynamicImage) -> Result<Vec<u8>, String> {
-    let mut jpeg_data = Vec::new();
-    {
-        let mut cursor = std::io::Cursor::new(&mut jpeg_data);
-        dyn_img
-            .write_to(&mut cursor, ImageFormat::Jpeg)
-            .map_err(|e| format!("Failed to encode image: {}", e))?;
-    }
-
-    if jpeg_data.is_empty() {
-        return Err("encoded JPEG is empty".to_string());
-    }
-
-    Ok(jpeg_data)
+/// Check if image format is supported by the API
+fn is_supported_format(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    
+    !matches!(ext.as_str(), "tiff" | "tif" | "bmp")
 }
 
 /// Check if image data matches known image format magic bytes.
@@ -72,6 +38,9 @@ fn is_valid_image_data(data: &[u8]) -> bool {
         || data.starts_with(&[0xFF, 0xD8, 0xFF]) // JPEG
         || data.starts_with(b"GIF8") // GIF
         || (data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP") // WebP
+        || data.starts_with(&[0x42, 0x4D]) // BMP
+        || data.starts_with(&[0x49, 0x49, 0x2A, 0x00]) // TIFF (little-endian)
+        || data.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]) // TIFF (big-endian)
 }
 
 /// Extract image URLs from text
@@ -85,118 +54,6 @@ pub fn extract_image_urls(text: &str) -> Vec<String> {
 }
 
 /// Extract local file paths from text (handles quoted and unquoted paths)
-pub fn extract_local_image_paths(text: &str) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    // Pattern 1: Quoted paths (single or double quotes)
-    let single_quote_pattern = format!(r"'([^']+\.{}[^']*)'", IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&single_quote_pattern) {
-        for cap in re.captures_iter(text) {
-            if let Some(path_match) = cap.get(1) {
-                let path = PathBuf::from(path_match.as_str());
-                if path.exists() && path.is_file() {
-                    paths.push(path);
-                }
-            }
-        }
-    }
-
-    let double_quote_pattern = format!(r#""([^"]+\.{}[^"]*)""#, IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&double_quote_pattern) {
-        for cap in re.captures_iter(text) {
-            if let Some(path_match) = cap.get(1) {
-                let path = PathBuf::from(path_match.as_str());
-                if path.exists() && path.is_file() && !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
-        }
-    }
-
-    // Pattern 2: Unquoted absolute paths (Unix/Mac style)
-    let unix_pattern = format!(r"/[^\s]+\.{}", IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&unix_pattern) {
-        for cap in re.find_iter(text) {
-            let path = PathBuf::from(cap.as_str());
-            if path.exists() && path.is_file() && !paths.contains(&path) {
-                paths.push(path);
-            }
-        }
-    }
-
-    // Pattern 3: Windows-style paths
-    let windows_pattern = format!(
-        r#"(?:[A-Za-z]:\\[^\s]+\.{}|\\\\[^\s]+\.{})"#,
-        IMAGE_EXTENSIONS, IMAGE_EXTENSIONS
-    );
-    if let Ok(re) = Regex::new(&windows_pattern) {
-        for cap in re.find_iter(text) {
-            let path = PathBuf::from(cap.as_str());
-            if path.exists() && path.is_file() && !paths.contains(&path) {
-                paths.push(path);
-            }
-        }
-    }
-
-    // Pattern 4: Tilde-expanded paths
-    let tilde_pattern = format!(r"~[^\s]+\.{}", IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&tilde_pattern) {
-        for cap in re.find_iter(text) {
-            let path_str = cap.as_str();
-            if let Some(home) = std::env::var("HOME")
-                .ok()
-                .or_else(|| std::env::var("USERPROFILE").ok())
-            {
-                let expanded = path_str.replacen("~", &home, 1);
-                let path = PathBuf::from(expanded);
-                if path.exists() && path.is_file() && !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
-        }
-    }
-
-    paths
-}
-
-/// Process and compress an image file: load, resize to max 768px if needed, save to temp JPEG file
-pub fn process_and_compress_image_file(path: &Path) -> Result<(PathBuf, u32, u32), String> {
-    if !path.exists() {
-        return Err(format!("File does not exist: {}", path.display()));
-    }
-
-    if !path.is_file() {
-        return Err(format!("Path is not a file: {}", path.display()));
-    }
-
-    let dyn_img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
-
-    // Resize image if it exceeds max dimension (768px for better compression)
-    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
-
-    // Encode resized image to JPEG for better compression
-    let jpeg_data = encode_image_to_jpeg(&dyn_img)?;
-
-    let tmp = Builder::new()
-        .prefix("stakpak-image-")
-        .suffix(".jpg")
-        .tempfile()
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
-
-    std::fs::write(tmp.path(), &jpeg_data)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
-
-    let (_file, temp_path) = tmp
-        .keep()
-        .map_err(|e| format!("Failed to persist temp file: {}", e.error))?;
-
-    let canonical_path = temp_path
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize path: {}", e))?;
-
-    Ok((canonical_path, final_width, final_height))
-}
-
 /// Create an image content part from a URL (sends URL directly, no download)
 pub fn create_image_part_from_url(url: &str) -> ContentPart {
     ContentPart {
@@ -226,6 +83,7 @@ pub fn create_image_part_from_path(path: &Path) -> Option<ContentPart> {
     }
 
     let image_data = std::fs::read(&canonical_path).ok()?;
+
     if image_data.is_empty() {
         return None;
     }
@@ -264,6 +122,14 @@ fn detect_mime_type_from_content(data: &[u8], path: &Path) -> &'static str {
         if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
             return "image/webp";
         }
+        if data.starts_with(&[0x42, 0x4D]) {
+            return "image/bmp";
+        }
+        if data.starts_with(&[0x49, 0x49, 0x2A, 0x00])
+            || data.starts_with(&[0x4D, 0x4D, 0x00, 0x2A])
+        {
+            return "image/tiff";
+        }
     }
     mime_type_from_path(path)
 }
@@ -284,6 +150,8 @@ fn mime_type_from_path(path: &Path) -> &'static str {
             "jpg" | "jpeg" => Some("image/jpeg"),
             "gif" => Some("image/gif"),
             "webp" => Some("image/webp"),
+            "bmp" => Some("image/bmp"),
+            "tiff" | "tif" => Some("image/tiff"),
             _ => None,
         })
         .unwrap_or("image/jpeg")
@@ -293,75 +161,28 @@ fn mime_type_from_path(path: &Path) -> &'static str {
 pub fn process_all_images(text: &str, attached_image_paths: &[PathBuf]) -> Vec<ContentPart> {
     let mut parts = Vec::new();
 
-    // Process image URLs from text
+    // Process image URLs from text (these are always valid)
     let image_urls = extract_image_urls(text);
     for url in image_urls {
         parts.push(create_image_part_from_url(&url));
     }
 
-    // Process local image paths from text
-    // Use extract_file_paths_from_text which handles paths with spaces better
-    // than the regex-based extract_local_image_paths
-    let local_paths = {
-        use crate::services::clipboard_paste::extract_file_paths_from_text;
-        let extracted = extract_file_paths_from_text(text);
-        // Also try the regex-based approach for quoted paths and other patterns
-        let regex_paths = extract_local_image_paths(text);
-        // Combine and deduplicate
-        let mut all_paths = extracted;
-        for path in regex_paths {
-            if !all_paths.contains(&path) {
-                all_paths.push(path);
-            }
-        }
-        all_paths
-    };
+    // DON'T extract local paths from text - the TUI already detected and provided them
+    // in attached_image_paths. Extracting from text causes old placeholders in history
+    // to be re-processed, leading to duplicate images across messages.
 
-    for local_path in local_paths {
-        // Process and compress local image
-        if let Ok((processed_path, _, _)) = process_and_compress_image_file(&local_path)
-            && let Some(part) = create_image_part_from_path(&processed_path)
-        {
-            parts.push(part);
-        }
-    }
-
-    // Process attached image paths (from clipboard/TUI)
+    // Process attached image paths (from TUI/clipboard)
+    // Filter out unsupported formats (TIFF/BMP) as the API doesn't support them
     for attached_path in attached_image_paths {
+        // Skip unsupported formats
+        if !is_supported_format(attached_path) {
+            continue;
+        }
+
         if let Some(part) = create_image_part_from_path(attached_path) {
             parts.push(part);
         }
     }
 
     parts
-}
-
-/// Clean text by removing image URLs and local paths
-pub fn clean_text_from_images(text: &str) -> String {
-    let mut cleaned = text.to_string();
-
-    // Remove image URLs
-    let image_urls = extract_image_urls(&cleaned);
-    for url in image_urls {
-        cleaned = cleaned.replace(&url, "").trim().to_string();
-    }
-
-    // Remove local paths (quoted)
-    let single_quote_pattern = format!(r"'[^']+\.{}[^']*'", IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&single_quote_pattern) {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    let double_quote_pattern = format!(r#""[^"]+\.{}[^"]*""#, IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&double_quote_pattern) {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    // Remove unquoted paths
-    let unix_pattern = format!(r"/[^\s]+\.{}", IMAGE_EXTENSIONS);
-    if let Ok(re) = Regex::new(&unix_pattern) {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    cleaned.trim().to_string()
 }

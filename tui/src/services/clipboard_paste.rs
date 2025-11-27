@@ -1,6 +1,5 @@
 use crate::services::handlers::find_image_file_by_name;
-use crate::services::image_upload::process_and_compress_image_file;
-use image::{GenericImageView, ImageFormat};
+use image::ImageFormat;
 use log;
 use std::path::PathBuf;
 use tempfile::Builder;
@@ -272,36 +271,6 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     None
 }
 
-/// Resize an image if it exceeds the maximum dimension, maintaining aspect ratio.
-///
-/// Returns the resized image and its final dimensions (width, height).
-/// If the image is already within the size limit, returns the original image unchanged.
-///
-/// Note: This is kept here for clipboard image data processing (raw RGBA data),
-/// which is different from file-based processing handled by image_upload module.
-fn resize_image_if_needed(mut dyn_img: image::DynamicImage) -> (image::DynamicImage, u32, u32) {
-    const MAX_DIMENSION: u32 = 768;
-    let (w, h) = dyn_img.dimensions();
-
-    if w > MAX_DIMENSION || h > MAX_DIMENSION {
-        log::info!("Resizing image from {w}x{h} to max {MAX_DIMENSION}px");
-        let (new_width, new_height) = if w > h {
-            let ratio = MAX_DIMENSION as f32 / w as f32;
-            (MAX_DIMENSION, (h as f32 * ratio) as u32)
-        } else {
-            let ratio = MAX_DIMENSION as f32 / h as f32;
-            ((w as f32 * ratio) as u32, MAX_DIMENSION)
-        };
-        log::info!("Resizing to {new_width}x{new_height}");
-        dyn_img =
-            dyn_img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
-        (dyn_img, new_width, new_height)
-    } else {
-        log::info!("Image is already within size limit, no resize needed");
-        (dyn_img, w, h)
-    }
-}
-
 /// Encode a DynamicImage to JPEG format.
 ///
 /// Returns the JPEG bytes or an error if encoding fails.
@@ -378,37 +347,31 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
         if let Some(path) = path_opt {
             log::info!("Found image file path in clipboard: {}", path.display());
 
-            // Use the shared image processing function from image_upload module
-            match process_and_compress_image_file(path.as_path()) {
-                Ok((processed_path, final_width, final_height)) => {
-                    // Read the processed JPEG file
-                    match std::fs::read(&processed_path) {
-                        Ok(jpeg) => {
-                            log::info!(
-                                "clipboard image from file processed (resized: {final_width}x{final_height}, {} bytes)",
-                                jpeg.len()
-                            );
-                            return Ok((
-                                jpeg,
-                                PastedImageInfo {
-                                    width: final_width,
-                                    height: final_height,
-                                    encoded_format: EncodedImageFormat::Jpeg,
-                                },
-                            ));
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "Failed to read processed image file {}: {}",
-                                processed_path.display(),
-                                e
-                            );
-                            // Fall through to try clipboard image data
-                        }
+            // Read the image file directly without resizing
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    // Get dimensions
+                    if let Ok((width, height)) = image::image_dimensions(&path) {
+                        log::info!(
+                            "clipboard image from file: {}x{}, {} bytes",
+                            width,
+                            height,
+                            data.len()
+                        );
+                        // Use JPEG as the format
+                        let encoded_format = EncodedImageFormat::Jpeg;
+                        return Ok((
+                            data,
+                            PastedImageInfo {
+                                width,
+                                height,
+                                encoded_format,
+                            },
+                        ));
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to process image file {}: {}", path.display(), e);
+                    log::warn!("Failed to read image file {}: {}", path.display(), e);
                     // Fall through to try clipboard image data
                 }
             }
@@ -461,21 +424,18 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
         actual_bytes
     );
 
-    // Resize image if it exceeds max dimension (768px for better compression)
-    let (dyn_img, final_width, final_height) = resize_image_if_needed(dyn_img);
-
-    // Encode resized image to JPEG for better compression
+    // Encode to JPEG for better compression (no resizing)
     let jpeg = encode_image_to_jpeg(&dyn_img)?;
 
     log::info!(
-        "clipboard image encoded to JPEG (original: {w}x{h}, resized: {final_width}x{final_height}, {} bytes)",
+        "clipboard image encoded to JPEG {w}x{h}, {} bytes",
         jpeg.len()
     );
     Ok((
         jpeg,
         PastedImageInfo {
-            width: final_width,
-            height: final_height,
+            width: w,
+            height: h,
             encoded_format: EncodedImageFormat::Jpeg,
         },
     ))
