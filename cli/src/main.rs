@@ -1,12 +1,17 @@
 use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::RemoteClient,
+};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::{integrations::openai::AgentModel, subagent::SubagentConfigs};
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 mod apikey_auth;
@@ -22,7 +27,7 @@ use commands::{
         run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
     },
 };
-use config::AppConfig;
+use config::{AppConfig, ProviderType};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
@@ -225,16 +230,37 @@ async fn main() {
                     }
                 }
                 None => {
-                    if config.api_key.is_none() {
+                    if config.api_key.is_none() && config.provider == ProviderType::Remote {
                         prompt_for_api_key(&mut config).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
-                    let api_config: ClientConfig = config.clone().into();
-                    let client = if let Ok(client) = Client::new(&api_config) {
-                        client
-                    } else {
-                        eprintln!("Failed to create client");
-                        std::process::exit(1);
+
+                    let client: Arc<dyn AgentProvider> = match config.provider {
+                        ProviderType::Remote => {
+                            let client =
+                                RemoteClient::new(&config.clone().into()).unwrap_or_else(|e| {
+                                    eprintln!("Failed to create client: {}", e);
+                                    std::process::exit(1);
+                                });
+                            Arc::new(client)
+                        }
+                        ProviderType::Local => {
+                            let client = LocalClient::new(LocalClientConfig {
+                                store_path: None,
+                                anthropic_config: config.anthropic.clone(),
+                                openai_config: config.openai.clone(),
+                                eco_model: config.eco_model.clone(),
+                                recovery_model: config.recovery_model.clone(),
+                                smart_model: config.smart_model.clone(),
+                                hook_registry: None,
+                            })
+                            .await
+                            .unwrap_or_else(|e| {
+                                eprintln!("Failed to create local client: {}", e);
+                                std::process::exit(1);
+                            });
+                            Arc::new(client)
+                        }
                     };
 
                     // Parallelize HTTP calls for faster startup
@@ -263,13 +289,16 @@ async fn main() {
                     match api_result {
                         Ok(_) => {}
                         Err(e) => {
-                            println!();
-                            println!("❌ API key validation failed: {}", e);
-                            println!("Please check your API key and run the below command");
-                            println!();
-                            println!("\x1b[1;34mstakpak login --api-key <your-api-key>\x1b[0m");
-                            println!();
-                            std::process::exit(1);
+                            // Only exit on error if using remote provider
+                            if matches!(config.provider, ProviderType::Remote) {
+                                println!();
+                                println!("❌ API key validation failed: {}", e);
+                                println!("Please check your API key and run the below command");
+                                println!();
+                                println!("\x1b[1;34mstakpak login --api-key <your-api-key>\x1b[0m");
+                                println!();
+                                std::process::exit(1);
+                            }
                         }
                     }
 
@@ -296,13 +325,13 @@ async fn main() {
                         None
                     };
 
-                    // match get_or_build_local_code_index(&api_config, None, cli.index_big_project)
+                    // match get_or_build_local_code_index(&config, None, cli.index_big_project)
                     //     .await
                     // {
                     //     Ok(_) => {
                     //         // Indexing was successful, start the file watcher
                     //         tokio::spawn(async move {
-                    //             match start_code_index_watcher(&api_config, None) {
+                    //             match start_code_index_watcher(&config, None) {
                     //                 Ok(_) => {}
                     //                 Err(e) => {
                     //                     eprintln!("Failed to start code index watcher: {}", e);

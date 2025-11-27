@@ -1,10 +1,16 @@
+use std::sync::Arc;
+
 use crate::{
     // code_index::{get_or_build_local_code_index, start_code_index_watcher},
-    config::AppConfig,
+    config::{AppConfig, ProviderType},
 };
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
-use stakpak_api::Client;
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::RemoteClient,
+};
 
 pub mod acp;
 pub mod agent;
@@ -145,6 +151,29 @@ pub enum Commands {
     Update,
 }
 
+async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
+    match config.provider {
+        ProviderType::Remote => {
+            let client = RemoteClient::new(&config.clone().into())?;
+            Ok(Arc::new(client))
+        }
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: config.anthropic.clone(),
+                openai_config: config.openai.clone(),
+                eco_model: config.eco_model.clone(),
+                recovery_model: config.recovery_model.clone(),
+                smart_model: config.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Ok(Arc::new(client))
+        }
+    }
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -236,7 +265,7 @@ impl Commands {
                 }
             },
             Commands::Rulebooks(rulebook_command) => {
-                let client = Client::new(&config.into()).map_err(|e| e.to_string())?;
+                let client = get_client(&config).await?;
                 match rulebook_command {
                     RulebookCommands::Get { uri } => {
                         if let Some(uri) = uri {
@@ -299,7 +328,7 @@ impl Commands {
                 }
             }
             Commands::Account => {
-                let client = Client::new(&(config.into())).map_err(|e| e.to_string())?;
+                let client = get_client(&config).await?;
                 let data = client.get_my_account().await?;
                 println!("{}", data.to_text());
             }

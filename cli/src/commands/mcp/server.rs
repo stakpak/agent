@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use stakpak_api::ClientConfig;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 
-use crate::{config::AppConfig, utils::network};
+use crate::{commands::get_client, config::AppConfig, utils::network};
 
 pub async fn run_server(
     config: AppConfig,
@@ -15,7 +14,6 @@ pub async fn run_server(
     _index_big_project: bool,
     disable_mcp_mtls: bool,
 ) -> Result<(), String> {
-    let _api_config: ClientConfig = config.clone().into();
     match tool_mode {
         ToolMode::RemoteOnly | ToolMode::Combined => {
             // Placeholder for code indexing logic
@@ -49,7 +47,7 @@ pub async fn run_server(
 
     start_server(
         MCPServerConfig {
-            api: config.into(),
+            client: Some(get_client(&config).await?),
             redact_secrets: !disable_secret_redaction,
             privacy_mode,
             enabled_tools: EnabledToolsConfig {

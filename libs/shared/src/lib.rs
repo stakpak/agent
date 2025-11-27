@@ -2,6 +2,7 @@ pub mod cert_utils;
 pub mod file_backup_manager;
 pub mod file_watcher;
 pub mod helper;
+pub mod hooks;
 pub mod local_store;
 pub mod models;
 pub mod remote_connection;
