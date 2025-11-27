@@ -28,7 +28,7 @@ fn is_supported_format(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    
+
     !matches!(ext.as_str(), "tiff" | "tif" | "bmp")
 }
 

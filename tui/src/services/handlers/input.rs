@@ -385,14 +385,16 @@ fn handle_input_submitted(
     } else if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
         // Allow submission if there's text input OR attached images
 
-        log::debug!("Submitting message with {} attached images", state.attached_images.len());
+        log::debug!(
+            "Submitting message with {} attached images",
+            state.attached_images.len()
+        );
 
         // Show loading immediately if processing images
         let has_images = !state.attached_images.is_empty();
 
         // Convert any pending image paths before submission
         convert_all_pending_paths(state);
-
 
         // Start streaming/loading state if we have images to process
         if has_images || !state.attached_images.is_empty() {
@@ -1046,7 +1048,7 @@ fn is_supported_format(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    
+
     !matches!(ext.as_str(), "tiff" | "tif" | "bmp")
 }
 
@@ -1134,7 +1136,7 @@ fn convert_path_to_placeholder(
         .attached_images
         .iter()
         .any(|img| img.path == resolved_path);
-    
+
     if !already_attached {
         // Store original path - processing will happen on submission
         state.attached_images.push(AttachedImage {
