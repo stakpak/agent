@@ -238,13 +238,8 @@ impl Anthropic {
         config: &AnthropicConfig,
         input: AnthropicInput,
     ) -> Result<LLMCompletionResponse, AgentError> {
-        let model = serde_json::to_string(&input.model)
-            .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?
-            .trim_matches('"')
-            .to_string();
-
         let mut payload = json!({
-            "model": model,
+            "model": input.model.to_string(),
             "system": input.messages.iter().find(|mess| mess.role == "system").map(|mess| mess.content.clone()),
             "messages": input.messages.into_iter().filter(|message| message.role!= "system").collect::<Vec<LLMMessage>>(),
             "max_tokens": input.max_tokens,
@@ -334,13 +329,8 @@ impl Anthropic {
         stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
         input: AnthropicInput,
     ) -> Result<LLMCompletionResponse, AgentError> {
-        let model = serde_json::to_string(&input.model)
-            .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?
-            .trim_matches('"')
-            .to_string();
-
         let mut payload = json!({
-            "model": model,
+            "model": input.model.to_string(),
             "system": input.messages.iter().find(|mess| mess.role == "system").map(|mess| json!([
                 {
                     "type": "text",
@@ -439,7 +429,7 @@ impl Anthropic {
         }
 
         let completion_response =
-            process_stream(response, model.clone(), stream_channel_tx).await?;
+            process_stream(response, input.model.to_string(), stream_channel_tx).await?;
 
         Ok(completion_response)
     }
