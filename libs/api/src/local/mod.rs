@@ -398,6 +398,7 @@ impl LocalClient {
         match model {
             AgentModel::Smart => self.smart_model.clone(),
             AgentModel::Eco => self.eco_model.clone(),
+            AgentModel::Recovery => self.recovery_model.clone(),
         }
     }
 
