@@ -458,12 +458,32 @@ impl AgentProvider for RemoteClient {
             .await
             .map_err(|e: ReqwestError| e.to_string())?;
 
+        // Check content-type before processing
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+
         // Extract x-request-id from headers
         let request_id = response
             .headers()
             .get("x-request-id")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
+
+        // If content-type is not event-stream, it's likely an error message
+        if !content_type.contains("event-stream") && !content_type.contains("text/event-stream") {
+            let status = response.status();
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            return Err(format!(
+                "Server returned non-stream response ({}): {}",
+                status, error_body
+            ));
+        }
 
         let response = self.handle_response_error(response).await?;
         let stream = response.bytes_stream().eventsource().map(|event| {

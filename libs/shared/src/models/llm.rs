@@ -252,6 +252,7 @@ impl ToString for LLMMessageContent {
                     LLMMessageTypedContent::Text { text } => text.clone(),
                     LLMMessageTypedContent::ToolCall { .. } => String::new(),
                     LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
+                    LLMMessageTypedContent::Image { .. } => String::new(),
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -288,6 +289,16 @@ pub enum LLMMessageTypedContent {
         tool_use_id: String,
         content: String,
     },
+    #[serde(rename = "image")]
+    Image { source: LLMMessageImageSource },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LLMMessageImageSource {
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub media_type: String,
+    pub data: String,
 }
 
 impl Default for LLMMessageTypedContent {

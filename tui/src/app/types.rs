@@ -5,6 +5,7 @@
 
 use crate::services::message::Message;
 use ratatui::text::Line;
+use std::path::PathBuf;
 
 // Type alias to reduce complexity - now stores processed lines for better performance
 pub type MessageLinesCache = (Vec<Message>, usize, Vec<Line<'static>>);
@@ -21,6 +22,16 @@ pub struct FileSearchResult {
 pub struct HelperCommand {
     pub command: &'static str,
     pub description: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct AttachedImage {
+    pub placeholder: String,
+    pub path: PathBuf,
+    pub filename: String,
+    pub dimensions: (u32, u32),
+    pub start_pos: usize,
+    pub end_pos: usize,
 }
 
 #[derive(Debug)]

@@ -29,7 +29,7 @@ use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_se
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatMessage, ToolCall, ToolCallResultStatus,
+    AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
@@ -278,8 +278,7 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
-                    OutputEvent::UserMessage(user_input, tool_calls_results) => {
-                        // Loading will be managed by stream processing
+                    OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
                         let mut user_input = user_input.clone();
 
                         // Add user shell history to the user input
@@ -310,16 +309,40 @@ pub async fn run_interactive(
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
-                                // Don't add local context or rulebooks for regular messages
                                 (user_input.to_string(), None::<String>)
                             };
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
 
+                        // Create message with ContentParts from TUI
+                        let user_msg = if image_parts.is_empty() {
+                            user_message(user_input)
+                        } else {
+                            let mut parts = Vec::new();
+                            if !user_input.trim().is_empty() {
+                                parts.push(
+                                    stakpak_shared::models::integrations::openai::ContentPart {
+                                        r#type: "text".to_string(),
+                                        text: Some(user_input),
+                                        image_url: None,
+                                    },
+                                );
+                            }
+                            parts.extend(image_parts);
+                            ChatMessage {
+                                role: Role::User,
+                                content: Some(MessageContent::Array(parts)),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                                usage: None,
+                            }
+                        };
+
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                         tools_queue.clear();
-                        messages.push(user_message(user_input));
+                        messages.push(user_msg);
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(
@@ -777,8 +800,26 @@ pub async fn run_interactive(
                     let (mut stream, current_request_id) = match stream_result {
                         Ok(result) => result,
                         Err(e) => {
-                            send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
-                            break Err(ApiStreamError::Unknown(e));
+                            // Extract a user-friendly error message
+                            let error_msg = if e.contains("Server returned non-stream response") {
+                                // Extract the actual error from the server response
+                                if let Some(start) = e.find(": ") {
+                                    e[start + 2..].to_string()
+                                } else {
+                                    e.clone()
+                                }
+                            } else {
+                                e.clone()
+                            };
+                            // End loading operation before sending error
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing),
+                            )
+                            .await?;
+                            send_input_event(&input_tx, InputEvent::Error(error_msg.clone()))
+                                .await?;
+                            break Err(ApiStreamError::Unknown(error_msg));
                         }
                     };
 
@@ -819,6 +860,14 @@ pub async fn run_interactive(
                                     // Loading will be managed by stream processing on retry
                                     continue;
                                 } else {
+                                    // End loading operation before sending error
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::EndLoadingOperation(
+                                            LoadingOperation::StreamProcessing,
+                                        ),
+                                    )
+                                    .await?;
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::Error("MAX_RETRY_REACHED".to_string()),
@@ -827,6 +876,14 @@ pub async fn run_interactive(
                                     break Err(e);
                                 }
                             } else {
+                                // End loading operation before sending error
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::EndLoadingOperation(
+                                        LoadingOperation::StreamProcessing,
+                                    ),
+                                )
+                                .await?;
                                 send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
                                     .await?;
                                 break Err(e);

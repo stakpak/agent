@@ -45,6 +45,9 @@ pub struct AppState {
     pub pasted_long_text: Option<String>,
     pub pasted_placeholder: Option<String>,
     pub pending_pastes: Vec<(String, String)>,
+    /// Images attached via pasted file paths (and future clipboard image support).
+    pub attached_images: Vec<AttachedImage>,
+    pub pending_path_start: Option<usize>,
     pub interactive_commands: Vec<String>,
 
     // ========== Messages & Scrolling State ==========
@@ -255,6 +258,8 @@ impl AppState {
             is_pasting: false,
             ondemand_shell_mode: false,
             shell_tool_calls: None,
+            attached_images: Vec::new(),
+            pending_path_start: None,
             dialog_message_id: None,
             file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),

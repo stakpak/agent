@@ -698,6 +698,11 @@ impl TextArea {
         self.elements.sort_by_key(|e| e.range.start);
     }
 
+    /// Register an existing range of text as a styled element
+    pub fn register_element(&mut self, range: Range<usize>) {
+        self.add_element(range);
+    }
+
     fn find_element_containing(&self, pos: usize) -> Option<usize> {
         self.elements
             .iter()

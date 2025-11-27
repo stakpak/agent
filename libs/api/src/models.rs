@@ -661,6 +661,7 @@ impl From<&InferenceOutput> for ChatMessage {
                     LLMMessageTypedContent::Text { text } => text.clone(),
                     LLMMessageTypedContent::ToolCall { .. } => String::new(),
                     LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
+                    LLMMessageTypedContent::Image { .. } => String::new(),
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
