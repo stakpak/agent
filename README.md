@@ -68,34 +68,26 @@ docker pull ghcr.io/stakpak/agent:latest
 ```
 
 ## Usage
+You can [use your own Anthropic or OpenAI API keys](#option-b-running-without-a-stakpak-api-key), [custom OpenAI compatible endpoint](#option-b-running-without-a-stakpak-api-key), or [a Stakpak API key](#option-a-running-with-a-stakpak-api-key).
 
-### Authentication
+### Option A: Running with a Stakpak API Key (no card required)
 
-#### Get an API Key (no card required)
+Just run `stakpak` and follow the instructions which will create a new API key for you.
+```bash
+stakpak
+```
 
-1. Visit [stakpak.dev](https://stakpak.dev)
-2. Click "Login" in the top right
+> Brave users may encounter issues with automatic redirects to localhost ports during the API key creation flow. If this happens to you:
+>
+> Copy your new key from the browser paste it in your terminal
 
-   <img src="assets/login.png" width="800">
-
-3. Click "Create API Key" in the account menu
-
-   <img src="assets/apikeys.png" width="800">
-
-#### Browser Compatibility Note
-
-**Brave Browser Users**: Brave's security features may block automatic redirects to localhost ports during the API key creation flow. If you encounter this:
-
-- **Option 1**: Click the security shield icon in the address bar and allow the redirect
-- **Option 2**: Wait ~15 seconds for the timeout, then manually add your API key using the steps below
-
-#### Set the environment variable `STAKPAK_API_KEY`
+#### You could also set the environment variable `STAKPAK_API_KEY`
 
 ```bash
 export STAKPAK_API_KEY=<mykey>
 ```
 
-#### Save your API key to `~/.stakpak/config.toml`
+#### Or save your API key to `~/.stakpak/config.toml`
 
 ```bash
 stakpak login --api-key $STAKPAK_API_KEY
@@ -107,15 +99,59 @@ stakpak login --api-key $STAKPAK_API_KEY
 stakpak account
 ```
 
-#### Start Stakpak Agent TUI
+### Option B: Running Without a Stakpak API Key
+
+Create `~/.stakpak/config.toml` with one of these configurations:
+
+**Option 1: Bring Your Own Keys (BYOK)** - Use your Anthropic/OpenAI API keys:
+```toml
+[profiles.byok]
+provider = "local"
+
+# customize models
+smart_model = "claude-sonnet-4-5"
+eco_model = "claude-haiku-4-5"
+
+[profiles.byok.anthropic]
+api_key = "sk-ant-..."
+
+[profiles.byok.openai]
+api_key = "sk-..."
+
+[settings]
+```
+
+**Option 2: Bring Your Own LLM** - Point to a local OpenAI-compatible endpoint (e.g. LM Studio):
+```toml
+[profiles.offline]
+provider = "local"
+smart_model = "qwen/qwen3-coder-30b"
+eco_model = "qwen/qwen3-coder-30b"
+
+[profiles.offline.openai]
+api_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
+api_key = ""
+
+[settings]
+```
+
+Then run with your profile:
+```bash
+stakpak --profile byok
+# or
+stakpak --profile offline
+```
+
+### Start Stakpak Agent TUI
 
 ```bash
+# Open the TUI
 stakpak
 # Resume execution from a checkpoint
 stakpak -c <checkpoint-id>
 ```
 
-#### Start Stakpak Agent TUI with Docker
+### Start Stakpak Agent TUI with Docker
 
 ```bash
 docker run -it --entrypoint stakpak ghcr.io/stakpak/agent:latest
@@ -138,11 +174,11 @@ docker run -it \
 - `Shift + Enter` or `Ctrl + J` to insert newline
 - `Ctrl + C` to quit
 
-### MCP Server Mode
+### MCP Modes
 
-Stakpak can run as an [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, providing secure and controlled access to system operations through different tool modes:
+You can use Stakpak as a secure MCP proxy or expose its security-hardened tools through an [MCP](https://modelcontextprotocol.io/) server.
 
-#### Tool Modes
+#### MCT Server Tools
 
 - **Local Mode (`--tool-mode local`)** - File operations and command execution only (no API key required)
 - **Remote Mode (`--tool-mode remote`)** - AI-powered code generation and search tools (API key required)
@@ -169,7 +205,6 @@ Additional flags for the MCP server:
 - `--disable-secret-redaction` – **not recommended**; prints secrets in plaintext to the console
 - `--privacy-mode` – redacts additional private data like IP addresses and AWS account IDs
 - `--enable-slack-tools` – enables experimental Slack tools
-- `--index-big-project` – allows indexing of large projects (more than 500 supported files)
 
 #### MCP Proxy Server
 
