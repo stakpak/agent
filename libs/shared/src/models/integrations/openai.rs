@@ -1209,6 +1209,8 @@ pub enum AgentModel {
     Smart,
     #[serde(rename = "eco")]
     Eco,
+    #[serde(rename = "recovery")]
+    Recovery,
 }
 
 impl std::fmt::Display for AgentModel {
@@ -1216,6 +1218,7 @@ impl std::fmt::Display for AgentModel {
         match self {
             AgentModel::Smart => write!(f, "smart"),
             AgentModel::Eco => write!(f, "eco"),
+            AgentModel::Recovery => write!(f, "recovery"),
         }
     }
 }
@@ -1224,6 +1227,7 @@ impl From<String> for AgentModel {
     fn from(value: String) -> Self {
         match value.as_str() {
             "eco" => AgentModel::Eco,
+            "recovery" => AgentModel::Recovery,
             _ => AgentModel::Smart,
         }
     }

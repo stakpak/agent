@@ -3,7 +3,7 @@
 //! Handles all input-related events including text input, cursor movement, and paste operations.
 
 use crate::app::{AppState, InputEvent, OutputEvent};
-use crate::constants::MAX_PASTE_CHAR_COUNT;
+use crate::constants::{CONTEXT_MAX_UTIL_TOKENS_RECOVERY, MAX_PASTE_CHAR_COUNT};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
@@ -403,10 +403,10 @@ fn handle_input_submitted(
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
 
-        // Use eco limit if eco model is selected
         let max_tokens = match state.model {
             AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
             AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+            AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
         };
 
         let usage = &state.current_message_usage;
