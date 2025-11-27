@@ -384,7 +384,7 @@ impl AppConfig {
         }
     }
 
-    fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
+    pub fn get_config_path<P: AsRef<Path>>(path: Option<P>) -> PathBuf {
         match path {
             Some(p) => p.as_ref().to_path_buf(),
             None => std::env::home_dir()

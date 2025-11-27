@@ -1,12 +1,21 @@
-# Stakpak Agent
 
-**The most secure agent built for operations & DevOps.** Designed for the grittiest parts of software development with enterprise-grade security features including mutual TLS (mTLS) encryption, dynamic secret redaction, and privacy-first architecture.
+# Stakpak
 
-<img src="assets/TUIOverview.png" width="800">
+You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
+Stakpak is built different:
+- **Secret Substitution** - The LLM works with your credentials without ever seeing them
+- **Warden Guardrails** - Network-level policies block destructive operations before they run
+- **DevOps Playbooks Baked-in** - Curated library of DevOps knowledge in Stakpak Rulebooks
+
+Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
+
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
+![til](./assets/stakpak-overview.gif)
 
 ## 🔒 Security Hardened
 
-- **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
+- **Mutual TLS (mTLS)** - End-to-end encrypted MCP
 - **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
@@ -143,16 +152,41 @@ Stakpak can run as an [Model Context Protocol (MCP)](https://modelcontextprotoco
 
 ```bash
 # Local tools only (no API key required, mTLS enabled by default)
-stakpak mcp --tool-mode local
+stakpak mcp start --tool-mode local
 
 # Remote tools only (AI tools optimized for DevOps)
-stakpak mcp --tool-mode remote
+stakpak mcp start --tool-mode remote
 
 # Combined mode (default - all tools with full security)
-stakpak mcp
+stakpak mcp start
 
 # Disable mTLS (NOT recommended for production)
-stakpak mcp --disable-mcp-mtls
+stakpak mcp start --disable-mcp-mtls
+```
+
+Additional flags for the MCP server:
+
+- `--disable-secret-redaction` – **not recommended**; prints secrets in plaintext to the console
+- `--privacy-mode` – redacts additional private data like IP addresses and AWS account IDs
+- `--enable-slack-tools` – enables experimental Slack tools
+- `--index-big-project` – allows indexing of large projects (more than 500 supported files)
+
+#### MCP Proxy Server
+
+Stakpak also includes an MCP proxy server that can multiplex connections to multiple upstream MCP servers using a configuration file.
+
+```bash
+# Start MCP proxy with automatic config discovery
+stakpak mcp proxy
+
+# Start MCP proxy with explicit config file
+stakpak mcp proxy --config-file ~/.stakpak/mcp.toml
+
+# Disable secret redaction (NOT recommended – secrets will be printed in logs)
+stakpak mcp proxy --disable-secret-redaction
+
+# Enable privacy mode to redact IPs, account IDs, etc.
+stakpak mcp proxy --privacy-mode
 ```
 
 ### Agent Client Protocol (ACP)

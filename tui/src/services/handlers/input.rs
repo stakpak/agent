@@ -419,6 +419,7 @@ fn handle_input_submitted(
             AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
             AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
         };
+
         let usage = &state.current_message_usage;
         let total_tokens = usage.total_tokens;
         let capped_tokens = total_tokens.min(max_tokens);
