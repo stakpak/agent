@@ -372,7 +372,7 @@ impl OpenAI {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
                 format!(
                     "{}: {}",
-                    response.status().to_string(),
+                    response.status(),
                     response.text().await.unwrap_or_default(),
                 ),
             )));
