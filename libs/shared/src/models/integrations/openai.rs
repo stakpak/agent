@@ -233,7 +233,6 @@ impl OpenAI {
         let mut payload = json!({
             "model": input.model.to_string(),
             "messages": input.messages,
-            "max_tokens": input.max_tokens,
             "max_completion_tokens": input.max_tokens,
             "stream": false,
         });
