@@ -348,6 +348,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
                 ctx.state.shell_tool_calls.clone(),
+                Vec::new(), // No image parts for command
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");

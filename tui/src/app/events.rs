@@ -55,6 +55,8 @@ pub enum InputEvent {
     ShellClear,
     ShellKill,
     HandlePaste(String),
+    /// Ctrl+V clipboard image paste (non-text, via system clipboard).
+    HandleClipboardImagePaste,
     InputDelete,
     InputDeleteWord,
     InputCursorStart,
@@ -115,7 +117,11 @@ pub enum InputEvent {
 
 #[derive(Debug)]
 pub enum OutputEvent {
-    UserMessage(String, Option<Vec<ToolCallResult>>),
+    UserMessage(
+        String,
+        Option<Vec<ToolCallResult>>,
+        Vec<stakpak_shared::models::integrations::openai::ContentPart>,
+    ),
     AcceptTool(ToolCall),
     RejectTool(ToolCall, bool),
     ListSessions,
