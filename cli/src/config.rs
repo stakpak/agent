@@ -1,5 +1,6 @@
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
+use stakpak_api::local::integrations::{anthropic::AnthropicConfig, openai::OpenAIConfig};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
@@ -41,18 +42,6 @@ pub struct WardenConfig {
     pub volumes: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct OpenAIConfig {
-    pub api_endpoint: Option<String>,
-    pub api_key: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct AnthropicConfig {
-    pub api_endpoint: Option<String>,
-    pub api_key: Option<String>,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
@@ -67,8 +56,13 @@ pub struct ProfileConfig {
     pub rulebooks: Option<RulebookConfig>,
     /// Warden (runtime security) configuration
     pub warden: Option<WardenConfig>,
+    /// OpenAI configuration
     pub openai: Option<OpenAIConfig>,
+    /// Anthropic configuration
     pub anthropic: Option<AnthropicConfig>,
+    pub eco_model: Option<String>,
+    pub smart_model: Option<String>,
+    pub recovery_model: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -104,6 +98,9 @@ pub struct AppConfig {
     pub warden: Option<WardenConfig>,
     pub openai: Option<OpenAIConfig>,
     pub anthropic: Option<AnthropicConfig>,
+    pub smart_model: Option<String>,
+    pub eco_model: Option<String>,
+    pub recovery_model: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -173,6 +170,9 @@ impl From<AppConfig> for ProfileConfig {
             provider: None,
             openai: config.openai,
             anthropic: config.anthropic,
+            eco_model: config.eco_model,
+            smart_model: config.smart_model,
+            recovery_model: config.recovery_model,
         }
     }
 }
@@ -335,6 +335,18 @@ impl ProfileConfig {
                 .anthropic
                 .clone()
                 .or_else(|| other.and_then(|config| config.anthropic.clone())),
+            eco_model: self
+                .eco_model
+                .clone()
+                .or_else(|| other.and_then(|config| config.eco_model.clone())),
+            smart_model: self
+                .smart_model
+                .clone()
+                .or_else(|| other.and_then(|config| config.smart_model.clone())),
+            recovery_model: self
+                .recovery_model
+                .clone()
+                .or_else(|| other.and_then(|config| config.recovery_model.clone())),
         }
     }
 }
@@ -431,6 +443,9 @@ impl AppConfig {
             provider: profile_config.provider.unwrap_or(ProviderType::Remote),
             openai: profile_config.openai,
             anthropic: profile_config.anthropic,
+            smart_model: profile_config.smart_model,
+            eco_model: profile_config.eco_model,
+            recovery_model: profile_config.recovery_model,
         }
     }
 
@@ -447,8 +462,11 @@ impl AppConfig {
         config_path: P,
         content: &str,
     ) -> Result<ConfigFile, ConfigError> {
-        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|_| {
-            ConfigError::Message("Failed to parse config file in both old and new formats".into())
+        let old_config = toml::from_str::<OldAppConfig>(content).map_err(|e| {
+            ConfigError::Message(format!(
+                "Failed to parse config file in both old and new formats: {}",
+                e
+            ))
         })?;
         let config_file = old_config.into();
 
@@ -610,6 +628,9 @@ auto_append_gitignore = true
             provider: ProviderType::Remote,
             openai: None,
             anthropic: None,
+            smart_model: None,
+            eco_model: None,
+            recovery_model: None,
         }
     }
 
@@ -749,6 +770,9 @@ auto_append_gitignore = true
                 provider: None,
                 openai: None,
                 anthropic: None,
+                smart_model: None,
+                eco_model: None,
+                recovery_model: None,
             },
         );
 
@@ -764,6 +788,9 @@ auto_append_gitignore = true
                 provider: None,
                 openai: None,
                 anthropic: None,
+                smart_model: None,
+                eco_model: None,
+                recovery_model: None,
             },
         );
 
@@ -960,6 +987,9 @@ auto_append_gitignore = true
             provider: ProviderType::Remote,
             openai: None,
             anthropic: None,
+            smart_model: None,
+            eco_model: None,
+            recovery_model: None,
         };
 
         config.save().unwrap();

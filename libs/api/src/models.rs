@@ -1,8 +1,14 @@
+use crate::local::integrations::LLMInput;
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
+use stakpak_shared::models::{
+    integrations::openai::{
+        AgentModel, ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall,
+    },
+    llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -233,6 +239,16 @@ impl AgentOutput {
             AgentOutput::PabloV1 { .. } => AgentID::PabloV1,
         }
     }
+    pub fn get_messages(&self) -> Vec<ChatMessage> {
+        match self {
+            AgentOutput::PabloV1 { messages, .. } => messages.clone(),
+        }
+    }
+    pub fn set_messages(&mut self, new_messages: Vec<ChatMessage>) {
+        match self {
+            AgentOutput::PabloV1 { messages, .. } => *messages = new_messages,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -441,7 +457,7 @@ pub struct CodeIndex {
     pub index: BuildCodeIndexOutput,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct AgentSessionStats {
     pub aborted_tool_calls: u32,
     pub analysis_period: Option<String>,
@@ -617,4 +633,110 @@ pub struct SlackSendMessageRequest {
     pub channel: String,
     pub mrkdwn_text: String,
     pub thread_ts: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AgentState {
+    pub agent_model: AgentModel,
+    pub messages: Vec<ChatMessage>,
+    pub tools: Option<Vec<Tool>>,
+
+    pub llm_input: Option<LLMInput>,
+    pub llm_output: Option<InferenceOutput>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct InferenceOutput {
+    pub new_message: LLMMessage,
+    pub usage: LLMTokenUsage,
+}
+
+impl From<&InferenceOutput> for ChatMessage {
+    fn from(value: &InferenceOutput) -> Self {
+        let message_content = match &value.new_message.content {
+            LLMMessageContent::String(s) => s.clone(),
+            LLMMessageContent::List(l) => l
+                .iter()
+                .map(|c| match c {
+                    LLMMessageTypedContent::Text { text } => text.clone(),
+                    LLMMessageTypedContent::ToolCall { .. } => String::new(),
+                    LLMMessageTypedContent::ToolResult { content, .. } => content.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        let tool_calls = if let LLMMessageContent::List(items) = &value.new_message.content {
+            let calls: Vec<ToolCall> = items
+                .iter()
+                .filter_map(|item| {
+                    if let LLMMessageTypedContent::ToolCall { id, name, args } = item {
+                        Some(ToolCall {
+                            id: id.clone(),
+                            r#type: "function".to_string(),
+                            function: FunctionCall {
+                                name: name.clone(),
+                                arguments: args.to_string(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if calls.is_empty() { None } else { Some(calls) }
+        } else {
+            None
+        };
+        ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String(message_content)),
+            name: None,
+            tool_calls,
+            tool_call_id: None,
+        }
+    }
+}
+
+impl AgentState {
+    pub fn new(
+        agent_model: AgentModel,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+    ) -> Self {
+        Self {
+            agent_model,
+            messages,
+            tools,
+            llm_input: None,
+            llm_output: None,
+        }
+    }
+
+    pub fn set_messages(&mut self, messages: Vec<ChatMessage>) {
+        self.messages = messages;
+    }
+
+    pub fn set_tools(&mut self, tools: Option<Vec<Tool>>) {
+        self.tools = tools;
+    }
+
+    pub fn set_agent_model(&mut self, agent_model: AgentModel) {
+        self.agent_model = agent_model;
+    }
+
+    pub fn set_llm_input(&mut self, llm_input: Option<LLMInput>) {
+        self.llm_input = llm_input;
+    }
+
+    pub fn set_llm_output(&mut self, new_message: LLMMessage, new_usage: Option<LLMTokenUsage>) {
+        self.llm_output = Some(InferenceOutput {
+            new_message,
+            usage: new_usage.unwrap_or_default(),
+        });
+    }
+
+    pub fn append_new_message(&mut self, new_message: ChatMessage) {
+        self.messages.push(new_message);
+    }
 }

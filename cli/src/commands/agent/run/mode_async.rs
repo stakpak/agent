@@ -86,9 +86,17 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             Arc::new(remote_client)
         }
         ProviderType::Local => {
-            let client = LocalClient::new(LocalClientConfig { store_path: None })
-                .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: ctx_clone.anthropic.clone(),
+                openai_config: ctx_clone.openai.clone(),
+                eco_model: ctx_clone.eco_model.clone(),
+                recovery_model: ctx_clone.recovery_model.clone(),
+                smart_model: ctx_clone.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
             Arc::new(client)
         }
     };
@@ -132,9 +140,17 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             Box::new(client)
         }
         ProviderType::Local => {
-            let client = LocalClient::new(LocalClientConfig { store_path: None })
-                .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: ctx.anthropic.clone(),
+                openai_config: ctx.openai.clone(),
+                eco_model: ctx.eco_model.clone(),
+                recovery_model: ctx.recovery_model.clone(),
+                smart_model: ctx.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
             Box::new(client)
         }
     };

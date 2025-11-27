@@ -1,13 +1,16 @@
-use crate::models::llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent};
+use crate::models::llm::{
+    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     System,
     Developer,
     User,
+    #[default]
     Assistant,
     Tool,
     // Function,
@@ -120,7 +123,7 @@ impl ChatCompletionRequest {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: Option<MessageContent>,
@@ -240,6 +243,15 @@ pub enum StopSequence {
 pub struct Tool {
     pub r#type: String,
     pub function: FunctionDefinition,
+}
+impl From<Tool> for LLMTool {
+    fn from(tool: Tool) -> Self {
+        LLMTool {
+            name: tool.function.name,
+            description: tool.function.description.unwrap_or_default(),
+            input_schema: tool.function.parameters,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -363,7 +375,7 @@ pub struct ChatCompletionResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<ChatCompletionChoice>,
-    pub usage: Usage,
+    pub usage: LLMTokenUsage,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
 }
@@ -406,27 +418,6 @@ pub struct TokenLogprob {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct PromptTokensDetails {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_read_input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_write_input_tokens: Option<u32>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_tokens_details: Option<PromptTokensDetails>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamResponse {
     pub id: String,
     pub object: String,
@@ -434,7 +425,7 @@ pub struct ChatCompletionStreamResponse {
     pub model: String,
     pub choices: Vec<ChatCompletionStreamChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<Usage>,
+    pub usage: Option<LLMTokenUsage>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamChoice {
@@ -450,6 +441,41 @@ pub struct ChatMessageDelta {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCallDelta>>,
+}
+
+impl From<GenerationDelta> for ChatMessageDelta {
+    fn from(delta: GenerationDelta) -> Self {
+        match delta {
+            GenerationDelta::Content { content } => ChatMessageDelta {
+                role: Some(Role::Assistant),
+                content: Some(content),
+                tool_calls: None,
+            },
+            GenerationDelta::Thinking { thinking: _ } => ChatMessageDelta {
+                role: Some(Role::Assistant),
+                content: None,
+                tool_calls: None,
+            },
+            GenerationDelta::ToolUse { tool_use } => ChatMessageDelta {
+                role: Some(Role::Assistant),
+                content: None,
+                tool_calls: Some(vec![ToolCallDelta {
+                    index: tool_use.index,
+                    id: tool_use.id,
+                    r#type: Some("function".to_string()),
+                    function: Some(FunctionCallDelta {
+                        name: tool_use.name,
+                        arguments: tool_use.input,
+                    }),
+                }]),
+            },
+            _ => ChatMessageDelta {
+                role: Some(Role::Assistant),
+                content: None,
+                tool_calls: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -503,6 +529,10 @@ impl From<LLMMessage> for ChatMessage {
                                 },
                             });
                         }
+                        LLMMessageTypedContent::ToolResult {
+                            tool_use_id: _,
+                            content: _,
+                        } => {}
                     }
                 }
 

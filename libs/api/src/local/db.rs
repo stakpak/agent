@@ -22,7 +22,7 @@ struct CheckpointRow {
     parent_id: Option<String>,
     created_at: String,
     updated_at: String,
-    output: Option<String>,
+    state: Option<String>,
 }
 
 pub async fn init_schema(conn: &Connection) -> Result<(), String> {
@@ -49,7 +49,7 @@ pub async fn init_schema(conn: &Connection) -> Result<(), String> {
             parent_id TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            output TEXT,
+            state TEXT,
             FOREIGN KEY(session_id) REFERENCES sessions(id),
             FOREIGN KEY(parent_id) REFERENCES checkpoints(id)
         )",
@@ -202,16 +202,16 @@ pub async fn get_checkpoint(
         let session_id = Uuid::from_str(&checkpoint_row.session_id).map_err(|e| e.to_string())?;
         let session = get_session(conn, session_id).await?;
 
-        let output = if let Some(s) = checkpoint_row.output {
+        let state = if let Some(s) = checkpoint_row.state {
             serde_json::from_str(&s).map_err(|e| e.to_string())?
         } else {
-            return Err("Checkpoint output not found".to_string());
+            return Err("Checkpoint state not found".to_string());
         };
 
         Ok(RunAgentOutput {
             checkpoint,
             session: session.into(),
-            output,
+            output: state,
         })
     } else {
         Err("Checkpoint not found".to_string())
@@ -263,12 +263,12 @@ pub async fn create_checkpoint(
     conn: &Connection,
     session_id: Uuid,
     checkpoint: &AgentCheckpointListItem,
-    output: &AgentOutput,
+    state: &AgentOutput,
 ) -> Result<(), String> {
-    let output_json = serde_json::to_string(output).map_err(|e| e.to_string())?;
+    let state_json = serde_json::to_string(state).map_err(|e| e.to_string())?;
 
     conn.execute(
-        "INSERT INTO checkpoints (id, session_id, status, execution_depth, parent_id, created_at, updated_at, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO checkpoints (id, session_id, status, execution_depth, parent_id, created_at, updated_at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             checkpoint.id.to_string(),
             session_id.to_string(),
@@ -277,7 +277,7 @@ pub async fn create_checkpoint(
             checkpoint.parent.as_ref().map(|p| p.id.to_string()),
             checkpoint.created_at.to_rfc3339(),
             checkpoint.updated_at.to_rfc3339(),
-            output_json,
+            state_json,
         ),
     )
     .await

@@ -8,6 +8,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use uuid::Uuid;
 
+pub mod error;
 pub mod local;
 pub mod models;
 pub mod remote;
@@ -63,12 +64,6 @@ pub trait AgentProvider: Send + Sync {
         String,
     >;
     async fn cancel_stream(&self, request_id: String) -> Result<(), String>;
-
-    // Code Index
-    async fn build_code_index(
-        &self,
-        input: &BuildCodeIndexInput,
-    ) -> Result<BuildCodeIndexOutput, String>;
 
     // Search Docs
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String>;

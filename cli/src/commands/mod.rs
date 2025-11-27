@@ -158,9 +158,17 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
             Ok(Arc::new(client))
         }
         ProviderType::Local => {
-            let client = LocalClient::new(LocalClientConfig { store_path: None })
-                .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: config.anthropic.clone(),
+                openai_config: config.openai.clone(),
+                eco_model: config.eco_model.clone(),
+                recovery_model: config.recovery_model.clone(),
+                smart_model: config.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
             Ok(Arc::new(client))
         }
     }
