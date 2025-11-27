@@ -1,10 +1,9 @@
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
-    GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse,
-    LLMCompletionStreamResponse, LLMMessage, LLMMessageContent, LLMMessageTypedContent,
-    LLMTokenUsage, LLMTool,
+    GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
+    LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
 };
-use futures_util::{Stream, StreamExt};
+use futures_util::StreamExt;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
@@ -35,6 +34,8 @@ pub enum OpenAIModel {
     GPT5Mini,
     #[serde(rename = "gpt-5-nano-2025-08-07")]
     GPT5Nano,
+
+    Custom(String),
 }
 
 impl OpenAIModel {
@@ -54,6 +55,8 @@ impl std::fmt::Display for OpenAIModel {
             OpenAIModel::GPT5Nano => write!(f, "gpt-5-nano-2025-08-07"),
             OpenAIModel::GPT5Mini => write!(f, "gpt-5-mini-2025-08-07"),
             OpenAIModel::GPT5 => write!(f, "gpt-5-2025-08-07"),
+
+            OpenAIModel::Custom(model_name) => write!(f, "{}", model_name),
         }
     }
 }
@@ -218,89 +221,6 @@ pub struct OpenAILLMMessageToolCallFunction {
 pub struct OpenAI {}
 
 impl OpenAI {
-    pub async fn chat_completions_stream(
-        config: &OpenAIConfig,
-        input: OpenAIInput,
-    ) -> Result<impl Stream<Item = Result<Vec<LLMCompletionStreamResponse>, AgentError>>, AgentError>
-    {
-        let model = serde_json::to_string(&input.model)
-            .map_err(|_| AgentError::InternalError)?
-            .trim_matches('"')
-            .to_string();
-
-        let mut payload = json!({
-            "model": model,
-            "messages": input.messages,
-            "max_completion_tokens": input.max_tokens,
-            "stream": true,
-            "stream_options":{
-                "include_usage": true
-            }
-        });
-
-        if input.is_reasoning_model() {
-            if let Some(reasoning_effort) = input.reasoning_effort {
-                payload["reasoning_effort"] = json!(reasoning_effort);
-            } else {
-                payload["reasoning_effort"] = json!(OpenAIReasoningEffort::Medium);
-            }
-        }
-
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-        let client = ClientBuilder::new(reqwest::Client::new())
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-            .build();
-
-        let api_endpoint = config.api_endpoint.as_ref().map_or(DEFAULT_BASE_URL, |v| v);
-        let api_key = config.api_key.as_ref().map_or("", |v| v);
-
-        // Send the POST request
-        let response = client
-            .post(api_endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
-            .body(serde_json::to_string(&payload).map_err(|_| AgentError::InternalError)?)
-            .send()
-            .await;
-
-        if response.is_err() {
-            return Err(AgentError::InternalError);
-        }
-
-        let response = response.map_err(|_| AgentError::InternalError)?;
-
-        if !response.status().is_success() {
-            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                response.status().to_string(),
-            )));
-        }
-
-        let stream = response.bytes_stream().map(|chunk| {
-            chunk
-                .map_err(|_| AgentError::InternalError)
-                .and_then(|bytes| {
-                    std::str::from_utf8(&bytes)
-                        .map_err(|_| AgentError::InternalError)
-                        .map(|text| {
-                            text.split("\n\n")
-                                .filter(|event| event.starts_with("data: "))
-                                .filter_map(|event| {
-                                    event.strip_prefix("data: ").and_then(|json_str| {
-                                        serde_json::from_str::<LLMCompletionStreamResponse>(
-                                            json_str,
-                                        )
-                                        .ok()
-                                    })
-                                })
-                                .collect::<Vec<LLMCompletionStreamResponse>>()
-                        })
-                })
-        });
-
-        Ok(stream)
-    }
-
     pub async fn chat(
         config: &OpenAIConfig,
         input: OpenAIInput,
@@ -310,15 +230,10 @@ impl OpenAI {
             .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
 
-        let model = serde_json::to_string(&input.model)
-            .map_err(|_| AgentError::InternalError)?
-            .trim_matches('"')
-            .to_string();
-
-        // Replace deprecated max_tokens with max_completion_tokens
         let mut payload = json!({
-            "model": model,
+            "model": input.model.to_string(),
             "messages": input.messages,
+            "max_tokens": input.max_tokens,
             "max_completion_tokens": input.max_tokens,
             "stream": false,
         });
@@ -352,7 +267,6 @@ impl OpenAI {
         let api_endpoint = config.api_endpoint.as_ref().map_or(DEFAULT_BASE_URL, |v| v);
         let api_key = config.api_key.as_ref().map_or("", |v| v);
 
-        // Send the POST request
         let response = client
             .post(api_endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
@@ -386,19 +300,13 @@ impl OpenAI {
         }
     }
 
-    pub async fn chat_stream_v2(
+    pub async fn chat_stream(
         config: &OpenAIConfig,
         stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
         input: OpenAIInput,
     ) -> Result<LLMCompletionResponse, AgentError> {
-        let model = serde_json::to_string(&input.model)
-            .map_err(|_| AgentError::InternalError)?
-            .trim_matches('"')
-            .to_string();
-
-        // Replace deprecated max_tokens with max_completion_tokens
         let mut payload = json!({
-            "model": model,
+            "model": input.model.to_string(),
             "messages": input.messages,
             "max_completion_tokens": input.max_tokens,
             "stream": true,
@@ -462,12 +370,15 @@ impl OpenAI {
 
         if !response.status().is_success() {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                response.status().to_string(),
+                format!(
+                    "{}: {}",
+                    response.status().to_string(),
+                    response.text().await.unwrap_or_default(),
+                ),
             )));
         }
 
-        // Process the stream and convert to GenerationDelta
-        process_openai_stream(response, model.clone(), stream_channel_tx)
+        process_openai_stream(response, input.model.to_string(), stream_channel_tx)
             .await
             .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))
     }

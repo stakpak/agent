@@ -15,6 +15,7 @@ pub enum LLMModel {
     Custom(String),
 }
 
+#[derive(Debug)]
 pub struct LLMProviderConfig {
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
@@ -51,6 +52,7 @@ pub struct LLMInput {
     pub tools: Option<Vec<LLMTool>>,
 }
 
+#[derive(Debug)]
 pub struct LLMStreamInput {
     pub model: LLMModel,
     pub messages: Vec<LLMMessage>,
@@ -114,9 +116,25 @@ pub async fn chat(
                 ))
             }
         }
-        LLMModel::Custom(_) => Err(AgentError::BadRequest(
-            BadRequestErrorMessage::InvalidAgentInput("Custom model not supported".to_string()),
-        )),
+        LLMModel::Custom(model_name) => {
+            if let Some(openai_config) = &config.openai_config {
+                let openai_input = OpenAIInput {
+                    model: OpenAIModel::Custom(model_name),
+                    messages: input.messages,
+                    max_tokens: input.max_tokens,
+                    json: None,
+                    tools: input.tools,
+                    reasoning_effort: None,
+                };
+                OpenAI::chat(openai_config, openai_input).await
+            } else {
+                Err(AgentError::BadRequest(
+                    BadRequestErrorMessage::InvalidAgentInput(
+                        "OpenAI config not found".to_string(),
+                    ),
+                ))
+            }
+        }
     }
 }
 
@@ -156,7 +174,7 @@ pub async fn chat_stream(
                     tools: input.tools,
                     reasoning_effort: None,
                 };
-                OpenAI::chat_stream_v2(openai_config, input.stream_channel_tx, openai_input).await
+                OpenAI::chat_stream(openai_config, input.stream_channel_tx, openai_input).await
             } else {
                 Err(AgentError::BadRequest(
                     BadRequestErrorMessage::InvalidAgentInput(
@@ -165,9 +183,25 @@ pub async fn chat_stream(
                 ))
             }
         }
-        LLMModel::Custom(_) => Err(AgentError::BadRequest(
-            BadRequestErrorMessage::InvalidAgentInput("Custom model not supported".to_string()),
-        )),
+        LLMModel::Custom(model_name) => {
+            if let Some(openai_config) = &config.openai_config {
+                let openai_input = OpenAIInput {
+                    model: OpenAIModel::Custom(model_name),
+                    messages: input.messages,
+                    max_tokens: input.max_tokens,
+                    json: None,
+                    tools: input.tools,
+                    reasoning_effort: None,
+                };
+                OpenAI::chat_stream(openai_config, input.stream_channel_tx, openai_input).await
+            } else {
+                Err(AgentError::BadRequest(
+                    BadRequestErrorMessage::InvalidAgentInput(
+                        "OpenAI config not found".to_string(),
+                    ),
+                ))
+            }
+        }
     }
 }
 
