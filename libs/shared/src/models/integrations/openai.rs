@@ -1,8 +1,8 @@
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse,
-    LLMCompletionStreamResponse, LLMMessage, LLMMessageContent, LLMMessageTypedContent,
-    LLMTokenUsage, LLMTool,
+    LLMCompletionStreamResponse, LLMMessage, LLMMessageContent, LLMMessageImageSource,
+    LLMMessageTypedContent, LLMTokenUsage, LLMTool,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest_middleware::ClientBuilder;
@@ -228,9 +228,11 @@ impl OpenAI {
             .trim_matches('"')
             .to_string();
 
+        let is_reasoning_model = input.is_reasoning_model();
+
         let mut payload = json!({
             "model": model,
-            "messages": input.messages,
+            "messages": input.messages.into_iter().map(ChatMessage::from).collect::<Vec<ChatMessage>>(),
             "max_completion_tokens": input.max_tokens,
             "stream": true,
             "stream_options":{
@@ -238,7 +240,7 @@ impl OpenAI {
             }
         });
 
-        if input.is_reasoning_model() {
+        if is_reasoning_model {
             if let Some(reasoning_effort) = input.reasoning_effort {
                 payload["reasoning_effort"] = json!(reasoning_effort);
             } else {
@@ -268,11 +270,16 @@ impl OpenAI {
             return Err(AgentError::InternalError);
         }
 
-        let response = response.map_err(|_| AgentError::InternalError)?;
+        let response = response
+            .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?;
 
         if !response.status().is_success() {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                response.status().to_string(),
+                format!(
+                    "{}\n{}",
+                    response.status().to_string(),
+                    response.text().await.unwrap()
+                ),
             )));
         }
 
@@ -315,15 +322,17 @@ impl OpenAI {
             .trim_matches('"')
             .to_string();
 
+        let is_reasoning_model = input.is_reasoning_model();
+
         // Replace deprecated max_tokens with max_completion_tokens
         let mut payload = json!({
             "model": model,
-            "messages": input.messages,
+            "messages": input.messages.into_iter().map(ChatMessage::from).collect::<Vec<ChatMessage>>(),
             "max_completion_tokens": input.max_tokens,
             "stream": false,
         });
 
-        if input.is_reasoning_model() {
+        if is_reasoning_model {
             if let Some(reasoning_effort) = input.reasoning_effort {
                 payload["reasoning_effort"] = json!(reasoning_effort);
             } else {
@@ -397,9 +406,11 @@ impl OpenAI {
             .to_string();
 
         // Replace deprecated max_tokens with max_completion_tokens
+        let is_reasoning_model = input.is_reasoning_model();
+
         let mut payload = json!({
             "model": model,
-            "messages": input.messages,
+            "messages": input.messages.into_iter().map(ChatMessage::from).collect::<Vec<ChatMessage>>(),
             "max_completion_tokens": input.max_tokens,
             "stream": true,
             "stream_options":{
@@ -407,7 +418,7 @@ impl OpenAI {
             }
         });
 
-        if input.is_reasoning_model() {
+        if is_reasoning_model {
             if let Some(reasoning_effort) = input.reasoning_effort {
                 payload["reasoning_effort"] = json!(reasoning_effort);
             } else {
@@ -462,7 +473,11 @@ impl OpenAI {
 
         if !response.status().is_success() {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                response.status().to_string(),
+                format!(
+                    "{}\n{}",
+                    response.status().to_string(),
+                    response.text().await.unwrap()
+                ),
             )));
         }
 
@@ -864,7 +879,9 @@ impl Default for MessageContent {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ContentPart {
     pub r#type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<ImageUrl>,
 }
 
@@ -1121,6 +1138,19 @@ impl From<LLMMessage> for ChatMessage {
                                 image_url: None,
                             });
                         }
+                        LLMMessageTypedContent::Image { source } => {
+                            text_parts.push(ContentPart {
+                                r#type: "image_url".to_string(),
+                                text: None,
+                                image_url: Some(ImageUrl {
+                                    url: format!(
+                                        "data:{};base64,{}",
+                                        source.media_type, source.data
+                                    ),
+                                    detail: None,
+                                }),
+                            });
+                        }
                     }
                 }
 
@@ -1164,9 +1194,34 @@ impl From<ChatMessage> for LLMMessage {
             }
             Some(MessageContent::Array(parts)) => {
                 for part in parts {
-                    content_parts.push(LLMMessageTypedContent::Text {
-                        text: part.text.unwrap_or_default(),
-                    });
+                    if let Some(text) = part.text {
+                        content_parts.push(LLMMessageTypedContent::Text { text });
+                    } else if let Some(image_url) = part.image_url {
+                        let (media_type, data) = if image_url.url.starts_with("data:") {
+                            let parts: Vec<&str> = image_url.url.splitn(2, ',').collect();
+                            if parts.len() == 2 {
+                                let meta = parts[0];
+                                let data = parts[1];
+                                let media_type = meta
+                                    .trim_start_matches("data:")
+                                    .trim_end_matches(";base64")
+                                    .to_string();
+                                (media_type, data.to_string())
+                            } else {
+                                ("image/jpeg".to_string(), image_url.url)
+                            }
+                        } else {
+                            ("image/jpeg".to_string(), image_url.url)
+                        };
+
+                        content_parts.push(LLMMessageTypedContent::Image {
+                            source: LLMMessageImageSource {
+                                r#type: "base64".to_string(),
+                                media_type,
+                                data,
+                            },
+                        });
+                    }
                 }
             }
             None => {}
