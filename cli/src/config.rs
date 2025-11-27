@@ -486,8 +486,10 @@ impl AppConfig {
 
     fn load_config_file<P: AsRef<Path>>(config_path: P) -> Result<ConfigFile, ConfigError> {
         match std::fs::read_to_string(config_path.as_ref()) {
-            Ok(content) => toml::from_str::<ConfigFile>(&content)
-                .or_else(|_| Self::migrate_old_config(config_path, &content)),
+            Ok(content) => toml::from_str::<ConfigFile>(&content).or_else(|e| {
+                println!("Failed to parse config file in new format: {}", e);
+                Self::migrate_old_config(config_path, &content)
+            }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::with_default_profile()),
             Err(e) => Err(ConfigError::Message(format!(
                 "Failed to read config file: {}",
