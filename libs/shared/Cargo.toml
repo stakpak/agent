@@ -28,8 +28,8 @@ russh-sftp = { version = "2.1.1" }
 dirs = "5.0"
 async-trait = { workspace = true }
 futures = { workspace = true }
-futures-util.workspace = true
-reqwest-middleware = "0.4.2"
+futures-util = { workspace = true }
+reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.8.0"
 itertools = "0.14.0"
 

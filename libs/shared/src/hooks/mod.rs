@@ -180,6 +180,14 @@ impl<State: Clone + Serialize> HookRegistry<State> {
 Usage Example
 
 ```rust
+use stakpak_shared::define_hook;
+use stakpak_shared::hooks::{HookAction, HookContext, HookError, LifecycleEvent, Hook};
+use chrono::{DateTime, Local};
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
+use serde::Serialize;
+use std::fmt::Debug;
+
 pub struct LoggerHook;
 
 impl LoggerHook {
