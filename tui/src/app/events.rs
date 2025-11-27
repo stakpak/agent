@@ -1,7 +1,8 @@
 use ratatui::style::Color;
-use stakpak_api::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{
-    AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
+use stakpak_api::models::ListRuleBook;
+use stakpak_shared::models::{
+    integrations::openai::{AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress},
+    llm::LLMTokenUsage,
 };
 use uuid::Uuid;
 
@@ -109,9 +110,9 @@ pub enum InputEvent {
     HandleCtrlS,
     ToggleMoreShortcuts,
     // Usage tracking events
-    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
+    StreamUsage(LLMTokenUsage),
     RequestTotalUsage,
-    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
+    TotalUsage(LLMTokenUsage),
 }
 
 #[derive(Debug)]

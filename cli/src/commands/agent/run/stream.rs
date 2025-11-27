@@ -1,10 +1,12 @@
 use crate::commands::agent::run::tui::send_input_event;
 use futures_util::{Stream, StreamExt};
 use stakpak_api::models::ApiStreamError;
-use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
-    ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
-    Usage,
+use stakpak_shared::models::{
+    integrations::openai::{
+        AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
+        ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
+    },
+    llm::LLMTokenUsage,
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
@@ -21,13 +23,14 @@ pub async fn process_responses_stream(
         created: 0,
         model: AgentModel::Smart.to_string(),
         choices: vec![],
-        usage: Usage {
+        usage: LLMTokenUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
             prompt_tokens_details: None,
         },
         system_fingerprint: None,
+        metadata: None,
     };
 
     let mut chat_message = ChatMessage {
@@ -36,6 +39,7 @@ pub async fn process_responses_stream(
         name: None,
         tool_calls: None,
         tool_call_id: None,
+        usage: None,
     };
     let message_id = Uuid::new_v4();
 
@@ -67,6 +71,7 @@ pub async fn process_responses_stream(
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,
+                    metadata: None,
                 };
 
                 if let Some(content) = &delta.content {

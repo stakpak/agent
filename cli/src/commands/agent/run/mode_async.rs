@@ -8,10 +8,15 @@ use crate::commands::agent::run::helpers::{
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ProviderType};
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
-use stakpak_api::{Client, ClientConfig, ListRuleBook};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    models::ListRuleBook,
+    remote::{ClientConfig, RemoteClient},
+};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
@@ -69,13 +74,37 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
     let certificate_chain_for_server = certificate_chain.clone();
     let subagent_configs = config.subagent_configs.clone();
+
+    // Create AgentProvider instance
+    let client_for_server: Arc<dyn AgentProvider> = match ctx.provider {
+        ProviderType::Remote => {
+            let remote_client = RemoteClient::new(&ClientConfig {
+                api_key: ctx_clone.api_key.clone(),
+                api_endpoint: ctx_clone.api_endpoint.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+            Arc::new(remote_client)
+        }
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: ctx_clone.anthropic.clone(),
+                openai_config: ctx_clone.openai.clone(),
+                eco_model: ctx_clone.eco_model.clone(),
+                recovery_model: ctx_clone.recovery_model.clone(),
+                smart_model: ctx_clone.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Arc::new(client)
+        }
+    };
+
     tokio::spawn(async move {
         let _ = start_server(
             MCPServerConfig {
-                api: ClientConfig {
-                    api_key: ctx_clone.api_key.clone(),
-                    api_endpoint: ctx_clone.api_endpoint.clone(),
-                },
+                client: Some(client_for_server),
                 redact_secrets: config.redact_secrets,
                 privacy_mode: config.privacy_mode,
                 enabled_tools: config.enabled_tools.clone(),
@@ -101,16 +130,36 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
     let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
 
-    let client = Client::new(&ClientConfig {
-        api_key: ctx.api_key.clone(),
-        api_endpoint: ctx.api_endpoint.clone(),
-    })
-    .map_err(|e| e.to_string())?;
+    let client: Box<dyn AgentProvider> = match ctx.provider {
+        ProviderType::Remote => {
+            let client = RemoteClient::new(&ClientConfig {
+                api_key: ctx.api_key.clone(),
+                api_endpoint: ctx.api_endpoint.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+            Box::new(client)
+        }
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig {
+                store_path: None,
+                anthropic_config: ctx.anthropic.clone(),
+                openai_config: ctx.openai.clone(),
+                eco_model: ctx.eco_model.clone(),
+                recovery_model: ctx.recovery_model.clone(),
+                smart_model: ctx.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Box::new(client)
+        }
+    };
 
     // Load checkpoint messages if provided
     if let Some(checkpoint_id) = config.checkpoint_id {
         let checkpoint_start = Instant::now();
-        let mut checkpoint_messages = get_checkpoint_messages(&client, &checkpoint_id).await?;
+        let mut checkpoint_messages =
+            get_checkpoint_messages(client.as_ref(), &checkpoint_id).await?;
         llm_response_time += checkpoint_start.elapsed();
 
         // Append checkpoint_id to the last assistant message if present

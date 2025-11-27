@@ -2,8 +2,10 @@
 //!
 //! Handles all input-related events including text input, cursor movement, and paste operations.
 
+use std::path::{Path, PathBuf};
+
 use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
-use crate::constants::MAX_PASTE_CHAR_COUNT;
+use crate::constants::{CONTEXT_MAX_UTIL_TOKENS_RECOVERY, MAX_PASTE_CHAR_COUNT};
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
@@ -13,7 +15,7 @@ use crate::services::helper_block::{push_clear_message, push_error_message, push
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::integrations::openai::AgentModel;
-use std::path::{Path, PathBuf};
+use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
@@ -341,7 +343,7 @@ fn handle_input_submitted(
         state.messages.clear();
 
         // Reset usage for the switched session
-        state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        state.total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
@@ -433,10 +435,10 @@ fn handle_input_submitted(
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
-        // Use eco limit if eco model is selected
         let max_tokens = match state.model {
             AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
             AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+            AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
         };
 
         let usage = &state.current_message_usage;

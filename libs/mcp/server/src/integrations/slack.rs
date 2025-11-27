@@ -4,8 +4,11 @@ use rmcp::{
     tool_router,
 };
 use serde::Deserialize;
-use serde_json::json;
-use stakpak_api::ToolsCallParams;
+use stakpak_api::models::{
+    SlackReadMessagesRequest as ApiSlackReadMessagesRequest,
+    SlackReadRepliesRequest as ApiSlackReadRepliesRequest,
+    SlackSendMessageRequest as ApiSlackSendMessageRequest,
+};
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SlackReadMessages {
@@ -15,6 +18,15 @@ pub struct SlackReadMessages {
         description = "Maximum number of messages to return (default: 10, max: 100). Returns most recent messages first."
     )]
     pub limit: Option<u32>,
+}
+
+impl From<SlackReadMessages> for ApiSlackReadMessagesRequest {
+    fn from(req: SlackReadMessages) -> Self {
+        Self {
+            channel: req.channel,
+            limit: req.limit,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -27,6 +39,15 @@ pub struct SlackReadReplies {
         description = "The root message timestamp of the thread (Slack 'ts' value) to fetch replies for, for example '1727287045.000600'."
     )]
     pub ts: String,
+}
+
+impl From<SlackReadReplies> for ApiSlackReadRepliesRequest {
+    fn from(req: SlackReadReplies) -> Self {
+        Self {
+            channel: req.channel,
+            ts: req.ts,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -49,6 +70,15 @@ pub struct SlackSendMessage {
     pub thread_ts: Option<String>,
 }
 
+impl From<SlackSendMessage> for ApiSlackSendMessageRequest {
+    fn from(req: SlackSendMessage) -> Self {
+        Self {
+            channel: req.channel,
+            mrkdwn_text: req.mrkdwn_text,
+            thread_ts: req.thread_ts,
+        }
+    }
+}
 #[tool_router(router = tool_router_slack, vis = "pub")]
 impl ToolContainer {
     #[tool(
@@ -56,7 +86,7 @@ impl ToolContainer {
     )]
     pub async fn slack_read_messages(
         &self,
-        Parameters(SlackReadMessages { channel, limit }): Parameters<SlackReadMessages>,
+        Parameters(request): Parameters<SlackReadMessages>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
@@ -68,16 +98,7 @@ impl ToolContainer {
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "slack_read_messages".to_string(),
-                arguments: json!({
-                    "channel": channel,
-                    "limit": limit,
-                }),
-            })
-            .await
-        {
+        let response = match client.slack_read_messages(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -95,7 +116,7 @@ impl ToolContainer {
     )]
     pub async fn slack_read_replies(
         &self,
-        Parameters(SlackReadReplies { channel, ts }): Parameters<SlackReadReplies>,
+        Parameters(request): Parameters<SlackReadReplies>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
@@ -107,16 +128,7 @@ impl ToolContainer {
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "slack_read_replies".to_string(),
-                arguments: json!({
-                    "channel": channel,
-                    "ts": ts,
-                }),
-            })
-            .await
-        {
+        let response = match client.slack_read_replies(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -134,11 +146,7 @@ impl ToolContainer {
     )]
     pub async fn slack_send_message(
         &self,
-        Parameters(SlackSendMessage {
-            channel,
-            mrkdwn_text,
-            thread_ts,
-        }): Parameters<SlackSendMessage>,
+        Parameters(request): Parameters<SlackSendMessage>,
     ) -> Result<CallToolResult, McpError> {
         let client = match self.get_client() {
             Some(client) => client,
@@ -150,17 +158,7 @@ impl ToolContainer {
             }
         };
 
-        let response = match client
-            .call_mcp_tool(&ToolsCallParams {
-                name: "slack_send_message".to_string(),
-                arguments: json!({
-                    "channel": channel,
-                    "markdown_text": mrkdwn_text,
-                    "thread_ts": thread_ts,
-                }),
-            })
-            .await
-        {
+        let response = match client.slack_send_message(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![

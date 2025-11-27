@@ -4,7 +4,7 @@ use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, handler::server::tool::ToolRouter, model::*,
     service::RequestContext, tool_router,
 };
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::AgentProvider;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
 use stakpak_shared::secret_manager::SecretManager;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ToolContainer {
-    pub client: Option<Client>,
+    pub client: Option<Arc<dyn AgentProvider>>,
     pub secret_manager: SecretManager,
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
@@ -25,7 +25,7 @@ pub struct ToolContainer {
 #[tool_router]
 impl ToolContainer {
     pub fn new(
-        api_config: Option<ClientConfig>,
+        client: Option<Arc<dyn AgentProvider>>,
         redact_secrets: bool,
         privacy_mode: bool,
         enabled_tools: EnabledToolsConfig,
@@ -33,12 +33,6 @@ impl ToolContainer {
         subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
     ) -> Result<Self, String> {
-        let client = if let Some(api_config) = api_config {
-            Some(Client::new(&api_config)?)
-        } else {
-            None
-        };
-
         Ok(Self {
             client,
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
@@ -54,7 +48,7 @@ impl ToolContainer {
         &self.secret_manager
     }
 
-    pub fn get_client(&self) -> Option<&Client> {
+    pub fn get_client(&self) -> Option<&Arc<dyn AgentProvider>> {
         self.client.as_ref()
     }
 

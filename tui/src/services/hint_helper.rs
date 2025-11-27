@@ -121,6 +121,12 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                     AgentModel::Eco => {
                         spans.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
                     }
+                    AgentModel::Recovery => {
+                        spans.push(Span::styled(
+                            "recovery",
+                            Style::default().fg(Color::LightBlue),
+                        ));
+                    }
                 }
                 spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
                 spans.push(Span::styled(

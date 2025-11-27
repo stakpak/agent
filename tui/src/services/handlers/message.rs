@@ -5,7 +5,7 @@
 use crate::app::AppState;
 use crate::services::helper_block::push_usage_message;
 use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
-use stakpak_shared::models::integrations::openai::Usage;
+use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -96,7 +96,7 @@ pub fn handle_has_user_message(state: &mut AppState) {
 }
 
 /// Handle stream usage event
-pub fn handle_stream_usage(state: &mut AppState, usage: Usage) {
+pub fn handle_stream_usage(state: &mut AppState, usage: LLMTokenUsage) {
     state.current_message_usage = usage;
 }
 
@@ -107,7 +107,7 @@ pub fn handle_request_total_usage(output_tx: &Sender<OutputEvent>) {
 }
 
 /// Handle total usage event
-pub fn handle_total_usage(state: &mut AppState, usage: Usage) {
+pub fn handle_total_usage(state: &mut AppState, usage: LLMTokenUsage) {
     // Update total session usage from CLI
     state.total_session_usage = usage;
     // If cost message was just displayed, update it

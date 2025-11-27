@@ -240,6 +240,12 @@ pub fn push_model_message(state: &mut AppState) {
         AgentModel::Eco => {
             line.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
         }
+        AgentModel::Recovery => {
+            line.push(Span::styled(
+                "recovery",
+                Style::default().fg(Color::LightBlue),
+            ));
+        }
     }
     line.push(Span::styled(" model", Style::default().fg(Color::DarkGray)));
 

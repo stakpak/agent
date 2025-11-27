@@ -1,7 +1,8 @@
 use crate::app::AppState;
 use crate::constants::{
     CONTEXT_APPROACH_PERCENT, CONTEXT_LESS_CHARGE_LIMIT, CONTEXT_MAX_UTIL_TOKENS,
-    CONTEXT_MAX_UTIL_TOKENS_ECO, CONTEXT_PRICING_TABLE, CONTEXT_PRICING_TABLE_ECO,
+    CONTEXT_MAX_UTIL_TOKENS_ECO, CONTEXT_MAX_UTIL_TOKENS_RECOVERY, CONTEXT_PRICING_TABLE,
+    CONTEXT_PRICING_TABLE_ECO, CONTEXT_PRICING_TABLE_RECOVERY,
 };
 use crate::services::helper_block::format_number_with_separator;
 use ratatui::{
@@ -104,6 +105,7 @@ fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
     let max_tokens = match state.model {
         AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
         AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+        AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
     };
     let formatted_max = format_number_with_separator(max_tokens);
 
@@ -143,10 +145,10 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
     let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens as f64;
 
-    // Use eco limit if eco model is selected
     let max_tokens = match state.model {
         AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
         AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+        AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
     };
 
     let ratio = (total_tokens / max_tokens as f64).clamp(0.0, 1.0);
@@ -161,6 +163,7 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
                 Color::Green
             }
         }
+        AgentModel::Recovery => Color::Green,
     };
 
     let gauge = Gauge::default()
@@ -194,14 +197,14 @@ fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
 
     let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
 
-    // Use eco limit if eco model is selected
     let max_tokens = match state.model {
         AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
         AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+        AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
     };
 
-    // For eco model, don't show the middle marker since there's no pricing tier change
     let cost_marker = match state.model {
+        AgentModel::Recovery => Paragraph::new(Line::from("")).alignment(Alignment::Center),
         AgentModel::Eco => Paragraph::new(Line::from("")).alignment(Alignment::Center),
         AgentModel::Smart => Paragraph::new(Line::from(
             format_number_with_separator(CONTEXT_LESS_CHARGE_LIMIT).to_string(),
@@ -234,6 +237,10 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
             CONTEXT_PRICING_TABLE_ECO.len(),
         ),
         AgentModel::Smart => (&CONTEXT_PRICING_TABLE[..], CONTEXT_PRICING_TABLE.len()),
+        AgentModel::Recovery => (
+            &CONTEXT_PRICING_TABLE_RECOVERY[..],
+            CONTEXT_PRICING_TABLE_RECOVERY.len(),
+        ),
     };
 
     let headers = ["Claude Price Tier", "Input", "Output"];
@@ -421,6 +428,13 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
                 "Approaching the 200K token limit. Try /summarize or /model."
             } else {
                 "Anthropic regular pricing"
+            }
+        }
+        AgentModel::Recovery => {
+            if state.context_usage_percent >= CONTEXT_APPROACH_PERCENT {
+                "Approaching the 400K token limit. Try /summarize or /model."
+            } else {
+                "OpenAI regular pricing"
             }
         }
         AgentModel::Smart => {
