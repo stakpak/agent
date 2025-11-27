@@ -234,7 +234,7 @@ impl TaskManager {
                     .values()
                     .map(|entry| TaskInfo::from(&entry.task))
                     .collect();
-                tasks.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+                tasks.sort_unstable_by(|a, b| b.start_time.cmp(&a.start_time));
                 let _ = response_tx.send(tasks);
                 false
             }

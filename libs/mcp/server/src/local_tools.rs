@@ -2004,7 +2004,7 @@ SAFETY NOTES:
 
         // Sort tasks by start time (newest first)
         let mut sorted_tasks = tasks.to_vec();
-        sorted_tasks.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+        sorted_tasks.sort_unstable_by(|a, b| b.start_time.cmp(&a.start_time));
 
         // Compact format for streaming - one line per task
         for task in &sorted_tasks {

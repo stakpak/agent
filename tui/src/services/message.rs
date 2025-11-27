@@ -884,7 +884,7 @@ fn format_json_value(value: &Value) -> String {
                 .into_iter()
                 .map(|(key, val)| (key, format_json_value(val)))
                 .collect::<Vec<_>>();
-            values.sort_by_key(|(_, val)| val.len());
+            values.sort_unstable_by_key(|(_, val)| val.len());
             values
                 .into_iter()
                 .map(|(key, val)| {
