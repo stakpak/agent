@@ -1,7 +1,8 @@
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
-use stakpak_api::local::integrations::{anthropic::AnthropicConfig, openai::OpenAIConfig};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
+use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
+use stakpak_shared::models::integrations::openai::OpenAIConfig;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::io;

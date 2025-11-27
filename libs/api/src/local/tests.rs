@@ -74,6 +74,7 @@ async fn test_local_db_operations() {
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            usage: None,
         }],
         node_states: serde_json::Value::Null,
     };

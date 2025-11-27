@@ -30,6 +30,7 @@ pub async fn process_responses_stream(
             prompt_tokens_details: None,
         },
         system_fingerprint: None,
+        metadata: None,
     };
 
     let mut chat_message = ChatMessage {
@@ -38,6 +39,7 @@ pub async fn process_responses_stream(
         name: None,
         tool_calls: None,
         tool_call_id: None,
+        usage: None,
     };
     let message_id = Uuid::new_v4();
 
@@ -69,6 +71,7 @@ pub async fn process_responses_stream(
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,
+                    metadata: None,
                 };
 
                 if let Some(content) = &delta.content {

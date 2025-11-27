@@ -406,7 +406,7 @@ impl AgentProvider for RemoteClient {
     ) -> Result<ChatCompletionResponse, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(model, messages, tools, None);
+        let input = ChatCompletionRequest::new(model.to_string(), messages, tools, None);
 
         let response = self
             .client
@@ -447,7 +447,7 @@ impl AgentProvider for RemoteClient {
     > {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(model, messages, tools, Some(true));
+        let input = ChatCompletionRequest::new(model.to_string(), messages, tools, Some(true));
 
         let response = self
             .client

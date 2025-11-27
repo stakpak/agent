@@ -1,7 +1,4 @@
 use crate::local::context_manager::{ContextManager, SimpleContextManager};
-use crate::local::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use crate::local::integrations::openai::{OpenAIConfig, OpenAIModel};
-use crate::local::integrations::{LLMInput, LLMModel, LLMProviderConfig, LLMStreamInput};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -10,11 +7,16 @@ use libsql::{Builder, Connection};
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
+use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, Role, Tool,
+    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
+    OpenAIModel, Role, Tool,
 };
-use stakpak_shared::models::llm::{GenerationDelta, LLMMessage, LLMMessageContent};
+use stakpak_shared::models::llm::{
+    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
+    LLMStreamInput, chat, chat_stream,
+};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -22,7 +24,6 @@ use uuid::Uuid;
 
 mod context_manager;
 mod db;
-pub mod integrations;
 
 #[cfg(test)]
 mod tests;
@@ -219,6 +220,7 @@ impl AgentProvider for LocalClient {
                 .map(|u| u.usage.clone())
                 .unwrap_or_default(),
             system_fingerprint: None,
+            metadata: None,
         })
     }
 
@@ -327,6 +329,7 @@ impl AgentProvider for LocalClient {
                                         finish_reason: None,
                                     }],
                                     usage: ctx.state.llm_output.as_ref().map(|u| u.usage.clone()),
+                                    metadata: None,
                                 })
                             }
                         }
@@ -456,7 +459,7 @@ impl LocalClient {
             };
 
             let chat_future = async move {
-                integrations::chat_stream(&inference_config, input)
+                chat_stream(&inference_config, input)
                     .await
                     .map_err(|e| e.to_string())
             };
@@ -473,7 +476,7 @@ impl LocalClient {
             let response = chat_result?;
             (response.choices[0].message.clone(), response.usage)
         } else {
-            let response = integrations::chat(&inference_config, input)
+            let response = chat(&inference_config, input)
                 .await
                 .map_err(|e| e.to_string())?;
             (response.choices[0].message.clone(), response.usage)
@@ -614,14 +617,14 @@ impl LocalClient {
             },
         ];
 
-        let input = crate::local::integrations::LLMInput {
+        let input = LLMInput {
             model: inference_model,
             messages,
             max_tokens: 100,
             tools: None,
         };
 
-        let response = integrations::chat(&inference_config, input)
+        let response = chat(&inference_config, input)
             .await
             .map_err(|e| e.to_string())?;
 

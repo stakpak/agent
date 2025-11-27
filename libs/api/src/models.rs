@@ -1,4 +1,3 @@
-use crate::local::integrations::LLMInput;
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
@@ -7,7 +6,7 @@ use stakpak_shared::models::{
     integrations::openai::{
         AgentModel, ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall,
     },
-    llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
+    llm::{LLMInput, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
 };
 use uuid::Uuid;
 
@@ -212,6 +211,7 @@ impl AgentInput {
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
+                        usage: None,
                     }]);
                 }
             }
@@ -694,6 +694,7 @@ impl From<&InferenceOutput> for ChatMessage {
             name: None,
             tool_calls,
             tool_call_id: None,
+            usage: None,
         }
     }
 }

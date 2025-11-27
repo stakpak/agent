@@ -43,6 +43,7 @@ pub fn user_message(user_input: String) -> ChatMessage {
         name: None,
         tool_calls: None,
         tool_call_id: None,
+        usage: None,
     }
 }
 
@@ -53,6 +54,7 @@ pub fn system_message(system_prompt: String) -> ChatMessage {
         name: None,
         tool_calls: None,
         tool_call_id: None,
+        usage: None,
     }
 }
 
@@ -63,6 +65,7 @@ pub fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
         name: None,
         tool_calls: None,
         tool_call_id: Some(tool_call_id),
+        usage: None,
     }
 }
 
