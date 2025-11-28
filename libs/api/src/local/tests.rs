@@ -1,5 +1,7 @@
 use super::*;
-use crate::local::context_manager::{ContextManager, SimpleContextManager};
+use crate::local::context_managers::{
+    ContextManager, simple_context_manager::SimpleContextManager,
+};
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, ContentPart, ImageUrl, MessageContent, Role,
 };

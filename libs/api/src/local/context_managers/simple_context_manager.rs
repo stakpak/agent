@@ -3,13 +3,10 @@ use stakpak_shared::models::{
     llm::{LLMMessage, LLMMessageContent},
 };
 
-pub trait ContextManager {
-    fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage>;
-}
-
+#[allow(dead_code)]
 pub struct SimpleContextManager;
 
-impl ContextManager for SimpleContextManager {
+impl super::ContextManager for SimpleContextManager {
     fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage> {
         if messages.is_empty() {
             return vec![];

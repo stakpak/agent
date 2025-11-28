@@ -1,4 +1,7 @@
-use crate::local::context_manager::{ContextManager, SimpleContextManager};
+use crate::local::context_managers::ContextManager;
+use crate::local::context_managers::scratchpad_context_manager::{
+    ScratchpadContextManager, ScratchpadContextManagerOptions,
+};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -22,7 +25,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-mod context_manager;
+mod context_managers;
 mod db;
 
 #[cfg(test)]
@@ -56,8 +59,8 @@ enum StreamMessage {
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
-const SYSTEM_PROMPT: &str = include_str!("./prompts/main.txt");
-const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/title_generator.txt");
+const SYSTEM_PROMPT: &str = include_str!("./prompts/agent.v1.txt");
+const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_generator.v1.txt");
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
@@ -426,7 +429,11 @@ impl LocalClient {
             llm_input
         } else {
             let inference_model = self.get_inference_model(ctx.state.agent_model.clone());
-            let context_manager = SimpleContextManager;
+            let context_manager = ScratchpadContextManager::new(ScratchpadContextManagerOptions {
+                history_action_message_size_limit: 100,
+                history_action_message_keep_last_n: 1,
+                history_action_result_keep_last_n: 50,
+            });
             let mut llm_messages = vec![LLMMessage {
                 role: Role::System.to_string(),
                 content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
