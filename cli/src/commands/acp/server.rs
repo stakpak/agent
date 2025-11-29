@@ -85,6 +85,7 @@ impl StakpakAcpAgent {
             }
             ProviderType::Local => {
                 let client = LocalClient::new(LocalClientConfig {
+                    stakpak_base_url: Some(config.api_endpoint.clone()),
                     store_path: None,
                     anthropic_config: config.anthropic.clone(),
                     openai_config: config.openai.clone(),

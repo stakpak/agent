@@ -4,6 +4,7 @@ use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
 use futures_util::Stream;
 use libsql::{Builder, Connection};
+use reqwest::Error as ReqwestError;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
@@ -17,6 +18,7 @@ use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
 };
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -31,6 +33,7 @@ mod tests;
 #[derive(Clone, Debug)]
 pub struct LocalClient {
     pub db: Connection,
+    pub stakpak_base_url: Option<String>,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
     pub smart_model: LLMModel,
@@ -40,6 +43,7 @@ pub struct LocalClient {
 }
 
 pub struct LocalClientConfig {
+    pub stakpak_base_url: Option<String>,
     pub store_path: Option<String>,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
@@ -82,6 +86,7 @@ impl LocalClient {
 
         Ok(Self {
             db: conn,
+            stakpak_base_url: config.stakpak_base_url.map(|url| url + "/v1"),
             anthropic_config: config.anthropic_config,
             openai_config: config.openai_config,
             smart_model: config
@@ -113,11 +118,69 @@ impl AgentProvider for LocalClient {
     }
 
     async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String> {
-        Ok(vec![])
+        if self.stakpak_base_url.is_none() {
+            return Ok(vec![]);
+        }
+
+        let stakpak_base_url = self
+            .stakpak_base_url
+            .as_ref()
+            .ok_or("Stakpak base URL not set")?;
+
+        let url = format!("{}/rules", stakpak_base_url);
+
+        let client = create_tls_client(
+            TlsClientConfig::default().with_timeout(std::time::Duration::from_secs(300)),
+        )?;
+
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<ListRulebooksResponse>(value.clone()) {
+            Ok(response) => Ok(response.results),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
     }
 
-    async fn get_rulebook_by_uri(&self, _uri: &str) -> Result<RuleBook, String> {
-        Err("Local provider does not support rulebooks yet".to_string())
+    async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
+        let stakpak_base_url = self
+            .stakpak_base_url
+            .as_ref()
+            .ok_or("Stakpak base URL not set")?;
+
+        let encoded_uri = urlencoding::encode(uri);
+
+        let url = format!("{}/rules/{}", stakpak_base_url, encoded_uri);
+
+        let client = create_tls_client(
+            TlsClientConfig::default().with_timeout(std::time::Duration::from_secs(300)),
+        )?;
+
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<RuleBook>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
     }
 
     async fn create_rulebook(

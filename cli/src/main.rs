@@ -247,6 +247,7 @@ async fn main() {
                         ProviderType::Local => {
                             let client = LocalClient::new(LocalClientConfig {
                                 store_path: None,
+                                stakpak_base_url: Some(config.api_endpoint.clone()),
                                 anthropic_config: config.anthropic.clone(),
                                 openai_config: config.openai.clone(),
                                 eco_model: config.eco_model.clone(),
