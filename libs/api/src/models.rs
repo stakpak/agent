@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
@@ -642,17 +644,19 @@ pub struct AgentState {
     pub tools: Option<Vec<Tool>>,
 
     pub llm_input: Option<LLMInput>,
-    pub llm_output: Option<InferenceOutput>,
+    pub llm_output: Option<LLMOutput>,
+
+    pub metadata: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct InferenceOutput {
+pub struct LLMOutput {
     pub new_message: LLMMessage,
     pub usage: LLMTokenUsage,
 }
 
-impl From<&InferenceOutput> for ChatMessage {
-    fn from(value: &InferenceOutput) -> Self {
+impl From<&LLMOutput> for ChatMessage {
+    fn from(value: &LLMOutput) -> Self {
         let message_content = match &value.new_message.content {
             LLMMessageContent::String(s) => s.clone(),
             LLMMessageContent::List(l) => l
@@ -712,6 +716,7 @@ impl AgentState {
             tools,
             llm_input: None,
             llm_output: None,
+            metadata: None,
         }
     }
 
@@ -732,7 +737,7 @@ impl AgentState {
     }
 
     pub fn set_llm_output(&mut self, new_message: LLMMessage, new_usage: Option<LLMTokenUsage>) {
-        self.llm_output = Some(InferenceOutput {
+        self.llm_output = Some(LLMOutput {
             new_message,
             usage: new_usage.unwrap_or_default(),
         });
