@@ -196,7 +196,7 @@ impl LoggerHook {
     }
 }
 
-define_hook!(LoggerHook, "logger", async |ctx, event| {
+define_hook!(LoggerHook, "logger", async |&self, ctx: &mut HookContext<State>, event: &LifecycleEvent| {
     let timestamp: DateTime<Local> = Local::now();
     let log_message = format!(
         "[{}] LoggerHook event: {:?}, {}\n",
@@ -222,18 +222,15 @@ define_hook!(LoggerHook, "logger", async |ctx, event| {
 */
 #[macro_export]
 macro_rules! define_hook {
-    ($name:ident, $hook_name:expr, async |$ctx:ident, $event:ident| $body:block) => {
+    ($name:ident, $hook_name:expr, async |&$self:ident, $ctx:ident: &mut HookContext<$state:ty>, $event:ident: &LifecycleEvent| $body:block) => {
         #[async_trait::async_trait]
-        impl<State> Hook<State> for $name
-        where
-            State: Clone + Serialize + Debug + Send + Sync,
-        {
+        impl Hook<$state> for $name {
             fn name(&self) -> &str {
                 $hook_name
             }
             async fn execute(
-                &self,
-                $ctx: &mut HookContext<State>,
+                &$self,
+                $ctx: &mut HookContext<$state>,
                 $event: &LifecycleEvent,
             ) -> Result<HookAction, HookError> {
                 $body
