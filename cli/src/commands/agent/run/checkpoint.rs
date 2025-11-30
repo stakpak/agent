@@ -1,6 +1,6 @@
 use crate::commands::agent::run::tui::send_input_event;
 use rmcp::model::CallToolResult;
-use stakpak_api::Client;
+use stakpak_api::AgentProvider;
 use stakpak_api::models::AgentOutput;
 use stakpak_shared::models::integrations::{
     mcp::CallToolResultExt,
@@ -10,7 +10,7 @@ use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
 
 pub async fn get_checkpoint_messages(
-    client: &Client,
+    client: &dyn AgentProvider,
     checkpoint_id: &String,
 ) -> Result<Vec<ChatMessage>, String> {
     let checkpoint_uuid = Uuid::parse_str(checkpoint_id).map_err(|_| {
@@ -213,7 +213,7 @@ pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<S
 
 /// Resumes a session from a checkpoint, loading messages and tool calls
 pub async fn resume_session_from_checkpoint(
-    client: &Client,
+    client: &dyn AgentProvider,
     session_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) -> Result<(Vec<ChatMessage>, Vec<ToolCall>, Uuid), String> {

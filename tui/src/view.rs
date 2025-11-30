@@ -1,7 +1,7 @@
 use crate::app::{AppState, LoadingType};
 use crate::constants::{
     CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO,
-    DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES,
+    CONTEXT_MAX_UTIL_TOKENS_RECOVERY, DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -491,6 +491,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             let max_tokens = match state.model {
                 AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
                 AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+                AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
             };
 
             let capped_tokens = used_context.total_tokens.min(max_tokens);

@@ -6,6 +6,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use stakpak_api::models::RuleBookVisibility;
 
 pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
     // Calculate popup size (80% width, 70% height for more space)
@@ -266,8 +267,8 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         )]));
         let visibility_text = match selected_rulebook.visibility {
-            stakpak_api::RuleBookVisibility::Public => "Public",
-            stakpak_api::RuleBookVisibility::Private => "Private",
+            RuleBookVisibility::Public => "Public",
+            RuleBookVisibility::Private => "Private",
         };
         detail_lines.push(Line::from(vec![Span::styled(
             format!("  {}", visibility_text),

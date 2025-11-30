@@ -1,5 +1,9 @@
-use crate::config::AppConfig;
-use stakpak_api::Client;
+use crate::config::{AppConfig, ProviderType};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::RemoteClient,
+};
 use tokio::time::Duration;
 
 const MAX_RETRIES: u32 = 2;
@@ -22,16 +26,39 @@ pub async fn validate_profile_switch(
         if let Some(default_key) = default_api_key {
             new_config.api_key = Some(default_key);
         } else {
-            return Err(format!(
-                "Profile '{}' has no API key and no default key available",
-                new_profile
-            ));
+            // Only error if provider is remote
+            if matches!(new_config.provider, ProviderType::Remote) {
+                return Err(format!(
+                    "Profile '{}' has no API key and no default key available",
+                    new_profile
+                ));
+            }
         }
     }
 
     // 3. Test API key with retry logic
-    let client = Client::new(&new_config.clone().into())
-        .map_err(|e| format!("Failed to create API client: {}", e))?;
+    let client: Box<dyn AgentProvider> = match new_config.provider {
+        ProviderType::Remote => {
+            let client = RemoteClient::new(&new_config.clone().into())
+                .map_err(|e| format!("Failed to create API client: {}", e))?;
+            Box::new(client)
+        }
+        ProviderType::Local => {
+            let client = LocalClient::new(LocalClientConfig {
+                stakpak_base_url: Some(new_config.api_endpoint.clone()),
+                store_path: None,
+                anthropic_config: new_config.anthropic.clone(),
+                openai_config: new_config.openai.clone(),
+                eco_model: new_config.eco_model.clone(),
+                recovery_model: new_config.recovery_model.clone(),
+                smart_model: new_config.smart_model.clone(),
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create local client: {}", e))?;
+            Box::new(client)
+        }
+    };
 
     let mut last_error = String::new();
     for attempt in 1..=MAX_RETRIES {
@@ -41,6 +68,11 @@ pub async fn validate_profile_switch(
                 return Ok(new_config);
             }
             Err(e) => {
+                // If local provider returns "Not Implemented", we consider it a success for now as it doesn't support account check
+                if matches!(new_config.provider, ProviderType::Local) {
+                    return Ok(new_config);
+                }
+
                 last_error = e;
                 if attempt < MAX_RETRIES {
                     // Wait before retry (exponential backoff)

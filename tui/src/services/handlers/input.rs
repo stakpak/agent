@@ -2,9 +2,12 @@
 //!
 //! Handles all input-related events including text input, cursor movement, and paste operations.
 
-use crate::app::{AppState, InputEvent, OutputEvent};
-use crate::constants::MAX_PASTE_CHAR_COUNT;
+use std::path::{Path, PathBuf};
+
+use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
+use crate::constants::{CONTEXT_MAX_UTIL_TOKENS_RECOVERY, MAX_PASTE_CHAR_COUNT};
 use crate::services::auto_approve::AutoApprovePolicy;
+use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
 use crate::services::helper_block::render_system_message;
@@ -13,6 +16,7 @@ use crate::services::message::Message;
 use ratatui::style::{Color, Style};
 use regex;
 use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
@@ -128,7 +132,7 @@ pub fn handle_input_submitted_event(
             // - show the message in the TUI
             // - send a UserMessage to the CLI so it runs the agent again
             let _ = input_tx.try_send(InputEvent::AddUserMessage(message_text.clone()));
-            let _ = output_tx.try_send(OutputEvent::UserMessage(message_text, None));
+            let _ = output_tx.try_send(OutputEvent::UserMessage(message_text, None, Vec::new()));
         }
 
         state.recovery_options.clear();
@@ -231,6 +235,12 @@ pub fn handle_input_changed(state: &mut AppState, c: char) {
 
     state.text_area.insert_str(&c.to_string());
 
+    // Check if editing inside a placeholder - reveal original path
+    check_placeholder_edit(state);
+
+    // Detect and convert pending paths
+    detect_and_convert_paths(state);
+
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
     if let Some(placeholder) = &state.pasted_placeholder
         && !state.input().contains(placeholder)
@@ -264,6 +274,9 @@ pub fn handle_input_changed(state: &mut AppState, c: char) {
 /// Handle backspace input
 pub fn handle_input_backspace(state: &mut AppState) {
     state.text_area.delete_backward(1);
+
+    // Check if editing inside a placeholder - reveal original path
+    check_placeholder_edit(state);
 
     // If a large paste placeholder is present and input is edited, only clear pasted state if placeholder is completely removed
     if let Some(placeholder) = &state.pasted_placeholder
@@ -399,7 +412,7 @@ fn handle_input_submitted(
         state.messages.clear();
 
         // Reset usage for the switched session
-        state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        state.total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
@@ -440,9 +453,26 @@ fn handle_input_submitted(
                 push_error_message(state, &e, None);
             }
         }
-    } else if !state.input().trim().is_empty() {
-        // PERFORMANCE FIX: Simplified condition for submission
-        // Allow submission of any non-empty input that's not a recognized helper command
+    } else if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
+        // Allow submission if there's text input OR attached images
+
+        log::debug!(
+            "Submitting message with {} attached images",
+            state.attached_images.len()
+        );
+
+        // Show loading immediately if processing images
+        let has_images = !state.attached_images.is_empty();
+
+        // Convert any pending image paths before submission
+        convert_all_pending_paths(state);
+
+        // Start streaming/loading state if we have images to process
+        if has_images || !state.attached_images.is_empty() {
+            state.is_streaming = true;
+            state.loading = true;
+        }
+
         let input_height = 3;
         let total_lines = state.messages.len() * 2;
         let max_visible_lines = std::cmp::max(1, message_area_height.saturating_sub(input_height));
@@ -471,26 +501,76 @@ fn handle_input_submitted(
         state.pasted_long_text = None;
         state.pasted_placeholder = None;
 
-        // Use eco limit if eco model is selected
+        // Keep placeholders in text for LLM context
+        let user_message_text = final_input.clone();
+
         let max_tokens = match state.model {
             AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
             AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
+            AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
         };
 
-        let capped_tokens = state.total_session_usage.total_tokens.min(max_tokens);
+        let usage = &state.current_message_usage;
+        let total_tokens = usage.total_tokens;
+        let capped_tokens = total_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 
-        let user_message_text = final_input.clone();
         if utilization_pct < 92 {
-            let _ = output_tx.try_send(OutputEvent::UserMessage(
+            // Process all images and create ContentParts
+            let attached_paths: Vec<_> = state
+                .attached_images
+                .iter()
+                .map(|img| img.path.clone())
+                .collect();
+
+            let image_parts =
+                crate::services::image_upload::process_all_images(&final_input, &attached_paths);
+
+            if image_parts.is_empty() && !attached_paths.is_empty() {
+                log::warn!(
+                    "Had {} attached paths but created 0 ContentParts",
+                    attached_paths.len()
+                );
+            }
+
+            // Check for image processing errors
+            let mut image_errors = Vec::new();
+            for img in &state.attached_images {
+                if !img.path.exists() {
+                    image_errors.push(format!("Image file not found: {}", img.path.display()));
+                } else if !is_supported_format(&img.path) {
+                    let ext = img
+                        .path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("unknown");
+                    image_errors.push(format!(
+                        "Unsupported image format: {} ({}). Supported formats: JPEG, PNG, GIF, WebP", 
+                        img.filename,
+                        ext.to_uppercase()
+                    ));
+                }
+            }
+
+            if !image_errors.is_empty() {
+                for error in image_errors {
+                    push_error_message(state, &error, None);
+                }
+            }
+
+            if let Err(e) = output_tx.try_send(OutputEvent::UserMessage(
                 final_input.clone(),
                 state.shell_tool_calls.clone(),
-            ));
-            let _ = input_tx.try_send(InputEvent::AddUserMessage(user_message_text));
-        }
+                image_parts,
+            )) {
+                log::warn!("Failed to send UserMessage event: {}", e);
+            }
 
-        if utilization_pct >= 92 {
+            if let Err(e) = input_tx.try_send(InputEvent::AddUserMessage(user_message_text)) {
+                log::warn!("Failed to send AddUserMessage event: {}", e);
+            }
+        } else {
             if !state.messages.is_empty() {
                 state.messages.push(Message::plain_text(""));
             }
@@ -507,8 +587,12 @@ fn handle_input_submitted(
             ));
             state.messages.push(Message::plain_text(""));
         }
+
+        // Always clear attached images and reset state after submission
         state.shell_tool_calls = None;
         state.text_area.set_text("");
+        state.attached_images.clear();
+        state.pending_path_start = None;
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
         if was_at_bottom {
@@ -556,22 +640,185 @@ pub fn handle_input_submitted_with(
     }
 }
 
-/// Handle paste operation
+/// Handle text paste (Event::Paste), including large text and image *paths*.
 pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
     // Normalize line endings: many terminals convert newlines to \r when pasting,
     // but textarea expects \n. This is the same fix used in Codex.
     let normalized_pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
 
+    // On macOS, Cmd+V might paste text even when an image is on clipboard.
+    // First, try to check if there's an image on the clipboard (for Cmd+V on macOS).
+    #[cfg(not(target_os = "android"))]
+    {
+        // Try to get image from clipboard - if successful, use that instead of text
+        // This also checks for file paths in clipboard text
+        if let Ok((path, info)) = paste_image_to_temp_png() {
+            attach_image(
+                state,
+                path,
+                info.width,
+                info.height,
+                info.encoded_format.label(),
+            );
+            return true;
+        }
+    }
+
+    // Also check if the pasted text itself contains file paths
+    // (e.g., user pastes "check this out /path/to/image.png")
     let char_count = normalized_pasted.chars().count();
     if char_count > MAX_PASTE_CHAR_COUNT {
         let placeholder = format!("[Pasted Content {char_count} chars]");
         state.text_area.insert_element(&placeholder);
         state.pending_pastes.push((placeholder, normalized_pasted));
+    } else if char_count > 1 && handle_paste_image_path(state, normalized_pasted.clone()) {
+        // Path inserted - conversion will happen when user types or hits Enter
     } else {
         state.text_area.insert_str(&normalized_pasted);
     }
 
     true
+}
+
+/// Handle Ctrl+V clipboard image paste (non-text clipboard images).
+pub fn handle_clipboard_image_paste(state: &mut AppState) {
+    state.is_pasting = true;
+    #[cfg(not(target_os = "android"))]
+    {
+        match paste_image_to_temp_png() {
+            Ok((path, info)) => {
+                attach_image(
+                    state,
+                    path,
+                    info.width,
+                    info.height,
+                    info.encoded_format.label(),
+                );
+            }
+            Err(e) => {
+                log::warn!("Failed to paste image from clipboard: {}", e);
+                let error_msg = match e.to_string().as_str() {
+                    s if s.contains("clipboard unavailable") => {
+                        "Clipboard is not available. Please check system permissions.".to_string()
+                    }
+                    s if s.contains("no image") => {
+                        "No image found on clipboard. Please copy an image first.".to_string()
+                    }
+                    s if s.contains("encode") => {
+                        "Failed to process clipboard image. The image format may not be supported."
+                            .to_string()
+                    }
+                    s if s.contains("io error") => {
+                        "Failed to save clipboard image. Please try again.".to_string()
+                    }
+                    _ => format!("Failed to paste image: {}", e),
+                };
+                push_error_message(state, &error_msg, None);
+            }
+        }
+    }
+    #[cfg(target_os = "android")]
+    {
+        push_error_message(state, "Image paste is not supported on Android.", None);
+    }
+    state.is_pasting = false;
+}
+
+fn handle_paste_image_path(state: &mut AppState, pasted: String) -> bool {
+    // First, try to normalize as a direct path
+    if let Some(path_buf) = normalize_pasted_path(&pasted)
+        && image::image_dimensions(&path_buf).is_ok()
+    {
+        // Just insert the path as text - let detection logic handle conversion
+        state
+            .text_area
+            .insert_str(path_buf.display().to_string().as_str());
+        return true;
+    }
+
+    // Try to extract file paths from text that may contain other content
+    let extracted_paths = crate::services::clipboard_paste::extract_file_paths_from_text(&pasted);
+    for path_buf in extracted_paths {
+        // Validate it's a valid image
+        if image::image_dimensions(&path_buf).is_ok() {
+            // Just insert the path as text - let detection logic handle conversion
+            state
+                .text_area
+                .insert_str(path_buf.display().to_string().as_str());
+            return true;
+        }
+    }
+
+    // Check if it looks like a filename (no slashes, might be a bare filename)
+    let trimmed = pasted.trim();
+    if !trimmed.is_empty() && !trimmed.contains('/') && !trimmed.contains('\\') {
+        // Search common directories for image files matching this name
+        if let Some(path_buf) = find_image_file_by_name(trimmed) {
+            // Validate it's a valid image
+            if image::image_dimensions(&path_buf).is_ok() {
+                // Just insert the path as text - let detection logic handle conversion
+                state
+                    .text_area
+                    .insert_str(path_buf.display().to_string().as_str());
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Search common directories for an image file matching the given name (with various extensions)
+pub fn find_image_file_by_name(name: &str) -> Option<PathBuf> {
+    // Common image extensions to try
+    const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"];
+
+    // Common directories to search (Desktop, Downloads, Documents, Pictures)
+    let common_dirs = [
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Desktop")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Downloads")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Documents")),
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(&h).join("Pictures")),
+        // Also try current directory
+        std::env::current_dir().ok(),
+    ];
+
+    for dir_opt in common_dirs.iter().flatten() {
+        for ext in IMAGE_EXTENSIONS {
+            let candidate = dir_opt.join(format!("{}.{}", name, ext));
+            if candidate.exists() && candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+fn attach_image(state: &mut AppState, path: PathBuf, width: u32, height: u32, format_label: &str) {
+    let filename = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("untitled")
+        .to_string();
+    let placeholder = format!("[Image {} {}x{} {}]", filename, width, height, format_label);
+    let cursor = state.cursor_position();
+    state.text_area.insert_element(&placeholder);
+    state.attached_images.push(AttachedImage {
+        placeholder: placeholder.clone(),
+        path: path.clone(),
+        filename,
+        dimensions: (width, height),
+        start_pos: cursor,
+        end_pos: cursor + placeholder.len(),
+    });
 }
 
 /// Handle input delete (clear input)
@@ -626,4 +873,352 @@ pub fn handle_cursor_right(state: &mut AppState) {
         return; // Event was consumed by popup
     }
     state.text_area.move_cursor_right();
+}
+
+/// Check if user is editing inside a placeholder and reveal original path
+fn check_placeholder_edit(state: &mut AppState) {
+    let input = state.input();
+    let cursor = state.cursor_position();
+
+    // Check if any placeholder is modified
+    for img in state.attached_images.clone().iter() {
+        if cursor >= img.start_pos && cursor <= img.end_pos {
+            // Check if placeholder still matches
+            if img.end_pos <= input.len() {
+                let current_text = &input[img.start_pos..img.end_pos];
+                if current_text != img.placeholder {
+                    // Placeholder modified - reveal path
+                    let path_str = img.path.display().to_string();
+                    state
+                        .text_area
+                        .replace_range(img.start_pos..img.end_pos, &path_str);
+                    state.text_area.set_cursor(img.start_pos + path_str.len());
+                    state
+                        .attached_images
+                        .retain(|p| p.start_pos != img.start_pos);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Detect paths in input and convert them to placeholders
+fn detect_and_convert_paths(state: &mut AppState) {
+    let input = state.input();
+    let cursor = state.cursor_position();
+
+    // Find all image paths in the input
+    let paths = find_all_image_paths(input);
+
+    // Find which path to convert (if any)
+    let mut path_to_convert: Option<(usize, usize, String)> = None;
+    let mut pending_start: Option<usize> = None;
+
+    for (start, end, path_str) in paths {
+        // Skip if this range already contains a placeholder
+        if end <= input.len() {
+            let text_at_pos = &input[start..end];
+            if text_at_pos.starts_with("[Image ") {
+                continue; // Already a placeholder
+            }
+        }
+
+        // Skip URLs
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            continue;
+        }
+
+        // Convert if:
+        // 1. User typed after the path (cursor > end), OR
+        // 2. There's text after the path (not at end of input)
+        let has_text_after = end < input.len();
+        let cursor_after_path = cursor > end;
+
+        if has_text_after || cursor_after_path {
+            // Mark this path for conversion
+            path_to_convert = Some((start, end, path_str));
+            break; // Only convert one at a time
+        } else {
+            // Path is at the end, waiting for more input
+            pending_start = Some(start);
+        }
+    }
+
+    // Now perform the conversion if needed
+    if let Some((start, end, path_str)) = path_to_convert {
+        let success = convert_path_to_placeholder(state, start, end, &path_str);
+        if success {
+            update_placeholder_positions_after_replacement(state);
+        }
+        state.pending_path_start = None;
+    } else if let Some(start) = pending_start {
+        state.pending_path_start = Some(start);
+    }
+}
+
+/// Find all image paths in the input text
+fn find_all_image_paths(input: &str) -> Vec<(usize, usize, String)> {
+    const IMAGE_EXTS: &[&str] = &[
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif",
+    ];
+    let mut paths = Vec::new();
+
+    // Pattern 1: Quoted paths (single or double quotes) - handles spaces
+    // Example: '/path/to/file with spaces.png' or "/path/to/file.png"
+    for quote in &['\'', '"'] {
+        let mut i = 0;
+        while i < input.len() {
+            if let Some(start) = input[i..].find(*quote) {
+                let start_pos = i + start;
+                let after_quote = start_pos + quote.len_utf8();
+
+                if let Some(end_quote_pos) = input[after_quote..].find(*quote) {
+                    let path_start = after_quote;
+                    let path_end = after_quote + end_quote_pos;
+                    let potential_path = &input[path_start..path_end];
+
+                    // Check if it has an image extension
+                    if IMAGE_EXTS
+                        .iter()
+                        .any(|ext| potential_path.to_lowercase().ends_with(ext))
+                    {
+                        // Store the full quoted text (including quotes) for proper replacement
+                        let end_with_quote = path_end + quote.len_utf8();
+                        let quoted_text = &input[start_pos..end_with_quote];
+                        paths.push((start_pos, end_with_quote, quoted_text.to_string()));
+                    }
+
+                    i = path_end + quote.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Pattern 2: Unquoted paths (must not contain spaces)
+    // Look for image extensions and work backwards/forwards
+    for ext in IMAGE_EXTS {
+        let ext_lower = ext.to_lowercase();
+        let mut search_pos = 0;
+
+        while let Some(ext_pos) = input[search_pos..].to_lowercase().find(&ext_lower) {
+            let ext_start = search_pos + ext_pos;
+            let ext_end = ext_start + ext.len();
+
+            // Work backwards to find path start
+            let mut path_start = ext_start;
+            while path_start > 0 {
+                let prev_char = input.as_bytes()[path_start - 1];
+                // Stop at whitespace or quotes
+                if prev_char == b' '
+                    || prev_char == b'\n'
+                    || prev_char == b'\t'
+                    || prev_char == b'\''
+                    || prev_char == b'"'
+                {
+                    break;
+                }
+                path_start -= 1;
+            }
+
+            // Make sure we're on char boundary
+            while path_start > 0 && !input.is_char_boundary(path_start) {
+                path_start -= 1;
+            }
+
+            let potential_path = &input[path_start..ext_end];
+
+            // Skip if this is part of a quoted path (already handled)
+            let is_quoted = paths
+                .iter()
+                .any(|(s, e, _)| *s <= path_start && *e >= ext_end);
+
+            if !is_quoted && !potential_path.is_empty() {
+                paths.push((path_start, ext_end, potential_path.to_string()));
+            }
+
+            search_pos = ext_end;
+        }
+    }
+
+    // Sort by position and deduplicate
+    paths.sort_by_key(|(start, _, _)| *start);
+    paths.dedup_by_key(|(start, _, _)| *start);
+
+    paths
+}
+
+/// Convert all pending image paths in the input (called on submission)
+fn convert_all_pending_paths(state: &mut AppState) {
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: usize = 20; // Safety limit to prevent infinite loops
+
+    loop {
+        attempts += 1;
+        if attempts > MAX_ATTEMPTS {
+            log::warn!("Exceeded max attempts to convert image paths");
+            break;
+        }
+
+        let input_before = state.input().to_string();
+        let paths = find_all_image_paths(&input_before);
+
+        // Find first unconverted path
+        let mut found_path = None;
+        for (start, end, path_str) in paths {
+            // Skip if this range already contains a placeholder
+            if end <= input_before.len() {
+                let text_at_pos = &input_before[start..end];
+                if text_at_pos.starts_with("[Image ") {
+                    continue; // Already a placeholder
+                }
+            }
+
+            // Skip URLs
+            if path_str.starts_with("http://") || path_str.starts_with("https://") {
+                continue;
+            }
+
+            found_path = Some((start, end, path_str));
+            break;
+        }
+
+        if let Some((start, end, path_str)) = found_path {
+            let success = convert_path_to_placeholder(state, start, end, &path_str);
+
+            if success {
+                // Update positions of all existing placeholders after replacement
+                update_placeholder_positions_after_replacement(state);
+            } else {
+                // Failed to convert - keep the path in text and skip it
+                break; // Stop trying to convert this batch
+            }
+
+            // Check if input actually changed to prevent infinite loop
+            let input_after = state.input().to_string();
+            if input_after == input_before {
+                log::warn!("Input unchanged after conversion attempt, breaking loop");
+                break;
+            }
+        } else {
+            break; // No more paths to convert
+        }
+    }
+
+    state.pending_path_start = None;
+}
+
+/// Check if image format is supported by the API
+fn is_supported_format(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    !matches!(ext.as_str(), "tiff" | "tif" | "bmp")
+}
+
+/// Update placeholder positions after a text replacement
+fn update_placeholder_positions_after_replacement(state: &mut AppState) {
+    let input = state.input().to_string();
+
+    // Recalculate all placeholder positions based on current input
+    for img in &mut state.attached_images {
+        // Find where this placeholder actually is in the current input
+        if let Some(pos) = input.find(&img.placeholder) {
+            img.start_pos = pos;
+            img.end_pos = pos + img.placeholder.len();
+        }
+    }
+}
+
+/// Convert a path string to an image placeholder
+/// Returns true if successful, false if failed
+fn convert_path_to_placeholder(
+    state: &mut AppState,
+    start: usize,
+    end: usize,
+    path_str: &str,
+) -> bool {
+    // Strip quotes if present
+    let clean_path = path_str.trim_matches('\'').trim_matches('"');
+    let path = PathBuf::from(clean_path);
+
+    // Resolve relative paths
+    let resolved_path = if path.is_absolute() {
+        path.clone()
+    } else {
+        // Try resolving from current directory
+        if let Ok(cwd) = std::env::current_dir() {
+            let resolved = cwd.join(&path);
+            if resolved.exists() {
+                resolved
+            } else {
+                // Maybe it's a path like "Users/..." that needs leading /
+                let with_slash = PathBuf::from(format!("/{}", clean_path));
+                if with_slash.exists() {
+                    with_slash
+                } else {
+                    path.clone()
+                }
+            }
+        } else {
+            path.clone()
+        }
+    };
+
+    // Quick validation - just check if file exists
+    if !resolved_path.exists() || !resolved_path.is_file() {
+        return false;
+    }
+
+    // Don't convert unsupported formats to placeholders - keep as path
+    if !is_supported_format(&resolved_path) {
+        return false;
+    }
+
+    // Get dimensions quickly without processing
+    let (width, height) = match image::image_dimensions(&resolved_path) {
+        Ok(dims) => dims,
+        Err(_) => return false,
+    };
+
+    let filename = resolved_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("untitled")
+        .to_string();
+
+    let placeholder = format!("[Image {} {}x{} JPEG]", filename, width, height);
+
+    // Replace path with placeholder
+    state.text_area.replace_range(start..end, &placeholder);
+    state
+        .text_area
+        .register_element(start..start + placeholder.len());
+
+    // Check if this path is already attached (avoid duplicates)
+    let already_attached = state
+        .attached_images
+        .iter()
+        .any(|img| img.path == resolved_path);
+
+    if !already_attached {
+        // Store original path - processing will happen on submission
+        state.attached_images.push(AttachedImage {
+            placeholder: placeholder.clone(),
+            path: resolved_path,
+            filename,
+            dimensions: (width, height),
+            start_pos: start,
+            end_pos: start + placeholder.len(),
+        });
+    }
+
+    true
 }

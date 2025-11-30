@@ -7,6 +7,7 @@ edition = "2024"
 stakpak-api = { path = "../libs/api" }
 stakpak-mcp-server = { path = "../libs/mcp/server" }
 stakpak-mcp-client = { path = "../libs/mcp/client" }
+stakpak-mcp-proxy = { path = "../libs/mcp/proxy" }
 stakpak-tui = { path = "../tui" }
 stakpak-shared = { path = "../libs/shared" }
 tracing = { workspace = true }
@@ -39,9 +40,10 @@ agent-client-protocol = "0.4.7"
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 tokio-util = { version = "0.7", features = ["compat"] }
-log = "0.4"
+log = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

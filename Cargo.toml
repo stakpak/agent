@@ -7,12 +7,13 @@ members = [
     "libs/api",
     "libs/mcp/client",
     "libs/mcp/server",
+    "libs/mcp/proxy",
 ]
 default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.2.79"
+version = "0.3.1"
 edition = "2024"
 
 
@@ -67,8 +68,10 @@ rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
+schemars = { version = "0.8.22", features = ["chrono"] }
 async-trait = "0.1"
 open = "5.3.2"
+log = "0.4"
 
 # Required nightly
 [workspace.lints.clippy]

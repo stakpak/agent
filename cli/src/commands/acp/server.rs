@@ -1,18 +1,25 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
+use crate::config::ProviderType;
 use crate::utils::network;
 use crate::{commands::agent::run::helpers::convert_tools_map_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
-use stakpak_api::{Client, ClientConfig};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    remote::{ClientConfig, RemoteClient},
+};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionResponse, ChatCompletionStreamResponse, Role, ToolCall,
-    ToolCallResultProgress,
+    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
+    ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, Tool,
+    ToolCall, ToolCallResultProgress, ToolCallResultStatus,
 };
+use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -23,17 +30,16 @@ use uuid::Uuid;
 
 pub struct StakpakAcpAgent {
     config: AppConfig,
-    client: Client,
+    client: Arc<dyn AgentProvider>,
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     next_session_id: Cell<u64>,
     mcp_server_host: Option<String>,
     clients: Option<Arc<ClientManager>>,
-    tools: Option<Vec<stakpak_shared::models::integrations::openai::Tool>>,
+    tools: Option<Vec<Tool>>,
     current_session_id: Cell<Option<Uuid>>,
     progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
     // Add persistent message history for conversation context
-    messages:
-        Arc<tokio::sync::Mutex<Vec<stakpak_shared::models::integrations::openai::ChatMessage>>>,
+    messages: Arc<tokio::sync::Mutex<Vec<ChatMessage>>>,
     // Add permission request channel
     permission_request_tx: Option<
         mpsc::UnboundedSender<(
@@ -45,8 +51,7 @@ pub struct StakpakAcpAgent {
     stream_cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     tool_cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     // Track active tool calls for cancellation
-    active_tool_calls:
-        Arc<tokio::sync::Mutex<Vec<stakpak_shared::models::integrations::openai::ToolCall>>>,
+    active_tool_calls: Arc<tokio::sync::Mutex<Vec<ToolCall>>>,
     // Store current streaming message for todo extraction
     current_streaming_message: Arc<tokio::sync::Mutex<String>>,
     // Buffer for handling partial XML tags during streaming
@@ -61,37 +66,60 @@ impl StakpakAcpAgent {
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
         system_prompt: Option<String>,
     ) -> Result<Self, String> {
-        let api_config: ClientConfig = config.clone().into();
-
-        // If no API key, create a dummy client that will fail on first use
-        // The user will be prompted during authenticate/new_session
-        let client = if api_config.api_key.is_none() {
-            log::warn!("No API key found. User will be prompted to authenticate.");
-            // Create a dummy client that will fail gracefully
-            Client::new(&ClientConfig {
-                api_key: Some("dummy_for_initialization".to_string()),
-                api_endpoint: api_config.api_endpoint.clone(),
-            })
-            .map_err(|e| format!("Failed to create client: {}", e))?
-        } else {
-            Client::new(&api_config).map_err(|e| format!("Failed to create client: {}", e))?
+        let client: Arc<dyn AgentProvider> = match config.provider {
+            ProviderType::Remote => {
+                let api_config: ClientConfig = config.clone().into();
+                if api_config.api_key.is_none() {
+                    log::warn!("No API key found. User will be prompted to authenticate.");
+                    let client = RemoteClient::new(&ClientConfig {
+                        api_key: Some("dummy_for_initialization".to_string()),
+                        api_endpoint: api_config.api_endpoint.clone(),
+                    })
+                    .map_err(|e| format!("Failed to create client: {}", e))?;
+                    Arc::new(client)
+                } else {
+                    let client = RemoteClient::new(&api_config)
+                        .map_err(|e| format!("Failed to create client: {}", e))?;
+                    Arc::new(client)
+                }
+            }
+            ProviderType::Local => {
+                let client = LocalClient::new(LocalClientConfig {
+                    stakpak_base_url: Some(config.api_endpoint.clone()),
+                    store_path: None,
+                    anthropic_config: config.anthropic.clone(),
+                    openai_config: config.openai.clone(),
+                    eco_model: config.eco_model.clone(),
+                    recovery_model: config.recovery_model.clone(),
+                    smart_model: config.smart_model.clone(),
+                    hook_registry: None,
+                })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+                Arc::new(client)
+            }
         };
 
         // Initialize MCP server and tools (optional for ACP)
-        let (mcp_server_host, clients, tools) =
-            match Self::initialize_mcp_server_and_tools(&config, None).await {
-                Ok((host, client_manager, tool_list)) => {
-                    log::info!("MCP server initialized successfully");
-                    (host, Some(client_manager), tool_list)
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to initialize MCP server: {}, continuing without tools",
-                        e
-                    );
-                    (String::new(), None, Vec::new())
-                }
-            };
+        let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(
+            &config,
+            client.clone(),
+            session_update_tx.clone(),
+        )
+        .await
+        {
+            Ok((host, client_manager, tool_list)) => {
+                log::info!("MCP server initialized successfully");
+                (host, Some(client_manager), tool_list)
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to initialize MCP server: {}, continuing without tools",
+                    e
+                );
+                (String::new(), None, Vec::new())
+            }
+        };
 
         // Create cancellation channels
         let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
@@ -679,10 +707,10 @@ impl StakpakAcpAgent {
     // Process tool calls with cancellation support
     async fn process_tool_calls_with_cancellation(
         &self,
-        tool_calls: Vec<stakpak_shared::models::integrations::openai::ToolCall>,
+        tool_calls: Vec<ToolCall>,
         session_id: &acp::SessionId,
         tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
-    ) -> Result<Vec<stakpak_shared::models::integrations::openai::ChatMessage>, acp::Error> {
+    ) -> Result<Vec<ChatMessage>, acp::Error> {
         log::info!(
             "🔧 DEBUG: Starting tool call processing with {} tool calls",
             tool_calls.len()
@@ -940,9 +968,7 @@ impl StakpakAcpAgent {
 
             if let Some(tool_result) = result {
                 // Check if the tool call was cancelled
-                if CallToolResultExt::get_status(&tool_result)
-                    == stakpak_shared::models::integrations::openai::ToolCallResultStatus::Cancelled
-                {
+                if CallToolResultExt::get_status(&tool_result) == ToolCallResultStatus::Cancelled {
                     // Send cancellation notification
                     self.send_tool_call_update(
                         session_id,
@@ -1081,19 +1107,15 @@ impl StakpakAcpAgent {
         Ok(results)
     }
 
-    async fn initialize_mcp_server_and_tools(
+    pub async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
-        progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
-    ) -> Result<
-        (
-            String,
-            Arc<ClientManager>,
-            Vec<stakpak_shared::models::integrations::openai::Tool>,
-        ),
-        String,
-    > {
+        client: Arc<dyn AgentProvider>,
+        _session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+    ) -> Result<(String, Arc<ClientManager>, Vec<Tool>), String> {
         // Find available bind address
-        let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
+        let (bind_address, listener) = network::find_available_bind_address_with_listener()
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Generate certificates for mTLS
         let certificate_chain = Arc::new(Some(
@@ -1104,13 +1126,13 @@ impl StakpakAcpAgent {
         let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
         // Start MCP server in background
-        let api_config: ClientConfig = config.clone().into();
         let certificate_chain_for_server = certificate_chain.clone();
+        let client_for_server = client.clone();
 
         tokio::spawn(async move {
             let _ = start_server(
                 MCPServerConfig {
-                    api: api_config,
+                    client: Some(client_for_server),
                     redact_secrets: true,
                     privacy_mode: false,
                     enabled_tools: EnabledToolsConfig { slack: false },
@@ -1132,7 +1154,7 @@ impl StakpakAcpAgent {
                     .mcp_server_host
                     .clone()
                     .unwrap_or(local_mcp_server_host.clone()),
-                progress_tx, // Use regular Sender directly
+                None, // progress_tx will be set later in run_stdio
                 certificate_chain,
             )
             .await
@@ -1163,21 +1185,23 @@ impl StakpakAcpAgent {
             created: 0,
             model: AgentModel::Smart.to_string(),
             choices: vec![],
-            usage: stakpak_shared::models::integrations::openai::Usage {
+            usage: LLMTokenUsage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
                 prompt_tokens_details: None,
             },
             system_fingerprint: None,
+            metadata: None,
         };
 
-        let mut chat_message = stakpak_shared::models::integrations::openai::ChatMessage {
-            role: stakpak_shared::models::integrations::openai::Role::Assistant,
+        let mut chat_message = ChatMessage {
+            role: Role::Assistant,
             content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            usage: None,
         };
 
         // Compile regex once outside the loop
@@ -1228,26 +1252,22 @@ impl StakpakAcpAgent {
                         created: response.created,
                         model: response.model.clone(),
                         choices: vec![],
-                        usage: stakpak_shared::models::integrations::openai::Usage {
+                        usage: LLMTokenUsage {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,
                             prompt_tokens_details: None,
                         },
                         system_fingerprint: None,
+                        metadata: None,
                     };
 
                     if let Some(content) = &delta.content {
-                        chat_message.content = Some(
-                            stakpak_shared::models::integrations::openai::MessageContent::String(
-                                match chat_message.content {
-                                    Some(stakpak_shared::models::integrations::openai::MessageContent::String(old_content)) => {
-                                        old_content + content
-                                    }
-                                    _ => content.clone(),
-                                }
-                            )
-                        );
+                        chat_message.content =
+                            Some(MessageContent::String(match chat_message.content {
+                                Some(MessageContent::String(old_content)) => old_content + content,
+                                _ => content.clone(),
+                            }));
 
                         // Accumulate the raw content in the current streaming message BEFORE filtering
                         {
@@ -1308,12 +1328,13 @@ impl StakpakAcpAgent {
                             if let Some(tool_calls_vec) = tool_calls_vec {
                                 match tool_calls_vec.get_mut(delta_tool_call.index) {
                                     Some(tool_call) => {
-                                        let delta_func = delta_tool_call.function.as_ref().unwrap_or(
-                                            &stakpak_shared::models::integrations::openai::FunctionCallDelta {
+                                        let delta_func = delta_tool_call
+                                            .function
+                                            .as_ref()
+                                            .unwrap_or(&FunctionCallDelta {
                                                 name: None,
                                                 arguments: None,
-                                            },
-                                        );
+                                            });
                                         tool_call.function.arguments =
                                             tool_call.function.arguments.clone()
                                                 + delta_func.arguments.as_deref().unwrap_or("");
@@ -1321,26 +1342,26 @@ impl StakpakAcpAgent {
                                     None => {
                                         // push empty tool calls until the index is reached
                                         tool_calls_vec.extend(
-                                            (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
-                                                ToolCall {
+                                            (tool_calls_vec.len()..delta_tool_call.index).map(
+                                                |_| ToolCall {
                                                     id: "".to_string(),
                                                     r#type: "function".to_string(),
-                                                    function: stakpak_shared::models::integrations::openai::FunctionCall {
+                                                    function: FunctionCall {
                                                         name: "".to_string(),
                                                         arguments: "".to_string(),
                                                     },
-                                                }
-                                            }),
+                                                },
+                                            ),
                                         );
 
                                         tool_calls_vec.push(ToolCall {
                                             id: delta_tool_call.id.clone().unwrap_or_default(),
                                             r#type: "function".to_string(),
-                                            function: stakpak_shared::models::integrations::openai::FunctionCall {
+                                            function: FunctionCall {
                                                 name: delta_tool_call
                                                     .function
                                                     .as_ref()
-                                                    .unwrap_or(&stakpak_shared::models::integrations::openai::FunctionCallDelta {
+                                                    .unwrap_or(&FunctionCallDelta {
                                                         name: None,
                                                         arguments: None,
                                                     })
@@ -1399,14 +1420,12 @@ impl StakpakAcpAgent {
                 .collect::<Vec<ToolCall>>(),
         );
 
-        chat_completion_response.choices.push(
-            stakpak_shared::models::integrations::openai::ChatCompletionChoice {
-                index: 0,
-                message: chat_message.clone(),
-                finish_reason: stakpak_shared::models::integrations::openai::FinishReason::Stop,
-                logprobs: None,
-            },
-        );
+        chat_completion_response.choices.push(ChatCompletionChoice {
+            index: 0,
+            message: chat_message.clone(),
+            finish_reason: FinishReason::Stop,
+            logprobs: None,
+        });
 
         Ok(chat_completion_response)
     }
@@ -1441,7 +1460,7 @@ impl StakpakAcpAgent {
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<ToolCallResultProgress>(100);
 
                 // Reinitialize MCP clients with progress channel
-                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, Some(progress_tx.clone())).await {
+                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, self.client.clone(), tx.clone()).await {
                     Ok((host, client_manager, tool_list)) => {
                         log::info!("MCP server reinitialized with progress channel");
                         (host, Some(client_manager), tool_list)
@@ -1857,11 +1876,11 @@ impl acp::Agent for StakpakAcpAgent {
 
         let content = if let Some(content) = &response.choices[0].message.content {
             match content {
-                stakpak_shared::models::integrations::openai::MessageContent::String(s) => {
+                MessageContent::String(s) => {
                     log::info!("Content from chat completion: '{}'", s);
                     s.clone()
                 }
-                stakpak_shared::models::integrations::openai::MessageContent::Array(parts) => {
+                MessageContent::Array(parts) => {
                     let extracted_content = parts
                         .iter()
                         .filter_map(|part| part.text.as_ref())
@@ -1984,10 +2003,7 @@ impl acp::Agent for StakpakAcpAgent {
 
                 // Check if any tool calls were cancelled in the current processing
                 let has_cancelled_tool_calls = tool_results.iter().any(|msg| {
-                    if let Some(
-                        stakpak_shared::models::integrations::openai::MessageContent::String(text),
-                    ) = &msg.content
-                    {
+                    if let Some(MessageContent::String(text)) = &msg.content {
                         text.contains("TOOL_CALL_CANCELLED")
                     } else {
                         false

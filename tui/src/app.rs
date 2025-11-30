@@ -2,6 +2,7 @@ mod events;
 mod types;
 
 pub use events::{InputEvent, OutputEvent};
+use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
@@ -19,7 +20,7 @@ use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent}
 use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
 use ratatui::text::Line;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use stakpak_api::models::{
     RecoveryOption as ApiRecoveryOption, RecoveryOptionsResponse as ApiRecoveryOptionsResponse,
 };
@@ -47,6 +48,9 @@ pub struct AppState {
     pub pasted_long_text: Option<String>,
     pub pasted_placeholder: Option<String>,
     pub pending_pastes: Vec<(String, String)>,
+    /// Images attached via pasted file paths (and future clipboard image support).
+    pub attached_images: Vec<AttachedImage>,
+    pub pending_path_start: Option<usize>,
     pub interactive_commands: Vec<String>,
 
     // ========== Messages & Scrolling State ==========
@@ -146,8 +150,8 @@ pub struct AppState {
     pub show_context_popup: bool,
 
     // ========== Usage Tracking State ==========
-    pub current_message_usage: stakpak_shared::models::integrations::openai::Usage,
-    pub total_session_usage: stakpak_shared::models::integrations::openai::Usage,
+    pub current_message_usage: LLMTokenUsage,
+    pub total_session_usage: LLMTokenUsage,
     pub context_usage_percent: u64,
 
     // ========== Recovery Options State ==========
@@ -271,6 +275,8 @@ impl AppState {
             is_pasting: false,
             ondemand_shell_mode: false,
             shell_tool_calls: None,
+            attached_images: Vec::new(),
+            pending_path_start: None,
             dialog_message_id: None,
             file_search: FileSearch::default(),
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
@@ -346,13 +352,13 @@ impl AppState {
             command_palette_scroll: 0,
             command_palette_search: String::new(),
             // Usage tracking
-            current_message_usage: stakpak_shared::models::integrations::openai::Usage {
+            current_message_usage: LLMTokenUsage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
                 prompt_tokens_details: None,
             },
-            total_session_usage: stakpak_shared::models::integrations::openai::Usage {
+            total_session_usage: LLMTokenUsage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,

@@ -1,12 +1,21 @@
-# Stakpak Agent
 
-**The most secure agent built for operations & DevOps.** Designed for the grittiest parts of software development with enterprise-grade security features including mutual TLS (mTLS) encryption, dynamic secret redaction, and privacy-first architecture.
+# Stakpak
 
-<img src="assets/TUIOverview.png" width="800">
+You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
+Stakpak is built different:
+- **Secret Substitution** - The LLM works with your credentials without ever seeing them
+- **Warden Guardrails** - Network-level policies block destructive operations before they run
+- **DevOps Playbooks Baked-in** - Curated library of DevOps knowledge in Stakpak Rulebooks
+
+Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
+
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
+![til](./assets/stakpak-overview.gif)
 
 ## 🔒 Security Hardened
 
-- **Mutual TLS (mTLS)** - End-to-end encrypted communication between agent components
+- **Mutual TLS (mTLS)** - End-to-end encrypted MCP
 - **Dynamic Secret Substitution** - AI can read/write/compare secrets without seeing actual values
 - **Secure Password Generation** - Generate cryptographically secure passwords with configurable complexity
 - **Privacy Mode** - Redacts sensitive data like IP addresses and AWS account IDs
@@ -59,34 +68,26 @@ docker pull ghcr.io/stakpak/agent:latest
 ```
 
 ## Usage
+You can [use your own Anthropic or OpenAI API keys](#option-b-running-without-a-stakpak-api-key), [custom OpenAI compatible endpoint](#option-b-running-without-a-stakpak-api-key), or [a Stakpak API key](#option-a-running-with-a-stakpak-api-key).
 
-### Authentication
+### Option A: Running with a Stakpak API Key (no card required)
 
-#### Get an API Key (no card required)
+Just run `stakpak` and follow the instructions which will create a new API key for you.
+```bash
+stakpak
+```
 
-1. Visit [stakpak.dev](https://stakpak.dev)
-2. Click "Login" in the top right
+> Brave users may encounter issues with automatic redirects to localhost ports during the API key creation flow. If this happens to you:
+>
+> Copy your new key from the browser paste it in your terminal
 
-   <img src="assets/login.png" width="800">
-
-3. Click "Create API Key" in the account menu
-
-   <img src="assets/apikeys.png" width="800">
-
-#### Browser Compatibility Note
-
-**Brave Browser Users**: Brave's security features may block automatic redirects to localhost ports during the API key creation flow. If you encounter this:
-
-- **Option 1**: Click the security shield icon in the address bar and allow the redirect
-- **Option 2**: Wait ~15 seconds for the timeout, then manually add your API key using the steps below
-
-#### Set the environment variable `STAKPAK_API_KEY`
+#### You could also set the environment variable `STAKPAK_API_KEY`
 
 ```bash
 export STAKPAK_API_KEY=<mykey>
 ```
 
-#### Save your API key to `~/.stakpak/config.toml`
+#### Or save your API key to `~/.stakpak/config.toml`
 
 ```bash
 stakpak login --api-key $STAKPAK_API_KEY
@@ -98,15 +99,59 @@ stakpak login --api-key $STAKPAK_API_KEY
 stakpak account
 ```
 
-#### Start Stakpak Agent TUI
+### Option B: Running Without a Stakpak API Key
+
+Create `~/.stakpak/config.toml` with one of these configurations:
+
+**Option 1: Bring Your Own Keys (BYOK)** - Use your Anthropic/OpenAI API keys:
+```toml
+[profiles.byok]
+provider = "local"
+
+# customize models
+smart_model = "claude-sonnet-4-5"
+eco_model = "claude-haiku-4-5"
+
+[profiles.byok.anthropic]
+api_key = "sk-ant-..."
+
+[profiles.byok.openai]
+api_key = "sk-..."
+
+[settings]
+```
+
+**Option 2: Bring Your Own LLM** - Point to a local OpenAI-compatible endpoint (e.g. LM Studio):
+```toml
+[profiles.offline]
+provider = "local"
+smart_model = "qwen/qwen3-coder-30b"
+eco_model = "qwen/qwen3-coder-30b"
+
+[profiles.offline.openai]
+api_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
+api_key = ""
+
+[settings]
+```
+
+Then run with your profile:
+```bash
+stakpak --profile byok
+# or
+stakpak --profile offline
+```
+
+### Start Stakpak Agent TUI
 
 ```bash
+# Open the TUI
 stakpak
 # Resume execution from a checkpoint
 stakpak -c <checkpoint-id>
 ```
 
-#### Start Stakpak Agent TUI with Docker
+### Start Stakpak Agent TUI with Docker
 
 ```bash
 docker run -it --entrypoint stakpak ghcr.io/stakpak/agent:latest
@@ -129,11 +174,11 @@ docker run -it \
 - `Shift + Enter` or `Ctrl + J` to insert newline
 - `Ctrl + C` to quit
 
-### MCP Server Mode
+### MCP Modes
 
-Stakpak can run as an [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, providing secure and controlled access to system operations through different tool modes:
+You can use Stakpak as a secure MCP proxy or expose its security-hardened tools through an [MCP](https://modelcontextprotocol.io/) server.
 
-#### Tool Modes
+#### MCT Server Tools
 
 - **Local Mode (`--tool-mode local`)** - File operations and command execution only (no API key required)
 - **Remote Mode (`--tool-mode remote`)** - AI-powered code generation and search tools (API key required)
@@ -143,16 +188,40 @@ Stakpak can run as an [Model Context Protocol (MCP)](https://modelcontextprotoco
 
 ```bash
 # Local tools only (no API key required, mTLS enabled by default)
-stakpak mcp --tool-mode local
+stakpak mcp start --tool-mode local
 
 # Remote tools only (AI tools optimized for DevOps)
-stakpak mcp --tool-mode remote
+stakpak mcp start --tool-mode remote
 
 # Combined mode (default - all tools with full security)
-stakpak mcp
+stakpak mcp start
 
 # Disable mTLS (NOT recommended for production)
-stakpak mcp --disable-mcp-mtls
+stakpak mcp start --disable-mcp-mtls
+```
+
+Additional flags for the MCP server:
+
+- `--disable-secret-redaction` – **not recommended**; prints secrets in plaintext to the console
+- `--privacy-mode` – redacts additional private data like IP addresses and AWS account IDs
+- `--enable-slack-tools` – enables experimental Slack tools
+
+#### MCP Proxy Server
+
+Stakpak also includes an MCP proxy server that can multiplex connections to multiple upstream MCP servers using a configuration file.
+
+```bash
+# Start MCP proxy with automatic config discovery
+stakpak mcp proxy
+
+# Start MCP proxy with explicit config file
+stakpak mcp proxy --config-file ~/.stakpak/mcp.toml
+
+# Disable secret redaction (NOT recommended – secrets will be printed in logs)
+stakpak mcp proxy --disable-secret-redaction
+
+# Enable privacy mode to redact IPs, account IDs, etc.
+stakpak mcp proxy --privacy-mode
 ```
 
 ### Agent Client Protocol (ACP)

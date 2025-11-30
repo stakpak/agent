@@ -28,6 +28,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
@@ -347,6 +348,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.output_tx.try_send(OutputEvent::UserMessage(
                 prompt.clone(),
                 ctx.state.shell_tool_calls.clone(),
+                Vec::new(), // No image parts for command
             ));
             ctx.state.shell_tool_calls = None;
             ctx.state.text_area.set_text("");
@@ -434,6 +436,10 @@ pub fn switch_model(state: &mut AppState) -> Result<(), String> {
             state.model = AgentModel::Smart;
             Ok(())
         }
+        AgentModel::Recovery => {
+            state.model = AgentModel::Smart;
+            Ok(())
+        }
     }
 }
 
@@ -452,7 +458,7 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     render_system_message(state, "Resuming last session.");
 
     // Reset usage for the resumed session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+    state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
@@ -475,7 +481,7 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     render_system_message(state, "New session started.");
 
     // Reset usage for the new session
-    state.total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+    state.total_session_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,

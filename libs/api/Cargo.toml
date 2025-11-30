@@ -13,5 +13,14 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
 eventsource-stream = "0.2.3"
-url = "2.5.0"
 urlencoding = "2.1"
+async-trait = { workspace = true }
+libsql = "0.9.29"
+async-stream = "0.3.6"
+tokio = { workspace = true, features = ["macros"] }
+serde_yaml = "0.9.34"
+once_cell = "1.21.3"
+regex.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

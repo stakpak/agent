@@ -13,22 +13,29 @@ use crate::commands::agent::run::stream::{StreamProcessingResult, process_respon
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ProviderType};
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::{ApiStreamError, RecoveryActionRequest};
-use stakpak_api::{Client, ClientConfig, ListRuleBook};
+use stakpak_api::{
+    AgentProvider,
+    local::{LocalClient, LocalClientConfig},
+    models::ListRuleBook,
+    remote::{ClientConfig, RemoteClient},
+};
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatMessage, ToolCall, ToolCallResultStatus,
+    AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
+use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -37,7 +44,7 @@ type ClientTaskResult = Result<
         Vec<ChatMessage>,
         Option<Uuid>,
         Option<AppConfig>,
-        stakpak_shared::models::integrations::openai::Usage,
+        LLMTokenUsage,
     ),
     String,
 >;
@@ -69,7 +76,7 @@ pub async fn run_interactive(
         let mut messages: Vec<ChatMessage> = Vec::new();
         let mut tools_queue: Vec<ToolCall> = Vec::new();
         let mut should_update_rulebooks_on_next_message = false;
-        let mut total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+        let mut total_session_usage = LLMTokenUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
@@ -79,8 +86,9 @@ pub async fn run_interactive(
         // Clone config values for this iteration
         let api_key = ctx.api_key.clone();
         let api_endpoint = ctx.api_endpoint.clone();
+        let provider_type = ctx.provider.clone();
         let config_path = ctx.config_path.clone();
-        let mcp_server_host = ctx.mcp_server_host.clone();
+        let _mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
         let mut rulebooks = config.rulebooks.clone();
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
@@ -89,69 +97,23 @@ pub async fn run_interactive(
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
-        let enabled_tools = config.enabled_tools.clone();
+        let _enabled_tools = config.enabled_tools.clone();
         let redact_secrets = config.redact_secrets;
         let privacy_mode = config.privacy_mode;
-        let enable_mtls = config.enable_mtls;
+        let _enable_mtls = config.enable_mtls;
         let is_git_repo = config.is_git_repo;
         let study_mode = config.study_mode;
 
-        // Create fresh channels for this iteration
         let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
         let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
         let (mcp_progress_tx, mut mcp_progress_rx) = tokio::sync::mpsc::channel(100);
-        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
         let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel::<()>(1);
-        let ctx_clone = ctx.clone();
-        let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
-
-        // Generate certificates if mTLS is enabled
-        let certificate_chain = Arc::new(if enable_mtls {
-            Some(CertificateChain::generate().map_err(|e| e.to_string())?)
-        } else {
-            None
-        });
-
-        let protocol = if enable_mtls { "https" } else { "http" };
-        let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
-
-        let certificate_chain_for_server = certificate_chain.clone();
-        let subagent_configs_for_server = subagent_configs.clone();
-        let mcp_handle = tokio::spawn(async move {
-            let _ = start_server(
-                MCPServerConfig {
-                    api: ClientConfig {
-                        api_key: ctx_clone.api_key.clone(),
-                        api_endpoint: ctx_clone.api_endpoint.clone(),
-                    },
-                    redact_secrets,
-                    privacy_mode,
-                    enabled_tools,
-                    tool_mode: ToolMode::Combined,
-                    subagent_configs: subagent_configs_for_server,
-                    bind_address,
-                    certificate_chain: certificate_chain_for_server,
-                },
-                Some(listener),
-                Some(shutdown_rx),
-            )
-            .await;
-        });
-
-        // Initialize clients and tools
-        let clients = ClientManager::new(
-            mcp_server_host.unwrap_or(local_mcp_server_host.clone()),
-            Some(mcp_progress_tx),
-            certificate_chain,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-        let tools = convert_tools_map_with_filter(&tools_map, allowed_tools.as_ref());
 
         // Spawn TUI task
         let shutdown_tx_for_tui = shutdown_tx.clone();
         let current_profile_for_tui = ctx.profile_name.clone();
+        let allowed_tools_for_tui = allowed_tools.clone(); // Clone for client task before move
         let rulebook_config_for_tui = ctx.rulebooks.clone().map(|rb| stakpak_tui::RulebookConfig {
             include: rb.include,
             exclude: rb.exclude,
@@ -189,23 +151,69 @@ pub async fn run_interactive(
             }
         });
 
-        // Spawn client task
         let api_key_for_client = api_key.clone();
         let api_endpoint_for_client = api_endpoint.clone();
         let shutdown_tx_for_client = shutdown_tx.clone();
+        let ctx_clone = ctx.clone(); // Clone ctx for use in client task
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
-            let client = Client::new(&ClientConfig {
-                api_key: api_key_for_client.clone(),
-                api_endpoint: api_endpoint_for_client.clone(),
-            })
-            .map_err(|e| e.to_string())?;
+
+            let client: Arc<dyn AgentProvider> = match provider_type {
+                ProviderType::Remote => {
+                    let client = RemoteClient::new(&ClientConfig {
+                        api_key: api_key_for_client.clone(),
+                        api_endpoint: api_endpoint_for_client.clone(),
+                    })
+                    .map_err(|e| e.to_string())?;
+                    Arc::new(client)
+                }
+                ProviderType::Local => {
+                    let client = LocalClient::new(LocalClientConfig {
+                        stakpak_base_url: Some(api_endpoint_for_client.clone()),
+                        store_path: None,
+                        anthropic_config: ctx_clone.anthropic.clone(),
+                        openai_config: ctx_clone.openai.clone(),
+                        eco_model: ctx_clone.eco_model.clone(),
+                        recovery_model: ctx_clone.recovery_model.clone(),
+                        smart_model: ctx_clone.smart_model.clone(),
+                        hook_registry: None,
+                    })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    Arc::new(client)
+                }
+            };
+
+            let (_mcp_server_host, clients, _tools) = match initialize_mcp_server_and_tools(
+                &ctx_clone,
+                client.clone(),
+                Some(mcp_progress_tx.clone()),
+                privacy_mode,
+            )
+            .await
+            {
+                Ok((host, client_manager, tool_list)) => (host, Some(client_manager), tool_list),
+                Err(e) => {
+                    log::warn!(
+                        "Failed to initialize MCP server: {}, continuing without tools",
+                        e
+                    );
+                    (String::new(), None, Vec::new())
+                }
+            };
+
+            let tools_map = if let Some(clients) = &clients {
+                clients.get_tools().await.map_err(|e| e.to_string())?
+            } else {
+                HashMap::new()
+            };
+            let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_tui.as_ref());
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
             // Load available profiles and send to TUI
-            let profiles_config_path = ctx.config_path.clone();
-            let current_profile_name = ctx.profile_name.clone();
+            let profiles_config_path = ctx_clone.config_path.clone();
+            let current_profile_name = ctx_clone.profile_name.clone();
             if let Ok(profiles) = AppConfig::list_available_profiles(Some(&profiles_config_path)) {
                 let _ = send_input_event(
                     &input_tx,
@@ -238,7 +246,7 @@ pub async fn run_interactive(
                 }
 
                 let checkpoint_messages =
-                    get_checkpoint_messages(&client, &checkpoint_id_str).await?;
+                    get_checkpoint_messages(client.as_ref(), &checkpoint_id_str).await?;
 
                 let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
                     &checkpoint_id_str,
@@ -272,8 +280,7 @@ pub async fn run_interactive(
                         model = new_model;
                         continue;
                     }
-                    OutputEvent::UserMessage(user_input, tool_calls_results) => {
-                        // Loading will be managed by stream processing
+                    OutputEvent::UserMessage(user_input, tool_calls_results, image_parts) => {
                         let mut user_input = user_input.clone();
 
                         // Add user shell history to the user input
@@ -304,16 +311,40 @@ pub async fn run_interactive(
                                 should_update_rulebooks_on_next_message = false; // Reset the flag
                                 (user_input_with_rulebooks, None::<String>)
                             } else {
-                                // Don't add local context or rulebooks for regular messages
                                 (user_input.to_string(), None::<String>)
                             };
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
 
+                        // Create message with ContentParts from TUI
+                        let user_msg = if image_parts.is_empty() {
+                            user_message(user_input)
+                        } else {
+                            let mut parts = Vec::new();
+                            if !user_input.trim().is_empty() {
+                                parts.push(
+                                    stakpak_shared::models::integrations::openai::ContentPart {
+                                        r#type: "text".to_string(),
+                                        text: Some(user_input),
+                                        image_url: None,
+                                    },
+                                );
+                            }
+                            parts.extend(image_parts);
+                            ChatMessage {
+                                role: Role::User,
+                                content: Some(MessageContent::Array(parts)),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                                usage: None,
+                            }
+                        };
+
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                         tools_queue.clear();
-                        messages.push(user_message(user_input));
+                        messages.push(user_msg);
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(
@@ -321,14 +352,18 @@ pub async fn run_interactive(
                             InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
                         )
                         .await?;
-                        let result = run_tool_call(
-                            &clients,
-                            &tools_map,
-                            &tool_call,
-                            Some(cancel_rx.resubscribe()),
-                            current_session_id,
-                        )
-                        .await?;
+                        let result = if let Some(ref client_manager) = clients {
+                            run_tool_call(
+                                client_manager.as_ref(),
+                                &tools_map,
+                                &tool_call,
+                                Some(cancel_rx.resubscribe()),
+                                current_session_id,
+                            )
+                            .await?
+                        } else {
+                            None
+                        };
 
                         let mut should_stop = false;
 
@@ -416,7 +451,7 @@ pub async fn run_interactive(
                             InputEvent::StartLoadingOperation(LoadingOperation::SessionsList),
                         )
                         .await?;
-                        match list_sessions(&client).await {
+                        match list_sessions(client.as_ref()).await {
                             Ok(sessions) => {
                                 send_input_event(&input_tx, InputEvent::SetSessions(sessions))
                                     .await?;
@@ -441,7 +476,7 @@ pub async fn run_interactive(
                         // Clear the current session and start fresh
                         current_session_id = None;
                         messages.clear();
-                        total_session_usage = stakpak_shared::models::integrations::openai::Usage {
+                        total_session_usage = LLMTokenUsage {
                             prompt_tokens: 0,
                             completion_tokens: 0,
                             total_tokens: 0,
@@ -454,9 +489,12 @@ pub async fn run_interactive(
                         let session_id = if let Some(session_id) = &current_session_id {
                             Some(session_id.to_string())
                         } else {
-                            list_sessions(&client).await.ok().and_then(|sessions| {
-                                sessions.first().map(|session| session.id.clone())
-                            })
+                            list_sessions(client.as_ref())
+                                .await
+                                .ok()
+                                .and_then(|sessions| {
+                                    sessions.first().map(|session| session.id.clone())
+                                })
                         };
 
                         if let Some(session_id) = &session_id {
@@ -467,8 +505,12 @@ pub async fn run_interactive(
                                 ),
                             )
                             .await?;
-                            match resume_session_from_checkpoint(&client, session_id, &input_tx)
-                                .await
+                            match resume_session_from_checkpoint(
+                                client.as_ref(),
+                                session_id,
+                                &input_tx,
+                            )
+                            .await
                             {
                                 Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                     // Track the current session ID
@@ -478,13 +520,12 @@ pub async fn run_interactive(
                                     should_update_rulebooks_on_next_message = true;
 
                                     // Reset usage for the resumed session
-                                    total_session_usage =
-                                        stakpak_shared::models::integrations::openai::Usage {
-                                            prompt_tokens: 0,
-                                            completion_tokens: 0,
-                                            total_tokens: 0,
-                                            prompt_tokens_details: None,
-                                        };
+                                    total_session_usage = LLMTokenUsage {
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        total_tokens: 0,
+                                        prompt_tokens_details: None,
+                                    };
 
                                     messages.extend(chat_messages);
                                     tools_queue.extend(tool_calls.clone());
@@ -533,7 +574,12 @@ pub async fn run_interactive(
                             InputEvent::StartLoadingOperation(LoadingOperation::CheckpointResume),
                         )
                         .await?;
-                        match resume_session_from_checkpoint(&client, &session_id, &input_tx).await
+                        match resume_session_from_checkpoint(
+                            client.as_ref(),
+                            &session_id,
+                            &input_tx,
+                        )
+                        .await
                         {
                             Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                 // Track the current session ID
@@ -543,13 +589,12 @@ pub async fn run_interactive(
                                 should_update_rulebooks_on_next_message = true;
 
                                 // Reset usage for the switched session
-                                total_session_usage =
-                                    stakpak_shared::models::integrations::openai::Usage {
-                                        prompt_tokens: 0,
-                                        completion_tokens: 0,
-                                        total_tokens: 0,
-                                        prompt_tokens_details: None,
-                                    };
+                                total_session_usage = LLMTokenUsage {
+                                    prompt_tokens: 0,
+                                    completion_tokens: 0,
+                                    total_tokens: 0,
+                                    prompt_tokens_details: None,
+                                };
 
                                 messages.extend(chat_messages);
                                 tools_queue.extend(tool_calls.clone());
@@ -798,8 +843,26 @@ pub async fn run_interactive(
                     let (mut stream, current_request_id) = match stream_result {
                         Ok(result) => result,
                         Err(e) => {
-                            send_input_event(&input_tx, InputEvent::Error(e.clone())).await?;
-                            break Err(ApiStreamError::Unknown(e));
+                            // Extract a user-friendly error message
+                            let error_msg = if e.contains("Server returned non-stream response") {
+                                // Extract the actual error from the server response
+                                if let Some(start) = e.find(": ") {
+                                    e[start + 2..].to_string()
+                                } else {
+                                    e.clone()
+                                }
+                            } else {
+                                e.clone()
+                            };
+                            // End loading operation before sending error
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::EndLoadingOperation(LoadingOperation::StreamProcessing),
+                            )
+                            .await?;
+                            send_input_event(&input_tx, InputEvent::Error(error_msg.clone()))
+                                .await?;
+                            break Err(ApiStreamError::Unknown(error_msg));
                         }
                     };
 
@@ -840,6 +903,14 @@ pub async fn run_interactive(
                                     // Loading will be managed by stream processing on retry
                                     continue;
                                 } else {
+                                    // End loading operation before sending error
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::EndLoadingOperation(
+                                            LoadingOperation::StreamProcessing,
+                                        ),
+                                    )
+                                    .await?;
                                     send_input_event(
                                         &input_tx,
                                         InputEvent::Error("MAX_RETRY_REACHED".to_string()),
@@ -848,6 +919,14 @@ pub async fn run_interactive(
                                     break Err(e);
                                 }
                             } else {
+                                // End loading operation before sending error
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::EndLoadingOperation(
+                                        LoadingOperation::StreamProcessing,
+                                    ),
+                                )
+                                .await?;
                                 send_input_event(&input_tx, InputEvent::Error(format!("{:?}", e)))
                                     .await?;
                                 break Err(e);
@@ -871,7 +950,8 @@ pub async fn run_interactive(
                                 .and_then(|value| value.as_str())
                                 .filter(|checkpoint_id| !checkpoint_id.is_empty())
                         {
-                            match get_checkpoint_messages(&client, &checkpoint_id.to_string()).await
+                            match get_checkpoint_messages(&*client, &checkpoint_id.to_string())
+                                .await
                             {
                                 Ok(checkpoint_messages) => {
                                     let (chat_messages, _tool_calls) =
@@ -914,14 +994,15 @@ pub async fn run_interactive(
                         // Accumulate prompt token details if available
                         if let Some(response_details) = &response.usage.prompt_tokens_details {
                             if total_session_usage.prompt_tokens_details.is_none() {
-                                total_session_usage.prompt_tokens_details = Some(
-                                    stakpak_shared::models::integrations::openai::PromptTokensDetails {
+                                total_session_usage.prompt_tokens_details =
+                                    Some(PromptTokensDetails {
                                         input_tokens: response_details.input_tokens,
                                         output_tokens: response_details.output_tokens,
-                                        cache_read_input_tokens: response_details.cache_read_input_tokens,
-                                        cache_write_input_tokens: response_details.cache_write_input_tokens,
-                                    },
-                                );
+                                        cache_read_input_tokens: response_details
+                                            .cache_read_input_tokens,
+                                        cache_write_input_tokens: response_details
+                                            .cache_write_input_tokens,
+                                    });
                             } else if let Some(details) =
                                 total_session_usage.prompt_tokens_details.as_mut()
                             {
@@ -1022,9 +1103,8 @@ pub async fn run_interactive(
         });
 
         // Wait for all tasks to finish
-        let (client_res, _, _, _) =
-            tokio::try_join!(client_handle, tui_handle, mcp_handle, mcp_progress_handle)
-                .map_err(|e| e.to_string())?;
+        let (client_res, _, _) = tokio::try_join!(client_handle, tui_handle, mcp_progress_handle)
+            .map_err(|e| e.to_string())?;
 
         let (final_messages, final_session_id, profile_switch_config, final_usage) = client_res?;
 
@@ -1037,11 +1117,31 @@ pub async fn run_interactive(
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
             // Fetch and filter rulebooks for the new profile
-            let client = Client::new(&ClientConfig {
-                api_key: new_config.api_key.clone(),
-                api_endpoint: new_config.api_endpoint.clone(),
-            })
-            .map_err(|e| e.to_string())?;
+            let client: Box<dyn AgentProvider> = match new_config.provider {
+                ProviderType::Remote => {
+                    let client = RemoteClient::new(&ClientConfig {
+                        api_key: new_config.api_key.clone(),
+                        api_endpoint: new_config.api_endpoint.clone(),
+                    })
+                    .map_err(|e| e.to_string())?;
+                    Box::new(client)
+                }
+                ProviderType::Local => {
+                    let client = LocalClient::new(LocalClientConfig {
+                        store_path: None,
+                        stakpak_base_url: Some(new_config.api_endpoint.clone()),
+                        anthropic_config: new_config.anthropic.clone(),
+                        openai_config: new_config.openai.clone(),
+                        eco_model: new_config.eco_model.clone(),
+                        recovery_model: new_config.recovery_model.clone(),
+                        smart_model: new_config.smart_model.clone(),
+                        hook_registry: None,
+                    })
+                    .await
+                    .map_err(|e| format!("Failed to create local client: {}", e))?;
+                    Box::new(client)
+                }
+            };
 
             let new_rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                 if let Some(rulebook_config) = &new_config.rulebooks {
@@ -1086,11 +1186,35 @@ pub async fn run_interactive(
 
         // Normal exit - no profile switch requested
         // Display final stats and session info
-        let client = Client::new(&ClientConfig {
-            api_key: ctx.api_key.clone(),
-            api_endpoint: ctx.api_endpoint.clone(),
-        })
-        .map_err(|e| e.to_string())?;
+        let final_api_key = ctx.api_key.clone();
+        let final_api_endpoint = ctx.api_endpoint.clone();
+        let final_provider = ctx.provider.clone();
+
+        let client: Box<dyn AgentProvider> = match final_provider {
+            ProviderType::Remote => {
+                let client = RemoteClient::new(&ClientConfig {
+                    api_key: final_api_key.clone(),
+                    api_endpoint: final_api_endpoint.clone(),
+                })
+                .map_err(|e| e.to_string())?;
+                Box::new(client)
+            }
+            ProviderType::Local => {
+                let client = LocalClient::new(LocalClientConfig {
+                    store_path: None,
+                    stakpak_base_url: Some(final_api_endpoint.clone()),
+                    anthropic_config: ctx.anthropic.clone(),
+                    openai_config: ctx.openai.clone(),
+                    eco_model: ctx.eco_model.clone(),
+                    recovery_model: ctx.recovery_model.clone(),
+                    smart_model: ctx.smart_model.clone(),
+                    hook_registry: None,
+                })
+                .await
+                .map_err(|e| format!("Failed to create local client: {}", e))?;
+                Box::new(client)
+            }
+        };
 
         // Display session stats
         if let Some(session_id) = final_session_id {
@@ -1152,4 +1276,81 @@ https://stakpak.dev/{}/agent-sessions/{}",
     } // End of 'profile_switch_loop
 
     Ok(())
+}
+
+async fn initialize_mcp_server_and_tools(
+    config: &AppConfig,
+    client: Arc<dyn AgentProvider>,
+    progress_tx: Option<
+        tokio::sync::mpsc::Sender<
+            stakpak_shared::models::integrations::openai::ToolCallResultProgress,
+        >,
+    >,
+    privacy_mode: bool,
+) -> Result<
+    (
+        String,
+        Arc<ClientManager>,
+        Vec<stakpak_shared::models::integrations::openai::Tool>,
+    ),
+    String,
+> {
+    // Find available bind address
+    let (bind_address, listener) = network::find_available_bind_address_with_listener()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Generate certificates for mTLS
+    let certificate_chain = Arc::new(Some(
+        CertificateChain::generate().map_err(|e| e.to_string())?,
+    ));
+
+    let protocol = "https";
+    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+
+    // Start MCP server in background
+    let certificate_chain_for_server = certificate_chain.clone();
+    let client_for_server = client.clone();
+
+    tokio::spawn(async move {
+        let _ = start_server(
+            MCPServerConfig {
+                client: Some(client_for_server),
+                redact_secrets: true,
+                privacy_mode,
+                enabled_tools: EnabledToolsConfig { slack: false },
+                tool_mode: ToolMode::Combined,
+                bind_address,
+                certificate_chain: certificate_chain_for_server,
+                subagent_configs: None,
+            },
+            Some(listener),
+            None,
+        )
+        .await;
+    });
+
+    // Initialize MCP clients
+    let clients = Arc::new(
+        ClientManager::new(
+            config
+                .mcp_server_host
+                .clone()
+                .unwrap_or(local_mcp_server_host.clone()),
+            progress_tx,
+            certificate_chain,
+        )
+        .await
+        .map_err(|e| format!("Failed to create MCP clients: {}", e))?,
+    );
+
+    // Get tools from MCP clients
+    let tools_map: HashMap<String, Vec<rmcp::model::Tool>> = clients
+        .get_tools()
+        .await
+        .map_err(|e| format!("Failed to get tools: {}", e))?;
+
+    let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
+
+    Ok((local_mcp_server_host, clients, tools))
 }

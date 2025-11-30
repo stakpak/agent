@@ -12,6 +12,9 @@ mod popup;
 pub mod shell;
 pub mod tool;
 
+// Re-export find_image_file_by_name for use in clipboard_paste
+pub use input::find_image_file_by_name;
+
 use crate::app::{AppState, InputEvent, OutputEvent};
 use ratatui::layout::Size;
 use tokio::sync::mpsc::Sender;
@@ -87,6 +90,9 @@ pub fn update(
         }
         InputEvent::HandlePaste(text) => {
             input::handle_paste(state, text);
+        }
+        InputEvent::HandleClipboardImagePaste => {
+            input::handle_clipboard_image_paste(state);
         }
         InputEvent::InputDelete => {
             input::handle_input_delete(state);

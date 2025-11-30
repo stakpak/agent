@@ -1,8 +1,9 @@
 use ratatui::style::Color;
-use stakpak_api::ListRuleBook;
+use stakpak_api::models::ListRuleBook;
 use stakpak_api::models::{RecoveryActionType, RecoveryOptionsResponse};
-use stakpak_shared::models::integrations::openai::{
-    AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress,
+use stakpak_shared::models::{
+    integrations::openai::{AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress},
+    llm::LLMTokenUsage,
 };
 use uuid::Uuid;
 
@@ -57,6 +58,8 @@ pub enum InputEvent {
     ShellClear,
     ShellKill,
     HandlePaste(String),
+    /// Ctrl+V clipboard image paste (non-text, via system clipboard).
+    HandleClipboardImagePaste,
     InputDelete,
     InputDeleteWord,
     InputCursorStart,
@@ -113,9 +116,9 @@ pub enum InputEvent {
     RecoveryOptions(RecoveryOptionsResponse),
     ExpandNotifications,
     // Usage tracking events
-    StreamUsage(stakpak_shared::models::integrations::openai::Usage),
+    StreamUsage(LLMTokenUsage),
     RequestTotalUsage,
-    TotalUsage(stakpak_shared::models::integrations::openai::Usage),
+    TotalUsage(LLMTokenUsage),
     // Checkpoint message replacement
     ReplaceMessagesFromCheckpoint(Vec<stakpak_shared::models::integrations::openai::ChatMessage>),
     SetRenderedCheckpointMessages(Vec<crate::services::message::Message>),
@@ -123,7 +126,11 @@ pub enum InputEvent {
 
 #[derive(Debug)]
 pub enum OutputEvent {
-    UserMessage(String, Option<Vec<ToolCallResult>>),
+    UserMessage(
+        String,
+        Option<Vec<ToolCallResult>>,
+        Vec<stakpak_shared::models::integrations::openai::ContentPart>,
+    ),
     AcceptTool(ToolCall),
     RejectTool(ToolCall, bool),
     ListSessions,
