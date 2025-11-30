@@ -1,4 +1,7 @@
-use crate::local::context_manager::{ContextManager, SimpleContextManager};
+use crate::local::context_managers::scratchpad_context_manager::{
+    ScratchpadContextManager, ScratchpadContextManagerOptions,
+};
+use crate::local::hooks::scratchpad_context_hook::{ContextHook, ContextHookOptions};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -12,7 +15,7 @@ use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, Anthropic
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
-    OpenAIModel, Role, Tool,
+    OpenAIModel, Tool,
 };
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
@@ -24,8 +27,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-mod context_manager;
+mod context_managers;
 mod db;
+mod hooks;
 
 #[cfg(test)]
 mod tests;
@@ -50,7 +54,7 @@ pub struct LocalClientConfig {
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
-    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+    pub hook_registry: Option<HookRegistry<AgentState>>,
 }
 
 #[derive(Debug)]
@@ -60,8 +64,8 @@ enum StreamMessage {
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
-const SYSTEM_PROMPT: &str = include_str!("./prompts/main.txt");
-const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/title_generator.txt");
+const SYSTEM_PROMPT: &str = include_str!("./prompts/agent.v1.txt");
+const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_generator.v1.txt");
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
@@ -84,24 +88,46 @@ impl LocalClient {
         // Initialize database schema
         db::init_schema(&conn).await?;
 
+        let smart_model = config
+            .smart_model
+            .map(LLMModel::from)
+            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet));
+        let eco_model = config
+            .eco_model
+            .map(LLMModel::from)
+            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku));
+        let recovery_model = config
+            .recovery_model
+            .map(LLMModel::from)
+            .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5));
+
+        // Add hooks
+        let mut hook_registry = config.hook_registry.unwrap_or_default();
+        hook_registry.register(
+            LifecycleEvent::BeforeInference,
+            Box::new(ContextHook::new(ContextHookOptions {
+                context_manager: Box::new(ScratchpadContextManager::new(
+                    ScratchpadContextManagerOptions {
+                        history_action_message_size_limit: 100,
+                        history_action_message_keep_last_n: 1,
+                        history_action_result_keep_last_n: 50,
+                    },
+                )),
+                smart_model: (smart_model.clone(), SYSTEM_PROMPT.to_string()),
+                eco_model: (eco_model.clone(), SYSTEM_PROMPT.to_string()),
+                recovery_model: (recovery_model.clone(), SYSTEM_PROMPT.to_string()),
+            })),
+        );
+
         Ok(Self {
             db: conn,
             stakpak_base_url: config.stakpak_base_url.map(|url| url + "/v1"),
             anthropic_config: config.anthropic_config,
             openai_config: config.openai_config,
-            smart_model: config
-                .smart_model
-                .map(LLMModel::from)
-                .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)),
-            eco_model: config
-                .eco_model
-                .map(LLMModel::from)
-                .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku)),
-            recovery_model: config
-                .recovery_model
-                .map(LLMModel::from)
-                .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5)),
-            hook_registry: config.hook_registry,
+            smart_model,
+            eco_model,
+            recovery_model,
+            hook_registry: Some(Arc::new(hook_registry)),
         })
     }
 }
@@ -267,9 +293,12 @@ impl AgentProvider for LocalClient {
             id: ctx.new_checkpoint_id.unwrap().to_string(),
             object: "chat.completion".to_string(),
             created: checkpoint_created_at,
-            model: self
-                .get_inference_model(ctx.state.agent_model.clone())
-                .to_string(),
+            model: ctx
+                .state
+                .llm_input
+                .as_ref()
+                .map(|llm_input| llm_input.model.clone().to_string())
+                .unwrap_or_default(),
             choices: vec![ChatCompletionChoice {
                 index: 0,
                 message: ctx.state.messages.last().cloned().unwrap(),
@@ -370,9 +399,6 @@ impl AgentProvider for LocalClient {
         });
 
         let hook_registry = self.hook_registry.clone();
-        let model_name = self
-            .get_inference_model(ctx.state.agent_model.clone())
-            .to_string();
         let stream = async_stream::stream! {
             while let Some(delta_result) = rx.recv().await {
                 match delta_result {
@@ -385,7 +411,7 @@ impl AgentProvider for LocalClient {
                                     id: ctx.request_id.to_string(),
                                     object: "chat.completion.chunk".to_string(),
                                     created: chrono::Utc::now().timestamp() as u64,
-                                    model: model_name.to_owned(),
+                                    model: ctx.state.llm_input.as_ref().map(|llm_input| llm_input.model.clone().to_string()).unwrap_or_default(),
                                     choices: vec![ChatCompletionStreamChoice {
                                         index: 0,
                                         delta: delta.into(),
@@ -457,15 +483,7 @@ impl AgentProvider for LocalClient {
 }
 
 impl LocalClient {
-    fn get_inference_model(&self, model: AgentModel) -> LLMModel {
-        match model {
-            AgentModel::Smart => self.smart_model.clone(),
-            AgentModel::Eco => self.eco_model.clone(),
-            AgentModel::Recovery => self.recovery_model.clone(),
-        }
-    }
-
-    fn get_inference_config(&self) -> LLMProviderConfig {
+    fn get_llm_config(&self) -> LLMProviderConfig {
         LLMProviderConfig {
             anthropic_config: self.anthropic_config.clone(),
             openai_config: self.openai_config.clone(),
@@ -488,29 +506,13 @@ impl LocalClient {
         let input = if let Some(llm_input) = ctx.state.llm_input.clone() {
             llm_input
         } else {
-            let inference_model = self.get_inference_model(ctx.state.agent_model.clone());
-            let context_manager = SimpleContextManager;
-            let mut llm_messages = vec![LLMMessage {
-                role: Role::System.to_string(),
-                content: LLMMessageContent::String(SYSTEM_PROMPT.into()),
-            }];
-            llm_messages.extend(context_manager.reduce_context(ctx.state.messages.clone()));
-
-            let llm_tools = ctx
-                .state
-                .tools
-                .clone()
-                .map(|t| t.into_iter().map(Into::into).collect());
-
-            LLMInput {
-                model: inference_model,
-                messages: llm_messages,
-                max_tokens: 16000,
-                tools: llm_tools,
-            }
+            return Err(
+                "Run agent completion: LLM input not found, make sure to register a context hook before inference"
+                    .to_string(),
+            );
         };
 
-        let inference_config = self.get_inference_config();
+        let llm_config = self.get_llm_config();
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
@@ -523,7 +525,7 @@ impl LocalClient {
             };
 
             let chat_future = async move {
-                chat_stream(&inference_config, input)
+                chat_stream(&llm_config, input)
                     .await
                     .map_err(|e| e.to_string())
             };
@@ -540,9 +542,7 @@ impl LocalClient {
             let response = chat_result?;
             (response.choices[0].message.clone(), response.usage)
         } else {
-            let response = chat(&inference_config, input)
-                .await
-                .map_err(|e| e.to_string())?;
+            let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
             (response.choices[0].message.clone(), response.usage)
         };
 
@@ -656,9 +656,8 @@ impl LocalClient {
     }
 
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        let inference_config = self.get_inference_config();
-        // Use eco model for title generation
-        let inference_model = self.eco_model.clone();
+        let llm_config = self.get_llm_config();
+        let llm_model = self.eco_model.clone();
 
         let messages = vec![
             LLMMessage {
@@ -682,15 +681,13 @@ impl LocalClient {
         ];
 
         let input = LLMInput {
-            model: inference_model,
+            model: llm_model,
             messages,
             max_tokens: 100,
             tools: None,
         };
 
-        let response = chat(&inference_config, input)
-            .await
-            .map_err(|e| e.to_string())?;
+        let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
     }
