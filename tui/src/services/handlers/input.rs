@@ -14,6 +14,7 @@ use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
+use regex;
 use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
@@ -79,6 +80,74 @@ pub fn handle_input_submitted_event(
     }
     if state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
+        return;
+    }
+    if state.show_recovery_options_popup {
+        // When recovery options popup is open, selecting an option should:
+        // 1) Send a RecoveryAction to the CLI
+        // 2) Add a user-visible message describing the chosen option
+        // 3) Trigger a normal UserMessage flow so the agent runs again and can
+        //    emit history_updated metadata for checkpoint sync.
+        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
+            && let Some(response) = &state.recovery_response
+        {
+            use stakpak_api::models::RecoveryMode;
+
+            let recovery_request_id = response.id.clone().unwrap_or_default();
+            let selected_option_id = selected.id;
+            let mode = selected.mode.clone();
+
+            // Map mode to a label consistent with the CLI
+            let mode_label = match mode {
+                RecoveryMode::Redirection => "REDIRECTION",
+                RecoveryMode::Revert => "REVERT",
+                RecoveryMode::ModelChange => "MODELCHANGE",
+            };
+            let message_text = format!("Proceeding with recovery option [{}]", mode_label);
+
+            // If ModelChange is selected, parse the number of messages from the option description
+            if matches!(mode, RecoveryMode::ModelChange) {
+                // Parse `{number}` (backticks) from the reasoning field, default to 5 if not found
+                // The reasoning has been converted from *{number}* to `{number}` by summarize_option
+                // Use regex to find the number between backticks
+                let messages_count = regex::Regex::new(r"`(\d+)`")
+                    .ok()
+                    .and_then(|re| {
+                        re.captures(&selected.reasoning)
+                            .and_then(|caps| caps.get(1))
+                            .and_then(|m| m.as_str().parse::<u32>().ok())
+                    })
+                    .unwrap_or(5);
+                state.model_change_messages_remaining = Some(messages_count);
+            }
+
+            // Send recovery action to CLI
+            let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+                action: stakpak_api::models::RecoveryActionType::Approve,
+                recovery_request_id,
+                selected_option_id,
+            });
+
+            // Mirror normal user submission behavior:
+            // - show the message in the TUI
+            // - send a UserMessage to the CLI so it runs the agent again
+            let _ = input_tx.try_send(InputEvent::AddUserMessage(message_text.clone()));
+            let _ = output_tx.try_send(OutputEvent::UserMessage(message_text, None, Vec::new()));
+        }
+
+        state.recovery_options.clear();
+        state.recovery_response = None;
+        state.recovery_popup_selected = 0;
+        state.show_recovery_options_popup = false;
+        state.recovery_checkpoint_id = None;
+        state.has_faulty_checkpoint = false;
+        // Note: Don't reset model_change_messages_remaining here - let it count down naturally
+        // Invalidate cache to redraw checkpoints without yellow colorization
+        crate::services::message::invalidate_message_lines_cache(state);
+
+        // Scroll to bottom after selecting recovery option
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
         return;
     }
     if state.approval_popup.is_visible() {

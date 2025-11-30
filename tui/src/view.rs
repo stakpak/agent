@@ -179,6 +179,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.show_context_popup {
         crate::services::context_popup::render_context_popup(f, state);
     }
+
+    if state.show_recovery_options_popup {
+        crate::services::recovery_popup::render_recovery_popup(f, state);
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -207,6 +211,83 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         return;
     }
 
+    // If recovery scroll is pending, scroll to the source_checkpoint and highlight it BEFORE popup opens
+    if state.recovery_scroll_pending {
+        if let Some(checkpoint_id) = &state.recovery_checkpoint_id {
+            let needle = format!("checkpoint {}", checkpoint_id);
+
+            // First, find which message contains the checkpoint ID
+            let message_with_checkpoint_idx =
+                state.messages.iter().position(|msg| match &msg.content {
+                    crate::services::message::MessageContent::AssistantMD(text, _) => {
+                        text.contains(&format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id))
+                    }
+                    crate::services::message::MessageContent::Plain(text, _) => {
+                        text.contains(&format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id))
+                    }
+                    _ => false,
+                });
+
+            if let Some(msg_idx) = message_with_checkpoint_idx {
+                // Calculate how many lines come before this message
+                // We need to process messages up to (but not including) this one
+                let messages_before: Vec<_> = state.messages[..msg_idx]
+                    .iter()
+                    .filter(|m| m.is_collapsed.is_none())
+                    .cloned()
+                    .collect();
+
+                // Get wrapped lines for messages before the checkpoint message
+                let lines_before =
+                    crate::services::message::get_wrapped_message_lines(&messages_before, width);
+
+                // Process these lines to match the same processing as processed_lines
+                // This matches the logic in get_processed_message_lines
+                let mut message_start_line: usize = 0;
+                for (line, _style) in &lines_before {
+                    let line_text = spans_to_string(line);
+                    if line_text.contains("<checkpoint_id>") {
+                        // Checkpoint processing adds empty line before and after
+                        message_start_line += 3; // empty + checkpoint + empty
+                    } else if line_text.trim() == "SPACING_MARKER" {
+                        message_start_line += 1; // spacing marker becomes empty line
+                    } else {
+                        message_start_line += 1;
+                    }
+                }
+
+                // Find the checkpoint line to scroll to it
+                // Note: Colorization is handled in process_checkpoint_patterns based on has_faulty_checkpoint
+                if processed_lines
+                    .iter()
+                    .any(|line| spans_to_string(line).contains(&needle))
+                {
+                    // Scroll to the top of the message containing the checkpoint
+                    // Position the message start near the top of the visible area
+                    let target_scroll = message_start_line.saturating_sub(2);
+                    state.scroll = target_scroll;
+                    state.stay_at_bottom = false;
+                    state.scroll_to_bottom = false;
+                }
+            } else {
+                // Fallback: if we can't find the message, just find the checkpoint line
+                // Note: Colorization is handled in process_checkpoint_patterns based on has_faulty_checkpoint
+                if let Some((line_idx, _)) = processed_lines
+                    .iter()
+                    .enumerate()
+                    .find(|(_, line)| spans_to_string(line).contains(&needle))
+                {
+                    // Try to center the checkpoint line within the visible area
+                    let target_scroll = line_idx.saturating_sub(height / 2);
+                    state.scroll = target_scroll;
+                    state.stay_at_bottom = false;
+                    state.scroll_to_bottom = false;
+                }
+            }
+        }
+        state.recovery_scroll_pending = false;
+    }
+
     // Use consistent scroll calculation with buffer (matching update.rs)
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
@@ -228,8 +309,6 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
-
-    // Add a space after the last message if we have content
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
@@ -398,9 +477,15 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Right side: total tokens (if > 0) - hide when sessions dialog is open
     let used_context = &state.current_message_usage;
     let total_width = area.width as usize;
-    let mut final_spans = Vec::new();
+    let total_adjusted_width = if state.loading {
+        total_width + 4
+    } else {
+        total_width
+    };
 
-    if !state.show_sessions_dialog {
+    // Calculate context utilization if we have tokens
+    let total_tokens = state.total_session_usage.total_tokens;
+    let (tokens_text, percentage_text, high_utilization, right_len) =
         if used_context.total_tokens > 0 {
             // Use eco limit if eco model is selected
             let max_tokens = match state.model {
@@ -415,33 +500,141 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
             let tokens_text = format!(
                 "consumed {} tokens",
-                crate::services::helper_block::format_number_with_separator(
-                    state.total_session_usage.total_tokens,
-                )
+                crate::services::helper_block::format_number_with_separator(total_tokens)
             );
             let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
 
             state.context_usage_percent = ctx_percentage;
 
-            // Calculate spacing to push tokens to the absolute right edge
-            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-            let total_adjusted_width = if state.loading {
-                total_width + 4
-            } else {
-                total_width
-            };
-            let total_text_len = tokens_text.len() + 3 + percentage_text.len();
-            let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
+            // Calculate right side length: tokens + separator + percentage
+            let right_len = tokens_text.len() + 3 + percentage_text.len();
+            (
+                Some(tokens_text),
+                Some(percentage_text),
+                high_utilization,
+                right_len,
+            )
+        } else {
+            state.context_usage_percent = 0;
+            (None, None, false, 0)
+        };
 
-            // Add left content first
-            final_spans.extend(left_spans);
+    // Middle message for recovery options
+    let middle_message = (!state.recovery_options.is_empty())
+        .then_some("Detected agent tool call loop . ctrl+x for more");
+    let middle_len = middle_message.map(|msg| msg.len()).unwrap_or(0);
 
-            // Add spacing to push tokens to absolute right
+    let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let left_spans_clone = left_spans.clone();
+    let mut final_spans = Vec::new();
+    final_spans.extend(left_spans);
+
+    if !state.show_sessions_dialog {
+        if let Some(message) = middle_message {
+            // Show recovery message in center, tokens on right
+            let available_without_right = total_adjusted_width.saturating_sub(right_len);
+            let desired_center = available_without_right / 2;
+            let current_center = left_len + middle_len / 2;
+            let mut space_before_mid = desired_center.saturating_sub(current_center);
+            // Shift 10 characters to the right
+            space_before_mid = space_before_mid.saturating_add(20);
+            if !final_spans.is_empty() && space_before_mid == 0 {
+                space_before_mid = 1;
+            }
+
+            if space_before_mid > 0 {
+                final_spans.push(Span::styled(" ".repeat(space_before_mid), Style::default()));
+            }
+
+            // Create shimmering effect for recovery message (yellow, no background, infinite animation)
+            // Use spinner_frame to create animated shimmer pattern (multiply by 2 for faster animation)
+            let shimmer_offset = (state.spinner_frame * 2) % (message.len() + 4);
+            let shimmer_width = 3;
+
+            // Create spans with shimmer effect - alternating bright and normal yellow
+            let message_chars: Vec<char> = message.chars().collect();
+            let mut shimmer_spans = Vec::new();
+
+            let use_rgb = crate::services::detect_term::should_use_rgb_colors();
+
+            for (i, ch) in message_chars.iter().enumerate() {
+                let distance_from_shimmer = i.abs_diff(shimmer_offset);
+                let is_shimmer = distance_from_shimmer < shimmer_width;
+
+                let color = if use_rgb {
+                    if is_shimmer {
+                        // Bright yellow for shimmer
+                        Color::Rgb(255, 255, 0) // Bright yellow
+                    } else {
+                        // Normal yellow
+                        Color::Rgb(200, 200, 0) // Dimmer yellow
+                    }
+                } else {
+                    // Fallback for terminals without RGB support - use standard yellow
+                    Color::Yellow
+                };
+
+                shimmer_spans.push(Span::styled(
+                    ch.to_string(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ));
+            }
+
+            final_spans.extend(shimmer_spans);
+
+            if let (Some(tokens_text), Some(percentage_text)) = (tokens_text, percentage_text) {
+                let mut space_before_right = total_adjusted_width
+                    .saturating_sub(left_len + space_before_mid + middle_len + right_len);
+                if space_before_right == 0 {
+                    space_before_right = 1;
+                }
+
+                if space_before_right > 0 {
+                    final_spans.push(Span::styled(
+                        " ".repeat(space_before_right),
+                        Style::default(),
+                    ));
+                }
+
+                let token_style = if high_utilization {
+                    Style::default().fg(Color::Black).bg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                final_spans.push(Span::styled(tokens_text, token_style));
+                final_spans.push(Span::styled(" · ", token_style));
+                final_spans.push(Span::styled(percentage_text, token_style));
+            } else if total_tokens > 0 {
+                // Show tokens even if used_context.total_tokens is 0
+                let formatted =
+                    crate::services::helper_block::format_number_with_separator(total_tokens);
+                let tokens_text = format!("{} tokens", formatted);
+                let mut space_before_right = total_adjusted_width
+                    .saturating_sub(left_len + space_before_mid + middle_len + tokens_text.len());
+                if space_before_right == 0 {
+                    space_before_right = 1;
+                }
+
+                if space_before_right > 0 {
+                    final_spans.push(Span::styled(
+                        " ".repeat(space_before_right),
+                        Style::default(),
+                    ));
+                }
+
+                final_spans.push(Span::styled(
+                    tokens_text,
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        } else if let (Some(tokens_text), Some(percentage_text)) = (tokens_text, percentage_text) {
+            // No recovery message, show tokens and percentage on right
+            let spacing = total_adjusted_width.saturating_sub(left_len + right_len);
             if spacing > 0 {
                 final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
             }
 
-            // Add tokens at the absolute right edge - all in gray
             let token_style = if high_utilization {
                 Style::default().fg(Color::Black).bg(Color::Yellow)
             } else {
@@ -454,15 +647,8 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             // No tokens, show hint in the same right-aligned slot
             let hint_text = "prompt to see ctx stats";
-            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-            let total_adjusted_width = if state.loading {
-                total_width + 4
-            } else {
-                total_width
-            };
             let spacing = total_adjusted_width.saturating_sub(left_len + hint_text.len());
 
-            final_spans.extend(left_spans);
             if spacing > 0 {
                 final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
             }
@@ -475,7 +661,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         }
     } else {
         // Sessions dialog is open - just show left content
-        final_spans.extend(left_spans);
+        final_spans.extend(left_spans_clone);
     }
 
     let widget =

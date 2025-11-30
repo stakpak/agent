@@ -631,4 +631,105 @@ impl AgentProvider for RemoteClient {
         let _ = self.handle_response_error(response).await?;
         Ok(())
     }
+
+    async fn get_recovery_options(
+        &self,
+        session_id: Uuid,
+        status: Option<&str>,
+    ) -> Result<RecoveryOptionsResponse, String> {
+        let url = format!(
+            "{}/recovery/sessions/{}/recoveries",
+            self.base_url, session_id
+        );
+
+        let status = status.unwrap_or("pending");
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("status", status)])
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let response = self.handle_response_error(response).await?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        if value.is_null() {
+            return Ok(RecoveryOptionsResponse {
+                recovery_options: Vec::new(),
+                id: None,
+                source_checkpoint: None,
+                session: None,
+            });
+        }
+
+        if let Some(result) = value.get("result") {
+            if result.is_null() {
+                return Ok(RecoveryOptionsResponse {
+                    recovery_options: Vec::new(),
+                    id: None,
+                    source_checkpoint: None,
+                    session: None,
+                });
+            }
+
+            match serde_json::from_value::<RecoveryOptionsResponse>(result.clone()) {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    eprintln!("Failed to deserialize response: {}", e);
+                    eprintln!("Raw response: {}", result);
+                }
+            }
+        }
+
+        if let Some(recovery_options) = value.get("recovery_options")
+            && recovery_options.is_null()
+        {
+            return Ok(RecoveryOptionsResponse {
+                recovery_options: Vec::new(),
+                id: None,
+                source_checkpoint: None,
+                session: None,
+            });
+        }
+
+        match serde_json::from_value::<RecoveryOptionsResponse>(value.clone()) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                eprintln!("Failed to deserialize response: {}", e);
+                eprintln!("Raw response: {}", value);
+                Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    async fn submit_recovery_action(
+        &self,
+        session_id: Uuid,
+        recovery_id: &str,
+        action: RecoveryActionType,
+        selected_option_id: Option<Uuid>,
+    ) -> Result<(), String> {
+        let url = format!(
+            "{}/recovery/sessions/{}/recovery/{}/action",
+            self.base_url, session_id, recovery_id
+        );
+
+        let payload = RecoveryActionRequest {
+            action,
+            selected_option_id,
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        self.handle_response_error(response).await?;
+        Ok(())
+    }
 }

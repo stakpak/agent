@@ -133,6 +133,51 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
     ))
 }
 
+pub fn prepare_checkpoint_messages_and_tool_calls(
+    checkpoint_id: &String,
+    messages: Vec<ChatMessage>,
+) -> (Vec<ChatMessage>, Vec<ToolCall>) {
+    let mut checkpoint_messages = messages;
+
+    // Extract tool_calls before modifying messages
+    let tool_calls = checkpoint_messages
+        .last()
+        .filter(|msg| msg.role == Role::Assistant)
+        .and_then(|msg| msg.tool_calls.as_ref())
+        .map(|t| t.to_vec())
+        .unwrap_or_default();
+
+    if let Ok(checkpoint_uuid) = Uuid::parse_str(checkpoint_id) {
+        if let Some(last_message) = checkpoint_messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.role != Role::User && message.role != Role::Tool)
+            .filter(|message| message.role == Role::Assistant)
+            && let Some(content) = last_message.content.as_ref()
+            && content.extract_checkpoint_id().is_none()
+        {
+            last_message.content = Some(content.inject_checkpoint_id(checkpoint_uuid));
+        }
+    } else if let Some(last_message) = checkpoint_messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role != Role::User && message.role != Role::Tool)
+        .filter(|message| message.role == Role::Assistant)
+    {
+        last_message.content = Some(MessageContent::String(format!(
+            "{}\n<checkpoint_id>{}</checkpoint_id>",
+            last_message
+                .content
+                .as_ref()
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default(),
+            checkpoint_id
+        )));
+    }
+
+    (checkpoint_messages, tool_calls)
+}
+
 pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
     messages
         .last()

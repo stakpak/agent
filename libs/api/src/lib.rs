@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures_util::Stream;
 use models::*;
+pub use models::{RecoveryMode, RecoveryOption, RecoveryOptionsResponse, SourceCheckpoint};
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::models::integrations::openai::{
@@ -40,6 +41,20 @@ pub trait AgentProvider: Send + Sync {
         &self,
         session_id: Uuid,
     ) -> Result<RunAgentOutput, String>;
+
+    // Recovery
+    async fn get_recovery_options(
+        &self,
+        session_id: Uuid,
+        status: Option<&str>,
+    ) -> Result<RecoveryOptionsResponse, String>;
+    async fn submit_recovery_action(
+        &self,
+        session_id: Uuid,
+        recovery_id: &str,
+        action: RecoveryActionType,
+        selected_option_id: Option<Uuid>,
+    ) -> Result<(), String>;
 
     // Chat
     async fn chat_completion(

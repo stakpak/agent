@@ -1,14 +1,15 @@
 use crate::agent::run::helpers::system_message;
 use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, extract_checkpoint_messages_and_tool_calls,
-    get_checkpoint_messages, resume_session_from_checkpoint,
+    get_checkpoint_messages, prepare_checkpoint_messages_and_tool_calls,
+    resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
-use crate::commands::agent::run::stream::process_responses_stream;
+use crate::commands::agent::run::stream::{StreamProcessingResult, process_responses_stream};
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
@@ -17,7 +18,7 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
-use stakpak_api::models::ApiStreamError;
+use stakpak_api::models::{ApiStreamError, RecoveryActionRequest};
 use stakpak_api::{
     AgentProvider,
     local::{LocalClient, LocalClientConfig},
@@ -672,6 +673,47 @@ pub async fn run_interactive(
                         }
                         continue;
                     }
+                    OutputEvent::RecoveryAction {
+                        action,
+                        recovery_request_id,
+                        selected_option_id,
+                    } => {
+                        let Some(session_id) = current_session_id else {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(
+                                    "Cannot process recovery action without active session".into(),
+                                ),
+                            )
+                            .await?;
+                            continue;
+                        };
+
+                        let request = RecoveryActionRequest {
+                            action,
+                            selected_option_id: Some(selected_option_id),
+                        };
+
+                        if let Err(err) = client
+                            .submit_recovery_action(
+                                session_id,
+                                &recovery_request_id,
+                                request.action,
+                                Some(selected_option_id),
+                            )
+                            .await
+                        {
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(format!(
+                                    "Failed to submit recovery action: {}",
+                                    err
+                                )),
+                            )
+                            .await?;
+                        }
+                        continue;
+                    }
                     OutputEvent::RequestProfileSwitch(new_profile) => {
                         // Send progress event
                         send_input_event(
@@ -841,9 +883,9 @@ pub async fn run_interactive(
                             break Err(ApiStreamError::Unknown("Stream cancelled by user".to_string()));
                         }
                     } {
-                        Ok(response) => {
+                        Ok(processed) => {
                             retry_attempts = 0;
-                            break Ok(response);
+                            break Ok(processed);
                         }
                         Err(e) => {
                             if matches!(e, ApiStreamError::AgentInvalidResponseStream) {
@@ -894,8 +936,55 @@ pub async fn run_interactive(
                 };
 
                 match response_result {
-                    Ok(response) => {
-                        messages.push(response.choices[0].message.clone());
+                    Ok(processed) => {
+                        let StreamProcessingResult { response, metadata } = processed;
+                        let mut history_synced = false;
+
+                        if let Some(metadata) = metadata
+                            && metadata
+                                .get("history_updated")
+                                .and_then(|value| value.as_bool())
+                                .unwrap_or(false)
+                            && let Some(checkpoint_id) = metadata
+                                .get("checkpoint_id")
+                                .and_then(|value| value.as_str())
+                                .filter(|checkpoint_id| !checkpoint_id.is_empty())
+                        {
+                            match get_checkpoint_messages(&*client, &checkpoint_id.to_string())
+                                .await
+                            {
+                                Ok(checkpoint_messages) => {
+                                    let (chat_messages, _tool_calls) =
+                                        prepare_checkpoint_messages_and_tool_calls(
+                                            &checkpoint_id.to_string(),
+                                            checkpoint_messages,
+                                        );
+
+                                    // Clear messages in mode_interactive
+                                    messages.clear();
+
+                                    // Send checkpoint messages to TUI for background rendering and replacement
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ReplaceMessagesFromCheckpoint(
+                                            chat_messages.clone(),
+                                        ),
+                                    )
+                                    .await?;
+
+                                    messages = chat_messages;
+                                    history_synced = true;
+                                }
+                                Err(err) => {
+                                    let _ =
+                                        send_input_event(&input_tx, InputEvent::Error(err)).await;
+                                }
+                            }
+                        }
+
+                        if !history_synced {
+                            messages.push(response.choices[0].message.clone());
+                        }
 
                         // Accumulate usage from response
                         total_session_usage.prompt_tokens += response.usage.prompt_tokens;
@@ -975,6 +1064,29 @@ pub async fn run_interactive(
                                 continue;
                             }
                         }
+
+                        // Poll for recovery options
+                        if let Some(session_id) = current_session_id {
+                            match client
+                                .get_recovery_options(session_id, Some("pending"))
+                                .await
+                            {
+                                Ok(recovery_response) => {
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::RecoveryOptions(recovery_response),
+                                    )
+                                    .await?;
+                                }
+                                Err(err) => {
+                                    let message =
+                                        format!("Failed to fetch recovery options: {}", err);
+                                    send_input_event(&input_tx, InputEvent::Error(message)).await?;
+                                }
+                            }
+                        }
+
+                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     }
                     Err(_) => {
                         continue;

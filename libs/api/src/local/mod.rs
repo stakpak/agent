@@ -480,6 +480,31 @@ impl AgentProvider for LocalClient {
         // TODO: Implement memorize session
         Ok(())
     }
+
+    async fn get_recovery_options(
+        &self,
+        _session_id: Uuid,
+        _status: Option<&str>,
+    ) -> Result<RecoveryOptionsResponse, String> {
+        // Local provider doesn't support recovery options yet
+        Ok(RecoveryOptionsResponse {
+            recovery_options: Vec::new(),
+            id: None,
+            source_checkpoint: None,
+            session: None,
+        })
+    }
+
+    async fn submit_recovery_action(
+        &self,
+        _session_id: Uuid,
+        _recovery_id: &str,
+        _action: RecoveryActionType,
+        _selected_option_id: Option<Uuid>,
+    ) -> Result<(), String> {
+        // Local provider doesn't support recovery actions yet
+        Ok(())
+    }
 }
 
 impl LocalClient {

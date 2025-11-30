@@ -2,9 +2,12 @@
 //!
 //! Handles all message-related events including streaming messages, adding user messages, and usage tracking.
 
-use crate::app::AppState;
-use crate::services::helper_block::push_usage_message;
-use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
+use crate::app::{AppState, InputEvent};
+use crate::services::helper_block::{push_usage_message, welcome_messages};
+use crate::services::message::{
+    Message, MessageContent, convert_chat_messages_to_tui_messages, invalidate_message_lines_cache,
+};
+use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -53,6 +56,16 @@ pub fn handle_stream_message(
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
         state.text_area.set_text("");
+
+        // Decrement model change countdown if active (for new assistant messages)
+        if let Some(remaining) = &mut state.model_change_messages_remaining
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            if *remaining == 0 {
+                state.model_change_messages_remaining = None;
+            }
+        }
 
         // If content changed while user is scrolled up, mark it
         if !was_at_bottom {
@@ -130,4 +143,52 @@ pub fn handle_total_usage(state: &mut AppState, usage: LLMTokenUsage) {
         state.messages.pop(); // Remove old message
         push_usage_message(state);
     }
+}
+
+/// Handle replace messages from checkpoint event
+pub fn handle_replace_messages_from_checkpoint(
+    state: &mut AppState,
+    chat_messages: Vec<ChatMessage>,
+    input_tx: &Sender<InputEvent>,
+    _message_area_height: usize,
+    _message_area_width: usize,
+) {
+    // Clear current messages immediately
+    state.messages.clear();
+    invalidate_message_lines_cache(state);
+
+    // Clone necessary data for background thread
+    let input_tx_clone = input_tx.clone();
+    let chat_messages_clone = chat_messages.clone();
+    let latest_version = state.latest_version.clone();
+
+    // Get welcome messages before moving state
+    let welcome_messages = welcome_messages(latest_version, state);
+
+    // Spawn an async task on the existing Tokio runtime instead of a raw thread.
+    // This avoids leaking OS threads and lets the runtime shut everything down cleanly.
+    tokio::spawn(async move {
+        let rendered_messages =
+            convert_chat_messages_to_tui_messages(chat_messages_clone, welcome_messages);
+
+        // Ignore errors if the TUI has already shut down.
+        let _ = input_tx_clone
+            .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
+            .await;
+    });
+}
+
+/// Handle set rendered checkpoint messages event
+pub fn handle_set_rendered_checkpoint_messages(
+    state: &mut AppState,
+    rendered_messages: Vec<Message>,
+    message_area_height: usize,
+    message_area_width: usize,
+) {
+    // Replace messages with rendered checkpoint messages
+    state.messages = rendered_messages;
+    invalidate_message_lines_cache(state);
+
+    use crate::services::handlers::navigation;
+    navigation::adjust_scroll(state, message_area_height, message_area_width);
 }

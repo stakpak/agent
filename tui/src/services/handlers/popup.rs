@@ -11,6 +11,7 @@ use crate::services::message::{
 };
 use ratatui::style::Style;
 use stakpak_api::models::ListRuleBook;
+use stakpak_api::models::RecoveryOptionsResponse;
 use tokio::sync::mpsc::Sender;
 
 /// Filter rulebooks based on search input
@@ -444,4 +445,53 @@ pub fn handle_toggle_collapsed_messages(
 /// Handle toggle context popup event
 pub fn handle_toggle_context_popup(state: &mut AppState) {
     state.show_context_popup = !state.show_context_popup;
+}
+
+// ========== Recovery Options Handlers ==========
+
+/// Handle recovery options event
+pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsResponse) {
+    let recovery_options = response.recovery_options.clone();
+    state.recovery_options = recovery_options;
+    state.recovery_response = Some(response.clone());
+    state.recovery_popup_selected = 0;
+    // Capture the source_checkpoint (faulty checkpoint) ID from the response
+    state.recovery_checkpoint_id = response.source_checkpoint.map(|sc| sc.id);
+    // Set flag if we have a faulty checkpoint
+    state.has_faulty_checkpoint =
+        state.recovery_checkpoint_id.is_some() && !state.recovery_options.is_empty();
+
+    // Invalidate message cache to redraw checkpoints with new colorization
+    if state.has_faulty_checkpoint {
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
+
+    if state.recovery_options.is_empty() {
+        state.show_recovery_options_popup = false;
+        state.has_faulty_checkpoint = false;
+        state.recovery_checkpoint_id = None;
+        // Invalidate cache to revert checkpoint appearance
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
+}
+
+/// Handle expand notifications event (recovery options popup toggle)
+pub fn handle_expand_notifications(state: &mut AppState) {
+    if state.recovery_options.is_empty() {
+        state.has_faulty_checkpoint = false;
+        state.recovery_checkpoint_id = None;
+        // Invalidate cache to revert checkpoint appearance
+        crate::services::message::invalidate_message_lines_cache(state);
+        return;
+    }
+
+    if state.show_recovery_options_popup {
+        state.show_recovery_options_popup = false;
+        state.recovery_scroll_pending = false;
+    } else {
+        state.show_recovery_options_popup = true;
+        state.recovery_popup_selected = 0;
+        // Trigger one-time scroll to the recovery checkpoint marker in the chat
+        state.recovery_scroll_pending = true;
+    }
 }
