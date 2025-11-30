@@ -168,6 +168,7 @@ pub async fn run_interactive(
                 }
                 ProviderType::Local => {
                     let client = LocalClient::new(LocalClientConfig {
+                        stakpak_base_url: Some(api_endpoint_for_client.clone()),
                         store_path: None,
                         anthropic_config: ctx_clone.anthropic.clone(),
                         openai_config: ctx_clone.openai.clone(),
@@ -1016,6 +1017,7 @@ pub async fn run_interactive(
                 ProviderType::Local => {
                     let client = LocalClient::new(LocalClientConfig {
                         store_path: None,
+                        stakpak_base_url: Some(new_config.api_endpoint.clone()),
                         anthropic_config: new_config.anthropic.clone(),
                         openai_config: new_config.openai.clone(),
                         eco_model: new_config.eco_model.clone(),
@@ -1088,6 +1090,7 @@ pub async fn run_interactive(
             ProviderType::Local => {
                 let client = LocalClient::new(LocalClientConfig {
                     store_path: None,
+                    stakpak_base_url: Some(final_api_endpoint.clone()),
                     anthropic_config: ctx.anthropic.clone(),
                     openai_config: ctx.openai.clone(),
                     eco_model: ctx.eco_model.clone(),

@@ -87,6 +87,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         }
         ProviderType::Local => {
             let client = LocalClient::new(LocalClientConfig {
+                stakpak_base_url: Some(ctx_clone.api_endpoint.clone()),
                 store_path: None,
                 anthropic_config: ctx_clone.anthropic.clone(),
                 openai_config: ctx_clone.openai.clone(),
@@ -141,6 +142,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         }
         ProviderType::Local => {
             let client = LocalClient::new(LocalClientConfig {
+                stakpak_base_url: Some(ctx.api_endpoint.clone()),
                 store_path: None,
                 anthropic_config: ctx.anthropic.clone(),
                 openai_config: ctx.openai.clone(),
