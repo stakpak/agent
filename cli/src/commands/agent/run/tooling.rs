@@ -17,7 +17,7 @@ pub async fn list_sessions(client: &dyn AgentProvider) -> Result<Vec<SessionInfo
         .into_iter()
         .map(|s| {
             let mut checkpoints = s.checkpoints.clone();
-            checkpoints.sort_by_key(|c| c.updated_at);
+            checkpoints.sort_unstable_by_key(|c| c.updated_at);
 
             // Get the last checkpoint's updated_at for sorting
             let last_checkpoint_timestamp = checkpoints
@@ -36,7 +36,7 @@ pub async fn list_sessions(client: &dyn AgentProvider) -> Result<Vec<SessionInfo
         })
         .collect();
 
-    session_infos.sort_by_key(|(_, timestamp)| *timestamp);
+    session_infos.sort_unstable_by_key(|(_, timestamp)| *timestamp);
     session_infos.reverse(); // Reverse to get most recent sessions at the top
 
     let session_infos: Vec<SessionInfo> = session_infos

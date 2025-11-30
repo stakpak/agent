@@ -470,8 +470,8 @@ pub async fn generate_directory_tree<P: FileSystemProvider>(
         }
     }
 
-    dir_entries.sort_by(|a, b| a.name.cmp(&b.name));
-    file_entries.sort_by(|a, b| a.name.cmp(&b.name));
+    dir_entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    file_entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
     const MAX_ITEMS: usize = 5;
     let total_items = dir_entries.len() + file_entries.len();

@@ -695,7 +695,7 @@ impl TextArea {
             range: range.clone(),
         };
         self.elements.push(elem);
-        self.elements.sort_by_key(|e| e.range.start);
+        self.elements.sort_unstable_by_key(|e| e.range.start);
     }
 
     /// Register an existing range of text as a styled element

@@ -74,7 +74,7 @@ pub fn redact_secrets(
     // Deduplicate overlapping secrets - keep the longest one
     let mut deduplicated_secrets: Vec<DetectedSecret> = Vec::new();
     let mut sorted_by_start = secrets;
-    sorted_by_start.sort_by(|a, b| a.start_pos.cmp(&b.start_pos));
+    sorted_by_start.sort_unstable_by(|a, b| a.start_pos.cmp(&b.start_pos));
 
     for secret in sorted_by_start {
         let mut should_add = true;
@@ -107,7 +107,7 @@ pub fn redact_secrets(
     }
 
     // Sort by position in reverse order to avoid index shifting issues
-    deduplicated_secrets.sort_by(|a, b| b.start_pos.cmp(&a.start_pos));
+    deduplicated_secrets.sort_unstable_by(|a, b| b.start_pos.cmp(&a.start_pos));
 
     for secret in deduplicated_secrets {
         // Validate character boundaries before replacement
