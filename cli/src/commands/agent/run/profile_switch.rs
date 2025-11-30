@@ -45,6 +45,7 @@ pub async fn validate_profile_switch(
         }
         ProviderType::Local => {
             let client = LocalClient::new(LocalClientConfig {
+                stakpak_base_url: Some(new_config.api_endpoint.clone()),
                 store_path: None,
                 anthropic_config: new_config.anthropic.clone(),
                 openai_config: new_config.openai.clone(),
