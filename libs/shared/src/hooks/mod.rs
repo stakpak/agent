@@ -188,6 +188,9 @@ use tokio::io::AsyncWriteExt;
 use serde::Serialize;
 use std::fmt::Debug;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct State;
+
 pub struct LoggerHook;
 
 impl LoggerHook {
@@ -196,28 +199,32 @@ impl LoggerHook {
     }
 }
 
-define_hook!(LoggerHook, "logger", async |&self, ctx: &mut HookContext<State>, event: &LifecycleEvent| {
-    let timestamp: DateTime<Local> = Local::now();
-    let log_message = format!(
-        "[{}] LoggerHook event: {:?}, {}\n",
-        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-        event,
-        serde_json::to_string(&ctx).unwrap_or_default(),
-    );
+define_hook!(
+    LoggerHook,
+    "logger",
+    async |&self, ctx: &mut HookContext<State>, event: &LifecycleEvent| {
+        let timestamp: DateTime<Local> = Local::now();
+        let log_message = format!(
+            "[{}] LoggerHook event: {:?}, {}\n",
+            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+            event,
+            serde_json::to_string(&ctx).unwrap_or_default(),
+        );
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("hook_events.log")
-        .await
-        .map_err(|e| HookError::ExecutionError(e.to_string()))?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("hook_events.log")
+            .await
+            .map_err(|e| HookError::ExecutionError(e.to_string()))?;
 
-    file.write_all(log_message.as_bytes())
-        .await
-        .map_err(|e| HookError::ExecutionError(e.to_string()))?;
+        file.write_all(log_message.as_bytes())
+            .await
+            .map_err(|e| HookError::ExecutionError(e.to_string()))?;
 
-    Ok(HookAction::Continue)
-});
+        Ok(HookAction::Continue)
+    }
+);
 ```
 */
 #[macro_export]
