@@ -7,6 +7,7 @@ use futures_util::StreamExt;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -19,7 +20,7 @@ pub struct GeminiConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum GeminiModel {
     #[default]
-    #[serde(rename = "gemini-3-pro-previews")]
+    #[serde(rename = "gemini-3-pro-preview")]
     Gemini3Pro,
     #[serde(rename = "gemini-2.5-pro")]
     Gemini25Pro,
@@ -695,7 +696,9 @@ async fn process_gemini_stream(
                                             GeminiPart::FunctionCall { function_call } => {
                                                 let GeminiFunctionCall { id, name, args } =
                                                     function_call;
-                                                let id = id.unwrap_or_default();
+
+                                                let id = id
+                                                    .unwrap_or_else(|| Uuid::new_v4().to_string());
                                                 let name_clone = name.clone();
                                                 let args_clone = args.clone();
                                                 stream_channel_tx
@@ -799,6 +802,8 @@ async fn process_gemini_stream(
             },
         },
     }];
+
+    eprint!("{:?}", completion_response);
 
     Ok(completion_response)
 }

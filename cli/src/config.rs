@@ -12,17 +12,12 @@ use std::path::{Path, PathBuf};
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
 const STAKPAK_CONFIG_PATH: &str = ".stakpak/config.toml";
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
+    #[default]
     Remote,
     Local,
-}
-
-impl Default for ProviderType {
-    fn default() -> Self {
-        Self::Remote
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

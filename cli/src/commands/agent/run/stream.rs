@@ -138,7 +138,11 @@ pub async fn process_responses_stream(
                                                 .as_deref()
                                                 .unwrap_or("")
                                                 .to_string(),
-                                            arguments: "".to_string(),
+                                            arguments: delta_tool_call
+                                                .function
+                                                .as_ref()
+                                                .and_then(|f| f.arguments.clone())
+                                                .unwrap_or_default(),
                                         },
                                     });
                                 }
