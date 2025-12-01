@@ -133,8 +133,6 @@ impl LocalClient {
             recovery_model,
             hook_registry: Some(Arc::new(hook_registry)),
         })
-
-
     }
 }
 

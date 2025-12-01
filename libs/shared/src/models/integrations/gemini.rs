@@ -85,17 +85,19 @@ pub enum GeminiRole {
     Model,
 }
 
+impl std::fmt::Display for GeminiRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GeminiRole::User => write!(f, "user"),
+            GeminiRole::Model => write!(f, "model"),
+        }
+    }
+}
+
 impl GeminiRole {
     pub fn from_string(s: &str) -> Result<Self, String> {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize Gemini role".to_string())
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            GeminiRole::User => "user".to_string(),
-            GeminiRole::Model => "model".to_string(),
-        }
     }
 }
 
