@@ -520,9 +520,18 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         };
 
     // Middle message for recovery options
-    let middle_message = (!state.recovery_options.is_empty())
-        .then_some("Detected agent tool call loop . ctrl+x for more");
-    let middle_len = middle_message.map(|msg| msg.len()).unwrap_or(0);
+    let middle_message = if let Some(rounds) = state.model_change_messages_remaining {
+        if rounds == 0 {
+            Some("Reverting to Smart model...".to_string())
+        } else {
+            Some(format!("Recovery Mode: {} rounds left", rounds))
+        }
+    } else if !state.recovery_options.is_empty() {
+        Some("Detected agent tool call loop . ctrl+x for more".to_string())
+    } else {
+        None
+    };
+    let middle_len = middle_message.as_ref().map(|msg| msg.len()).unwrap_or(0);
 
     let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
     let left_spans_clone = left_spans.clone();

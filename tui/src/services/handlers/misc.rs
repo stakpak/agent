@@ -108,6 +108,13 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
+    // Handle recovery popup navigation with Tab
+    if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
+        let len = state.recovery_options.len();
+        state.recovery_popup_selected = (state.recovery_popup_selected + 1) % len;
+        return;
+    }
+
     if state.show_collapsed_messages {
         handle_collapsed_messages_tab(state, message_area_height, message_area_width);
     } else {

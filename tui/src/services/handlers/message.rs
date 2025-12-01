@@ -57,16 +57,6 @@ pub fn handle_stream_message(
             .push(Message::assistant(Some(id), s.clone(), None));
         state.text_area.set_text("");
 
-        // Decrement model change countdown if active (for new assistant messages)
-        if let Some(remaining) = &mut state.model_change_messages_remaining
-            && *remaining > 0
-        {
-            *remaining -= 1;
-            if *remaining == 0 {
-                state.model_change_messages_remaining = None;
-            }
-        }
-
         // If content changed while user is scrolled up, mark it
         if !was_at_bottom {
             state.content_changed_while_scrolled_up = true;

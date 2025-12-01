@@ -309,6 +309,18 @@ pub fn update(
         InputEvent::ExpandNotifications => {
             popup::handle_expand_notifications(state);
         }
+        InputEvent::RecoveryModeStatus(rounds) => {
+            state.model_change_messages_remaining = rounds;
+            // When recovery mode ends (None), revert to Smart model
+            if rounds.is_none() {
+                state.model = stakpak_shared::models::integrations::openai::AgentModel::Smart;
+            } else {
+                // When recovery mode is active, show Recovery model
+                state.model = stakpak_shared::models::integrations::openai::AgentModel::Recovery;
+            }
+            // Note: When recovery starts, the model is already updated in recovery.rs
+            // and will be reflected in the next agent call
+        }
 
         // Message handlers
         InputEvent::StreamAssistantMessage(id, s) => {

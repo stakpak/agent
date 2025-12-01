@@ -114,14 +114,9 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
-    if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
-        if state.recovery_popup_selected == 0 {
-            state.recovery_popup_selected = state.recovery_options.len().saturating_sub(1);
-        } else {
-            state.recovery_popup_selected -= 1;
-        }
-        return;
-    }
+    // Recovery popup no longer handles Up/Down - Tab is used for navigation
+    // Allow Up to scroll the message area even when recovery popup is open
+
     if state.show_command_palette {
         let filtered_commands = filter_commands(&state.command_palette_search);
         if state.command_palette_selected > 0 {
@@ -191,11 +186,9 @@ pub fn handle_down_navigation(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
-        let len = state.recovery_options.len();
-        state.recovery_popup_selected = (state.recovery_popup_selected + 1) % len;
-        return;
-    }
+    // Recovery popup no longer handles Up/Down - Tab is used for navigation
+    // Allow Down to scroll the message area even when recovery popup is open
+
     if state.show_command_palette {
         let filtered_commands = filter_commands(&state.command_palette_search);
         if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {

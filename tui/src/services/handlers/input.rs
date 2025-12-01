@@ -97,13 +97,19 @@ pub fn handle_input_submitted_event(
             let selected_option_id = selected.id;
             let mode = selected.mode.clone();
 
-            // Map mode to a label consistent with the CLI
+            // Combine generic label with specific message if available
             let mode_label = match mode {
                 RecoveryMode::Redirection => "REDIRECTION",
                 RecoveryMode::Revert => "REVERT",
                 RecoveryMode::ModelChange => "MODELCHANGE",
             };
-            let message_text = format!("Proceeding with recovery option [{}]", mode_label);
+            let prefix = format!("Proceeding with recovery option [{}]\n\n", mode_label);
+
+            let message_text = if let Some(msg) = &selected.redirection_message {
+                format!("{}{}", prefix, msg)
+            } else {
+                prefix
+            };
 
             // If ModelChange is selected, parse the number of messages from the option description
             if matches!(mode, RecoveryMode::ModelChange) {

@@ -122,6 +122,8 @@ pub enum InputEvent {
     // Checkpoint message replacement
     ReplaceMessagesFromCheckpoint(Vec<stakpak_shared::models::integrations::openai::ChatMessage>),
     SetRenderedCheckpointMessages(Vec<crate::services::message::Message>),
+    // Recovery mode status (rounds remaining)
+    RecoveryModeStatus(Option<u32>),
 }
 
 #[derive(Debug)]

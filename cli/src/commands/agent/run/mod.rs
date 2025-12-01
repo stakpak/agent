@@ -3,6 +3,7 @@ pub mod helpers;
 pub mod mode_async;
 pub mod mode_interactive;
 pub mod profile_switch;
+pub mod recovery;
 pub mod renderer;
 pub mod stream;
 pub mod tooling;

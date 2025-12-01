@@ -140,7 +140,7 @@ pub fn render_recovery_popup(f: &mut Frame, state: &mut AppState) {
 
     let help = Paragraph::new(Line::from(vec![
         Span::styled(
-            " ↑/↓",
+            " Tab",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),

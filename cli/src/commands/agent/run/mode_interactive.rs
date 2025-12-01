@@ -8,6 +8,7 @@ use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
+use crate::commands::agent::run::recovery;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::{StreamProcessingResult, process_responses_stream};
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -18,7 +19,7 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
-use stakpak_api::models::{ApiStreamError, RecoveryActionRequest};
+use stakpak_api::models::ApiStreamError;
 use stakpak_api::{
     AgentProvider,
     local::{LocalClient, LocalClientConfig},
@@ -37,6 +38,7 @@ use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 type ClientTaskResult = Result<
@@ -48,6 +50,8 @@ type ClientTaskResult = Result<
     ),
     String,
 >;
+
+const RECOVERY_POLL_SECONDS: u64 = 5;
 
 pub struct RunInteractiveConfig {
     pub checkpoint_id: Option<String>,
@@ -157,6 +161,11 @@ pub async fn run_interactive(
         let ctx_clone = ctx.clone(); // Clone ctx for use in client task
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
+            let shared_session_id = Arc::new(RwLock::new(None));
+            let recovery_options_store = Arc::new(RwLock::new(Vec::<
+                stakpak_api::models::RecoveryOption,
+            >::new()));
+            let mut recovery_rounds_remaining: Option<u32> = None;
 
             let client: Arc<dyn AgentProvider> = match provider_type {
                 ProviderType::Remote => {
@@ -209,6 +218,57 @@ pub async fn run_interactive(
             };
             let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_tui.as_ref());
 
+            // Spawn recovery polling task
+            let poll_session_id = shared_session_id.clone();
+            let poll_client = client.clone();
+            let poll_input_tx = input_tx.clone();
+            let poll_options_store = recovery_options_store.clone();
+            let mut poll_shutdown_rx = shutdown_tx_for_client.subscribe();
+
+            tokio::spawn(async move {
+                eprintln!("[RECOVERY POLL] Task started");
+                let mut interval =
+                    tokio::time::interval(tokio::time::Duration::from_secs(RECOVERY_POLL_SECONDS));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let session_id = *poll_session_id.read().await;
+                            eprintln!("[RECOVERY POLL] Tick - session_id: {:?}", session_id);
+                            if let Some(sid) = session_id {
+                                eprintln!("[RECOVERY POLL] Polling for session: {}", sid);
+                                match poll_client.get_recovery_options(sid, Some("pending")).await {
+                                    Ok(response) => {
+                                        eprintln!("[RECOVERY POLL] Got response with {} options", response.recovery_options.len());
+                                        // Update local store
+                                        {
+                                            let mut store = poll_options_store.write().await;
+                                            *store = response.recovery_options.clone();
+                                        }
+                                        // Send to TUI
+                                        let result = send_input_event(
+                                            &poll_input_tx,
+                                            InputEvent::RecoveryOptions(response),
+                                        ).await;
+                                        eprintln!("[RECOVERY POLL] Send to TUI result: {:?}", result);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[RECOVERY POLL] Error polling: {}", e);
+                                        log::debug!("Failed to poll recovery options: {}", e);
+                                    }
+                                }
+                            } else {
+                                eprintln!("[RECOVERY POLL] No session_id, skipping poll");
+                            }
+                        }
+                        _ = poll_shutdown_rx.recv() => {
+                            eprintln!("[RECOVERY POLL] Shutdown signal received");
+                            break;
+                        }
+                    }
+                }
+                eprintln!("[RECOVERY POLL] Task ended");
+            });
+
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
             // Load available profiles and send to TUI
@@ -242,7 +302,10 @@ pub async fn run_interactive(
                 if let Ok(checkpoint_with_session) =
                     client.get_agent_checkpoint(checkpoint_uuid).await
                 {
-                    current_session_id = Some(checkpoint_with_session.session.id);
+                    {
+                        current_session_id = Some(checkpoint_with_session.session.id);
+                        *shared_session_id.write().await = current_session_id;
+                    }
                 }
 
                 let checkpoint_messages =
@@ -475,6 +538,7 @@ pub async fn run_interactive(
                     OutputEvent::NewSession => {
                         // Clear the current session and start fresh
                         current_session_id = None;
+                        *shared_session_id.write().await = None;
                         messages.clear();
                         total_session_usage = LLMTokenUsage {
                             prompt_tokens: 0,
@@ -482,6 +546,13 @@ pub async fn run_interactive(
                             total_tokens: 0,
                             prompt_tokens_details: None,
                         };
+                        // Reset recovery model to Smart
+                        if model != AgentModel::Smart {
+                            model = AgentModel::Smart;
+                            recovery_rounds_remaining = None;
+                            send_input_event(&input_tx, InputEvent::RecoveryModeStatus(None))
+                                .await?;
+                        }
                         continue;
                     }
 
@@ -515,6 +586,7 @@ pub async fn run_interactive(
                                 Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                     // Track the current session ID
                                     current_session_id = Some(session_id_uuid);
+                                    *shared_session_id.write().await = Some(session_id_uuid);
 
                                     // Mark that we need to update rulebooks on the next user message
                                     should_update_rulebooks_on_next_message = true;
@@ -526,6 +598,17 @@ pub async fn run_interactive(
                                         total_tokens: 0,
                                         prompt_tokens_details: None,
                                     };
+
+                                    // Reset recovery model to Smart when resuming
+                                    if model != AgentModel::Smart {
+                                        model = AgentModel::Smart;
+                                        recovery_rounds_remaining = None;
+                                        send_input_event(
+                                            &input_tx,
+                                            InputEvent::RecoveryModeStatus(None),
+                                        )
+                                        .await?;
+                                    }
 
                                     messages.extend(chat_messages);
                                     tools_queue.extend(tool_calls.clone());
@@ -584,6 +667,7 @@ pub async fn run_interactive(
                             Ok((chat_messages, tool_calls, session_id_uuid)) => {
                                 // Track the current session ID
                                 current_session_id = Some(session_id_uuid);
+                                *shared_session_id.write().await = Some(session_id_uuid);
 
                                 // Mark that we need to update rulebooks on the next user message
                                 should_update_rulebooks_on_next_message = true;
@@ -595,6 +679,17 @@ pub async fn run_interactive(
                                     total_tokens: 0,
                                     prompt_tokens_details: None,
                                 };
+
+                                // Reset recovery model to Smart when resuming
+                                if model != AgentModel::Smart {
+                                    model = AgentModel::Smart;
+                                    recovery_rounds_remaining = None;
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::RecoveryModeStatus(None),
+                                    )
+                                    .await?;
+                                }
 
                                 messages.extend(chat_messages);
                                 tools_queue.extend(tool_calls.clone());
@@ -678,37 +773,84 @@ pub async fn run_interactive(
                         recovery_request_id,
                         selected_option_id,
                     } => {
-                        let Some(session_id) = current_session_id else {
-                            send_input_event(
-                                &input_tx,
-                                InputEvent::Error(
-                                    "Cannot process recovery action without active session".into(),
-                                ),
-                            )
-                            .await?;
-                            continue;
-                        };
+                        // Submit to server for tracking/logging (fire and forget)
+                        let submit_client = client.clone();
+                        let submit_session_id = current_session_id.unwrap_or_default();
+                        let submit_request_id = recovery_request_id.clone();
+                        let submit_option_id = selected_option_id;
+                        let submit_action = action;
+                        tokio::spawn(async move {
+                            let _ = submit_client
+                                .submit_recovery_action(
+                                    submit_session_id,
+                                    &submit_request_id,
+                                    submit_action,
+                                    Some(submit_option_id),
+                                )
+                                .await;
+                        });
 
-                        let request = RecoveryActionRequest {
-                            action,
-                            selected_option_id: Some(selected_option_id),
-                        };
-
-                        if let Err(err) = client
-                            .submit_recovery_action(
-                                session_id,
-                                &recovery_request_id,
-                                request.action,
-                                Some(selected_option_id),
+                        // Apply recovery locally
+                        let options = recovery_options_store.read().await;
+                        if let Some(option) = options.iter().find(|o| o.id == selected_option_id) {
+                            match recovery::handle_recovery_action(
+                                client.as_ref(),
+                                option,
+                                &mut messages,
+                                &mut model,
                             )
                             .await
-                        {
+                            {
+                                Ok(result) => {
+                                    // Clear recovery options in TUI first
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::RecoveryOptions(
+                                            stakpak_api::models::RecoveryOptionsResponse {
+                                                recovery_options: Vec::new(),
+                                                id: None,
+                                                source_checkpoint: None,
+                                                session: None,
+                                            },
+                                        ),
+                                    )
+                                    .await?;
+
+                                    // Always sync the updated messages state with TUI
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::ReplaceMessagesFromCheckpoint(messages.clone()),
+                                    )
+                                    .await?;
+
+                                    // Handle model switch if applicable
+                                    if let recovery::RecoveryResult::ModelSwitched(rounds) = result
+                                    {
+                                        // Explicitly switch to Recovery model
+                                        model = stakpak_shared::models::integrations::openai::AgentModel::Recovery;
+                                        eprintln!("DEBUG: Switched to Recovery model: {:?}", model);
+
+                                        let rounds_u32 = rounds as u32;
+                                        recovery_rounds_remaining = Some(rounds_u32);
+                                        send_input_event(
+                                            &input_tx,
+                                            InputEvent::RecoveryModeStatus(Some(rounds_u32)),
+                                        )
+                                        .await?;
+                                    }
+                                }
+                                Err(e) => {
+                                    send_input_event(
+                                        &input_tx,
+                                        InputEvent::Error(format!("Recovery failed: {}", e)),
+                                    )
+                                    .await?;
+                                }
+                            }
+                        } else {
                             send_input_event(
                                 &input_tx,
-                                InputEvent::Error(format!(
-                                    "Failed to submit recovery action: {}",
-                                    err
-                                )),
+                                InputEvent::Error("Selected recovery option not found".to_string()),
                             )
                             .await?;
                         }
@@ -1043,6 +1185,7 @@ pub async fn run_interactive(
                                 client.get_agent_checkpoint(checkpoint_uuid).await
                         {
                             current_session_id = Some(checkpoint_with_session.session.id);
+                            *shared_session_id.write().await = current_session_id;
                         }
 
                         // Send tool calls to TUI if present
@@ -1065,28 +1208,27 @@ pub async fn run_interactive(
                             }
                         }
 
-                        // Poll for recovery options
-                        if let Some(session_id) = current_session_id {
-                            match client
-                                .get_recovery_options(session_id, Some("pending"))
-                                .await
-                            {
-                                Ok(recovery_response) => {
-                                    send_input_event(
-                                        &input_tx,
-                                        InputEvent::RecoveryOptions(recovery_response),
-                                    )
+                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
+
+                        // Handle recovery countdown after assistant message
+                        if let Some(rounds) = recovery_rounds_remaining {
+                            let new_rounds = rounds.saturating_sub(1);
+                            if new_rounds == 0 {
+                                recovery_rounds_remaining = None;
+                                model = AgentModel::Smart;
+                                eprintln!("DEBUG: Reverted to Smart model: {:?}", model);
+                                // Notify TUI we are reverting (None indicates done)
+                                send_input_event(&input_tx, InputEvent::RecoveryModeStatus(None))
                                     .await?;
-                                }
-                                Err(err) => {
-                                    let message =
-                                        format!("Failed to fetch recovery options: {}", err);
-                                    send_input_event(&input_tx, InputEvent::Error(message)).await?;
-                                }
+                            } else {
+                                recovery_rounds_remaining = Some(new_rounds);
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::RecoveryModeStatus(Some(new_rounds)),
+                                )
+                                .await?;
                             }
                         }
-
-                        send_input_event(&input_tx, InputEvent::ResetAutoApproveMessage).await?;
                     }
                     Err(_) => {
                         continue;
