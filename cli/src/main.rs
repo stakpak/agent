@@ -250,6 +250,7 @@ async fn main() {
                                 stakpak_base_url: Some(config.api_endpoint.clone()),
                                 anthropic_config: config.anthropic.clone(),
                                 openai_config: config.openai.clone(),
+                                gemini_config: config.gemini.clone(),
                                 eco_model: config.eco_model.clone(),
                                 recovery_model: config.recovery_model.clone(),
                                 smart_model: config.smart_model.clone(),
