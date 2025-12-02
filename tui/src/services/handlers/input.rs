@@ -85,19 +85,14 @@ pub fn handle_input_submitted_event(
         // When recovery options popup is open, selecting an option should:
         // 1) Send a RecoveryAction to the CLI (for logging/API)
         // 2) Parse state_edits and send sequential InputEvents for each action
+        let mut recovery_request_id = "".to_string();
+        let mut selected_option_id = uuid::Uuid::default();
         let selected_index = state.recovery_popup.selected_index();
         if let Some(selected) = state.recovery_options.get(selected_index)
             && let Some(response) = &state.recovery_response
         {
-            let recovery_request_id = response.id.clone().unwrap_or_default();
-            let selected_option_id = selected.id;
-
-            // Send recovery action to CLI (for API logging)
-            let _ = output_tx.try_send(OutputEvent::RecoveryAction {
-                action: stakpak_api::models::RecoveryActionType::Approve,
-                recovery_request_id,
-                selected_option_id,
-            });
+            recovery_request_id = response.id.clone().unwrap_or_default();
+            selected_option_id = selected.id;
 
             // Parse and execute state edits sequentially
             if let Ok(actions) = serde_json::from_value::<
@@ -173,6 +168,9 @@ pub fn handle_input_submitted_event(
             }
         }
 
+        // Signal that all recovery operations are complete so CLI can send updated messages
+        let _ = output_tx.try_send(OutputEvent::RecoveryComplete);
+
         state.recovery_options.clear();
         state.recovery_response = None;
         state.recovery_popup_selected = 0;
@@ -185,8 +183,12 @@ pub fn handle_input_submitted_event(
         // Invalidate cache to redraw checkpoints without yellow colorization
         crate::services::message::invalidate_message_lines_cache(state);
 
-        // Signal that all recovery operations are complete so CLI can send updated messages
-        let _ = output_tx.try_send(OutputEvent::RecoveryComplete);
+        // Send recovery action to CLI (for API logging)
+        let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+            action: stakpak_api::models::RecoveryActionType::Approve,
+            recovery_request_id,
+            selected_option_id,
+        });
 
         // Scroll to bottom after selecting recovery option
         state.scroll_to_bottom = true;
