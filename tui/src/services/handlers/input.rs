@@ -85,15 +85,20 @@ pub fn handle_input_submitted_event(
         // When recovery options popup is open, selecting an option should:
         // 1) Send a RecoveryAction to the CLI (for logging/API)
         // 2) Parse state_edits and send sequential InputEvents for each action
-        let mut recovery_request_id = "".to_string();
-        let mut selected_option_id = uuid::Uuid::default();
         let selected_index = state.recovery_popup.selected_index();
         if let Some(selected) = state.recovery_options.get(selected_index)
             && let Some(response) = &state.recovery_response
         {
             let _ = output_tx.try_send(OutputEvent::ToggleRecoveryPolling(false));
-            recovery_request_id = response.id.clone().unwrap_or_default();
-            selected_option_id = selected.id;
+            let recovery_request_id = response.id.clone().unwrap_or_default();
+            let selected_option_id = selected.id;
+
+            // Send recovery action to CLI (for API logging)
+            let _ = output_tx.try_send(OutputEvent::RecoveryAction {
+                action: stakpak_api::models::RecoveryActionType::Approve,
+                recovery_request_id,
+                selected_option_id,
+            });
 
             // Parse and execute state edits sequentially
             if let Ok(actions) = serde_json::from_value::<
@@ -183,13 +188,6 @@ pub fn handle_input_submitted_event(
         // Note: Don't reset model_change_messages_remaining here - let it count down naturally
         // Invalidate cache to redraw checkpoints without yellow colorization
         crate::services::message::invalidate_message_lines_cache(state);
-
-        // Send recovery action to CLI (for API logging)
-        let _ = output_tx.try_send(OutputEvent::RecoveryAction {
-            action: stakpak_api::models::RecoveryActionType::Approve,
-            recovery_request_id,
-            selected_option_id,
-        });
 
         let _ = output_tx.try_send(OutputEvent::ToggleRecoveryPolling(true));
 
