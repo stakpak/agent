@@ -789,71 +789,65 @@ pub async fn run_interactive(
                                 )
                                 .await;
                         });
-
-                        // Apply recovery locally
-                        let options = recovery_options_store.read().await;
-                        if let Some(option) = options.iter().find(|o| o.id == selected_option_id) {
-                            match recovery::handle_recovery_action(
-                                client.as_ref(),
-                                option,
-                                &mut messages,
-                                &mut model,
-                            )
-                            .await
-                            {
-                                Ok(result) => {
-                                    // Clear recovery options in TUI first
-                                    send_input_event(
-                                        &input_tx,
-                                        InputEvent::RecoveryOptions(
-                                            stakpak_api::models::RecoveryOptionsResponse {
-                                                recovery_options: Vec::new(),
-                                                id: None,
-                                                source_checkpoint: None,
-                                                session: None,
-                                            },
-                                        ),
-                                    )
-                                    .await?;
-
-                                    // Always sync the updated messages state with TUI
-                                    send_input_event(
-                                        &input_tx,
-                                        InputEvent::ReplaceMessagesFromCheckpoint(messages.clone()),
-                                    )
-                                    .await?;
-
-                                    // Handle model switch if applicable
-                                    if let recovery::RecoveryResult::ModelSwitched(rounds) = result
-                                    {
-                                        // Explicitly switch to Recovery model
-                                        model = stakpak_shared::models::integrations::openai::AgentModel::Recovery;
-                                        eprintln!("DEBUG: Switched to Recovery model: {:?}", model);
-
-                                        let rounds_u32 = rounds as u32;
-                                        recovery_rounds_remaining = Some(rounds_u32);
-                                        send_input_event(
-                                            &input_tx,
-                                            InputEvent::RecoveryModeStatus(Some(rounds_u32)),
-                                        )
-                                        .await?;
-                                    }
-                                }
-                                Err(e) => {
-                                    send_input_event(
-                                        &input_tx,
-                                        InputEvent::Error(format!("Recovery failed: {}", e)),
-                                    )
-                                    .await?;
-                                }
-                            }
-                        } else {
-                            send_input_event(
-                                &input_tx,
-                                InputEvent::Error("Selected recovery option not found".to_string()),
-                            )
-                            .await?;
+                    }
+                    OutputEvent::RecoveryRevert(checkpoint_id) => {
+                        if let Err(e) = recovery::handle_revert_to_checkpoint(
+                            client.as_ref(),
+                            &checkpoint_id,
+                            &mut messages,
+                        ).await {
+                            log::error!("Failed to revert to checkpoint: {}", e);
+                            send_input_event(&input_tx, InputEvent::Error(format!("Recovery failed: {}", e))).await?;
                         }
+                        continue;
+                    }
+                    OutputEvent::RecoveryTruncate(index) => {
+                        recovery::handle_truncate(&mut messages, index);
+                        continue;
+                    }
+                    OutputEvent::RecoveryRemoveTools(tool_ids) => {
+                        recovery::handle_remove_tools(&mut messages, &tool_ids);
+                        continue;
+                    }
+                    OutputEvent::RecoveryAppend(role_str, content) => {
+                        let role = match role_str.as_str() {
+                            "user" => Role::User,
+                            "assistant" => Role::Assistant,
+                            "system" => Role::System,
+                            "tool" => Role::Tool,
+                            _ => Role::User,
+                        };
+                        
+                        recovery::handle_append(&mut messages, role.clone(), content);
+                        
+                        if role == Role::User {
+                             send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                             // Fall through to agent execution
+                        } else {
+                            continue;
+                        }
+                    }
+                    OutputEvent::RecoveryChangeModel(model_str, provider_str) => {
+                        let config = recovery::ModelConfig {
+                            model: model_str,
+                            provider: provider_str,
+                        };
+                       
+                        match recovery::handle_change_model(&mut model, &config) {
+                            recovery::RecoveryResult::ModelSwitched(rounds) => {
+                                recovery_rounds_remaining = Some(rounds as u32);
+                                send_input_event(&input_tx, InputEvent::RecoveryModeStatus(recovery_rounds_remaining)).await?;
+                            }
+                        }
+                        continue;
+                    }
+                    OutputEvent::RecoveryComplete => {
+                        // All recovery operations are complete, send updated messages to TUI
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::ReplaceMessagesFromCheckpoint(messages.clone()),
+                        )
+                        .await?;
                         continue;
                     }
                     OutputEvent::RequestProfileSwitch(new_profile) => {

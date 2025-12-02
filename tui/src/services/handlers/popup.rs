@@ -508,7 +508,7 @@ pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsRe
         use ratatui::layout::Size;
         // Preserve the show flag - don't reset it when recreating popup
         let should_show = state.show_recovery_options_popup;
-        state.recovery_popup = crate::services::recovery_popup_v2::RecoveryPopupService::new_with_recovery_options(
+        state.recovery_popup = crate::services::recovery_popup::RecoveryPopupService::new_with_recovery_options(
             recovery_options,
             Size {
                 width: state.terminal_size.width,
@@ -547,7 +547,7 @@ pub fn handle_expand_notifications(state: &mut AppState) {
         // Always recreate popup with current options to ensure it's up to date and properly initialized
         use ratatui::layout::Size;
         let current_index = state.recovery_popup.selected_index();
-        state.recovery_popup = crate::services::recovery_popup_v2::RecoveryPopupService::new_with_recovery_options(
+        state.recovery_popup = crate::services::recovery_popup::RecoveryPopupService::new_with_recovery_options(
             state.recovery_options.clone(),
             Size {
                 width: state.terminal_size.width,

@@ -6,7 +6,7 @@ use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
-use crate::services::recovery_popup_v2::RecoveryPopupService;
+use crate::services::recovery_popup::RecoveryPopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};

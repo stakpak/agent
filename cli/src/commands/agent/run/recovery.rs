@@ -3,14 +3,21 @@ use crate::commands::agent::run::checkpoint::{
 };
 use serde::{Deserialize, Serialize};
 use stakpak_api::AgentProvider;
-use stakpak_api::models::{RecoveryMode, RecoveryOption};
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage, MessageContent, Role};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RecoveryOperation {
-    Append,      // Append a new message (e.g., redirection message)
-    Truncate,    // Truncate messages after a certain point
-    RemoveTools, // Remove tool calls and their results
+    Append,
+    Truncate,
+    RemoveTools,
+    RevertToCheckpoint,
+    ChangeModel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub model: String,
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,72 +27,54 @@ pub struct RecoveryAction {
     pub content: Option<MessageContent>,
     pub failed_tool_call_ids_to_remove: Option<Vec<String>>,
     pub recovery_operation: RecoveryOperation,
+    pub revert_to_checkpoint: Option<String>,
+    pub model_config: Option<ModelConfig>,
+    pub explanation: Option<String>,
 }
 
 pub enum RecoveryResult {
-    Applied,
     ModelSwitched(usize),
 }
 
-pub async fn handle_recovery_action(
+pub async fn handle_revert_to_checkpoint(
     client: &dyn AgentProvider,
-    option: &RecoveryOption,
+    checkpoint_id: &String,
     messages: &mut Vec<ChatMessage>,
-    current_model: &mut AgentModel,
-) -> Result<RecoveryResult, String> {
-    // 1. Handle Revert/Checkpoint loading first if needed
-    if let Some(checkpoint_id) = option.revert_to_checkpoint {
-        let checkpoint_messages =
-            get_checkpoint_messages(client, &checkpoint_id.to_string()).await?;
-        let (chat_messages, _) = prepare_checkpoint_messages_and_tool_calls(
-            &checkpoint_id.to_string(),
-            checkpoint_messages,
-        );
-        *messages = chat_messages;
-    }
+) -> Result<(), String> {
+    let checkpoint_messages =
+        get_checkpoint_messages(client, checkpoint_id).await?;
+    let (chat_messages, _) = prepare_checkpoint_messages_and_tool_calls(
+        checkpoint_id,
+        checkpoint_messages,
+    );
+    *messages = chat_messages;
+    Ok(())
+}
 
-    // 2. Parse and apply state edits
-    if let Ok(actions) = serde_json::from_value::<Vec<RecoveryAction>>(option.state_edits.clone()) {
-        for action in actions {
-            match action.recovery_operation {
-                RecoveryOperation::Truncate => {
-                    if action.message_index < messages.len() {
-                        messages.truncate(action.message_index);
-                    }
-                }
-                RecoveryOperation::RemoveTools => {
-                    if let Some(tool_ids) = &action.failed_tool_call_ids_to_remove {
-                        clean_state_from_tool_failures(messages, tool_ids);
-                    }
-                }
-                RecoveryOperation::Append => {
-                    // Skip User role messages - TUI handles adding the recovery message
-                    if let (Some(role), Some(content)) = (action.role, action.content)
-                        && role != Role::User
-                    {
-                        messages.push(ChatMessage {
-                            role,
-                            content: Some(content),
-                            name: None,
-                            tool_calls: None,
-                            tool_call_id: None,
-                            usage: None,
-                        });
-                    }
-                }
-            }
-        }
+pub fn handle_truncate(messages: &mut Vec<ChatMessage>, index: usize) {
+    if index < messages.len() {
+        messages.truncate(index);
     }
+}
 
-    // 3. Handle Model Change
-    if option.mode == RecoveryMode::ModelChange {
-        // Always switch to Recovery model for ModelChange mode
-        let new_model = AgentModel::Recovery;
-        *current_model = new_model.clone();
-        return Ok(RecoveryResult::ModelSwitched(5));
-    }
+pub fn handle_remove_tools(messages: &mut Vec<ChatMessage>, tool_ids: &[String]) {
+    clean_state_from_tool_failures(messages, tool_ids);
+}
 
-    Ok(RecoveryResult::Applied)
+pub fn handle_append(messages: &mut Vec<ChatMessage>, role: Role, content: MessageContent) {
+    messages.push(ChatMessage {
+        role,
+        content: Some(content),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+        usage: None,
+    });
+}
+
+pub fn handle_change_model(current_model: &mut AgentModel, config: &ModelConfig) -> RecoveryResult {
+    *current_model = AgentModel::from(config.model.clone());
+    RecoveryResult::ModelSwitched(5)
 }
 
 fn clean_state_from_tool_failures(messages: &mut Vec<ChatMessage>, tool_ids: &[String]) {

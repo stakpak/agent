@@ -151,4 +151,11 @@ pub enum OutputEvent {
         recovery_request_id: String,
         selected_option_id: Uuid,
     },
+    // Recovery Actions
+    RecoveryAppend(String, stakpak_shared::models::integrations::openai::MessageContent),
+    RecoveryTruncate(usize),
+    RecoveryRemoveTools(Vec<String>),
+    RecoveryRevert(String),
+    RecoveryChangeModel(String, String), // model, provider
+    RecoveryComplete, // Signal that all recovery operations are complete
 }
