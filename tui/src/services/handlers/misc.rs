@@ -116,7 +116,6 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-
     if state.show_collapsed_messages {
         handle_collapsed_messages_tab(state, message_area_height, message_area_width);
     } else {

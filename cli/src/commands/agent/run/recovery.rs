@@ -41,12 +41,9 @@ pub async fn handle_revert_to_checkpoint(
     checkpoint_id: &String,
     messages: &mut Vec<ChatMessage>,
 ) -> Result<(), String> {
-    let checkpoint_messages =
-        get_checkpoint_messages(client, checkpoint_id).await?;
-    let (chat_messages, _) = prepare_checkpoint_messages_and_tool_calls(
-        checkpoint_id,
-        checkpoint_messages,
-    );
+    let checkpoint_messages = get_checkpoint_messages(client, checkpoint_id).await?;
+    let (chat_messages, _) =
+        prepare_checkpoint_messages_and_tool_calls(checkpoint_id, checkpoint_messages);
     *messages = chat_messages;
     Ok(())
 }

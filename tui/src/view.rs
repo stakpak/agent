@@ -243,8 +243,12 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
                     .collect();
 
                 // Get wrapped lines for messages before the checkpoint message
-                let lines_before =
-                    crate::services::message::get_wrapped_message_lines(&messages_before, width, None, false);
+                let lines_before = crate::services::message::get_wrapped_message_lines(
+                    &messages_before,
+                    width,
+                    None,
+                    false,
+                );
 
                 // Process these lines to match the same processing as processed_lines
                 // This matches the logic in get_processed_message_lines
@@ -550,13 +554,14 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             let right_side_width = if tokens_text.is_some() && percentage_text.is_some() {
                 right_len
             } else if total_tokens > 0 {
-                let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
+                let formatted =
+                    crate::services::helper_block::format_number_with_separator(total_tokens);
                 format!("{} tokens", formatted).len()
             } else {
                 // Hint text width
                 "prompt to see ctx stats".len()
             };
-            
+
             // Show recovery message in center, accounting for both left and right side
             // Layout: [left content] [spacing] [message] [spacing] [right content]
             // To center: spacing before message = spacing after message
@@ -567,7 +572,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             } else {
                 1
             };
-            
+
             // Ensure minimum spacing if there's left content
             if !final_spans.is_empty() && space_before_mid == 0 {
                 space_before_mid = 1;
@@ -628,7 +633,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             }
 
             // Render right side content
-            if let (Some(tokens_text_val), Some(percentage_text_val)) = (&tokens_text, &percentage_text) {
+            if let (Some(tokens_text_val), Some(percentage_text_val)) =
+                (&tokens_text, &percentage_text)
+            {
                 let token_style = if high_utilization {
                     Style::default().fg(Color::Black).bg(Color::Yellow)
                 } else {

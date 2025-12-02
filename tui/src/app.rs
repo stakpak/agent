@@ -6,13 +6,13 @@ use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
-use crate::services::recovery_popup::RecoveryPopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 use crate::services::helper_block::push_error_message;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::Message;
+use crate::services::recovery_popup::RecoveryPopupService;
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
@@ -164,6 +164,8 @@ pub struct AppState {
     pub recovery_popup: RecoveryPopupService,
     /// Checkpoint ID associated with the current recovery options (if any)
     pub recovery_checkpoint_id: Option<Uuid>,
+    /// Revert checkpoint ID (where we're rolling back to) - highlighted but not faulty
+    pub recovery_revert_checkpoint_id: Option<Uuid>,
     /// Internal flag used to trigger a one-time scroll to the recovery checkpoint
     pub recovery_scroll_pending: bool,
     /// Flag indicating if there's a faulty checkpoint that should be highlighted
@@ -377,6 +379,7 @@ impl AppState {
             recovery_response: None,
             recovery_popup: RecoveryPopupService::new(),
             recovery_checkpoint_id: None,
+            recovery_revert_checkpoint_id: None,
             recovery_scroll_pending: false,
             has_faulty_checkpoint: false,
             highlight_after_checkpoint: false,

@@ -791,25 +791,57 @@ pub async fn run_interactive(
                         });
                     }
                     OutputEvent::RecoveryRevert(checkpoint_id) => {
+                        eprintln!("[RECOVERY CLI] Received RecoveryRevert: {}", checkpoint_id);
                         if let Err(e) = recovery::handle_revert_to_checkpoint(
                             client.as_ref(),
                             &checkpoint_id,
                             &mut messages,
-                        ).await {
+                        )
+                        .await
+                        {
                             log::error!("Failed to revert to checkpoint: {}", e);
-                            send_input_event(&input_tx, InputEvent::Error(format!("Recovery failed: {}", e))).await?;
+                            send_input_event(
+                                &input_tx,
+                                InputEvent::Error(format!("Recovery failed: {}", e)),
+                            )
+                            .await?;
+                        } else {
+                            eprintln!(
+                                "[RECOVERY CLI] Successfully reverted to checkpoint {}",
+                                checkpoint_id
+                            );
                         }
                         continue;
                     }
                     OutputEvent::RecoveryTruncate(index) => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryTruncate at index: {}",
+                            index
+                        );
                         recovery::handle_truncate(&mut messages, index);
+                        eprintln!(
+                            "[RECOVERY CLI] Messages truncated, new count: {}",
+                            messages.len()
+                        );
                         continue;
                     }
                     OutputEvent::RecoveryRemoveTools(tool_ids) => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryRemoveTools: {} tool calls",
+                            tool_ids.len()
+                        );
                         recovery::handle_remove_tools(&mut messages, &tool_ids);
+                        eprintln!(
+                            "[RECOVERY CLI] Tool calls removed, new message count: {}",
+                            messages.len()
+                        );
                         continue;
                     }
                     OutputEvent::RecoveryAppend(role_str, content) => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryAppend with role: {}",
+                            role_str
+                        );
                         let role = match role_str.as_str() {
                             "user" => Role::User,
                             "assistant" => Role::Assistant,
@@ -817,37 +849,61 @@ pub async fn run_interactive(
                             "tool" => Role::Tool,
                             _ => Role::User,
                         };
-                        
+
                         recovery::handle_append(&mut messages, role.clone(), content);
-                        
+                        eprintln!(
+                            "[RECOVERY CLI] Message appended, new message count: {}",
+                            messages.len()
+                        );
+
                         if role == Role::User {
-                             send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
-                             // Fall through to agent execution
+                            send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
+                            eprintln!(
+                                "[RECOVERY CLI] User message appended, triggering agent execution"
+                            );
+                            // Fall through to agent execution
                         } else {
                             continue;
                         }
                     }
                     OutputEvent::RecoveryChangeModel(model_str, provider_str) => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryChangeModel: {} ({})",
+                            model_str, provider_str
+                        );
                         let config = recovery::ModelConfig {
-                            model: model_str,
+                            model: model_str.clone(),
                             provider: provider_str,
                         };
-                       
+
                         match recovery::handle_change_model(&mut model, &config) {
                             recovery::RecoveryResult::ModelSwitched(rounds) => {
                                 recovery_rounds_remaining = Some(rounds as u32);
-                                send_input_event(&input_tx, InputEvent::RecoveryModeStatus(recovery_rounds_remaining)).await?;
+                                eprintln!(
+                                    "[RECOVERY CLI] Model switched to {} for {} rounds",
+                                    model_str, rounds
+                                );
+                                send_input_event(
+                                    &input_tx,
+                                    InputEvent::RecoveryModeStatus(recovery_rounds_remaining),
+                                )
+                                .await?;
                             }
                         }
                         continue;
                     }
                     OutputEvent::RecoveryComplete => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryComplete, sending {} messages to TUI",
+                            messages.len()
+                        );
                         // All recovery operations are complete, send updated messages to TUI
                         send_input_event(
                             &input_tx,
                             InputEvent::ReplaceMessagesFromCheckpoint(messages.clone()),
                         )
                         .await?;
+                        eprintln!("[RECOVERY CLI] Messages sent to TUI successfully");
                         continue;
                     }
                     OutputEvent::RequestProfileSwitch(new_profile) => {

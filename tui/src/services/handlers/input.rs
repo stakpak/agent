@@ -100,39 +100,70 @@ pub fn handle_input_submitted_event(
             });
 
             // Parse and execute state edits sequentially
-            if let Ok(actions) = serde_json::from_value::<Vec<crate::services::recovery_popup::RecoveryAction>>(
-                selected.state_edits.clone(),
-            ) {
-                for action in actions {
+            if let Ok(actions) = serde_json::from_value::<
+                Vec<crate::services::recovery_popup::RecoveryAction>,
+            >(selected.state_edits.clone())
+            {
+                eprintln!(
+                    "[RECOVERY TUI] Processing {} recovery actions",
+                    actions.len()
+                );
+                for (idx, action) in actions.iter().enumerate() {
+                    eprintln!(
+                        "[RECOVERY TUI] Action {}/{}: {:?}",
+                        idx + 1,
+                        actions.len(),
+                        action.recovery_operation
+                    );
                     match action.recovery_operation {
                         crate::services::recovery_popup::RecoveryOperation::RevertToCheckpoint => {
-                            if let Some(ckpt_id) = action.revert_to_checkpoint {
-                                let _ = output_tx.try_send(OutputEvent::RecoveryRevert(ckpt_id));
+                            if let Some(ref ckpt_id) = action.revert_to_checkpoint {
+                                eprintln!("[RECOVERY TUI] Sending RevertToCheckpoint: {}", ckpt_id);
+                                let _ = output_tx
+                                    .try_send(OutputEvent::RecoveryRevert(ckpt_id.clone()));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::Truncate => {
-                            let _ = output_tx.try_send(OutputEvent::RecoveryTruncate(action.message_index));
+                            eprintln!(
+                                "[RECOVERY TUI] Sending Truncate at index: {}",
+                                action.message_index
+                            );
+                            let _ = output_tx
+                                .try_send(OutputEvent::RecoveryTruncate(action.message_index));
                         }
                         crate::services::recovery_popup::RecoveryOperation::RemoveTools => {
-                            if let Some(ids) = action.failed_tool_call_ids_to_remove {
-                                let _ = output_tx.try_send(OutputEvent::RecoveryRemoveTools(ids));
+                            if let Some(ref ids) = action.failed_tool_call_ids_to_remove {
+                                eprintln!(
+                                    "[RECOVERY TUI] Sending RemoveTools: {} tool calls",
+                                    ids.len()
+                                );
+                                let _ = output_tx
+                                    .try_send(OutputEvent::RecoveryRemoveTools(ids.clone()));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::Append => {
-                            if let Some(content) = action.content {
-                                // Convert content to shared model type if needed, or use as is
-                                // The event expects stakpak_shared::models::integrations::openai::MessageContent
+                            if let Some(ref content) = action.content {
+                                let role_str = action
+                                    .role
+                                    .as_ref()
+                                    .map(|r| r.to_string())
+                                    .unwrap_or_default();
+                                eprintln!("[RECOVERY TUI] Sending Append with role: {}", role_str);
                                 let _ = output_tx.try_send(OutputEvent::RecoveryAppend(
-                                    action.role.map(|r| r.to_string()).unwrap_or_default(), 
-                                    content
+                                    role_str,
+                                    content.clone(),
                                 ));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::ChangeModel => {
-                            if let Some(config) = action.model_config {
+                            if let Some(ref config) = action.model_config {
+                                eprintln!(
+                                    "[RECOVERY TUI] Sending ChangeModel: {} ({})",
+                                    config.model, config.provider
+                                );
                                 let _ = output_tx.try_send(OutputEvent::RecoveryChangeModel(
-                                    config.model,
-                                    config.provider
+                                    config.model.clone(),
+                                    config.provider.clone(),
                                 ));
                             }
                         }
@@ -147,6 +178,7 @@ pub fn handle_input_submitted_event(
         state.show_recovery_options_popup = false;
         state.recovery_popup.escape();
         state.recovery_checkpoint_id = None;
+        state.recovery_revert_checkpoint_id = None;
         state.has_faulty_checkpoint = false;
         // Note: Don't reset model_change_messages_remaining here - let it count down naturally
         // Invalidate cache to redraw checkpoints without yellow colorization

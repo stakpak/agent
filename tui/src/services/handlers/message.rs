@@ -166,8 +166,6 @@ pub fn handle_replace_messages_from_checkpoint(
             .send(InputEvent::SetRenderedCheckpointMessages(rendered_messages))
             .await;
     });
-    
-
 }
 
 /// Handle set rendered checkpoint messages event
@@ -177,13 +175,10 @@ pub fn handle_set_rendered_checkpoint_messages(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-
     // Replace messages with rendered checkpoint messages
     state.messages = rendered_messages;
     invalidate_message_lines_cache(state);
 
     use crate::services::handlers::navigation;
     navigation::adjust_scroll(state, message_area_height, message_area_width);
-    
-   
 }

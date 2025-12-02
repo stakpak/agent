@@ -370,8 +370,7 @@ impl RecoveryPopupService {
         // Parse state_edits and generate detailed steps
         if let Ok(actions) =
             serde_json::from_value::<Vec<RecoveryAction>>(option.state_edits.clone())
-        {
-            if !actions.is_empty() {
+            && !actions.is_empty() {
                 full_content.push_str("## Steps\n");
                 for action in actions {
                     let (operation_name, default_explanation) = match action.recovery_operation {
@@ -408,15 +407,17 @@ impl RecoveryPopupService {
                     let explanation = action.explanation.as_ref().unwrap_or(&default_explanation);
                     full_content.push_str(&format!("- **{}**: {}\n", operation_name, explanation));
                 }
-                
+
                 // Add final step showing checkpoint rollback if available
                 if let Some(ref checkpoint_id) = option.revert_to_checkpoint {
-                    full_content.push_str(&format!("- Rolling back to checkpoint `{}`\n", checkpoint_id));
+                    full_content.push_str(&format!(
+                        "- Rolling back to checkpoint `{}`\n",
+                        checkpoint_id
+                    ));
                 }
-                
+
                 full_content.push_str("\n# NOTE: These operations are Irreversible!");
             }
-        }
 
         let rendered_markdown = render_markdown_to_lines_safe(&full_content).unwrap_or_default();
 
@@ -492,11 +493,10 @@ impl RecoveryPopupService {
     }
 
     fn restore_scroll_position(&mut self) {
-        if self.selected_index < self.tab_scroll_positions.len() {
-            if let Some(saved_scroll) = self.tab_scroll_positions[self.selected_index] {
+        if self.selected_index < self.tab_scroll_positions.len()
+            && let Some(saved_scroll) = self.tab_scroll_positions[self.selected_index] {
                 self.popup.state_mut().scroll = saved_scroll;
             }
-        }
     }
 
     fn render_subheader(&self, option: &RecoveryOption) -> Vec<(Line<'static>, Style)> {

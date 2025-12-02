@@ -1351,7 +1351,7 @@ pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &
             id: Uuid::new_v4(),
             content: MessageContent::StyledBlock(lines),
             is_collapsed: None,
-            left_border_color: None
+            left_border_color: None,
         });
     }
 }
