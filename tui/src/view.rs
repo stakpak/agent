@@ -536,7 +536,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             Some(format!("Recovery Mode: {} rounds left", rounds))
         }
     } else if !state.recovery_options.is_empty() {
-        Some("Detected agent tool call loop . ctrl+x for more".to_string())
+        Some("Detected tool call loop . ctrl+x for more".to_string())
     } else {
         None
     };

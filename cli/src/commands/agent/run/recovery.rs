@@ -93,25 +93,6 @@ pub async fn handle_revert_to_checkpoint(
 
     *messages = chat_messages;
 
-    eprintln!(
-        "[RECOVERY] After revert_to_checkpoint, messages count: {}",
-        messages.len()
-    );
-    for (i, msg) in messages.iter().enumerate() {
-        eprintln!(
-            "  [{}] role={:?}, content={}",
-            i,
-            msg.role,
-            msg.content
-                .as_ref()
-                .map(|c| c.to_string())
-                .unwrap_or_default()
-                .chars()
-                .take(100)
-                .collect::<String>()
-        );
-    }
-
     Ok(())
 }
 
@@ -135,50 +116,10 @@ pub fn handle_truncate(messages: &mut Vec<ChatMessage>, index: usize) {
             }
         }
     }
-
-    eprintln!(
-        "[RECOVERY] After truncate to index {}, messages count: {}",
-        index,
-        messages.len()
-    );
-    for (i, msg) in messages.iter().enumerate() {
-        eprintln!(
-            "  [{}] role={:?}, content={}",
-            i,
-            msg.role,
-            msg.content
-                .as_ref()
-                .map(|c| c.to_string())
-                .unwrap_or_default()
-                .chars()
-                .take(100)
-                .collect::<String>()
-        );
-    }
 }
 
 pub fn handle_remove_tools(messages: &mut Vec<ChatMessage>, tool_ids: &[String]) {
     clean_state_from_tool_failures(messages, tool_ids);
-
-    eprintln!(
-        "[RECOVERY] After remove_tools (removed {} tool IDs), messages count: {}",
-        tool_ids.len(),
-        messages.len()
-    );
-    for (i, msg) in messages.iter().enumerate() {
-        eprintln!(
-            "  [{}] role={:?}, content={}",
-            i,
-            msg.role,
-            msg.content
-                .as_ref()
-                .map(|c| c.to_string())
-                .unwrap_or_default()
-                .chars()
-                .take(100)
-                .collect::<String>()
-        );
-    }
 }
 
 pub fn handle_append(
@@ -209,26 +150,6 @@ pub fn handle_append(
         tool_call_id: None,
         usage: None,
     });
-
-    eprintln!(
-        "[RECOVERY] After append (role={:?}), messages count: {}",
-        role,
-        messages.len()
-    );
-    for (i, msg) in messages.iter().enumerate() {
-        eprintln!(
-            "  [{}] role={:?}, content={}",
-            i,
-            msg.role,
-            msg.content
-                .as_ref()
-                .map(|c| c.to_string())
-                .unwrap_or_default()
-                .chars()
-                .take(100)
-                .collect::<String>()
-        );
-    }
 }
 
 fn clean_state_from_tool_failures(messages: &mut Vec<ChatMessage>, tool_ids: &[String]) {

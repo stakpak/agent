@@ -227,7 +227,6 @@ pub async fn run_interactive(
             let mut poll_shutdown_rx = shutdown_tx_for_client.subscribe();
 
             tokio::spawn(async move {
-                eprintln!("[RECOVERY POLL] Task started");
                 let mut interval =
                     tokio::time::interval(tokio::time::Duration::from_secs(RECOVERY_POLL_SECONDS));
                 loop {
@@ -237,40 +236,37 @@ pub async fn run_interactive(
                                 continue;
                             }
                             let session_id = *poll_session_id.read().await;
-                            eprintln!("[RECOVERY POLL] Tick - session_id: {:?}", session_id);
+
                             if let Some(sid) = session_id {
-                                eprintln!("[RECOVERY POLL] Polling for session: {}", sid);
+
                                 match poll_client.get_recovery_options(sid, Some("pending")).await {
                                     Ok(response) => {
-                                        eprintln!("[RECOVERY POLL] Got response with {} options", response.recovery_options.len());
+
                                         // Update local store
                                         {
                                             let mut store = poll_options_store.write().await;
                                             *store = response.recovery_options.clone();
                                         }
                                         // Send to TUI
-                                        let result = send_input_event(
+                                        let _ = send_input_event(
                                             &poll_input_tx,
                                             InputEvent::RecoveryOptions(response),
-                                        ).await;
-                                        eprintln!("[RECOVERY POLL] Send to TUI result: {:?}", result);
+                                        )
+                                        .await;
                                     }
                                     Err(e) => {
-                                        eprintln!("[RECOVERY POLL] Error polling: {}", e);
+
                                         log::debug!("Failed to poll recovery options: {}", e);
                                     }
                                 }
-                            } else {
-                                eprintln!("[RECOVERY POLL] No session_id, skipping poll");
                             }
                         }
                         _ = poll_shutdown_rx.recv() => {
-                            eprintln!("[RECOVERY POLL] Shutdown signal received");
+
                             break;
                         }
                     }
                 }
-                eprintln!("[RECOVERY POLL] Task ended");
             });
 
             let data = client.get_my_account().await?;
@@ -857,16 +853,11 @@ pub async fn run_interactive(
                         });
                     }
                     OutputEvent::RecoveryModeStatus(new_rounds) => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryModeStatus: {:?}",
-                            new_rounds
-                        );
                         recovery_rounds_remaining = new_rounds;
                         send_input_event(&input_tx, InputEvent::RecoveryModeStatus(new_rounds))
                             .await?;
                     }
                     OutputEvent::RecoveryRevert(checkpoint_id) => {
-                        eprintln!("[RECOVERY CLI] Received RecoveryRevert: {}", checkpoint_id);
                         if let Err(e) = recovery::handle_revert_to_checkpoint(
                             client.as_ref(),
                             &checkpoint_id,
@@ -880,43 +871,20 @@ pub async fn run_interactive(
                                 InputEvent::Error(format!("Recovery failed: {}", e)),
                             )
                             .await?;
-                        } else {
-                            eprintln!(
-                                "[RECOVERY CLI] Successfully reverted to checkpoint {}",
-                                checkpoint_id
-                            );
                         }
                         continue;
                     }
                     OutputEvent::RecoveryTruncate(index) => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryTruncate at index: {}",
-                            index
-                        );
                         recovery::handle_truncate(&mut messages, index);
-                        eprintln!(
-                            "[RECOVERY CLI] Messages truncated, new count: {}",
-                            messages.len()
-                        );
+
                         continue;
                     }
                     OutputEvent::RecoveryRemoveTools(tool_ids) => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryRemoveTools: {} tool calls",
-                            tool_ids.len()
-                        );
                         recovery::handle_remove_tools(&mut messages, &tool_ids);
-                        eprintln!(
-                            "[RECOVERY CLI] Tool calls removed, new message count: {}",
-                            messages.len()
-                        );
+
                         continue;
                     }
                     OutputEvent::RecoveryAppend(role_str, content, checkpoint_id) => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryAppend with role: {}",
-                            role_str
-                        );
                         let role = match role_str.as_str() {
                             "user" => Role::User,
                             "assistant" => Role::Assistant,
@@ -932,37 +900,25 @@ pub async fn run_interactive(
                             checkpoint_id,
                         );
 
-                        eprintln!(
-                            "[RECOVERY CLI] Message appended, new message count: {}",
-                            messages.len()
-                        );
-
                         if role == Role::User {
                             send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
-                            eprintln!(
-                                "[RECOVERY CLI] User message appended, triggering agent execution"
-                            );
+
                             // Fall through to agent execution
                         } else {
                             continue;
                         }
                     }
                     OutputEvent::RecoveryComplete => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryComplete, sending {} messages to TUI",
-                            messages.len()
-                        );
                         // All recovery operations are complete, send updated messages to TUI
                         send_input_event(
                             &input_tx,
                             InputEvent::ReplaceMessagesFromCheckpoint(messages.clone()),
                         )
                         .await?;
-                        eprintln!("[RECOVERY CLI] Messages sent to TUI successfully");
+
                         continue;
                     }
                     OutputEvent::ToggleRecoveryPolling(enabled) => {
-                        eprintln!("[RECOVERY CLI] Toggling recovery polling: {}", enabled);
                         let _ = polling_enabled_tx.send(enabled);
                         continue;
                     }
@@ -1326,7 +1282,6 @@ pub async fn run_interactive(
                             if new_rounds == 0 {
                                 recovery_rounds_remaining = None;
                                 model = AgentModel::Smart;
-                                eprintln!("DEBUG: Reverted to Smart model: {:?}", model);
                                 // Notify TUI we are reverting (None indicates done)
                                 send_input_event(&input_tx, InputEvent::RecoveryModeStatus(None))
                                     .await?;

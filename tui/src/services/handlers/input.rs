@@ -105,39 +105,20 @@ pub fn handle_input_submitted_event(
                 Vec<crate::services::recovery_popup::RecoveryAction>,
             >(selected.state_edits.clone())
             {
-                eprintln!(
-                    "[RECOVERY TUI] Processing {} recovery actions",
-                    actions.len()
-                );
-                for (idx, action) in actions.iter().enumerate() {
-                    eprintln!(
-                        "[RECOVERY TUI] Action {}/{}: {:?}",
-                        idx + 1,
-                        actions.len(),
-                        action.recovery_operation
-                    );
+                for action in actions.iter() {
                     match action.recovery_operation {
                         crate::services::recovery_popup::RecoveryOperation::RevertToCheckpoint => {
                             if let Some(ref ckpt_id) = action.revert_to_checkpoint {
-                                eprintln!("[RECOVERY TUI] Sending RevertToCheckpoint: {}", ckpt_id);
                                 let _ = output_tx
                                     .try_send(OutputEvent::RecoveryRevert(ckpt_id.clone()));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::Truncate => {
-                            eprintln!(
-                                "[RECOVERY TUI] Sending Truncate at index: {}",
-                                action.message_index
-                            );
                             let _ = output_tx
                                 .try_send(OutputEvent::RecoveryTruncate(action.message_index));
                         }
                         crate::services::recovery_popup::RecoveryOperation::RemoveTools => {
                             if let Some(ref ids) = action.failed_tool_call_ids_to_remove {
-                                eprintln!(
-                                    "[RECOVERY TUI] Sending RemoveTools: {} tool calls",
-                                    ids.len()
-                                );
                                 let _ = output_tx
                                     .try_send(OutputEvent::RecoveryRemoveTools(ids.clone()));
                             }
@@ -149,7 +130,7 @@ pub fn handle_input_submitted_event(
                                     .as_ref()
                                     .map(|r| r.to_string())
                                     .unwrap_or_default();
-                                eprintln!("[RECOVERY TUI] Sending Append with role: {}", role_str);
+
                                 let _ = output_tx.try_send(OutputEvent::RecoveryAppend(
                                     role_str,
                                     content.clone(),
@@ -158,17 +139,9 @@ pub fn handle_input_submitted_event(
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::ChangeModel => {
-                            if let Some(ref config) = action.model_config {
-                                eprintln!(
-                                    "[RECOVERY TUI] Sending ChangeModel: {} ({})",
-                                    config.model, config.provider
-                                );
-
-                                let _ = output_tx
-                                    .try_send(OutputEvent::SwitchModel(AgentModel::Recovery));
-                                let _ =
-                                    output_tx.try_send(OutputEvent::RecoveryModeStatus(Some(5)));
-                            }
+                            let _ =
+                                output_tx.try_send(OutputEvent::SwitchModel(AgentModel::Recovery));
+                            let _ = output_tx.try_send(OutputEvent::RecoveryModeStatus(Some(5)));
                         }
                     }
                 }
