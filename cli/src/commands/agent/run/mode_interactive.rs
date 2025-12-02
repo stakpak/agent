@@ -19,7 +19,7 @@ use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use crate::utils::network;
 use reqwest::header::HeaderMap;
-use stakpak_api::models::ApiStreamError;
+use stakpak_api::models::{ApiStreamError, RecoveryOptionsResponse};
 use stakpak_api::{
     AgentProvider,
     local::{LocalClient, LocalClientConfig},
@@ -540,6 +540,23 @@ pub async fn run_interactive(
                         continue;
                     }
                     OutputEvent::NewSession => {
+                        // Stop recovery polling and clear options
+                        let _ = polling_enabled_tx.send(false);
+                        {
+                            let mut store = recovery_options_store.write().await;
+                            store.clear();
+                        }
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::RecoveryOptions(RecoveryOptionsResponse {
+                                id: None,
+                                recovery_options: vec![],
+                                source_checkpoint: None,
+                                session: None,
+                            }),
+                        )
+                        .await?;
+
                         // Clear the current session and start fresh
                         current_session_id = None;
                         *shared_session_id.write().await = None;
@@ -557,10 +574,30 @@ pub async fn run_interactive(
                             send_input_event(&input_tx, InputEvent::RecoveryModeStatus(None))
                                 .await?;
                         }
+
+                        // Resume recovery polling
+                        let _ = polling_enabled_tx.send(true);
                         continue;
                     }
 
                     OutputEvent::ResumeSession => {
+                        // Stop recovery polling and clear options
+                        let _ = polling_enabled_tx.send(false);
+                        {
+                            let mut store = recovery_options_store.write().await;
+                            store.clear();
+                        }
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::RecoveryOptions(RecoveryOptionsResponse {
+                                id: None,
+                                recovery_options: vec![],
+                                source_checkpoint: None,
+                                session: None,
+                            }),
+                        )
+                        .await?;
+
                         let session_id = if let Some(session_id) = &current_session_id {
                             Some(session_id.to_string())
                         } else {
@@ -643,6 +680,8 @@ pub async fn run_interactive(
                                         ),
                                     )
                                     .await?;
+                                    // Resume recovery polling
+                                    let _ = polling_enabled_tx.send(true);
                                     continue;
                                 }
                             }
@@ -653,9 +692,28 @@ pub async fn run_interactive(
                             )
                             .await?;
                         }
+                        // Resume recovery polling
+                        let _ = polling_enabled_tx.send(true);
                         continue;
                     }
                     OutputEvent::SwitchToSession(session_id) => {
+                        // Stop recovery polling and clear options
+                        let _ = polling_enabled_tx.send(false);
+                        {
+                            let mut store = recovery_options_store.write().await;
+                            store.clear();
+                        }
+                        send_input_event(
+                            &input_tx,
+                            InputEvent::RecoveryOptions(RecoveryOptionsResponse {
+                                id: None,
+                                recovery_options: vec![],
+                                source_checkpoint: None,
+                                session: None,
+                            }),
+                        )
+                        .await?;
+
                         send_input_event(
                             &input_tx,
                             InputEvent::StartLoadingOperation(LoadingOperation::CheckpointResume),
@@ -723,9 +781,13 @@ pub async fn run_interactive(
                                     ),
                                 )
                                 .await?;
+                                // Resume recovery polling
+                                let _ = polling_enabled_tx.send(true);
                                 continue;
                             }
                         }
+                        // Resume recovery polling
+                        let _ = polling_enabled_tx.send(true);
                         continue;
                     }
                     OutputEvent::SendToolResult(
