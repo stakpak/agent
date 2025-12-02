@@ -148,7 +148,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_hint_or_shortcuts(f, state, padded_hint_area);
     }
 
-    // Render approval popup LAST to ensure it appears on top of everything
+    // Render approval popup
     if state.approval_popup.is_visible() {
         state.approval_popup.render(f, f.area());
     }
@@ -180,8 +180,13 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         crate::services::context_popup::render_context_popup(f, state);
     }
 
-    if state.show_recovery_options_popup {
-        crate::services::recovery_popup::render_recovery_popup(f, state);
+    // Render recovery popup LAST to ensure it appears on top of everything
+    if state.show_recovery_options_popup && !state.recovery_options.is_empty() {
+        // Ensure popup is shown before rendering
+        if !state.recovery_popup.is_visible() {
+            state.recovery_popup.show();
+        }
+        state.recovery_popup.render(f, f.area());
     }
 }
 
@@ -239,7 +244,7 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
 
                 // Get wrapped lines for messages before the checkpoint message
                 let lines_before =
-                    crate::services::message::get_wrapped_message_lines(&messages_before, width);
+                    crate::services::message::get_wrapped_message_lines(&messages_before, width, None, false);
 
                 // Process these lines to match the same processing as processed_lines
                 // This matches the logic in get_processed_message_lines
@@ -540,13 +545,30 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     if !state.show_sessions_dialog {
         if let Some(message) = middle_message {
-            // Show recovery message in center, tokens on right
-            let available_without_right = total_adjusted_width.saturating_sub(right_len);
-            let desired_center = available_without_right / 2;
-            let current_center = left_len + middle_len / 2;
-            let mut space_before_mid = desired_center.saturating_sub(current_center);
-            // Shift 10 characters to the right
-            space_before_mid = space_before_mid.saturating_add(20);
+            // Calculate right side width (tokens, percentage, or hint text)
+            // Check without moving the values
+            let right_side_width = if tokens_text.is_some() && percentage_text.is_some() {
+                right_len
+            } else if total_tokens > 0 {
+                let formatted = crate::services::helper_block::format_number_with_separator(total_tokens);
+                format!("{} tokens", formatted).len()
+            } else {
+                // Hint text width
+                "prompt to see ctx stats".len()
+            };
+            
+            // Show recovery message in center, accounting for both left and right side
+            // Layout: [left content] [spacing] [message] [spacing] [right content]
+            // To center: spacing before message = spacing after message
+            // So: spacing = (total_width - left_len - middle_len - right_side_width) / 2
+            let total_used = left_len + middle_len + right_side_width;
+            let mut space_before_mid = if total_used < total_adjusted_width {
+                (total_adjusted_width - total_used) / 2
+            } else {
+                1
+            };
+            
+            // Ensure minimum spacing if there's left content
             if !final_spans.is_empty() && space_before_mid == 0 {
                 space_before_mid = 1;
             }
@@ -591,50 +613,49 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
             final_spans.extend(shimmer_spans);
 
-            if let (Some(tokens_text), Some(percentage_text)) = (tokens_text, percentage_text) {
-                let mut space_before_right = total_adjusted_width
-                    .saturating_sub(left_len + space_before_mid + middle_len + right_len);
-                if space_before_right == 0 {
-                    space_before_right = 1;
-                }
+            // Calculate spacing before right side content
+            let mut space_before_right = total_adjusted_width
+                .saturating_sub(left_len + space_before_mid + middle_len + right_side_width);
+            if space_before_right == 0 {
+                space_before_right = 1;
+            }
 
-                if space_before_right > 0 {
-                    final_spans.push(Span::styled(
-                        " ".repeat(space_before_right),
-                        Style::default(),
-                    ));
-                }
+            if space_before_right > 0 {
+                final_spans.push(Span::styled(
+                    " ".repeat(space_before_right),
+                    Style::default(),
+                ));
+            }
 
+            // Render right side content
+            if let (Some(tokens_text_val), Some(percentage_text_val)) = (&tokens_text, &percentage_text) {
                 let token_style = if high_utilization {
                     Style::default().fg(Color::Black).bg(Color::Yellow)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
 
-                final_spans.push(Span::styled(tokens_text, token_style));
+                final_spans.push(Span::styled(tokens_text_val.clone(), token_style));
                 final_spans.push(Span::styled(" · ", token_style));
-                final_spans.push(Span::styled(percentage_text, token_style));
+                final_spans.push(Span::styled(percentage_text_val.clone(), token_style));
             } else if total_tokens > 0 {
                 // Show tokens even if used_context.total_tokens is 0
                 let formatted =
                     crate::services::helper_block::format_number_with_separator(total_tokens);
                 let tokens_text = format!("{} tokens", formatted);
-                let mut space_before_right = total_adjusted_width
-                    .saturating_sub(left_len + space_before_mid + middle_len + tokens_text.len());
-                if space_before_right == 0 {
-                    space_before_right = 1;
-                }
-
-                if space_before_right > 0 {
-                    final_spans.push(Span::styled(
-                        " ".repeat(space_before_right),
-                        Style::default(),
-                    ));
-                }
 
                 final_spans.push(Span::styled(
                     tokens_text,
                     Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                // No tokens, show hint in the same right-aligned slot even when recovery message is shown
+                let hint_text = "prompt to see ctx stats";
+                final_spans.push(Span::styled(
+                    hint_text,
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 ));
             }
         } else if let (Some(tokens_text), Some(percentage_text)) = (tokens_text, percentage_text) {

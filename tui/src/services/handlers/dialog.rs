@@ -24,6 +24,7 @@ pub fn handle_esc_event(
 ) {
     if state.show_recovery_options_popup {
         state.show_recovery_options_popup = false;
+        state.recovery_popup.escape();
         return;
     }
     if state.show_context_popup {
@@ -118,6 +119,7 @@ pub fn handle_esc(
                 id: Uuid::new_v4(),
                 content: MessageContent::StyledBlock(rendered_lines),
                 is_collapsed: None,
+                left_border_color: None,
             });
         }
         state.is_dialog_open = false;
@@ -173,6 +175,7 @@ pub fn handle_show_confirmation_dialog(
             id: Uuid::new_v4(),
             content: MessageContent::StyledBlock(rendered_lines),
             is_collapsed: None,
+            left_border_color: None,
         });
         state.is_dialog_open = false;
         state.dialog_command = None;

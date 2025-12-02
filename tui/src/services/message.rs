@@ -112,6 +112,7 @@ pub struct Message {
     pub id: Uuid,
     pub content: MessageContent,
     pub is_collapsed: Option<bool>,
+    pub left_border_color: Option<Color>,
 }
 
 impl Message {
@@ -122,7 +123,9 @@ impl Message {
                 text.into(),
                 style.unwrap_or(Style::default().fg(Color::DarkGray)),
             ),
+
             is_collapsed: None,
+            left_border_color: None,
         }
     }
     pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
@@ -132,7 +135,9 @@ impl Message {
                 format!("→ {}", text.into()),
                 style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
             ),
+
             is_collapsed: None,
+            left_border_color: None,
         }
     }
     pub fn assistant(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
@@ -140,6 +145,7 @@ impl Message {
             id: id.unwrap_or(Uuid::new_v4()),
             content: MessageContent::AssistantMD(text.into(), style.unwrap_or_default()),
             is_collapsed: None,
+            left_border_color: None
         }
     }
     pub fn submitted_with(id: Option<Uuid>, text: impl Into<String>, style: Option<Style>) -> Self {
@@ -147,6 +153,7 @@ impl Message {
             id: id.unwrap_or(Uuid::new_v4()),
             content: MessageContent::Plain(text.into(), style.unwrap_or_default()),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
     pub fn styled(line: Line<'static>) -> Self {
@@ -154,6 +161,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Styled(line),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
     pub fn markdown(text: impl Into<String>) -> Self {
@@ -161,6 +169,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::Markdown(text.into()),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
 
@@ -169,6 +178,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::PlainText(text.into()),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
 
@@ -177,6 +187,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderCollapsedMessage(tool_call),
             is_collapsed: Some(true),
+            left_border_color: None,
         }
     }
 
@@ -189,6 +200,7 @@ impl Message {
             id: message_id.unwrap_or_else(Uuid::new_v4),
             content: MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
 
@@ -210,6 +222,7 @@ impl Message {
                 tool_type.to_string(),
             ),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
 
@@ -218,6 +231,7 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderEscapedTextBlock(content),
             is_collapsed: None,
+            left_border_color: None,
         }
     }
 
@@ -228,8 +242,16 @@ impl Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderResultBorderBlock(tool_call_result),
             is_collapsed: if is_collapsed { Some(true) } else { None },
+            left_border_color: None,
         }
     }
+
+    /// Add a left border to this message with the specified color
+    pub fn with_left_border(mut self, color: Color) -> Self {
+        self.left_border_color = Some(color);
+        self
+    }
+
 }
 
 pub fn get_wrapped_plain_lines<'a>(
@@ -397,8 +419,10 @@ fn convert_line_to_owned(line: Line<'_>) -> Line<'static> {
 pub fn get_wrapped_message_lines(
     messages: &[Message],
     width: usize,
+    faulty_checkpoint_id: Option<&uuid::Uuid>,
+    _highlight_after_checkpoint: bool,
 ) -> Vec<(Line<'static>, Style)> {
-    get_wrapped_message_lines_internal(messages, width, false)
+    get_wrapped_message_lines_internal(messages, width, false, faulty_checkpoint_id)
 }
 
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
@@ -415,14 +439,17 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
                 .all(|(a, b)| a.id == b.id)
             // Also check if faulty checkpoint ID matches (cache needs invalidation if it changed)
             && state.has_faulty_checkpoint == (faulty_checkpoint_id.is_some())
+            // Check highlight mode
+            && state.message_lines_cache_highlight_mode == state.highlight_after_checkpoint
     } else {
         false
     };
 
     if !cache_valid {
         // Calculate and cache the processed lines directly
-        let processed_lines = get_processed_message_lines(&messages, width, faulty_checkpoint_id);
+        let processed_lines = get_processed_message_lines(&messages, width, faulty_checkpoint_id, state.highlight_after_checkpoint);
         state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
+        state.message_lines_cache_highlight_mode = state.highlight_after_checkpoint;
         processed_lines
     } else {
         // Return cached processed lines immediately - no more processing needed!
@@ -430,7 +457,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             cached_lines.clone()
         } else {
             // Fallback if cache is somehow invalid
-            get_processed_message_lines(&messages, width, faulty_checkpoint_id)
+            get_processed_message_lines(&messages, width, faulty_checkpoint_id, state.highlight_after_checkpoint)
         }
     }
 }
@@ -440,10 +467,11 @@ pub fn get_processed_message_lines(
     messages: &[Message],
     width: usize,
     faulty_checkpoint_id: Option<&uuid::Uuid>,
+    highlight_after_checkpoint: bool,
 ) -> Vec<Line<'static>> {
     use crate::services::message_pattern::{process_checkpoint_patterns, spans_to_string};
 
-    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
+    let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width, faulty_checkpoint_id, highlight_after_checkpoint);
 
     // Pre-allocate with estimated capacity to reduce reallocations
     let estimated_capacity = all_lines.len() + (all_lines.len() / 10); // +10% for processing overhead
@@ -518,7 +546,7 @@ pub fn get_wrapped_collapsed_message_lines_cached(
         // Calculate and cache the processed lines directly
 
         let processed_lines: Vec<Line<'static>> =
-            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None)
                 .into_iter()
                 .map(|(line, _style)| line)
                 .collect();
@@ -533,7 +561,7 @@ pub fn get_wrapped_collapsed_message_lines_cached(
         } else {
             // Fallback if cache is somehow invalid
 
-            get_wrapped_message_lines_internal(&collapsed_messages, width, true)
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None)
                 .into_iter()
                 .map(|(line, _style)| line)
                 .collect()
@@ -541,10 +569,22 @@ pub fn get_wrapped_collapsed_message_lines_cached(
     }
 }
 
+
+
+/// Helper function to add a left border to a line
+fn add_left_border_to_line(line: Line<'static>, border_color: Color) -> Line<'static> {
+    let mut new_spans = vec![
+        Span::styled("│ ", Style::default().fg(border_color)),
+    ];
+    new_spans.extend(line.spans);
+    Line::from(new_spans)
+}
+
 fn get_wrapped_message_lines_internal(
     messages: &[Message],
     width: usize,
     include_collapsed: bool,
+    faulty_checkpoint_id: Option<&uuid::Uuid>,
 ) -> Vec<(Line<'static>, Style)> {
     let filtered_messages = if include_collapsed {
         messages.iter().collect::<Vec<_>>()
@@ -555,24 +595,120 @@ fn get_wrapped_message_lines_internal(
             .collect::<Vec<_>>()
     };
     let mut all_lines = Vec::new();
-    let mut agent_mode_removed = false;
-    let mut checkpoint_id_removed = false;
+    
+    // FIRST PASS: Scan for faulty checkpoint index and previous checkpoint index
+    // We need to identify the range (Previous Checkpoint, Faulty Checkpoint]
+    let mut faulty_msg_idx = None;
+    let mut prev_checkpoint_idx = None;
+    let mut next_checkpoint_idx = None;
 
-    for msg in filtered_messages {
+    if let Some(faulty_id) = faulty_checkpoint_id {
+        for (i, msg) in filtered_messages.iter().enumerate() {
+            let text_opt = match &msg.content {
+                MessageContent::AssistantMD(text, _) => Some(text),
+                MessageContent::Plain(text, _) => Some(text),
+                _ => None,
+            };
+
+            if let Some(text) = text_opt {
+                // Find ALL checkpoint IDs in the message
+                for (start, _) in text.match_indices("<checkpoint_id>") {
+                    let after = &text[start + "<checkpoint_id>".len()..];
+                    if let Some(end) = after.find("</checkpoint_id>") {
+                        let checkpoint_str = &after[..end];
+                        if let Ok(checkpoint_uuid) = uuid::Uuid::parse_str(checkpoint_str.trim()) {
+                            if &checkpoint_uuid == faulty_id {
+                                faulty_msg_idx = Some(i);
+                            } else if faulty_msg_idx.is_none() {
+                                prev_checkpoint_idx = Some(i);
+                            } else if next_checkpoint_idx.is_none() {
+                                next_checkpoint_idx = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // State machine for faulty checkpoint yellow border tracking (for AFTER the checkpoint)
+    let mut faulty_checkpoint_found = false;
+    let mut checkpoint_had_tool_calls = false;
+    let mut seen_next_message_after_checkpoint = false;
+
+    for (idx, msg) in filtered_messages.iter().enumerate() {
+        // Reset per-message flags
+        let agent_mode_removed = false;
+        
+        // Check if we are in the range BEFORE the faulty checkpoint (inclusive)
+        let in_pre_faulty_range = if let Some(f_idx) = faulty_msg_idx {
+            idx <= f_idx && prev_checkpoint_idx.map_or(true, |p| idx > p)
+        } else {
+            false
+        };
+        // Determine if this message is a tool call result BEFORE processing
+        let is_tool_call_content = matches!(
+            &msg.content,
+            MessageContent::RenderPendingBorderBlock(_, _)
+                | MessageContent::RenderResultBorderBlock(_)
+                | MessageContent::StyledBlock(_)
+        );
+        
+        // Collect lines for this message
+        let mut message_lines: Vec<(Line<'static>, Style)> = Vec::new();
+        
+        // Determine if this message will get a border (for width calculation)
+        // This needs to match the logic later when we actually apply the border
+        let will_have_border = msg.left_border_color.is_some() 
+            || in_pre_faulty_range 
+            || (faulty_checkpoint_found && (is_tool_call_content || matches!(&msg.content, MessageContent::AssistantMD(_, _))));
+        
+        let effective_width = if will_have_border {
+            width.saturating_sub(2)
+        } else {
+            width
+        };
+
         match &msg.content {
             MessageContent::AssistantMD(text, style) => {
                 let mut cleaned = text.to_string();
 
                 // Strip markdown delimiters first (for session resume)
                 cleaned = strip_markdown_delimiters(&cleaned);
+                
+                // Check if this message contains a checkpoint_id to track faulty ranges
+                // MUST happen BEFORE we remove the tags!
+                if let Some(faulty_id) = faulty_checkpoint_id {
+                    if let Some(start) = cleaned.find("<checkpoint_id>") {
+                        if let Some(end) = cleaned.find("</checkpoint_id>") {
+                            let checkpoint_str = &cleaned[start + "<checkpoint_id>".len()..end];
+                            if let Ok(checkpoint_uuid) = uuid::Uuid::parse_str(checkpoint_str.trim()) {
+                                if &checkpoint_uuid == faulty_id {
+                                    // Found the faulty checkpoint
+                                    faulty_checkpoint_found = true;
+                                    checkpoint_had_tool_calls = false; // Will be set to true if we see tool calls
+                                    seen_next_message_after_checkpoint = false;
+                                } else {
+                                    // Different checkpoint found - reset state
+                                    faulty_checkpoint_found = false;
+                                    checkpoint_had_tool_calls = false;
+                                    seen_next_message_after_checkpoint = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 if !agent_mode_removed
                     && let Some(start) = cleaned.find("<agent_mode>")
                     && let Some(end) = cleaned.find("</agent_mode>")
                 {
                     cleaned.replace_range(start..end + "</agent_mode>".len(), "");
                 }
-                if !checkpoint_id_removed
-                    && let Some(start) = cleaned.find("<checkpoint_id>")
+
+                // Restore hiding of the first checkpoint_id
+                if let Some(start) = cleaned.find("<checkpoint_id>")
                     && let Some(end) = cleaned.find("</checkpoint_id>")
                 {
                     // Remove the checkpoint_id tag and any preceding newline
@@ -590,11 +726,11 @@ fn get_wrapped_message_lines_internal(
                     cleaned = format!("{}{}", cleaned_before, after_checkpoint);
                 }
 
+
                 let borrowed_lines =
                     render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
-                // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
                 for line in borrowed_lines {
-                    all_lines.push((convert_line_to_owned(line), *style));
+                    message_lines.push((convert_line_to_owned(line), *style));
                 }
             }
             MessageContent::Plain(text, style) => {
@@ -723,9 +859,11 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::StyledBlock(lines) => {
-                let borrowed_lines = get_wrapped_styled_block_lines(lines, width);
+                let borrowed_lines = get_wrapped_styled_block_lines(lines, effective_width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
-                all_lines.extend(owned_lines);
+                for (line, style) in owned_lines {
+                    message_lines.push((line, style));
+                }
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
@@ -772,10 +910,12 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::RenderResultBorderBlock(tool_call_result) => {
-                let rendered_lines = render_result_block(tool_call_result, width);
-                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let rendered_lines = render_result_block(tool_call_result, effective_width);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, effective_width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
-                all_lines.extend(owned_lines);
+                for (line, style) in owned_lines {
+                    message_lines.push((line, style));
+                }
             }
             MessageContent::RenderEscapedTextBlock(content) => {
                 let rendered_lines = format_text_content(content, width);
@@ -803,8 +943,58 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
         };
-        agent_mode_removed = false;
-        checkpoint_id_removed = false;
+        
+        // Update state machine based on message type
+        if faulty_checkpoint_found {
+            if is_tool_call_content {
+                // Mark that we've seen tool calls for this checkpoint
+                checkpoint_had_tool_calls = true;
+            } else if !matches!(&msg.content, MessageContent::AssistantMD(_, _)) {
+                // Non-AssistantMD, non-tool-call message - stop tracking
+                faulty_checkpoint_found = false;
+            } else if checkpoint_had_tool_calls {
+                // We've seen tool calls and now we're at a new AssistantMD message - stop
+                faulty_checkpoint_found = false;
+            } else if seen_next_message_after_checkpoint {
+                // We've already seen the next message and now another one - stop
+                faulty_checkpoint_found = false;
+            } else {
+                // This is the first AssistantMD after checkpoint with no tool calls yet
+                seen_next_message_after_checkpoint = true;
+            }
+        }
+        
+        // Apply left border if set or if in faulty checkpoint range
+        // We apply it if:
+        // 1. We are in the range leading up to the faulty checkpoint (in_pre_faulty_range)
+        // 2. We are AFTER the faulty checkpoint and the state machine says so (for subsequent tool calls)
+        let should_apply_yellow_border = in_pre_faulty_range 
+            || (faulty_checkpoint_found && (is_tool_call_content || matches!(&msg.content, MessageContent::AssistantMD(_, _))));
+        
+        let border_color = if should_apply_yellow_border {
+            Some(Color::Yellow)
+        } else {
+            msg.left_border_color
+        };
+        
+        if let Some(border_color) = border_color {
+            for (line, style) in message_lines {
+                // Check if this line contains checkpoint_id tags - don't add border to those
+                let line_text = line.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+                if line_text.contains("<checkpoint_id>") {
+                    all_lines.push((line, style));
+                } else if line_text.contains("SPACING_MARKER") {
+                    let empty_line = Line::from("");
+                    let bordered_line = add_left_border_to_line(empty_line, border_color);
+                    all_lines.push((bordered_line, style));
+                } else {
+                    let bordered_line = add_left_border_to_line(line, border_color);
+                    all_lines.push((bordered_line, style));
+                }
+            }
+        } else {
+            all_lines.extend(message_lines);
+        }
     }
     if !all_lines.is_empty() {
         all_lines.push((Line::from(""), Style::default()));
@@ -1150,6 +1340,7 @@ pub fn convert_chat_messages_to_tui_messages(
                                     false,
                                 ),
                                 is_collapsed: None,
+                                left_border_color: None,
                             });
                         }
                     }

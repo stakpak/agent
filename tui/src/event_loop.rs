@@ -93,6 +93,12 @@ pub async fn run_tui(
     state.current_profile_name = current_profile_name;
     state.rulebook_config = rulebook_config;
 
+    // Initialize terminal size
+    state.terminal_size = ratatui::layout::Size {
+        width: term_size.width,
+        height: term_size.height,
+    };
+
     // Add welcome messages after state is created
     let welcome_msg =
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);

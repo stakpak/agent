@@ -160,6 +160,12 @@ pub fn handle_up_navigation(state: &mut AppState) {
         return; // Event was consumed by popup
     }
 
+    // Check if recovery popup is visible and should consume the event
+    // if state.recovery_popup.is_visible() {
+    //     state.recovery_popup.scroll_up();
+    //     return; // Event was consumed by popup
+    // }
+
     // Handle different UI states
     if state.show_sessions_dialog {
         if state.session_selected > 0 {
@@ -234,6 +240,12 @@ pub fn handle_down_navigation(
         state.approval_popup.scroll_down();
         return; // Event was consumed by popup
     }
+
+    // Check if recovery popup is visible and should consume the event
+    // if state.recovery_popup.is_visible() {
+    //     state.recovery_popup.scroll_down();
+    //     return; // Event was consumed by popup
+    // }
 
     // Handle different UI states
     if state.show_sessions_dialog {

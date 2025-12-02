@@ -6,6 +6,7 @@ use stakpak_shared::models::llm::LLMTokenUsage;
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
+use crate::services::recovery_popup_v2::RecoveryPopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
@@ -60,6 +61,7 @@ pub struct AppState {
     pub stay_at_bottom: bool,
     pub content_changed_while_scrolled_up: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
+    pub message_lines_cache_highlight_mode: bool,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
     pub processed_lines_cache: Option<(Vec<Message>, usize, Vec<Line<'static>>)>,
     pub show_collapsed_messages: bool,
@@ -159,12 +161,14 @@ pub struct AppState {
     pub show_recovery_options_popup: bool,
     pub recovery_popup_selected: usize,
     pub recovery_response: Option<ApiRecoveryOptionsResponse>,
+    pub recovery_popup: RecoveryPopupService,
     /// Checkpoint ID associated with the current recovery options (if any)
     pub recovery_checkpoint_id: Option<Uuid>,
     /// Internal flag used to trigger a one-time scroll to the recovery checkpoint
     pub recovery_scroll_pending: bool,
     /// Flag indicating if there's a faulty checkpoint that should be highlighted
     pub has_faulty_checkpoint: bool,
+    pub highlight_after_checkpoint: bool,
     /// Number of messages remaining before switching back to original model (None if not active)
     pub model_change_messages_remaining: Option<u32>,
 
@@ -306,6 +310,7 @@ impl AppState {
             show_context_popup: false,
             is_git_repo,
             message_lines_cache: None,
+            message_lines_cache_highlight_mode: false,
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
@@ -370,9 +375,11 @@ impl AppState {
             show_recovery_options_popup: false,
             recovery_popup_selected: 0,
             recovery_response: None,
+            recovery_popup: RecoveryPopupService::new(),
             recovery_checkpoint_id: None,
             recovery_scroll_pending: false,
             has_faulty_checkpoint: false,
+            highlight_after_checkpoint: false,
             model_change_messages_remaining: None,
             model,
         }

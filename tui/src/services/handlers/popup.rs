@@ -410,6 +410,12 @@ pub fn handle_toggle_collapsed_messages(
         return;
     }
 
+    // If recovery popup is visible, toggle its maximize state instead
+    if state.recovery_popup.is_visible() {
+        state.recovery_popup.toggle_maximize();
+        return;
+    }
+
     // Otherwise, handle collapsed messages popup as usual
     state.show_collapsed_messages = !state.show_collapsed_messages;
     if state.show_collapsed_messages {
@@ -452,11 +458,35 @@ pub fn handle_toggle_context_popup(state: &mut AppState) {
 /// Handle recovery options event
 pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsResponse) {
     let recovery_options = response.recovery_options.clone();
-    state.recovery_options = recovery_options;
+    
+    // Preserve the current selected index BEFORE updating state, if popup already exists with same options
+    let old_options_count = state.recovery_options.len();
+    let current_selected_index = if state.recovery_popup.is_visible() 
+        && old_options_count > 0 
+        && old_options_count == recovery_options.len() {
+        state.recovery_popup.selected_index()
+    } else {
+        0
+    };
+    
+    state.recovery_options = recovery_options.clone();
     state.recovery_response = Some(response.clone());
-    state.recovery_popup_selected = 0;
+    state.recovery_popup_selected = current_selected_index;
     // Capture the source_checkpoint (faulty checkpoint) ID from the response
     state.recovery_checkpoint_id = response.source_checkpoint.map(|sc| sc.id);
+
+    // Default to backward highlighting (for Redirection)
+    state.highlight_after_checkpoint = false;
+
+    // Override with Revert checkpoint ID if available (as per user request to highlight the revert target)
+    if let Some(revert_opt) = state.recovery_options.iter().find(|o| matches!(o.mode, stakpak_api::models::RecoveryMode::Revert)) {
+        if let Some(id) = revert_opt.revert_to_checkpoint {
+             state.recovery_checkpoint_id = Some(id);
+             // For Revert, we want to highlight the checkpoint and everything AFTER it (up to the next checkpoint)
+             state.highlight_after_checkpoint = true;
+        }
+    }
+
     // Set flag if we have a faulty checkpoint
     state.has_faulty_checkpoint =
         state.recovery_checkpoint_id.is_some() && !state.recovery_options.is_empty();
@@ -472,6 +502,26 @@ pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsRe
         state.recovery_checkpoint_id = None;
         // Invalidate cache to revert checkpoint appearance
         crate::services::message::invalidate_message_lines_cache(state);
+        state.recovery_popup.escape();
+    } else {
+        // Initialize the recovery popup with the new options
+        use ratatui::layout::Size;
+        // Preserve the show flag - don't reset it when recreating popup
+        let should_show = state.show_recovery_options_popup;
+        state.recovery_popup = crate::services::recovery_popup_v2::RecoveryPopupService::new_with_recovery_options(
+            recovery_options,
+            Size {
+                width: state.terminal_size.width,
+                height: state.terminal_size.height,
+            },
+        );
+        // Restore the selected index
+        state.recovery_popup.set_selected_index(current_selected_index);
+        // Show if the flag is set (user wants it visible)
+        if should_show {
+            state.recovery_popup.show();
+        }
+        // Don't reset the flag - preserve user's choice
     }
 }
 
@@ -486,11 +536,30 @@ pub fn handle_expand_notifications(state: &mut AppState) {
     }
 
     if state.show_recovery_options_popup {
+        // Hide the popup
         state.show_recovery_options_popup = false;
         state.recovery_scroll_pending = false;
+        state.recovery_popup.escape();
     } else {
+        // Show the popup - preserve current selected index instead of resetting to 0
         state.show_recovery_options_popup = true;
-        state.recovery_popup_selected = 0;
+        
+        // Always recreate popup with current options to ensure it's up to date and properly initialized
+        use ratatui::layout::Size;
+        let current_index = state.recovery_popup.selected_index();
+        state.recovery_popup = crate::services::recovery_popup_v2::RecoveryPopupService::new_with_recovery_options(
+            state.recovery_options.clone(),
+            Size {
+                width: state.terminal_size.width,
+                height: state.terminal_size.height,
+            },
+        );
+        state.recovery_popup.set_selected_index(current_index);
+        state.recovery_popup_selected = current_index;
+        
+        // Explicitly show the popup after creating it
+        state.recovery_popup.show();
+        
         // Trigger one-time scroll to the recovery checkpoint marker in the chat
         state.recovery_scroll_pending = true;
     }

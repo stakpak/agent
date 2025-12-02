@@ -18,6 +18,7 @@ pub mod message_pattern;
 pub mod placeholder_prompts;
 pub mod profile_switcher;
 pub mod recovery_popup;
+pub mod recovery_popup_v2;
 pub mod rulebook_switcher;
 pub mod sessions_dialog;
 pub mod shell_mode;

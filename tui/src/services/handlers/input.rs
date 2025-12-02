@@ -88,7 +88,8 @@ pub fn handle_input_submitted_event(
         // 2) Add a user-visible message describing the chosen option
         // 3) Trigger a normal UserMessage flow so the agent runs again and can
         //    emit history_updated metadata for checkpoint sync.
-        if let Some(selected) = state.recovery_options.get(state.recovery_popup_selected)
+        let selected_index = state.recovery_popup.selected_index();
+        if let Some(selected) = state.recovery_options.get(selected_index)
             && let Some(response) = &state.recovery_response
         {
             use stakpak_api::models::RecoveryMode;
@@ -145,6 +146,7 @@ pub fn handle_input_submitted_event(
         state.recovery_response = None;
         state.recovery_popup_selected = 0;
         state.show_recovery_options_popup = false;
+        state.recovery_popup.escape();
         state.recovery_checkpoint_id = None;
         state.has_faulty_checkpoint = false;
         // Note: Don't reset model_change_messages_remaining here - let it count down naturally
@@ -869,6 +871,10 @@ pub fn handle_cursor_left(state: &mut AppState) {
         state.approval_popup.prev_tab();
         return; // Event was consumed by popup
     }
+    if state.recovery_popup.is_visible() {
+        state.recovery_popup.prev_tab();
+        return; // Event was consumed by popup
+    }
     state.text_area.move_cursor_left();
 }
 
@@ -876,6 +882,10 @@ pub fn handle_cursor_left(state: &mut AppState) {
 pub fn handle_cursor_right(state: &mut AppState) {
     if state.approval_popup.is_visible() {
         state.approval_popup.next_tab();
+        return; // Event was consumed by popup
+    }
+    if state.recovery_popup.is_visible() {
+        state.recovery_popup.next_tab();
         return; // Event was consumed by popup
     }
     state.text_area.move_cursor_right();
