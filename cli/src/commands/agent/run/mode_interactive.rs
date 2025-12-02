@@ -912,7 +912,7 @@ pub async fn run_interactive(
                         );
                         continue;
                     }
-                    OutputEvent::RecoveryAppend(role_str, content) => {
+                    OutputEvent::RecoveryAppend(role_str, content, checkpoint_id) => {
                         eprintln!(
                             "[RECOVERY CLI] Received RecoveryAppend with role: {}",
                             role_str
@@ -926,6 +926,18 @@ pub async fn run_interactive(
                         };
 
                         recovery::handle_append(&mut messages, role.clone(), content);
+                        if let Some(checkpoint_id) = checkpoint_id {
+                            let checkpoint_msg =
+                                format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id);
+                            recovery::handle_append(
+                                &mut messages,
+                                Role::Assistant,
+                                stakpak_shared::models::integrations::openai::MessageContent::String(
+                                    checkpoint_msg,
+                                ),
+                            );
+                        }
+
                         eprintln!(
                             "[RECOVERY CLI] Message appended, new message count: {}",
                             messages.len()

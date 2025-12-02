@@ -157,6 +157,7 @@ pub enum OutputEvent {
     RecoveryAppend(
         String,
         stakpak_shared::models::integrations::openai::MessageContent,
+        Option<String>, // checkpoint_id
     ),
     RecoveryTruncate(usize),
     RecoveryRevert(String),

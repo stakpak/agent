@@ -153,6 +153,7 @@ pub fn handle_input_submitted_event(
                                 let _ = output_tx.try_send(OutputEvent::RecoveryAppend(
                                     role_str,
                                     content.clone(),
+                                    action.revert_to_checkpoint.clone(),
                                 ));
                             }
                         }
