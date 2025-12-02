@@ -693,24 +693,23 @@ fn get_wrapped_message_lines_internal(
                 // MUST happen BEFORE we remove the tags!
                 if let Some(faulty_id) = faulty_checkpoint_id
                     && let Some(start) = cleaned.find("<checkpoint_id>")
-                        && let Some(end) = cleaned.find("</checkpoint_id>") {
-                            let checkpoint_str = &cleaned[start + "<checkpoint_id>".len()..end];
-                            if let Ok(checkpoint_uuid) =
-                                uuid::Uuid::parse_str(checkpoint_str.trim())
-                            {
-                                if &checkpoint_uuid == faulty_id {
-                                    // Found the faulty checkpoint
-                                    faulty_checkpoint_found = true;
-                                    checkpoint_had_tool_calls = false; // Will be set to true if we see tool calls
-                                    seen_next_message_after_checkpoint = false;
-                                } else {
-                                    // Different checkpoint found - reset state
-                                    faulty_checkpoint_found = false;
-                                    checkpoint_had_tool_calls = false;
-                                    seen_next_message_after_checkpoint = false;
-                                }
-                            }
+                    && let Some(end) = cleaned.find("</checkpoint_id>")
+                {
+                    let checkpoint_str = &cleaned[start + "<checkpoint_id>".len()..end];
+                    if let Ok(checkpoint_uuid) = uuid::Uuid::parse_str(checkpoint_str.trim()) {
+                        if &checkpoint_uuid == faulty_id {
+                            // Found the faulty checkpoint
+                            faulty_checkpoint_found = true;
+                            checkpoint_had_tool_calls = false; // Will be set to true if we see tool calls
+                            seen_next_message_after_checkpoint = false;
+                        } else {
+                            // Different checkpoint found - reset state
+                            faulty_checkpoint_found = false;
+                            checkpoint_had_tool_calls = false;
+                            seen_next_message_after_checkpoint = false;
                         }
+                    }
+                }
 
                 if !agent_mode_removed
                     && let Some(start) = cleaned.find("<agent_mode>")

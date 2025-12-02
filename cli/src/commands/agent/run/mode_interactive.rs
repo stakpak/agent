@@ -879,6 +879,7 @@ pub async fn run_interactive(
                         match recovery::handle_change_model(&mut model, &config) {
                             recovery::RecoveryResult::ModelSwitched(rounds) => {
                                 recovery_rounds_remaining = Some(rounds as u32);
+                                model = AgentModel::Recovery;
                                 eprintln!(
                                     "[RECOVERY CLI] Model switched to {} for {} rounds",
                                     model_str, rounds

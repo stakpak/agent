@@ -370,54 +370,80 @@ impl RecoveryPopupService {
         // Parse state_edits and generate detailed steps
         if let Ok(actions) =
             serde_json::from_value::<Vec<RecoveryAction>>(option.state_edits.clone())
-            && !actions.is_empty() {
-                full_content.push_str("## Steps\n");
-                for action in actions {
-                    let (operation_name, default_explanation) = match action.recovery_operation {
-                        RecoveryOperation::Truncate => {
-                            ("Truncate", format!("Truncating conversation history after message {}", action.message_index))
+            && !actions.is_empty()
+        {
+            full_content.push_str("## Steps\n");
+            for action in actions {
+                let (operation_name, default_explanation) = match action.recovery_operation {
+                    RecoveryOperation::Truncate => (
+                        "Truncate",
+                        format!(
+                            "Truncating conversation history after message {}",
+                            action.message_index
+                        ),
+                    ),
+                    RecoveryOperation::RemoveTools => {
+                        if let Some(ref ids) = action.failed_tool_call_ids_to_remove {
+                            let count = ids.len();
+                            (
+                                "Remove",
+                                format!(
+                                    "Cleaning up {} action{} in this checkpoint",
+                                    count,
+                                    if count == 1 { "" } else { "s" }
+                                ),
+                            )
+                        } else {
+                            (
+                                "Remove",
+                                "Cleaning up actions in this checkpoint".to_string(),
+                            )
                         }
-                        RecoveryOperation::RemoveTools => {
-                            if let Some(ref ids) = action.failed_tool_call_ids_to_remove {
-                                let count = ids.len();
-                                ("Remove", format!("Cleaning up {} action{} in this checkpoint", count, if count == 1 { "" } else { "s" }))
-                            } else {
-                                ("Remove", "Cleaning up actions in this checkpoint".to_string())
-                            }
+                    }
+                    RecoveryOperation::Append => (
+                        "Append",
+                        "Adding a message to guide the LLM on what went wrong and how to fix it"
+                            .to_string(),
+                    ),
+                    RecoveryOperation::RevertToCheckpoint => {
+                        if let Some(ref ckpt) = action.revert_to_checkpoint {
+                            ("Revert", format!("Reverting to checkpoint {}", ckpt))
+                        } else {
+                            ("Revert", "Reverting to checkpoint".to_string())
                         }
-                        RecoveryOperation::Append => {
-                            ("Append", "Adding a message to guide the LLM on what went wrong and how to fix it".to_string())
+                    }
+                    RecoveryOperation::ChangeModel => {
+                        if let Some(ref config) = action.model_config {
+                            (
+                                "Model",
+                                format!(
+                                    "Switching to {} ({}) for the next 5 turns",
+                                    config.model, config.provider
+                                ),
+                            )
+                        } else {
+                            (
+                                "Model",
+                                "Switching to a different model for the next 5 turns".to_string(),
+                            )
                         }
-                        RecoveryOperation::RevertToCheckpoint => {
-                            if let Some(ref ckpt) = action.revert_to_checkpoint {
-                                ("Revert", format!("Reverting to checkpoint {}", ckpt))
-                            } else {
-                                ("Revert", "Reverting to checkpoint".to_string())
-                            }
-                        }
-                        RecoveryOperation::ChangeModel => {
-                            if let Some(ref config) = action.model_config {
-                                ("Model", format!("Switching to {} ({}) for the next 5 turns", config.model, config.provider))
-                            } else {
-                                ("Model", "Switching to a different model for the next 5 turns".to_string())
-                            }
-                        }
-                    };
+                    }
+                };
 
-                    let explanation = action.explanation.as_ref().unwrap_or(&default_explanation);
-                    full_content.push_str(&format!("- **{}**: {}\n", operation_name, explanation));
-                }
-
-                // Add final step showing checkpoint rollback if available
-                if let Some(ref checkpoint_id) = option.revert_to_checkpoint {
-                    full_content.push_str(&format!(
-                        "- Rolling back to checkpoint `{}`\n",
-                        checkpoint_id
-                    ));
-                }
-
-                full_content.push_str("\n# NOTE: These operations are Irreversible!");
+                let explanation = action.explanation.as_ref().unwrap_or(&default_explanation);
+                full_content.push_str(&format!("- **{}**: {}\n", operation_name, explanation));
             }
+
+            // Add final step showing checkpoint rollback if available
+            if let Some(ref checkpoint_id) = option.revert_to_checkpoint {
+                full_content.push_str(&format!(
+                    "- Rolling back to checkpoint `{}`\n",
+                    checkpoint_id
+                ));
+            }
+
+            full_content.push_str("\n# NOTE: These operations are Irreversible!");
+        }
 
         let rendered_markdown = render_markdown_to_lines_safe(&full_content).unwrap_or_default();
 
@@ -494,9 +520,10 @@ impl RecoveryPopupService {
 
     fn restore_scroll_position(&mut self) {
         if self.selected_index < self.tab_scroll_positions.len()
-            && let Some(saved_scroll) = self.tab_scroll_positions[self.selected_index] {
-                self.popup.state_mut().scroll = saved_scroll;
-            }
+            && let Some(saved_scroll) = self.tab_scroll_positions[self.selected_index]
+        {
+            self.popup.state_mut().scroll = saved_scroll;
+        }
     }
 
     fn render_subheader(&self, option: &RecoveryOption) -> Vec<(Line<'static>, Style)> {
