@@ -437,7 +437,7 @@ pub fn switch_model(state: &mut AppState) -> Result<(), String> {
             Ok(())
         }
         AgentModel::Recovery => {
-            state.model = AgentModel::Smart;
+            state.model = AgentModel::Recovery;
             Ok(())
         }
     }
