@@ -32,14 +32,58 @@ pub struct RecoveryAction {
     pub explanation: Option<String>,
 }
 
+fn assistant_msg_with_checkpoint_id(checkpoint_id: &str) -> ChatMessage {
+    let checkpoint_msg = format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id);
+    ChatMessage {
+        role: Role::Assistant,
+        content: Some(MessageContent::String(checkpoint_msg)),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+        usage: None,
+    }
+}
+
+fn last_msg_checkpoint(messages: &[ChatMessage]) -> Option<&str> {
+    messages.last().and_then(|msg| {
+        if msg.role == Role::Assistant {
+            msg.content.as_ref().and_then(|content| {
+                if let MessageContent::String(content) = content {
+                    if content.starts_with("<checkpoint_id>") {
+                        content
+                            .split_once('>')
+                            .and_then(|(_, id)| id.split_once('<').map(|(_, id)| id))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    })
+}
+
 pub async fn handle_revert_to_checkpoint(
     client: &dyn AgentProvider,
     checkpoint_id: &String,
     messages: &mut Vec<ChatMessage>,
 ) -> Result<(), String> {
     let checkpoint_messages = get_checkpoint_messages(client, checkpoint_id).await?;
-    let (chat_messages, _) =
+    let (mut chat_messages, _) =
         prepare_checkpoint_messages_and_tool_calls(checkpoint_id, checkpoint_messages);
+
+    // Check the NEW messages after revert, not the old ones
+    let last_msg_checkpoit = last_msg_checkpoint(&chat_messages);
+    if let Some(last_msg) = chat_messages.last()
+        && last_msg.role == Role::User
+        && let Some(checkpoint_id) = last_msg_checkpoit
+    {
+        chat_messages.push(assistant_msg_with_checkpoint_id(checkpoint_id));
+    }
+
     *messages = chat_messages;
     Ok(())
 }
@@ -47,6 +91,15 @@ pub async fn handle_revert_to_checkpoint(
 pub fn handle_truncate(messages: &mut Vec<ChatMessage>, index: usize) {
     if index < messages.len() {
         messages.truncate(index);
+
+        // After truncating, check if the new last message is a User message
+        let last_msg_checkpoit = last_msg_checkpoint(messages);
+        if let Some(last_msg) = messages.last()
+            && last_msg.role == Role::User
+            && let Some(checkpoint_id) = last_msg_checkpoit
+        {
+            messages.push(assistant_msg_with_checkpoint_id(checkpoint_id));
+        }
     }
 }
 
@@ -65,15 +118,7 @@ pub fn handle_append(
         && last_msg.role == Role::User
         && let Some(checkpoint_id) = checkpoint_id
     {
-        let checkpoint_msg = format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id);
-        messages.push(ChatMessage {
-            role: Role::Assistant,
-            content: Some(MessageContent::String(checkpoint_msg)),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            usage: None,
-        });
+        messages.push(assistant_msg_with_checkpoint_id(&checkpoint_id));
     }
 
     messages.push(ChatMessage {
