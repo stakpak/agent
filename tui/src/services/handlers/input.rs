@@ -161,10 +161,11 @@ pub fn handle_input_submitted_event(
                                     "[RECOVERY TUI] Sending ChangeModel: {} ({})",
                                     config.model, config.provider
                                 );
-                                let _ = output_tx.try_send(OutputEvent::RecoveryChangeModel(
-                                    config.model.clone(),
-                                    config.provider.clone(),
-                                ));
+
+                                let _ = output_tx
+                                    .try_send(OutputEvent::SwitchModel(AgentModel::Recovery));
+                                let _ =
+                                    output_tx.try_send(OutputEvent::RecoveryModeStatus(Some(5)));
                             }
                         }
                     }

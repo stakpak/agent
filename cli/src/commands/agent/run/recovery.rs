@@ -3,7 +3,7 @@ use crate::commands::agent::run::checkpoint::{
 };
 use serde::{Deserialize, Serialize};
 use stakpak_api::AgentProvider;
-use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage, MessageContent, Role};
+use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RecoveryOperation {
@@ -30,10 +30,6 @@ pub struct RecoveryAction {
     pub revert_to_checkpoint: Option<String>,
     pub model_config: Option<ModelConfig>,
     pub explanation: Option<String>,
-}
-
-pub enum RecoveryResult {
-    ModelSwitched(usize),
 }
 
 pub async fn handle_revert_to_checkpoint(
@@ -67,11 +63,6 @@ pub fn handle_append(messages: &mut Vec<ChatMessage>, role: Role, content: Messa
         tool_call_id: None,
         usage: None,
     });
-}
-
-pub fn handle_change_model(current_model: &mut AgentModel, config: &ModelConfig) -> RecoveryResult {
-    *current_model = AgentModel::from(config.model.clone());
-    RecoveryResult::ModelSwitched(5)
 }
 
 fn clean_state_from_tool_failures(messages: &mut Vec<ChatMessage>, tool_ids: &[String]) {

@@ -790,6 +790,15 @@ pub async fn run_interactive(
                                 .await;
                         });
                     }
+                    OutputEvent::RecoveryModeStatus(new_rounds) => {
+                        eprintln!(
+                            "[RECOVERY CLI] Received RecoveryModeStatus: {:?}",
+                            new_rounds
+                        );
+                        recovery_rounds_remaining = new_rounds;
+                        send_input_event(&input_tx, InputEvent::RecoveryModeStatus(new_rounds))
+                            .await?;
+                    }
                     OutputEvent::RecoveryRevert(checkpoint_id) => {
                         eprintln!("[RECOVERY CLI] Received RecoveryRevert: {}", checkpoint_id);
                         if let Err(e) = recovery::handle_revert_to_checkpoint(
@@ -865,33 +874,6 @@ pub async fn run_interactive(
                         } else {
                             continue;
                         }
-                    }
-                    OutputEvent::RecoveryChangeModel(model_str, provider_str) => {
-                        eprintln!(
-                            "[RECOVERY CLI] Received RecoveryChangeModel: {} ({})",
-                            model_str, provider_str
-                        );
-                        let config = recovery::ModelConfig {
-                            model: model_str.clone(),
-                            provider: provider_str,
-                        };
-
-                        match recovery::handle_change_model(&mut model, &config) {
-                            recovery::RecoveryResult::ModelSwitched(rounds) => {
-                                recovery_rounds_remaining = Some(rounds as u32);
-                                model = AgentModel::Recovery;
-                                eprintln!(
-                                    "[RECOVERY CLI] Model switched to {} for {} rounds",
-                                    model_str, rounds
-                                );
-                                send_input_event(
-                                    &input_tx,
-                                    InputEvent::RecoveryModeStatus(recovery_rounds_remaining),
-                                )
-                                .await?;
-                            }
-                        }
-                        continue;
                     }
                     OutputEvent::RecoveryComplete => {
                         eprintln!(

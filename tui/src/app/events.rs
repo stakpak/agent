@@ -151,6 +151,8 @@ pub enum OutputEvent {
         recovery_request_id: String,
         selected_option_id: Uuid,
     },
+    // Recovery Mode Status
+    RecoveryModeStatus(Option<u32>),
     // Recovery Actions
     RecoveryAppend(
         String,
@@ -159,6 +161,5 @@ pub enum OutputEvent {
     RecoveryTruncate(usize),
     RecoveryRemoveTools(Vec<String>),
     RecoveryRevert(String),
-    RecoveryChangeModel(String, String), // model, provider
-    RecoveryComplete,                    // Signal that all recovery operations are complete
+    RecoveryComplete, // Signal that all recovery operations are complete
 }
