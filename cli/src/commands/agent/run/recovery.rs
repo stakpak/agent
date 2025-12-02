@@ -54,7 +54,28 @@ pub fn handle_remove_tools(messages: &mut Vec<ChatMessage>, tool_ids: &[String])
     clean_state_from_tool_failures(messages, tool_ids);
 }
 
-pub fn handle_append(messages: &mut Vec<ChatMessage>, role: Role, content: MessageContent) {
+pub fn handle_append(
+    messages: &mut Vec<ChatMessage>,
+    role: Role,
+    content: MessageContent,
+    checkpoint_id: Option<String>,
+) {
+    // check if the last message is user role and if so add assistant message with the checkpoint_id if exists
+    if let Some(last_msg) = messages.last()
+        && last_msg.role == Role::User
+        && let Some(checkpoint_id) = checkpoint_id
+    {
+        let checkpoint_msg = format!("<checkpoint_id>{}</checkpoint_id>", checkpoint_id);
+        messages.push(ChatMessage {
+            role: Role::Assistant,
+            content: Some(MessageContent::String(checkpoint_msg)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+            usage: None,
+        });
+    }
+
     messages.push(ChatMessage {
         role,
         content: Some(content),
