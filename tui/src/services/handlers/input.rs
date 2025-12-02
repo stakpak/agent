@@ -91,6 +91,7 @@ pub fn handle_input_submitted_event(
         if let Some(selected) = state.recovery_options.get(selected_index)
             && let Some(response) = &state.recovery_response
         {
+            let _ = output_tx.try_send(OutputEvent::ToggleRecoveryPolling(false));
             recovery_request_id = response.id.clone().unwrap_or_default();
             selected_option_id = selected.id;
 
@@ -189,6 +190,8 @@ pub fn handle_input_submitted_event(
             recovery_request_id,
             selected_option_id,
         });
+
+        let _ = output_tx.try_send(OutputEvent::ToggleRecoveryPolling(true));
 
         // Scroll to bottom after selecting recovery option
         state.scroll_to_bottom = true;

@@ -219,6 +219,7 @@ pub async fn run_interactive(
             let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_tui.as_ref());
 
             // Spawn recovery polling task
+            let (polling_enabled_tx, polling_enabled_rx) = tokio::sync::watch::channel(true);
             let poll_session_id = shared_session_id.clone();
             let poll_client = client.clone();
             let poll_input_tx = input_tx.clone();
@@ -232,6 +233,9 @@ pub async fn run_interactive(
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
+                            if !*polling_enabled_rx.borrow() {
+                                continue;
+                            }
                             let session_id = *poll_session_id.read().await;
                             eprintln!("[RECOVERY POLL] Tick - session_id: {:?}", session_id);
                             if let Some(sid) = session_id {
@@ -887,6 +891,11 @@ pub async fn run_interactive(
                         )
                         .await?;
                         eprintln!("[RECOVERY CLI] Messages sent to TUI successfully");
+                        continue;
+                    }
+                    OutputEvent::ToggleRecoveryPolling(enabled) => {
+                        eprintln!("[RECOVERY CLI] Toggling recovery polling: {}", enabled);
+                        let _ = polling_enabled_tx.send(enabled);
                         continue;
                     }
                     OutputEvent::RequestProfileSwitch(new_profile) => {

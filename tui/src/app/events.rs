@@ -159,7 +159,8 @@ pub enum OutputEvent {
         stakpak_shared::models::integrations::openai::MessageContent,
     ),
     RecoveryTruncate(usize),
-    RecoveryRemoveTools(Vec<String>),
     RecoveryRevert(String),
+    RecoveryRemoveTools(Vec<String>),
     RecoveryComplete, // Signal that all recovery operations are complete
+    ToggleRecoveryPolling(bool),
 }
