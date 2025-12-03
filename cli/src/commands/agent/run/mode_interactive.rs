@@ -241,8 +241,6 @@ pub async fn run_interactive(
 
                                 match poll_client.get_recovery_options(sid, Some("pending")).await {
                                     Ok(response) => {
-                                        eprintln!("{:#?}", response);
-
                                         // Update local store
                                         {
                                             let mut store = poll_options_store.write().await;
@@ -858,7 +856,7 @@ pub async fn run_interactive(
                         send_input_event(&input_tx, InputEvent::RecoveryModeStatus(new_rounds))
                             .await?;
                     }
-                    OutputEvent::RecoveryRevert(checkpoint_id) => {
+                    OutputEvent::RevertToCheckpoint(checkpoint_id) => {
                         if let Err(e) = recovery::handle_revert_to_checkpoint(
                             client.as_ref(),
                             &checkpoint_id,
@@ -875,17 +873,17 @@ pub async fn run_interactive(
                         }
                         continue;
                     }
-                    OutputEvent::RecoveryTruncate(index) => {
+                    OutputEvent::TruncateAtIndex(index) => {
                         recovery::handle_truncate(&mut messages, index);
 
                         continue;
                     }
-                    OutputEvent::RecoveryRemoveTools(tool_ids) => {
+                    OutputEvent::RemoveToolsFromMessage(tool_ids) => {
                         recovery::handle_remove_tools(&mut messages, &tool_ids);
 
                         continue;
                     }
-                    OutputEvent::RecoveryAppend(role_str, content, checkpoint_id) => {
+                    OutputEvent::AppendMessage(role_str, content, checkpoint_id) => {
                         let role = match role_str.as_str() {
                             "user" => Role::User,
                             "assistant" => Role::Assistant,

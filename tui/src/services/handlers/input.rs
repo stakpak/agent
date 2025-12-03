@@ -135,17 +135,17 @@ pub fn handle_input_submitted_event(
                         crate::services::recovery_popup::RecoveryOperation::RevertToCheckpoint => {
                             if let Some(ref ckpt_id) = action.revert_to_checkpoint {
                                 let _ = output_tx
-                                    .try_send(OutputEvent::RecoveryRevert(ckpt_id.clone()));
+                                    .try_send(OutputEvent::RevertToCheckpoint(ckpt_id.clone()));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::Truncate => {
                             let _ = output_tx
-                                .try_send(OutputEvent::RecoveryTruncate(action.message_index));
+                                .try_send(OutputEvent::TruncateAtIndex(action.message_index));
                         }
                         crate::services::recovery_popup::RecoveryOperation::RemoveTools => {
                             if let Some(ref ids) = action.failed_tool_call_ids_to_remove {
                                 let _ = output_tx
-                                    .try_send(OutputEvent::RecoveryRemoveTools(ids.clone()));
+                                    .try_send(OutputEvent::RemoveToolsFromMessage(ids.clone()));
                             }
                         }
                         crate::services::recovery_popup::RecoveryOperation::Append => {
@@ -156,7 +156,7 @@ pub fn handle_input_submitted_event(
                                     .map(|r| r.to_string())
                                     .unwrap_or_default();
 
-                                let _ = output_tx.try_send(OutputEvent::RecoveryAppend(
+                                let _ = output_tx.try_send(OutputEvent::AppendMessage(
                                     role_str,
                                     content.clone(),
                                     action.revert_to_checkpoint.clone(),

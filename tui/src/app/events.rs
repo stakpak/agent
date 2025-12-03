@@ -154,14 +154,14 @@ pub enum OutputEvent {
     // Recovery Mode Status
     RecoveryModeStatus(Option<u32>),
     // Recovery Actions
-    RecoveryAppend(
+    AppendMessage(
         String,
         stakpak_shared::models::integrations::openai::MessageContent,
         Option<String>, // checkpoint_id
     ),
-    RecoveryTruncate(usize),
-    RecoveryRevert(String),
-    RecoveryRemoveTools(Vec<String>),
+    TruncateAtIndex(usize),
+    RevertToCheckpoint(String),
+    RemoveToolsFromMessage(Vec<String>),
     RecoveryComplete, // Signal that all recovery operations are complete
     ToggleRecoveryPolling(bool),
 }
