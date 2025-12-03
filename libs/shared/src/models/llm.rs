@@ -2,6 +2,7 @@ use crate::models::{
     error::{AgentError, BadRequestErrorMessage},
     integrations::{
         anthropic::{Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel},
+        gemini::{Gemini, GeminiConfig, GeminiInput, GeminiModel},
         openai::{OpenAI, OpenAIConfig, OpenAIInput, OpenAIModel},
     },
 };
@@ -11,6 +12,7 @@ use std::fmt::Display;
 #[derive(Clone, Debug, Serialize)]
 pub enum LLMModel {
     Anthropic(AnthropicModel),
+    Gemini(GeminiModel),
     OpenAI(OpenAIModel),
     Custom(String),
 }
@@ -18,6 +20,7 @@ pub enum LLMModel {
 #[derive(Debug)]
 pub struct LLMProviderConfig {
     pub anthropic_config: Option<AnthropicConfig>,
+    pub gemini_config: Option<GeminiConfig>,
     pub openai_config: Option<OpenAIConfig>,
 }
 
@@ -27,6 +30,12 @@ impl From<String> for LLMModel {
             "claude-haiku-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
             "claude-sonnet-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Sonnet),
             "claude-opus-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Opus),
+            "gemini-2.0-flash" => LLMModel::Gemini(GeminiModel::Gemini20Flash),
+            "gemini-2.0-flash-lite" => LLMModel::Gemini(GeminiModel::Gemini20FlashLite),
+            "gemini-2.5-flash" => LLMModel::Gemini(GeminiModel::Gemini25Flash),
+            "gemini-2.5-flash-lite" => LLMModel::Gemini(GeminiModel::Gemini25FlashLite),
+            "gemini-2.5-pro" => LLMModel::Gemini(GeminiModel::Gemini25Pro),
+            "gemini-3-pro-preview" => LLMModel::Gemini(GeminiModel::Gemini3Pro),
             "gpt-5" => LLMModel::OpenAI(OpenAIModel::GPT5),
             "gpt-5-mini" => LLMModel::OpenAI(OpenAIModel::GPT5Mini),
             _ => LLMModel::Custom(value),
@@ -38,6 +47,7 @@ impl Display for LLMModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LLMModel::Anthropic(model) => write!(f, "{}", model),
+            LLMModel::Gemini(model) => write!(f, "{}", model),
             LLMModel::OpenAI(model) => write!(f, "{}", model),
             LLMModel::Custom(model) => write!(f, "{}", model),
         }
@@ -93,6 +103,24 @@ pub async fn chat(
                 Err(AgentError::BadRequest(
                     BadRequestErrorMessage::InvalidAgentInput(
                         "Anthropic config not found".to_string(),
+                    ),
+                ))
+            }
+        }
+
+        LLMModel::Gemini(model) => {
+            if let Some(gemini_config) = &config.gemini_config {
+                let gemini_input = GeminiInput {
+                    model,
+                    messages: input.messages,
+                    max_tokens: input.max_tokens,
+                    tools: input.tools,
+                };
+                Gemini::chat(gemini_config, gemini_input).await
+            } else {
+                Err(AgentError::BadRequest(
+                    BadRequestErrorMessage::InvalidAgentInput(
+                        "Gemini config not found".to_string(),
                     ),
                 ))
             }
@@ -160,6 +188,24 @@ pub async fn chat_stream(
                 Err(AgentError::BadRequest(
                     BadRequestErrorMessage::InvalidAgentInput(
                         "Anthropic config not found".to_string(),
+                    ),
+                ))
+            }
+        }
+
+        LLMModel::Gemini(model) => {
+            if let Some(gemini_config) = &config.gemini_config {
+                let gemini_input = GeminiInput {
+                    model,
+                    messages: input.messages,
+                    max_tokens: input.max_tokens,
+                    tools: input.tools,
+                };
+                Gemini::chat_stream(gemini_config, input.stream_channel_tx, gemini_input).await
+            } else {
+                Err(AgentError::BadRequest(
+                    BadRequestErrorMessage::InvalidAgentInput(
+                        "Gemini config not found".to_string(),
                     ),
                 ))
             }

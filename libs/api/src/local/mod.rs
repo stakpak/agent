@@ -12,6 +12,7 @@ use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
+use stakpak_shared::models::integrations::gemini::GeminiConfig;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
@@ -40,6 +41,7 @@ pub struct LocalClient {
     pub stakpak_base_url: Option<String>,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
+    pub gemini_config: Option<GeminiConfig>,
     pub smart_model: LLMModel,
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
@@ -51,6 +53,7 @@ pub struct LocalClientConfig {
     pub store_path: Option<String>,
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
+    pub gemini_config: Option<GeminiConfig>,
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
@@ -123,6 +126,7 @@ impl LocalClient {
             db: conn,
             stakpak_base_url: config.stakpak_base_url.map(|url| url + "/v1"),
             anthropic_config: config.anthropic_config,
+            gemini_config: config.gemini_config,
             openai_config: config.openai_config,
             smart_model,
             eco_model,
@@ -487,6 +491,7 @@ impl LocalClient {
         LLMProviderConfig {
             anthropic_config: self.anthropic_config.clone(),
             openai_config: self.openai_config.clone(),
+            gemini_config: self.gemini_config.clone(),
         }
     }
 

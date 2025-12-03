@@ -118,6 +118,9 @@ api_key = "sk-ant-..."
 [profiles.byok.openai]
 api_key = "sk-..."
 
+[profiles.byok.gemini]
+api_key = "sk-..."
+
 [settings]
 ```
 
