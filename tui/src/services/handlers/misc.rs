@@ -116,6 +116,12 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
+    if state.recovery_popup.is_visible() {
+        state.recovery_popup.next_tab();
+        super::input::update_highlighted_tool_calls_for_recovery(state);
+        return;
+    }
+
     if state.show_collapsed_messages {
         handle_collapsed_messages_tab(state, message_area_height, message_area_width);
     } else {

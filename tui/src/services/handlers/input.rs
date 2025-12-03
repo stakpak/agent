@@ -20,6 +20,31 @@ use tokio::sync::mpsc::Sender;
 
 use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
 
+/// Helper function to update highlighted tool call IDs based on the selected recovery option
+pub fn update_highlighted_tool_calls_for_recovery(state: &mut AppState) {
+    let selected_index = state.recovery_popup.selected_index();
+    if let Some(selected) = state.recovery_options.get(selected_index)
+        && let Ok(actions) = serde_json::from_value::<
+            Vec<crate::services::recovery_popup::RecoveryAction>,
+        >(selected.state_edits.clone())
+    {
+        let mut ids_to_highlight = Vec::new();
+        for action in actions {
+            if let Some(ids) = action.failed_tool_call_ids_to_remove {
+                ids_to_highlight.extend(ids);
+            }
+        }
+
+        if !ids_to_highlight.is_empty() {
+            state.highlighted_tool_call_ids = Some(ids_to_highlight);
+        } else {
+            state.highlighted_tool_call_ids = None;
+        }
+        // Invalidate cache to trigger re-render with highlighting
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
+}
+
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
     if state.approval_popup.is_visible() {
@@ -159,6 +184,7 @@ pub fn handle_input_submitted_event(
         state.recovery_checkpoint_id = None;
         state.recovery_revert_checkpoint_id = None;
         state.has_faulty_checkpoint = false;
+        state.highlighted_tool_call_ids = None;
         // Note: Don't reset model_change_messages_remaining here - let it count down naturally
         // Invalidate cache to redraw checkpoints without yellow colorization
         crate::services::message::invalidate_message_lines_cache(state);
@@ -885,6 +911,7 @@ pub fn handle_cursor_left(state: &mut AppState) {
     }
     if state.recovery_popup.is_visible() {
         state.recovery_popup.prev_tab();
+        update_highlighted_tool_calls_for_recovery(state);
         return; // Event was consumed by popup
     }
     state.text_area.move_cursor_left();
@@ -898,6 +925,7 @@ pub fn handle_cursor_right(state: &mut AppState) {
     }
     if state.recovery_popup.is_visible() {
         state.recovery_popup.next_tab();
+        update_highlighted_tool_calls_for_recovery(state);
         return; // Event was consumed by popup
     }
     state.text_area.move_cursor_right();

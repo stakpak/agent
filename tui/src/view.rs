@@ -248,6 +248,7 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
                     width,
                     None,
                     false,
+                    None,
                 );
 
                 // Process these lines to match the same processing as processed_lines

@@ -521,6 +521,10 @@ pub fn handle_recovery_options(state: &mut AppState, response: RecoveryOptionsRe
         state
             .recovery_popup
             .set_selected_index(current_selected_index);
+
+        // Populate initial highlighted tool calls based on the selected option
+        super::input::update_highlighted_tool_calls_for_recovery(state);
+
         // Show if the flag is set (user wants it visible)
         if should_show {
             state.recovery_popup.show();
@@ -562,6 +566,9 @@ pub fn handle_expand_notifications(state: &mut AppState) {
             );
         state.recovery_popup.set_selected_index(current_index);
         state.recovery_popup_selected = current_index;
+
+        // Populate initial highlighted tool calls based on the selected option
+        super::input::update_highlighted_tool_calls_for_recovery(state);
 
         // Explicitly show the popup after creating it
         state.recovery_popup.show();

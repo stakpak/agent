@@ -442,7 +442,7 @@ impl RecoveryPopupService {
                 ));
             }
 
-            full_content.push_str("\n# NOTE: These operations are Irreversible!");
+            // full_content.push_str("\n# NOTE: These operations are Irreversible!");
         }
 
         let rendered_markdown = render_markdown_to_lines_safe(&full_content).unwrap_or_default();

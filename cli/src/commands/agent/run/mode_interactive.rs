@@ -241,6 +241,7 @@ pub async fn run_interactive(
 
                                 match poll_client.get_recovery_options(sid, Some("pending")).await {
                                     Ok(response) => {
+                                        eprintln!("{:#?}", response);
 
                                         // Update local store
                                         {

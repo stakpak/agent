@@ -173,6 +173,8 @@ pub struct AppState {
     pub highlight_after_checkpoint: bool,
     /// Number of messages remaining before switching back to original model (None if not active)
     pub model_change_messages_remaining: Option<u32>,
+    /// Tool call IDs that should be highlighted (e.g. when previewing removal)
+    pub highlighted_tool_call_ids: Option<Vec<String>>,
 
     // ========== Configuration State ==========
     pub secret_manager: SecretManager,
@@ -384,6 +386,7 @@ impl AppState {
             has_faulty_checkpoint: false,
             highlight_after_checkpoint: false,
             model_change_messages_remaining: None,
+            highlighted_tool_call_ids: None,
             model,
         }
     }

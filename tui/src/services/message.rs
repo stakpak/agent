@@ -420,15 +420,22 @@ pub fn get_wrapped_message_lines(
     width: usize,
     faulty_checkpoint_id: Option<&uuid::Uuid>,
     _highlight_after_checkpoint: bool,
+    highlighted_tool_call_ids: Option<&Vec<String>>,
 ) -> Vec<(Line<'static>, Style)> {
-    get_wrapped_message_lines_internal(messages, width, false, faulty_checkpoint_id)
+    get_wrapped_message_lines_internal(
+        messages,
+        width,
+        false,
+        faulty_checkpoint_id,
+        highlighted_tool_call_ids,
+    )
 }
 
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
     let messages = state.messages.clone();
     let faulty_checkpoint_id = state.recovery_checkpoint_id.as_ref();
 
-    // Check if cache is valid (including faulty checkpoint ID)
+    // Check if cache is valid (including faulty checkpoint ID and highlighted tool calls)
     let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
         cached_messages.len() == messages.len()
             && *cached_width == width
@@ -440,6 +447,9 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             && state.has_faulty_checkpoint == (faulty_checkpoint_id.is_some())
             // Check highlight mode
             && state.message_lines_cache_highlight_mode == state.highlight_after_checkpoint
+        // Check if highlighted tool calls changed (we don't cache the exact IDs, just assume invalidation handles it)
+        // But we should check if the *presence* of highlighting matches what we expect if we were to cache it fully
+        // For now, simple invalidation in input handler is enough, but we need to ensure we use the current state here
     } else {
         false
     };
@@ -451,6 +461,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             width,
             faulty_checkpoint_id,
             state.highlight_after_checkpoint,
+            state.highlighted_tool_call_ids.as_ref(),
         );
         state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
         state.message_lines_cache_highlight_mode = state.highlight_after_checkpoint;
@@ -466,6 +477,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
                 width,
                 faulty_checkpoint_id,
                 state.highlight_after_checkpoint,
+                state.highlighted_tool_call_ids.as_ref(),
             )
         }
     }
@@ -477,6 +489,7 @@ pub fn get_processed_message_lines(
     width: usize,
     faulty_checkpoint_id: Option<&uuid::Uuid>,
     highlight_after_checkpoint: bool,
+    highlighted_tool_call_ids: Option<&Vec<String>>,
 ) -> Vec<Line<'static>> {
     use crate::services::message_pattern::{process_checkpoint_patterns, spans_to_string};
 
@@ -485,6 +498,7 @@ pub fn get_processed_message_lines(
         width,
         faulty_checkpoint_id,
         highlight_after_checkpoint,
+        highlighted_tool_call_ids,
     );
 
     // Pre-allocate with estimated capacity to reduce reallocations
@@ -560,7 +574,7 @@ pub fn get_wrapped_collapsed_message_lines_cached(
         // Calculate and cache the processed lines directly
 
         let processed_lines: Vec<Line<'static>> =
-            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None)
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None, None)
                 .into_iter()
                 .map(|(line, _style)| line)
                 .collect();
@@ -575,7 +589,7 @@ pub fn get_wrapped_collapsed_message_lines_cached(
         } else {
             // Fallback if cache is somehow invalid
 
-            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None)
+            get_wrapped_message_lines_internal(&collapsed_messages, width, true, None, None)
                 .into_iter()
                 .map(|(line, _style)| line)
                 .collect()
@@ -595,6 +609,7 @@ fn get_wrapped_message_lines_internal(
     width: usize,
     include_collapsed: bool,
     faulty_checkpoint_id: Option<&uuid::Uuid>,
+    highlighted_tool_call_ids: Option<&Vec<String>>,
 ) -> Vec<(Line<'static>, Style)> {
     let filtered_messages = if include_collapsed {
         messages.iter().collect::<Vec<_>>()
@@ -665,6 +680,19 @@ fn get_wrapped_message_lines_internal(
                 | MessageContent::StyledBlock(_)
         );
 
+        // Check if this message should be highlighted due to tool call ID match
+        let is_highlighted_tool_call = if let Some(ids) = highlighted_tool_call_ids {
+            match &msg.content {
+                MessageContent::RenderPendingBorderBlock(tool_call, _) => {
+                    ids.contains(&tool_call.id)
+                }
+                MessageContent::RenderResultBorderBlock(result) => ids.contains(&result.call.id),
+                _ => false,
+            }
+        } else {
+            false
+        };
+
         // Collect lines for this message
         let mut message_lines: Vec<(Line<'static>, Style)> = Vec::new();
 
@@ -672,6 +700,7 @@ fn get_wrapped_message_lines_internal(
         // This needs to match the logic later when we actually apply the border
         let will_have_border = msg.left_border_color.is_some()
             || in_pre_faulty_range
+            || is_highlighted_tool_call
             || (faulty_checkpoint_found
                 && (is_tool_call_content
                     || matches!(&msg.content, MessageContent::AssistantMD(_, _))));
@@ -980,6 +1009,7 @@ fn get_wrapped_message_lines_internal(
         // 1. We are in the range leading up to the faulty checkpoint (in_pre_faulty_range)
         // 2. We are AFTER the faulty checkpoint and the state machine says so (for subsequent tool calls)
         let should_apply_yellow_border = in_pre_faulty_range
+            || is_highlighted_tool_call
             || (faulty_checkpoint_found
                 && (is_tool_call_content
                     || matches!(&msg.content, MessageContent::AssistantMD(_, _))));
