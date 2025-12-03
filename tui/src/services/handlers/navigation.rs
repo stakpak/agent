@@ -136,11 +136,7 @@ pub fn handle_up_navigation(state: &mut AppState) {
 
     if state.show_shortcuts_popup {
         // Handle scrolling up in shortcuts popup (like collapsed messages)
-        if state.shortcuts_scroll >= SCROLL_LINES {
-            state.shortcuts_scroll -= SCROLL_LINES;
-        } else {
-            state.shortcuts_scroll = 0;
-        }
+        state.shortcuts_scroll = state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
         return;
     }
     if state.show_rulebook_switcher {
@@ -205,15 +201,7 @@ pub fn handle_down_navigation(
 
     if state.show_shortcuts_popup {
         // Handle scrolling down in shortcuts popup (like collapsed messages)
-        let all_lines = crate::services::shortcuts_popup::get_cached_shortcuts_content(None);
-        let total_lines = all_lines.len();
-        let max_scroll = total_lines;
-
-        if state.shortcuts_scroll + SCROLL_LINES < max_scroll {
-            state.shortcuts_scroll += SCROLL_LINES;
-        } else {
-            state.shortcuts_scroll = max_scroll;
-        }
+        state.shortcuts_scroll = state.shortcuts_scroll.saturating_add(SCROLL_LINES);
         return;
     }
     if state.show_rulebook_switcher {
