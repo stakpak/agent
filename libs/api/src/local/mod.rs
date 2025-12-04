@@ -1,5 +1,5 @@
-use crate::local::context_managers::scratchpad_context_manager::{
-    ScratchpadContextManager, ScratchpadContextManagerOptions,
+use crate::local::context_managers::file_scratchpad_context_manager::{
+    FileScratchpadContextManager, FileScratchpadContextManagerOptions,
 };
 use crate::local::hooks::scratchpad_context_hook::{ContextHook, ContextHookOptions};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
@@ -67,8 +67,13 @@ enum StreamMessage {
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
-const SYSTEM_PROMPT: &str = include_str!("./prompts/agent.v1.txt");
+#[allow(dead_code)]
+const SYSTEM_PROMPT_V1: &str = include_str!("./prompts/agent.v1.txt");
 const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_generator.v1.txt");
+
+const SYSTEM_PROMPT_V2: &str = include_str!("./prompts/agent.v2.txt");
+const SCRATCHPAD_FILE: &str = ".stakpak/session/scratchpad.md";
+const TODO_FILE: &str = ".stakpak/session/todo.md";
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
@@ -104,21 +109,33 @@ impl LocalClient {
             .map(LLMModel::from)
             .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5));
 
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let scratchpad_file_path = cwd.join(SCRATCHPAD_FILE);
+        let todo_file_path = cwd.join(TODO_FILE);
+        let system_prompt = SYSTEM_PROMPT_V2
+            .replace(
+                "{{SCRATCHPAD_PATH}}",
+                &scratchpad_file_path.display().to_string(),
+            )
+            .replace("{{TODO_PATH}}", &todo_file_path.display().to_string());
+
         // Add hooks
         let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(ContextHook::new(ContextHookOptions {
-                context_manager: Box::new(ScratchpadContextManager::new(
-                    ScratchpadContextManagerOptions {
+                context_manager: Box::new(FileScratchpadContextManager::new(
+                    FileScratchpadContextManagerOptions {
                         history_action_message_size_limit: 100,
                         history_action_message_keep_last_n: 1,
                         history_action_result_keep_last_n: 50,
+                        scratchpad_file_path,
+                        todo_file_path,
                     },
                 )),
-                smart_model: (smart_model.clone(), SYSTEM_PROMPT.to_string()),
-                eco_model: (eco_model.clone(), SYSTEM_PROMPT.to_string()),
-                recovery_model: (recovery_model.clone(), SYSTEM_PROMPT.to_string()),
+                smart_model: (smart_model.clone(), system_prompt.clone()),
+                eco_model: (eco_model.clone(), system_prompt.clone()),
+                recovery_model: (recovery_model.clone(), system_prompt),
             })),
         );
 
