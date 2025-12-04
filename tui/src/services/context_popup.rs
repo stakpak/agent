@@ -7,7 +7,40 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Paragraph},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
+use stakpak_shared::models::{
+    integrations::openai::AgentModel,
+    llm::LLMModel,
+    model_pricing::{ContextAware, ModelContextInfo},
+};
+
+/// Get context info from llm_model, or fallback to agent_model mapping
+fn get_context_info(state: &AppState) -> ModelContextInfo {
+    if let Some(model) = &state.llm_model {
+        let info = model.context_info();
+        // If we have a model but no pricing tiers, try to infer from agent_model
+        if info.pricing_tiers.is_empty() {
+            // Map agent_model to actual model string and get context_info
+            let model_string = match state.agent_model {
+                AgentModel::Smart => "claude-sonnet-4-5",
+                AgentModel::Eco => "claude-haiku-4-5",
+                AgentModel::Recovery => "gpt-5",
+            };
+            let mapped_model: LLMModel = model_string.to_string().into();
+            mapped_model.context_info()
+        } else {
+            info
+        }
+    } else {
+        // No llm_model set, use agent_model to determine model
+        let model_string = match state.agent_model {
+            AgentModel::Smart => "claude-sonnet-4-5",
+            AgentModel::Eco => "claude-haiku-4-5",
+            AgentModel::Recovery => "gpt-5",
+        };
+        let mapped_model: LLMModel = model_string.to_string().into();
+        mapped_model.context_info()
+    }
+}
 
 pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     let screen = f.area();
@@ -107,11 +140,7 @@ fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
     let total_tokens = usage.total_tokens;
     let formatted_total = format_number_with_separator(total_tokens);
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
+    let context_info = get_context_info(state);
     let max_tokens = context_info.max_tokens;
     let formatted_max = format_number_with_separator(max_tokens as u32);
 
@@ -151,11 +180,7 @@ fn render_usage_gauge(f: &mut Frame, state: &AppState, area: Rect) {
     let usage = &state.current_message_usage;
     let total_tokens = usage.total_tokens as f64;
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
+    let context_info = get_context_info(state);
     let max_tokens = context_info.max_tokens;
 
     let ratio = (total_tokens / max_tokens as f64).clamp(0.0, 1.0);
@@ -200,11 +225,7 @@ fn render_markers(f: &mut Frame, state: &AppState, area: Rect) {
 
     let zero = Paragraph::new(Line::from("0")).alignment(Alignment::Left);
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
+    let context_info = get_context_info(state);
     let max_tokens = context_info.max_tokens;
 
     // Find the first threshold that is not 0 cost, if any, to show as a marker
@@ -244,11 +265,7 @@ fn render_pricing_table(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
+    let context_info = get_context_info(state);
     let pricing_table = &context_info.pricing_tiers;
     let table_len = pricing_table.len();
 
@@ -453,11 +470,7 @@ fn build_row_line(
 fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let total_tokens = state.current_message_usage.total_tokens;
 
-    let context_info = state
-        .llm_model
-        .as_ref()
-        .map(|model| model.context_info())
-        .unwrap_or_default();
+    let context_info = get_context_info(state);
     let max_tokens = context_info.max_tokens;
     let ratio = (total_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
 
