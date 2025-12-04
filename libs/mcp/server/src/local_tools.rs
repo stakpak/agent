@@ -5,6 +5,7 @@ use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
+use stakpak_shared::models::password::Password;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -42,7 +43,7 @@ pub struct RunCommandRequest {
     )]
     pub remote: Option<String>,
     #[schemars(description = "Optional password for remote connection")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(description = "Optional path to private key for remote connection")]
     pub private_key_path: Option<String>,
 }
@@ -90,7 +91,7 @@ pub struct ViewRequest {
     )]
     pub view_range: Option<[i32; 2]>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -118,7 +119,7 @@ pub struct StrReplaceRequest {
     )]
     pub replace_all: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -136,7 +137,7 @@ pub struct CreateRequest {
     )]
     pub file_text: String,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -145,7 +146,10 @@ pub struct CreateRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GeneratePasswordRequest {
-    #[schemars(description = "The length of the password to generate")]
+    #[schemars(
+        description = "The length of the password to generate (minimum: 8 characters, default: 15)",
+        range(min = 8)
+    )]
     pub length: Option<usize>,
     #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
     pub no_symbols: Option<bool>,
@@ -162,7 +166,7 @@ pub struct RemoveRequest {
     )]
     pub recursive: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -996,7 +1000,7 @@ SAFETY NOTES:
     async fn get_remote_connection(
         &self,
         path: &str,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
     ) -> Result<(Arc<RemoteConnection>, String), CallToolResult> {
         let path_location = PathLocation::parse(path).map_err(|e| {
@@ -1053,7 +1057,7 @@ SAFETY NOTES:
         command: &str,
         timeout: Option<u64>,
         remote: Option<String>,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {

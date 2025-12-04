@@ -12,6 +12,8 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 toml = { workspace = true }
 rand = { workspace = true }
+schemars = { workspace = true }
+secrecy = { version = "0.10.3", features = ["serde"] }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
 notify = { workspace = true }

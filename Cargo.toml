@@ -68,7 +68,7 @@ rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
-schemars = { version = "0.8.22", features = ["chrono"] }
+schemars = { version = "1.1.0", features = ["chrono04"] }
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
