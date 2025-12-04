@@ -3,10 +3,10 @@ use futures_util::{Stream, StreamExt};
 use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::{
     integrations::openai::{
-        AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
-        ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
+        ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
+        FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
     },
-    llm::LLMTokenUsage,
+    llm::{LLMModel, LLMTokenUsage},
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ pub async fn process_responses_stream(
         id: "".to_string(),
         object: "".to_string(),
         created: 0,
-        model: AgentModel::Smart.to_string(),
+        model: "".to_string(),
         choices: vec![],
         usage: LLMTokenUsage {
             prompt_tokens: 0,
@@ -32,6 +32,8 @@ pub async fn process_responses_stream(
         system_fingerprint: None,
         metadata: None,
     };
+
+    let mut llm_model: Option<LLMModel> = None;
 
     let mut chat_message = ChatMessage {
         role: Role::Assistant,
@@ -62,12 +64,32 @@ pub async fn process_responses_stream(
                 }
 
                 let delta = &response.choices[0].delta;
+                if !response.model.is_empty() {
+                    let current_model: LLMModel = response.model.clone().into();
+                    match &llm_model {
+                        Some(model) => {
+                            if *model != current_model {
+                                llm_model = Some(current_model.clone());
+                                send_input_event(input_tx, InputEvent::StreamModel(current_model))
+                                    .await?;
+                            }
+                        }
+                        None => {
+                            llm_model = Some(current_model.clone());
+                            send_input_event(input_tx, InputEvent::StreamModel(current_model))
+                                .await?;
+                        }
+                    }
+                }
 
                 chat_completion_response = ChatCompletionResponse {
                     id: response.id.clone(),
                     object: response.object.clone(),
                     created: response.created,
-                    model: response.model.clone(),
+                    model: llm_model
+                        .clone()
+                        .map(|model| model.to_string())
+                        .unwrap_or_default(),
                     choices: vec![],
                     usage: chat_completion_response.usage.clone(),
                     system_fingerprint: None,

@@ -2,7 +2,7 @@ mod events;
 mod types;
 
 pub use events::{InputEvent, OutputEvent};
-use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
@@ -157,7 +157,8 @@ pub struct AppState {
     pub is_git_repo: bool,
     pub auto_approve_manager: AutoApproveManager,
     pub allowed_tools: Option<Vec<String>>,
-    pub model: AgentModel,
+    pub agent_model: AgentModel,
+    pub llm_model: Option<LLMModel>,
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
@@ -174,7 +175,7 @@ pub struct AppStateOptions<'a> {
     pub auto_approve_tools: Option<&'a Vec<String>>,
     pub allowed_tools: Option<&'a Vec<String>>,
     pub input_tx: Option<mpsc::Sender<InputEvent>>,
-    pub model: AgentModel,
+    pub agent_model: AgentModel,
 }
 
 impl AppState {
@@ -213,7 +214,7 @@ impl AppState {
             auto_approve_tools,
             allowed_tools,
             input_tx,
-            model,
+            agent_model,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -348,7 +349,8 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
-            model,
+            agent_model,
+            llm_model: None,
         }
     }
 
