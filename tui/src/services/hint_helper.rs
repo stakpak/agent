@@ -8,7 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use stakpak_shared::models::context::ContextAware;
+use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::integrations::openai::AgentModel;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {

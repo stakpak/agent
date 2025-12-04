@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Paragraph},
 };
-use stakpak_shared::models::context::ContextAware;
+use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     let screen = f.area();

@@ -1,11 +1,11 @@
 use crate::models::{
-    context::{ContextAware, ModelContextInfo},
     error::{AgentError, BadRequestErrorMessage},
     integrations::{
         anthropic::{Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel},
         gemini::{Gemini, GeminiConfig, GeminiInput, GeminiModel},
         openai::{OpenAI, OpenAIConfig, OpenAIInput, OpenAIModel},
     },
+    model_pricing::{ContextAware, ModelContextInfo},
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;

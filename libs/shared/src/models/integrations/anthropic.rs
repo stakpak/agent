@@ -1,10 +1,10 @@
-use crate::models::context::{ContextAware, ContextPricingTier, ModelContextInfo};
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
     LLMMessageContent, LLMMessageTypedContent, LLMTool,
 };
 use crate::models::llm::{LLMTokenUsage, PromptTokensDetails};
+use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use futures_util::StreamExt;
 use itertools::Itertools;
 use reqwest::Response;

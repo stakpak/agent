@@ -15,7 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::context::ContextAware;
+use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content

@@ -14,7 +14,7 @@ use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
-use stakpak_shared::models::context::ContextAware;
+use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 

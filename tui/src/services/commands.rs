@@ -25,7 +25,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::context::ContextAware;
+use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
