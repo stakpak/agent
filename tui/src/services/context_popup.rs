@@ -9,6 +9,53 @@ use ratatui::{
 };
 use stakpak_shared::models::model_pricing::ContextAware;
 
+fn should_show_pricing_table(state: &AppState) -> bool {
+    if state.llm_model.is_none() {
+        return false;
+    }
+
+    let context_info = state
+        .llm_model
+        .as_ref()
+        .map(|model| model.context_info())
+        .unwrap_or_default();
+
+    !context_info.pricing_tiers.is_empty()
+}
+
+fn get_pricing_table_height(state: &AppState) -> u16 {
+    if state.llm_model.is_none() {
+        return 0;
+    }
+
+    let context_info = state
+        .llm_model
+        .as_ref()
+        .map(|model| model.context_info())
+        .unwrap_or_default();
+
+    let tier_count = context_info.pricing_tiers.len();
+    if tier_count == 0 {
+        return 0;
+    }
+
+    // Table structure: top border (1) + header (1) + border after header (1)
+    // + data rows (tier_count) + border lines (tier_count) = 3 + 2 * tier_count
+    3 + 2 * tier_count as u16
+}
+
+fn should_show_footer_message(state: &AppState) -> bool {
+    let total_tokens = state.current_message_usage.total_tokens;
+    let context_info = state
+        .llm_model
+        .as_ref()
+        .map(|model| model.context_info())
+        .unwrap_or_default();
+    let max_tokens = context_info.max_tokens;
+    let ratio = (total_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
+    ratio >= context_info.approach_warning_threshold
+}
+
 pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     let screen = f.area();
     if screen.width < 30 || screen.height < 10 {
@@ -26,13 +73,33 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
             .max(min_width.min(available_width))
     };
 
+    // Determine what content to show
+    let show_pricing_table = should_show_pricing_table(state);
+    let show_footer = should_show_footer_message(state);
+    let pricing_table_height = if show_pricing_table {
+        get_pricing_table_height(state)
+    } else {
+        0
+    };
+
+    // Calculate base height: top padding (1) + usage summary (3) + gauge (1) + markers (2) = 7
+    // Plus block borders (top + bottom) = 2
+    let mut content_height = 7 + 2; // base content + borders
+
+    if show_pricing_table {
+        content_height += pricing_table_height; // pricing table (dynamic height)
+    }
+
+    if show_footer {
+        content_height += 1; // footer message
+    }
+
     let available_height = screen.height.saturating_sub(2);
-    let desired_height = 17;
-    let min_height = 17;
+    let min_height = 9; // minimum: base content + borders
     let popup_height = if available_height == 0 {
         0
     } else {
-        desired_height
+        content_height
             .min(available_height)
             .max(min_height.min(available_height))
     };
@@ -82,24 +149,48 @@ pub fn render_context_popup(f: &mut Frame, state: &AppState) {
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
 
+    // Build constraints dynamically based on what should be shown
+    let mut constraints = vec![
+        Constraint::Length(1), // top padding
+        Constraint::Length(3), // usage summary (allows wrapping + IO line)
+        Constraint::Length(1), // gauge
+        Constraint::Length(2), // markers
+    ];
+
+    if show_pricing_table {
+        constraints.push(Constraint::Length(pricing_table_height)); // pricing table (dynamic height)
+    }
+
+    if show_footer {
+        constraints.push(Constraint::Length(1)); // footer
+    }
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // top padding
-            Constraint::Length(3), // usage summary (allows wrapping + IO line)
-            Constraint::Length(1), // gauge
-            Constraint::Length(2), // markers
-            Constraint::Length(7), // pricing table
-            Constraint::Min(1),    // footer
-        ])
+        .constraints(constraints)
         .split(inner);
 
-    f.render_widget(Paragraph::new(""), layout[0]);
-    render_usage_summary(f, state, layout[1]);
-    render_usage_gauge(f, state, layout[2]);
-    render_markers(f, state, layout[3]);
-    render_pricing_table(f, state, layout[4]);
-    render_footer(f, state, layout[5]);
+    let mut layout_idx = 0;
+    f.render_widget(Paragraph::new(""), layout[layout_idx]);
+    layout_idx += 1;
+
+    render_usage_summary(f, state, layout[layout_idx]);
+    layout_idx += 1;
+
+    render_usage_gauge(f, state, layout[layout_idx]);
+    layout_idx += 1;
+
+    render_markers(f, state, layout[layout_idx]);
+    layout_idx += 1;
+
+    if show_pricing_table {
+        render_pricing_table(f, state, layout[layout_idx]);
+        layout_idx += 1;
+    }
+
+    if show_footer {
+        render_footer(f, state, layout[layout_idx]);
+    }
 }
 
 fn render_usage_summary(f: &mut Frame, state: &AppState, area: Rect) {
