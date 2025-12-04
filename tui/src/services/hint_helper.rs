@@ -8,8 +8,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.is_pasting {

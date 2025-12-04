@@ -25,9 +25,9 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")

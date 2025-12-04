@@ -14,8 +14,8 @@ use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
-use stakpak_shared::models::model_pricing::ContextAware;
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
