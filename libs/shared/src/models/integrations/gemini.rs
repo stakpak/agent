@@ -1,3 +1,4 @@
+use crate::models::context::{ContextAware, ContextPricingTier, ModelContextInfo};
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
@@ -28,10 +29,6 @@ pub enum GeminiModel {
     Gemini25Flash,
     #[serde(rename = "gemini-2.5-flash-lite")]
     Gemini25FlashLite,
-    #[serde(rename = "gemini-2.0-flash")]
-    Gemini20Flash,
-    #[serde(rename = "gemini-2.0-flash-lite")]
-    Gemini20FlashLite,
 }
 
 impl std::fmt::Display for GeminiModel {
@@ -41,8 +38,6 @@ impl std::fmt::Display for GeminiModel {
             GeminiModel::Gemini25Pro => write!(f, "gemini-2.5-pro"),
             GeminiModel::Gemini25Flash => write!(f, "gemini-2.5-flash"),
             GeminiModel::Gemini25FlashLite => write!(f, "gemini-2.5-flash-lite"),
-            GeminiModel::Gemini20Flash => write!(f, "gemini-2.0-flash"),
-            GeminiModel::Gemini20FlashLite => write!(f, "gemini-2.0-flash-lite"),
         }
     }
 }
@@ -51,6 +46,78 @@ impl GeminiModel {
     pub fn from_string(s: &str) -> Result<Self, String> {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize Gemini model".to_string())
+    }
+}
+
+impl ContextAware for GeminiModel {
+    fn context_info(&self) -> ModelContextInfo {
+        match self {
+            GeminiModel::Gemini3Pro => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![
+                    ContextPricingTier {
+                        label: "<200k tokens".to_string(),
+                        input_cost_per_million: 2.0,
+                        output_cost_per_million: 12.0,
+                        upper_bound: Some(200_000),
+                    },
+                    ContextPricingTier {
+                        label: ">200k tokens".to_string(),
+                        input_cost_per_million: 4.0,
+                        output_cost_per_million: 18.0,
+                        upper_bound: None,
+                    },
+                ],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25Pro => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![
+                    ContextPricingTier {
+                        label: "<200k tokens".to_string(),
+                        input_cost_per_million: 1.25,
+                        output_cost_per_million: 10.0,
+                        upper_bound: Some(200_000),
+                    },
+                    ContextPricingTier {
+                        label: ">200k tokens".to_string(),
+                        input_cost_per_million: 2.50,
+                        output_cost_per_million: 15.0,
+                        upper_bound: None,
+                    },
+                ],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25Flash => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.30,
+                    output_cost_per_million: 2.50,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25FlashLite => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.1,
+                    output_cost_per_million: 0.4,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            },
+        }
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            GeminiModel::Gemini3Pro => "Gemini 3 Pro".to_string(),
+            GeminiModel::Gemini25Pro => "Gemini 2.5 Pro".to_string(),
+            GeminiModel::Gemini25Flash => "Gemini 2.5 Flash".to_string(),
+            GeminiModel::Gemini25FlashLite => "Gemini 2.5 Flash Lite".to_string(),
+        }
     }
 }
 
@@ -802,8 +869,6 @@ async fn process_gemini_stream(
             },
         },
     }];
-
-    eprint!("{:?}", completion_response);
 
     Ok(completion_response)
 }

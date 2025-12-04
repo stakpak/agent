@@ -9,9 +9,7 @@
 //! All commands are defined here and executed through a unified executor.
 
 use crate::app::{AppState, HelperCommand};
-use crate::constants::{
-    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
-};
+use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
@@ -27,6 +25,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
+use stakpak_shared::models::context::ContextAware;
 use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
@@ -294,7 +293,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             Ok(()) => {
                 let _ = ctx
                     .output_tx
-                    .try_send(OutputEvent::SwitchModel(ctx.state.model.clone()));
+                    .try_send(OutputEvent::SwitchModel(ctx.state.agent_model.clone()));
                 push_model_message(ctx.state);
                 ctx.state.text_area.set_text("");
                 ctx.state.show_helper_dropdown = false;
@@ -420,24 +419,20 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
 // ========== Helper Functions ==========
 
 pub fn switch_model(state: &mut AppState) -> Result<(), String> {
-    match state.model {
+    match state.agent_model {
         AgentModel::Smart => {
-            if state.current_message_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
-                state.model = AgentModel::Eco;
-                Ok(())
-            } else {
-                Err(
-                    "Cannot switch model: context exceeds eco model context window size."
-                        .to_string(),
-                )
-            }
+            // TODO: Check if context exceeds eco model context window size
+            state.agent_model = AgentModel::Eco;
+            Ok(())
         }
         AgentModel::Eco => {
-            state.model = AgentModel::Smart;
+            // TODO: Check if context exceeds smart model context window size
+            state.agent_model = AgentModel::Smart;
             Ok(())
         }
         AgentModel::Recovery => {
-            state.model = AgentModel::Smart;
+            // TODO: Check if context exceeds recovery model context window size
+            state.agent_model = AgentModel::Smart;
             Ok(())
         }
     }
@@ -496,8 +491,16 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let total_tokens = usage.total_tokens;
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
-    let context_usage_pct = if CONTEXT_MAX_UTIL_TOKENS > 0 {
-        (total_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64) * 100.0
+
+    let context_info = state
+        .llm_model
+        .as_ref()
+        .map(|model| model.context_info())
+        .unwrap_or_default();
+    let max_tokens = context_info.max_tokens as u32;
+
+    let context_usage_pct = if max_tokens > 0 {
+        (total_tokens as f64 / max_tokens as f64) * 100.0
     } else {
         0.0
     };
@@ -518,7 +521,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     prompt.push_str(&format!(
         "- Context window usage: {:.1}% of {} tokens\n",
         context_usage_pct.min(100.0),
-        CONTEXT_MAX_UTIL_TOKENS
+        max_tokens
     ));
     if !recent_inputs.is_empty() {
         prompt.push('\n');

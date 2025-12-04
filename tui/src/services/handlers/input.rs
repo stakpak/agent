@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::app::{AppState, AttachedImage, InputEvent, OutputEvent};
-use crate::constants::{CONTEXT_MAX_UTIL_TOKENS_RECOVERY, MAX_PASTE_CHAR_COUNT};
+use crate::constants::MAX_PASTE_CHAR_COUNT;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
@@ -14,11 +14,9 @@ use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
 use crate::services::message::Message;
 use ratatui::style::{Color, Style};
-use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::context::ContextAware;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
-
-use crate::constants::{CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO};
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
@@ -435,15 +433,14 @@ fn handle_input_submitted(
         // Keep placeholders in text for LLM context
         let user_message_text = final_input.clone();
 
-        let max_tokens = match state.model {
-            AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
-            AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
-            AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
-        };
+        let context_info = state
+            .llm_model
+            .as_ref()
+            .map(|model| model.context_info())
+            .unwrap_or_default();
+        let max_tokens = context_info.max_tokens as u32;
 
-        let usage = &state.current_message_usage;
-        let total_tokens = usage.total_tokens;
-        let capped_tokens = total_tokens.min(max_tokens);
+        let capped_tokens = state.current_message_usage.total_tokens.min(max_tokens);
         let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
         let utilization_pct = (utilization_ratio * 100.0).round() as u64;
 

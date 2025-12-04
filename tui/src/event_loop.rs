@@ -46,7 +46,7 @@ pub async fn run_tui(
     allowed_tools: Option<&Vec<String>>,
     current_profile_name: String,
     rulebook_config: Option<RulebookConfig>,
-    model: AgentModel,
+    agent_model: AgentModel,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -86,7 +86,7 @@ pub async fn run_tui(
         auto_approve_tools,
         allowed_tools,
         input_tx: Some(internal_tx.clone()),
-        model,
+        agent_model,
     });
 
     // Set the current profile name and rulebook config

@@ -1,4 +1,5 @@
 use crate::models::{
+    context::{ContextAware, ModelContextInfo},
     error::{AgentError, BadRequestErrorMessage},
     integrations::{
         anthropic::{Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel},
@@ -9,12 +10,32 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum LLMModel {
     Anthropic(AnthropicModel),
     Gemini(GeminiModel),
     OpenAI(OpenAIModel),
     Custom(String),
+}
+
+impl ContextAware for LLMModel {
+    fn context_info(&self) -> ModelContextInfo {
+        match self {
+            LLMModel::Anthropic(model) => model.context_info(),
+            LLMModel::Gemini(model) => model.context_info(),
+            LLMModel::OpenAI(model) => model.context_info(),
+            LLMModel::Custom(_) => ModelContextInfo::default(),
+        }
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            LLMModel::Anthropic(model) => model.model_name(),
+            LLMModel::Gemini(model) => model.model_name(),
+            LLMModel::OpenAI(model) => model.model_name(),
+            LLMModel::Custom(model_name) => model_name.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -26,19 +47,26 @@ pub struct LLMProviderConfig {
 
 impl From<String> for LLMModel {
     fn from(value: String) -> Self {
-        match value.as_str() {
-            "claude-haiku-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
-            "claude-sonnet-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Sonnet),
-            "claude-opus-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Opus),
-            "gemini-2.0-flash" => LLMModel::Gemini(GeminiModel::Gemini20Flash),
-            "gemini-2.0-flash-lite" => LLMModel::Gemini(GeminiModel::Gemini20FlashLite),
-            "gemini-2.5-flash" => LLMModel::Gemini(GeminiModel::Gemini25Flash),
-            "gemini-2.5-flash-lite" => LLMModel::Gemini(GeminiModel::Gemini25FlashLite),
-            "gemini-2.5-pro" => LLMModel::Gemini(GeminiModel::Gemini25Pro),
-            "gemini-3-pro-preview" => LLMModel::Gemini(GeminiModel::Gemini3Pro),
-            "gpt-5" => LLMModel::OpenAI(OpenAIModel::GPT5),
-            "gpt-5-mini" => LLMModel::OpenAI(OpenAIModel::GPT5Mini),
-            _ => LLMModel::Custom(value),
+        if value.starts_with("claude-haiku-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+        } else if value.starts_with("claude-sonnet-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)
+        } else if value.starts_with("claude-opus-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
+        } else if value == "gemini-2.5-flash-lite" {
+            LLMModel::Gemini(GeminiModel::Gemini25FlashLite)
+        } else if value.starts_with("gemini-2.5-flash") {
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        } else if value.starts_with("gemini-2.5-pro") {
+            LLMModel::Gemini(GeminiModel::Gemini25Pro)
+        } else if value.starts_with("gemini-3-pro-preview") {
+            LLMModel::Gemini(GeminiModel::Gemini3Pro)
+        } else if value.starts_with("gpt-5-mini") {
+            LLMModel::OpenAI(OpenAIModel::GPT5Mini)
+        } else if value.starts_with("gpt-5") {
+            LLMModel::OpenAI(OpenAIModel::GPT5)
+        } else {
+            LLMModel::Custom(value)
         }
     }
 }
