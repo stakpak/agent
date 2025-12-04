@@ -93,22 +93,6 @@ pub struct MCPServerConfig {
     pub certificate_chain: Arc<Option<CertificateChain>>,
 }
 
-/// Initialize gitleaks configuration if secret redaction is enabled
-async fn init_gitleaks_if_needed(redact_secrets: bool, privacy_mode: bool) {
-    if redact_secrets {
-        tokio::spawn(async move {
-            match std::panic::catch_unwind(|| {
-                stakpak_shared::secrets::initialize_gitleaks_config(privacy_mode)
-            }) {
-                Ok(_rule_count) => {}
-                Err(_) => {
-                    // Failed to initialize, will initialize on first use
-                }
-            }
-        });
-    }
-}
-
 /// Create graceful shutdown handler
 async fn create_shutdown_handler(
     shutdown_rx: Option<Receiver<()>>,
@@ -190,8 +174,6 @@ async fn start_server_internal(
     tcp_listener: TcpListener,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
-
     // Create and start TaskManager
     let task_manager = TaskManager::new();
     let task_manager_handle = task_manager.handle();
