@@ -62,7 +62,7 @@ impl BestMatchesList {
             .collect();
 
         // Sort by descending score, then ascending path for consistent ordering
-        sorted_matches.sort_by(|a, b| match b.0.cmp(&a.0) {
+        sorted_matches.sort_unstable_by(|a, b| match b.0.cmp(&a.0) {
             std::cmp::Ordering::Equal => a.1.cmp(&b.1),
             other => other,
         });

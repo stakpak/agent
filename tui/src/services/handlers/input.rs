@@ -977,7 +977,7 @@ fn find_all_image_paths(input: &str) -> Vec<(usize, usize, String)> {
     }
 
     // Sort by position and deduplicate
-    paths.sort_by_key(|(start, _, _)| *start);
+    paths.sort_unstable_by_key(|(start, _, _)| *start);
     paths.dedup_by_key(|(start, _, _)| *start);
 
     paths

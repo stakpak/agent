@@ -377,7 +377,7 @@ impl RemoteConnection {
             result.push((entry_path, is_directory));
         }
 
-        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         Ok(result)
     }
 

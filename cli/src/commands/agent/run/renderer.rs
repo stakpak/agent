@@ -477,7 +477,7 @@ impl OutputRenderer {
             .filter(|tool| tool.time_saved_seconds.unwrap_or(0) > 0)
             .collect();
 
-        time_saving_tools.sort_by(|a, b| {
+        time_saving_tools.sort_unstable_by(|a, b| {
             b.time_saved_seconds
                 .unwrap_or(0)
                 .cmp(&a.time_saved_seconds.unwrap_or(0))
