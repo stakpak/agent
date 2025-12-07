@@ -339,6 +339,12 @@ mod password_tests {
     use super::*;
 
     #[test]
+    fn test_generate_password_length_too_low() {
+        let password = generate_password(3, false);
+        assert_eq!(password.len(), 3);
+    }
+
+    #[test]
     fn test_generate_password_length() {
         let password = generate_password(10, false);
         assert_eq!(password.len(), 10);
