@@ -177,6 +177,7 @@ pub struct GeminiGenerationConfig {
 // Gemini API Response Structs
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiResponse {
     pub candidates: Option<Vec<GeminiCandidate>>,
     pub usage_metadata: Option<GeminiUsageMetadata>,
@@ -185,6 +186,7 @@ pub struct GeminiResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiCandidate {
     pub content: Option<GeminiContent>,
     pub finish_reason: Option<String>,
@@ -192,6 +194,7 @@ pub struct GeminiCandidate {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiUsageMetadata {
     pub prompt_token_count: Option<u32>,
     pub cached_content_token_count: Option<u32>,
@@ -802,8 +805,6 @@ async fn process_gemini_stream(
             },
         },
     }];
-
-    eprint!("{:?}", completion_response);
 
     Ok(completion_response)
 }
