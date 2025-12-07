@@ -708,7 +708,10 @@ pub async fn process_stream(
                                 let usage = LLMTokenUsage {
                                     prompt_tokens: usage.input_tokens,
                                     completion_tokens: usage.output_tokens,
-                                    total_tokens: usage.input_tokens + usage.output_tokens,
+                                    total_tokens: usage.input_tokens
+                                        + usage.cache_creation_input_tokens.unwrap_or(0)
+                                        + usage.cache_read_input_tokens.unwrap_or(0)
+                                        + usage.output_tokens,
                                     prompt_tokens_details: Some(PromptTokensDetails {
                                         input_tokens: Some(usage.input_tokens),
                                         output_tokens: Some(usage.output_tokens),
