@@ -4,6 +4,7 @@ use rand::seq::IndexedRandom;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use walkdir::DirEntry;
 
 use crate::models::password::Password;
@@ -287,6 +288,8 @@ temp*
         Ok(())
     }
 }
+
+static PASSWORD_CONFLICT_EXHAUST_RETRIES_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 /// Generate a secure password with alphanumeric characters and optional symbols
 pub fn generate_password(
