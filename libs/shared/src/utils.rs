@@ -292,7 +292,7 @@ temp*
 pub fn generate_password(
     length: usize,
     no_symbols: bool,
-    redaction_map: HashMap<String, String>,
+    redaction_map: &HashMap<String, String>,
 ) -> Result<Password, String> {
     let mut rng = rand::rng();
 

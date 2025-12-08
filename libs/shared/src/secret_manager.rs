@@ -1,4 +1,5 @@
 use crate::local_store::LocalStore;
+use crate::models::password::Password;
 use crate::secrets::{redact_password, redact_secrets, restore_secrets};
 use serde_json;
 use std::collections::HashMap;
@@ -93,7 +94,10 @@ impl SecretManager {
         redaction_result.redacted_string
     }
 
-    pub fn redact_and_store_password(&self, password: &str) -> String {
+    pub fn redact_and_store_password(&self, password: Password) -> String {
+        // temporary to remove errors
+        let password = password.expose_secret();
+
         if !self.redact_secrets {
             return password.to_string();
         }
