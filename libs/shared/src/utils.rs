@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use rand::Rng;
-use rand::seq::IndexedRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use walkdir::DirEntry;
 
-use crate::models::password::Password;
+use crate::models::password::{Password, PasswordGenerationError};
 
 /// Read .gitignore patterns from the specified base directory
 pub fn read_gitignore_patterns(base_dir: &str) -> Vec<String> {
@@ -296,7 +296,7 @@ pub fn generate_password(
     length: usize,
     no_symbols: bool,
     redaction_map: &HashMap<String, String>,
-) -> Result<Password, String> {
+) -> Result<Password, PasswordGenerationError> {
     let mut rng = rand::rng();
 
     // Define character sets
@@ -367,23 +367,30 @@ mod password_tests {
     use super::*;
 
     #[test]
-    fn test_generate_password_length_too_low() {
-        let password = generate_password(3, false);
-        assert_eq!(password.expose_secret().len(), 3);
+    fn test_generate_password_length_too_short() {
+        let redaction_map = HashMap::new();
+        let result = generate_password(7, false, &redaction_map);
+
+        match result {
+            Ok(_) => panic!("Expected an error, but got a valid password"),
+            Err(e) => assert_eq!(e, PasswordGenerationError::TooShort),
+        }
     }
 
     #[test]
     fn test_generate_password_length() {
-        let password = generate_password(10, false);
+        let redaction_map = HashMap::new();
+        let password = generate_password(10, false, &redaction_map).unwrap();
         assert_eq!(password.expose_secret().len(), 10);
 
-        let password = generate_password(20, true);
+        let password = generate_password(20, true, &redaction_map).unwrap();
         assert_eq!(password.expose_secret().len(), 20);
     }
 
     #[test]
     fn test_generate_password_no_symbols() {
-        let password = generate_password(50, true);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, true, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         for symbol in symbols.chars() {
@@ -397,7 +404,8 @@ mod password_tests {
 
     #[test]
     fn test_generate_password_with_symbols() {
-        let password = generate_password(50, false);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, false, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         // At least one symbol should be present (due to our algorithm)
@@ -410,7 +418,8 @@ mod password_tests {
 
     #[test]
     fn test_generate_password_contains_required_chars() {
-        let password = generate_password(50, false);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, false, &redaction_map).unwrap();
 
         let has_lowercase = password
             .expose_secret()
@@ -429,8 +438,9 @@ mod password_tests {
 
     #[test]
     fn test_generate_password_uniqueness() {
-        let password1 = generate_password(20, false);
-        let password2 = generate_password(20, false);
+        let redaction_map = HashMap::new();
+        let password1 = generate_password(20, false, &redaction_map).unwrap();
+        let password2 = generate_password(20, false, &redaction_map).unwrap();
 
         // Very unlikely to generate the same password twice
         assert_ne!(password1.expose_secret(), password2.expose_secret());

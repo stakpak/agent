@@ -825,8 +825,10 @@ SECURITY FEATURES:
 
         let redaction_map = self.get_secret_manager().load_session_redaction_map();
 
-        let password =
-            stakpak_shared::utils::generate_password(length, no_symbols, &redaction_map).unwrap();
+        let password = stakpak_shared::utils::generate_password(length, no_symbols, &redaction_map)
+            .map_err(|err| {
+                McpError::internal_error(err.to_string(), Some(json!({"error": err.to_string()})))
+            })?;
 
         let redacted_password = self
             .get_secret_manager()

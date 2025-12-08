@@ -23,9 +23,24 @@ pub struct Password(#[schemars(with = "String", length(min = 8))] SecretString);
 //     secret.expose_secret().serialize(serializer)
 // }
 
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub enum PasswordGenerationError {
+    #[error("Failed to generate a unique password")]
+    Conflict,
+    #[error("Failed to generate a password. too short")]
+    TooShort,
+}
+
 impl Password {
-    pub fn new(password: impl Into<String>) -> Self {
-        Self(SecretString::from(password.into()))
+    pub fn new(password: impl Into<String>) -> Result<Self, PasswordGenerationError> {
+        let password: String = password.into();
+
+        if password.len() < 8 {
+            tracing::error!("password is too short");
+            return Err(PasswordGenerationError::TooShort);
+        }
+
+        Ok(Self(SecretString::from(password)))
     }
 
     pub fn expose_secret(&self) -> &str {
@@ -38,12 +53,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_password_rejects_less_than_8_chars() {
+        let raw = "1234567";
+        let password = Password::new(raw);
+
+        assert!(password.is_err());
+    }
+
+    #[test]
     fn test_initialization_and_exposure() {
         let raw = "super_secret_123";
         let password = Password::new(raw);
 
         // Verify we can retrieve the secret explicitly
-        assert_eq!(password.expose_secret(), raw);
+        assert_eq!(password.unwrap().expose_secret(), raw);
     }
 
     #[test]
