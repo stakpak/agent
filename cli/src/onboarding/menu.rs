@@ -3,8 +3,11 @@
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::styled_output::{self, Colors, StepStatus};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::io::{self, Write, stdout};
+use std::time::{Duration, Instant};
 
 /// Select from a list of options with search capability
 /// Returns NavResult to support back navigation
@@ -23,10 +26,8 @@ pub fn select_option<T: Clone>(
     }
 
     // Note: Caller should have already cleared the step content area
-    // We just render this step's content fresh
-    print!("\r\n");
-    styled_output::render_title(title);
-    print!("\r\n");
+    // We just render this step's content fresh - start immediately, no extra newline
+    styled_output::render_title(title); // render_title already includes \r\n
 
     // Render progress steps on one line
     let steps: Vec<_> = (0..total_steps)
@@ -41,10 +42,11 @@ pub fn select_option<T: Clone>(
             (format!("Step {}", i + 1), status)
         })
         .collect();
-    styled_output::render_steps(&steps);
-    print!("\r\n");
-    print!("\r\n");
+    styled_output::render_steps(&steps); // render_steps already includes \r\n
+    print!("\r\n"); // One empty line before interactive area
 
+    // Track total height including title and steps (3 lines: title, steps, 1 empty line)
+    const HEADER_HEIGHT: usize = 3;
     // Initial render of the interactive area
     // We track how many lines we printed so we can move back up
     let mut previous_height = 0;
@@ -110,8 +112,8 @@ pub fn select_option<T: Clone>(
         {
             match code {
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    // Clear interactive area before exiting
-                    print!("\x1b[{}A", previous_height);
+                    // Clear everything including title and steps before exiting
+                    print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
                     print!("\x1b[0J");
                     let _ = stdout().flush();
                     disable_raw_mode().ok();
@@ -119,8 +121,8 @@ pub fn select_option<T: Clone>(
                 }
                 KeyCode::Enter => {
                     if !filtered.is_empty() {
-                        // Clear only the interactive area
-                        print!("\x1b[{}A", previous_height);
+                        // Clear everything including title and steps
+                        print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
                         print!("\x1b[0J");
                         let _ = stdout().flush();
                         disable_raw_mode().ok();
@@ -144,8 +146,8 @@ pub fn select_option<T: Clone>(
                     selected = 0;
                 }
                 KeyCode::Esc => {
-                    // Clear interactive area
-                    print!("\x1b[{}A", previous_height);
+                    // Clear everything including title and steps
+                    print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
                     print!("\x1b[0J");
                     let _ = stdout().flush();
                     disable_raw_mode().ok();
@@ -184,47 +186,53 @@ pub fn prompt_text(prompt: &str, required: bool) -> NavResult<Option<String>> {
         print!("{}{}", Colors::CYAN, input);
         let _ = io::stdout().flush();
 
-        if let Ok(Event::Key(KeyEvent {
-            code,
-            kind: KeyEventKind::Press,
-            modifiers,
-            ..
-        })) = event::read()
-        {
-            match code {
-                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    disable_raw_mode().ok();
-                    std::process::exit(130);
-                }
-                KeyCode::Enter => {
-                    let trimmed = input.trim();
-                    if required && trimmed.is_empty() {
-                        show_required = true;
-                        input.clear();
-                        // Don't disable raw mode - continue the loop
-                        continue;
-                    }
-                    print!("\r\n");
-                    disable_raw_mode().ok();
-                    return NavResult::Forward(if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    });
-                }
-                KeyCode::Esc => {
-                    print!("\r\n");
-                    disable_raw_mode().ok();
-                    return NavResult::Back;
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                }
-                KeyCode::Char(c) => {
-                    input.push(c);
-                }
-                _ => {}
+        match event::read() {
+            Ok(Event::Paste(pasted_text)) => {
+                // Handle paste event - add all characters at once
+                input.push_str(&pasted_text);
             }
+            Ok(Event::Key(KeyEvent {
+                code,
+                kind: KeyEventKind::Press,
+                modifiers,
+                ..
+            })) => {
+                match code {
+                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        disable_raw_mode().ok();
+                        std::process::exit(130);
+                    }
+                    KeyCode::Enter => {
+                        let trimmed = input.trim();
+                        if required && trimmed.is_empty() {
+                            show_required = true;
+                            input.clear();
+                            // Don't disable raw mode - continue the loop
+                            continue;
+                        }
+                        print!("\r\n");
+                        disable_raw_mode().ok();
+                        return NavResult::Forward(if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        });
+                    }
+                    KeyCode::Esc => {
+                        print!("\r\n");
+                        disable_raw_mode().ok();
+                        return NavResult::Back;
+                    }
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        input.push(c);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -239,62 +247,167 @@ pub fn prompt_password(prompt: &str, required: bool) -> NavResult<Option<String>
         return NavResult::Cancel;
     }
 
-    loop {
-        // Clear the line and re-render prompt
-        print!("\r\x1b[K"); // Clear current line
-        print!("{}▲ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
+    // Enable bracketed paste mode for better paste handling
+    let _ = execute!(stdout(), EnableBracketedPaste);
 
+    // Buffer for rapid character input (paste detection)
+    let mut paste_buffer = String::new();
+    let mut last_char_time = Instant::now();
+    const PASTE_TIMEOUT_MS: u64 = 50; // Characters arriving within 50ms are considered a paste
+
+    loop {
+        // Get terminal width for wrapping calculation
+        let terminal_width = crossterm::terminal::size()
+            .map(|(w, _)| w as usize)
+            .unwrap_or(80)
+            .max(40);
+
+        // Calculate what we're about to print
+        let prompt_text = format!("▲ {}: ", prompt);
+        let required_text = if show_required && required {
+            " (Required) "
+        } else {
+            ""
+        };
+        let prefix_len = prompt_text.len() + required_text.len();
+        let display_len = password.len() + paste_buffer.len();
+
+        let available_width = terminal_width.saturating_sub(prefix_len);
+
+        // Show asterisks for password (including buffered paste)
+        // Cap the number of stars to available width to prevent wrapping issues
+        let stars_to_show = display_len.min(available_width.saturating_sub(1));
+
+        // Move up to the start of the prompt if we've printed before
+        // Since we force single line now, we only need to handle the single line case
+        // But to be safe against edge cases where we might have wrapped previously (before this fix running)
+        // or just standard redraw:
+        // Actually, with single line enforcement, `\r` is sufficient to return to start of line,
+        // and `\x1b[K` clears it.
+        // The previous logic tried to handle multi-line. We simplify it.
+
+        print!("\r\x1b[K"); // Clear current line
+
+        // Render prompt
+        print!("{}▲ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
         if show_required && required {
             print!("{}(Required){} ", Colors::YELLOW, Colors::RESET);
         }
 
-        // Show asterisks for password
+        // Show asterisks
         print!("{}", Colors::CYAN);
-        for _ in 0..password.len() {
+        for _ in 0..stars_to_show {
             print!("*");
         }
+        // If truncated, maybe show a hint? No, simpler is better for now to fix the bug.
+        print!("{}", Colors::RESET);
+
+        // previous_lines is no longer needed for multi-line tracking,
+        // but we keep the variable or logic compatible if we want.
+        // Actually, I should remove the complex movement logic above this block too.
+
         let _ = io::stdout().flush();
 
-        if let Ok(Event::Key(KeyEvent {
-            code,
-            kind: KeyEventKind::Press,
-            modifiers,
-            ..
-        })) = event::read()
-        {
-            match code {
-                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    disable_raw_mode().ok();
-                    std::process::exit(130);
-                }
-                KeyCode::Enter => {
-                    let trimmed = password.trim();
-                    if required && trimmed.is_empty() {
-                        show_required = true;
-                        password.clear();
-                        // Don't disable raw mode - continue the loop
-                        continue;
+        match event::read() {
+            Ok(Event::Paste(pasted_text)) => {
+                // Handle paste event - add all characters at once
+                password.push_str(&pasted_text);
+                paste_buffer.clear();
+            }
+            Ok(Event::Key(KeyEvent {
+                code,
+                kind: KeyEventKind::Press,
+                modifiers,
+                ..
+            })) => {
+                let now = Instant::now();
+                let time_since_last = now.duration_since(last_char_time);
+
+                match code {
+                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        let _ = execute!(stdout(), DisableBracketedPaste);
+                        disable_raw_mode().ok();
+                        std::process::exit(130);
                     }
-                    print!("\r\n");
-                    disable_raw_mode().ok();
-                    return NavResult::Forward(if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    });
+                    KeyCode::Enter => {
+                        // Flush any pending paste buffer
+                        if !paste_buffer.is_empty() {
+                            password.push_str(&paste_buffer);
+                            paste_buffer.clear();
+                        }
+                        let trimmed = password.trim();
+                        if required && trimmed.is_empty() {
+                            show_required = true;
+                            password.clear();
+                            // Don't disable raw mode - continue the loop
+                            continue;
+                        }
+                        print!("\r\n");
+                        let _ = execute!(stdout(), DisableBracketedPaste);
+                        disable_raw_mode().ok();
+                        return NavResult::Forward(if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        });
+                    }
+                    KeyCode::Esc => {
+                        print!("\r\n");
+                        let _ = execute!(stdout(), DisableBracketedPaste);
+                        disable_raw_mode().ok();
+                        return NavResult::Back;
+                    }
+                    KeyCode::Backspace => {
+                        if !paste_buffer.is_empty() {
+                            paste_buffer.pop();
+                        } else {
+                            password.pop();
+                        }
+                        last_char_time = now;
+                    }
+                    KeyCode::Char(c) => {
+                        // If characters are arriving rapidly, collect them as a paste
+                        if time_since_last.as_millis() < PASTE_TIMEOUT_MS as u128 {
+                            paste_buffer.push(c);
+                            last_char_time = now;
+
+                            // Try to read all remaining rapid characters
+                            while let Ok(true) = event::poll(Duration::from_millis(10)) {
+                                match event::read() {
+                                    Ok(Event::Key(KeyEvent {
+                                        code: KeyCode::Char(ch),
+                                        kind: KeyEventKind::Press,
+                                        ..
+                                    })) => {
+                                        paste_buffer.push(ch);
+                                        last_char_time = Instant::now();
+                                    }
+                                    _ => break,
+                                }
+                            }
+
+                            // Flush buffer to password
+                            password.push_str(&paste_buffer);
+                            paste_buffer.clear();
+                        } else {
+                            // Flush any pending paste buffer
+                            if !paste_buffer.is_empty() {
+                                password.push_str(&paste_buffer);
+                                paste_buffer.clear();
+                            }
+                            password.push(c);
+                            last_char_time = now;
+                        }
+                    }
+                    _ => {}
                 }
-                KeyCode::Esc => {
-                    print!("\r\n");
-                    disable_raw_mode().ok();
-                    return NavResult::Back;
+            }
+            _ => {
+                // Flush any pending paste buffer on other events
+                if !paste_buffer.is_empty() {
+                    password.push_str(&paste_buffer);
+                    paste_buffer.clear();
                 }
-                KeyCode::Backspace => {
-                    password.pop();
-                }
-                KeyCode::Char(c) => {
-                    password.push(c);
-                }
-                _ => {}
             }
         }
     }

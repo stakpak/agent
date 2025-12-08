@@ -52,6 +52,8 @@ pub async fn run_onboarding(config: &mut AppConfig) {
         print!("\x1b[0J"); // Clear from cursor to end of screen
         print!("\x1b[K"); // Clear from cursor to end of current line
         let _ = io::stdout().flush();
+        // Re-save position to ensure it's correct
+        print!("\x1b[s");
 
         let initial_choice = select_option(
             "Choose authentication method",
@@ -79,13 +81,9 @@ pub async fn run_onboarding(config: &mut AppConfig) {
                 break;
             }
             NavResult::Forward(InitialChoice::OwnKeys) => {
-                // Clear step 1 content and re-establish position after welcome
-                // select_option may have overwritten the saved position, so we restore and re-save
-                print!("\x1b[u");
-                print!("\x1b[0J");
-                print!("\x1b[K");
-                let _ = io::stdout().flush();
-                // Re-save position after welcome for step 2
+                // select_option already cleared everything including title and steps
+                // Cursor is now at the position right after welcome message
+                // Just re-save this position for step 2 (no need to restore/clear again)
                 print!("\x1b[s");
                 if handle_own_keys_flow(config).await {
                     break;
@@ -119,19 +117,13 @@ async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
     // Provider selection with back navigation support
     loop {
         // CRITICAL: Clear previous step content WITHOUT touching welcome message
-        // The saved position should be right after the welcome message
-        // But select_option may have overwritten it, so we need to handle that
-
-        // Restore to saved position (may be wrong if select_option overwrote it)
+        // On first iteration, cursor is already at correct position (select_option cleared everything)
+        // On subsequent iterations (after back navigation), restore and clear
         print!("\x1b[u");
-        // Clear from cursor to end - this should clear all step content
-        print!("\x1b[0J");
-        // Clear current line
-        print!("\x1b[K");
+        print!("\x1b[0J"); // Clear from cursor to end of screen
+        print!("\x1b[K"); // Clear current line
         let _ = io::stdout().flush();
-
-        // Re-save position after clearing - we should be at the right place now
-        // (right after welcome message, since we cleared everything below)
+        // Re-save position after clearing for next step or back navigation
         print!("\x1b[s");
 
         let provider_choice = select_option(
@@ -155,12 +147,11 @@ async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
             NavResult::Back => {
                 // User wants to go back to step 1
                 // Clear step 2 content WITHOUT touching welcome message
-                // Just restore to position after welcome and clear from there
                 print!("\x1b[u");
-                print!("\x1b[0J");
-                print!("\x1b[K");
+                print!("\x1b[0J"); // Clear from cursor to end of screen
+                print!("\x1b[K"); // Clear current line
                 let _ = io::stdout().flush();
-                // Re-save position after welcome
+                // Re-save position after welcome for step 1
                 print!("\x1b[s");
                 return false;
             }
@@ -179,17 +170,13 @@ async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
 /// Handle OpenAI setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_openai_setup(config: &mut AppConfig) -> bool {
-    // Clear previous step content (step 2) WITHOUT touching welcome message
+    // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
-    print!("\x1b[0J");
-    print!("\x1b[K");
+    print!("\x1b[0J"); // Clear from cursor to end of screen
+    print!("\x1b[K"); // Clear current line
     let _ = io::stdout().flush();
 
-    // Re-save position after welcome
-    print!("\x1b[s");
-
-    // Render step 3 - start immediately after welcome message
-    print!("\r\n");
+    // Render step 3 - start immediately after welcome message (no extra newline)
     crate::onboarding::styled_output::render_title("OpenAI Configuration");
     print!("\r\n");
 
@@ -248,15 +235,13 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
 /// Handle Gemini setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
-    // Clear previous step content (step 2) WITHOUT touching welcome message
+    // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
-    print!("\x1b[0J");
-    print!("\x1b[K");
+    print!("\x1b[0J"); // Clear from cursor to end of screen
+    print!("\x1b[K"); // Clear current line
     let _ = io::stdout().flush();
-    print!("\x1b[s");
 
-    // Render step 3 - start immediately after welcome message
-    print!("\r\n");
+    // Render step 3 - start immediately after welcome message (no extra newline)
     crate::onboarding::styled_output::render_title("Gemini Configuration");
     print!("\r\n");
 
@@ -315,15 +300,13 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
 /// Handle Anthropic setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
-    // Clear previous step content (step 2) WITHOUT touching welcome message
+    // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
-    print!("\x1b[0J");
-    print!("\x1b[K");
+    print!("\x1b[0J"); // Clear from cursor to end of screen
+    print!("\x1b[K"); // Clear current line
     let _ = io::stdout().flush();
-    print!("\x1b[s");
 
-    // Render step 3 - start immediately after welcome message
-    print!("\r\n");
+    // Render step 3 - start immediately after welcome message (no extra newline)
     crate::onboarding::styled_output::render_title("Anthropic Configuration");
     print!("\r\n");
 

@@ -14,6 +14,8 @@ impl Colors {
     pub const WHITE: &'static str = "\x1b[1;37m";
     /// Gray - for inactive/secondary text
     pub const GRAY: &'static str = "\x1b[90m";
+    /// Magenta - for info messages
+    pub const MAGENTA: &'static str = "\x1b[1;35m";
     /// Reset color
     pub const RESET: &'static str = "\x1b[0m";
 }
@@ -72,7 +74,7 @@ pub fn render_success(message: &str) {
 }
 
 /// Render an option in a menu
-pub fn render_option(option: &str, is_selected: bool, is_recommended: bool) {
+pub fn render_option(option: &str, is_selected: bool, _is_recommended: bool) {
     let indicator = if is_selected {
         format!("{}●{}", Colors::GREEN, Colors::RESET)
     } else {
@@ -85,19 +87,12 @@ pub fn render_option(option: &str, is_selected: bool, is_recommended: bool) {
         Colors::GRAY
     };
 
-    let recommended = if is_recommended {
-        format!(" {} (recommended)", Colors::GRAY)
-    } else {
-        String::new()
-    };
-
     print!(
-        "  {} {}{}{}{}\r\n",
+        "  {} {}{}{}\r\n",
         indicator,
         text_color,
         option,
-        Colors::RESET,
-        recommended
+        Colors::RESET
     );
 }
 
@@ -184,7 +179,7 @@ pub fn render_warning(message: &str) {
     print!("{}⚠️  {}{}\r\n", Colors::YELLOW, message, Colors::RESET);
 }
 
-/// Render an info message (cyan)
+/// Render an info message (magenta)
 pub fn render_info(message: &str) {
-    print!("{}ℹ️  {}{}\r\n", Colors::CYAN, message, Colors::RESET);
+    print!("{}ℹ️  {}{}\r\n", Colors::MAGENTA, message, Colors::RESET);
 }
