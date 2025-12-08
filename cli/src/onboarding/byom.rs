@@ -7,6 +7,9 @@ use crate::onboarding::config_templates::{
 use crate::onboarding::menu::{prompt_password, prompt_text, prompt_yes_no, select_option};
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::styled_output::{self, StepStatus};
+use stakpak_shared::models::integrations::anthropic::AnthropicModel;
+use stakpak_shared::models::integrations::gemini::GeminiModel;
+use stakpak_shared::models::integrations::openai::OpenAIModel;
 
 /// Configure BYOM - single model or hybrid
 pub fn configure_byom(current_step: usize, total_steps: usize) -> Option<ProfileConfig> {
@@ -217,24 +220,52 @@ fn select_model_for_provider(
     let models = match provider {
         HybridProvider::OpenAI => {
             vec![
-                ("gpt-5", "GPT-5", true),
-                ("gpt-5-mini", "GPT-5 Mini", false),
-                ("gpt-5-nano", "GPT-5 Nano", false),
+                (OpenAIModel::GPT5.to_string(), "GPT-5", true),
+                (OpenAIModel::GPT5Mini.to_string(), "GPT-5 Mini", false),
+                (OpenAIModel::GPT5Nano.to_string(), "GPT-5 Nano", false),
             ]
         }
         HybridProvider::Gemini => {
             vec![
-                ("gemini-3-pro-preview", "Gemini 3 Pro Preview", true),
-                ("gemini-2.5-pro", "Gemini 2.5 Pro", false),
-                ("gemini-2.5-flash", "Gemini 2.5 Flash", false),
-                ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", false),
+                (
+                    GeminiModel::Gemini3Pro.to_string(),
+                    "Gemini 3 Pro Preview",
+                    true,
+                ),
+                (
+                    GeminiModel::Gemini25Pro.to_string(),
+                    "Gemini 2.5 Pro",
+                    false,
+                ),
+                (
+                    GeminiModel::Gemini25Flash.to_string(),
+                    "Gemini 2.5 Flash",
+                    false,
+                ),
+                (
+                    GeminiModel::Gemini25FlashLite.to_string(),
+                    "Gemini 2.5 Flash Lite",
+                    false,
+                ),
             ]
         }
         HybridProvider::Anthropic => {
             vec![
-                ("claude-opus-4-5", "Claude Opus 4.5", true),
-                ("claude-sonnet-4-5", "Claude Sonnet 4.5", false),
-                ("claude-haiku-4-5", "Claude Haiku 4.5", false),
+                (
+                    AnthropicModel::Claude45Opus.to_string(),
+                    "Claude Opus 4.5",
+                    true,
+                ),
+                (
+                    AnthropicModel::Claude45Sonnet.to_string(),
+                    "Claude Sonnet 4.5",
+                    false,
+                ),
+                (
+                    AnthropicModel::Claude45Haiku.to_string(),
+                    "Claude Haiku 4.5",
+                    false,
+                ),
             ]
         }
     };

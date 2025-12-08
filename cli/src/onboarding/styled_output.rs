@@ -96,19 +96,6 @@ pub fn render_option(option: &str, is_selected: bool, _is_recommended: bool) {
     );
 }
 
-/// Render a box border (cyan)
-#[allow(dead_code)]
-pub fn render_box_top(width: usize) {
-    let line = "─".repeat(width.saturating_sub(2));
-    print!("{}┌{}┐{}\r\n", Colors::CYAN, line, Colors::RESET);
-}
-
-#[allow(dead_code)]
-pub fn render_box_bottom(width: usize) {
-    let line = "─".repeat(width.saturating_sub(2));
-    print!("{}└{}┘{}\r\n", Colors::CYAN, line, Colors::RESET);
-}
-
 /// Render a config preview (TOML syntax highlighting)
 pub fn render_config_preview(config: &str) {
     print!("\r\n");
@@ -144,12 +131,6 @@ pub fn render_config_preview(config: &str) {
     print!("{}\r\n", Colors::RESET);
 }
 
-/// Render a separator line
-#[allow(dead_code)]
-pub fn render_separator() {
-    print!("─────────────────────────────────────────────────────────────────────────────\r\n");
-}
-
 /// Render colorized keyboard shortcuts footer (like TUI style)
 pub fn render_footer_shortcuts() {
     // Green for Enter
@@ -182,4 +163,25 @@ pub fn render_warning(message: &str) {
 /// Render an info message (magenta)
 pub fn render_info(message: &str) {
     print!("{}ℹ️  {}{}\r\n", Colors::MAGENTA, message, Colors::RESET);
+}
+
+/// Render default models for a provider in neutral colors (white/gray)
+pub fn render_default_models(smart_model: &str, eco_model: &str, recovery_model: Option<&str>) {
+    print!("{}Default models:{}\r\n", Colors::WHITE, Colors::RESET);
+    print!(
+        "  {}Smart: {}{}\r\n",
+        Colors::GRAY,
+        Colors::WHITE,
+        smart_model
+    );
+    print!("  {}Eco: {}{}\r\n", Colors::GRAY, Colors::WHITE, eco_model);
+    if let Some(recovery) = recovery_model {
+        print!(
+            "  {}Recovery: {}{}\r\n",
+            Colors::GRAY,
+            Colors::WHITE,
+            recovery
+        );
+    }
+    print!("\r\n");
 }

@@ -25,6 +25,9 @@ use crate::onboarding::menu::{prompt_password, select_option};
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save, save_to_default_profile};
 use crate::onboarding::styled_output::StepStatus;
+use stakpak_shared::models::integrations::anthropic::AnthropicModel;
+use stakpak_shared::models::integrations::gemini::GeminiModel;
+use stakpak_shared::models::integrations::openai::OpenAIModel;
 use std::io::{self, Write};
 
 /// Main onboarding flow entry point
@@ -188,7 +191,13 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
     ];
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
-    print!("\r\n");
+
+    // Show default models
+    crate::onboarding::styled_output::render_default_models(
+        &OpenAIModel::default_smart_model(),
+        &OpenAIModel::default_eco_model(),
+        Some(&OpenAIModel::default_recovery_model()),
+    );
 
     match prompt_password("Enter your OpenAI API key", true) {
         NavResult::Forward(Some(api_key)) => {
@@ -266,7 +275,13 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
     ];
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
-    print!("\r\n");
+
+    // Show default models
+    crate::onboarding::styled_output::render_default_models(
+        &GeminiModel::default_smart_model(),
+        &GeminiModel::default_eco_model(),
+        Some(&GeminiModel::default_recovery_model()),
+    );
 
     match prompt_password("Enter your Gemini API key", true) {
         NavResult::Forward(Some(api_key)) => {
@@ -344,7 +359,13 @@ async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
     ];
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
-    print!("\r\n");
+
+    // Show default models
+    crate::onboarding::styled_output::render_default_models(
+        &AnthropicModel::default_smart_model(),
+        &AnthropicModel::default_eco_model(),
+        Some(&AnthropicModel::default_recovery_model()),
+    );
 
     match prompt_password("Enter your Anthropic API key", true) {
         NavResult::Forward(Some(api_key)) => {
