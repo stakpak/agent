@@ -209,7 +209,7 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile) {
+                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -222,6 +222,19 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
                         "✓ Configuration saved successfully",
                     );
                     println!();
+
+                    // Update AppConfig with saved values so we can use them immediately
+                    config.provider = profile
+                        .provider
+                        .unwrap_or(crate::config::ProviderType::Local);
+                    config.openai = profile.openai.clone();
+                    config.smart_model = profile.smart_model.clone();
+                    config.eco_model = profile.eco_model.clone();
+                    config.recovery_model = profile.recovery_model.clone();
+                    if let Some(key) = &profile.api_key {
+                        config.api_key = Some(key.clone());
+                    }
+
                     true
                 }
                 NavResult::Forward(Some(false)) | NavResult::Back | NavResult::Cancel => false,
@@ -274,7 +287,7 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile) {
+                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -287,6 +300,19 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
                         "✓ Configuration saved successfully",
                     );
                     println!();
+
+                    // Update AppConfig with saved values so we can use them immediately
+                    config.provider = profile
+                        .provider
+                        .unwrap_or(crate::config::ProviderType::Local);
+                    config.gemini = profile.gemini.clone();
+                    config.smart_model = profile.smart_model.clone();
+                    config.eco_model = profile.eco_model.clone();
+                    config.recovery_model = profile.recovery_model.clone();
+                    if let Some(key) = &profile.api_key {
+                        config.api_key = Some(key.clone());
+                    }
+
                     true
                 }
                 NavResult::Forward(Some(false)) | NavResult::Back | NavResult::Cancel => false,
@@ -339,7 +365,7 @@ async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile) {
+                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -352,6 +378,19 @@ async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
                         "✓ Configuration saved successfully",
                     );
                     println!();
+
+                    // Update AppConfig with saved values so we can use them immediately
+                    config.provider = profile
+                        .provider
+                        .unwrap_or(crate::config::ProviderType::Local);
+                    config.anthropic = profile.anthropic.clone();
+                    config.smart_model = profile.smart_model.clone();
+                    config.eco_model = profile.eco_model.clone();
+                    config.recovery_model = profile.recovery_model.clone();
+                    if let Some(key) = &profile.api_key {
+                        config.api_key = Some(key.clone());
+                    }
+
                     true
                 }
                 NavResult::Forward(Some(false)) | NavResult::Back | NavResult::Cancel => false,
@@ -374,13 +413,28 @@ async fn handle_byom_setup(config: &mut AppConfig) -> bool {
     };
 
     if let Some(profile) = configure_byom(2, 4) {
-        if let Err(e) = preview_and_save(&config_path, profile) {
+        if let Err(e) = preview_and_save(&config_path, profile.clone()) {
             crate::onboarding::styled_output::render_error(&format!(
                 "Failed to save configuration: {}",
                 e
             ));
             std::process::exit(1);
         }
+
+        // Update AppConfig with saved values so we can use them immediately
+        config.provider = profile
+            .provider
+            .unwrap_or(crate::config::ProviderType::Local);
+        config.openai = profile.openai.clone();
+        config.anthropic = profile.anthropic.clone();
+        config.gemini = profile.gemini.clone();
+        config.smart_model = profile.smart_model.clone();
+        config.eco_model = profile.eco_model.clone();
+        config.recovery_model = profile.recovery_model.clone();
+        if let Some(key) = &profile.api_key {
+            config.api_key = Some(key.clone());
+        }
+
         true
     } else {
         crate::onboarding::styled_output::render_warning("BYOM configuration cancelled.");
