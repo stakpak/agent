@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
 
+use crate::models::password::Password;
+
 /// Read .gitignore patterns from the specified base directory
 pub fn read_gitignore_patterns(base_dir: &str) -> Vec<String> {
     let mut patterns = vec![".git".to_string()]; // Always ignore .git directory
@@ -286,7 +288,7 @@ temp*
 }
 
 /// Generate a secure password with alphanumeric characters and optional symbols
-pub fn generate_password(length: usize, no_symbols: bool) -> String {
+pub fn generate_password(length: usize, no_symbols: bool) -> Password {
     let mut rng = rand::rng();
 
     // Define character sets
@@ -331,7 +333,8 @@ pub fn generate_password(length: usize, no_symbols: bool) -> String {
 
     // Take only the requested length
     // password_chars.into_iter().take(length).collect()
-    String::from_utf8(password).unwrap()
+    Password::new(unsafe { String::from_utf8_unchecked(password) })
+    // Password::new(String::from_utf8(password).unwrap())
 }
 
 #[cfg(test)]
@@ -341,16 +344,16 @@ mod password_tests {
     #[test]
     fn test_generate_password_length_too_low() {
         let password = generate_password(3, false);
-        assert_eq!(password.len(), 3);
+        assert_eq!(password.expose_secret().len(), 3);
     }
 
     #[test]
     fn test_generate_password_length() {
         let password = generate_password(10, false);
-        assert_eq!(password.len(), 10);
+        assert_eq!(password.expose_secret().len(), 10);
 
         let password = generate_password(20, true);
-        assert_eq!(password.len(), 20);
+        assert_eq!(password.expose_secret().len(), 20);
     }
 
     #[test]
@@ -360,7 +363,7 @@ mod password_tests {
 
         for symbol in symbols.chars() {
             assert!(
-                !password.contains(symbol),
+                !password.expose_secret().contains(symbol),
                 "Password should not contain symbol: {}",
                 symbol
             );
@@ -373,7 +376,10 @@ mod password_tests {
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         // At least one symbol should be present (due to our algorithm)
-        let has_symbol = password.chars().any(|c| symbols.contains(c));
+        let has_symbol = password
+            .expose_secret()
+            .chars()
+            .any(|c| symbols.contains(c));
         assert!(has_symbol, "Password should contain at least one symbol");
     }
 
@@ -381,9 +387,15 @@ mod password_tests {
     fn test_generate_password_contains_required_chars() {
         let password = generate_password(50, false);
 
-        let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
-        let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
-        let has_digit = password.chars().any(|c| c.is_ascii_digit());
+        let has_lowercase = password
+            .expose_secret()
+            .chars()
+            .any(|c| c.is_ascii_lowercase());
+        let has_uppercase = password
+            .expose_secret()
+            .chars()
+            .any(|c| c.is_ascii_uppercase());
+        let has_digit = password.expose_secret().chars().any(|c| c.is_ascii_digit());
 
         assert!(has_lowercase, "Password should contain lowercase letters");
         assert!(has_uppercase, "Password should contain uppercase letters");
@@ -396,7 +408,7 @@ mod password_tests {
         let password2 = generate_password(20, false);
 
         // Very unlikely to generate the same password twice
-        assert_ne!(password1, password2);
+        assert_ne!(password1.expose_secret(), password2.expose_secret());
     }
 }
 
