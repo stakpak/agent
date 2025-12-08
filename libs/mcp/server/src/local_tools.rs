@@ -827,7 +827,7 @@ SECURITY FEATURES:
 
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(&password, &password);
+            .redact_and_store_password(&password);
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
