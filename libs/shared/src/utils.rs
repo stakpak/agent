@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use rand::Rng;
 use rand::seq::IndexedRandom;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
@@ -288,7 +289,11 @@ temp*
 }
 
 /// Generate a secure password with alphanumeric characters and optional symbols
-pub fn generate_password(length: usize, no_symbols: bool) -> Password {
+pub fn generate_password(
+    length: usize,
+    no_symbols: bool,
+    redaction_map: HashMap<String, String>,
+) -> Result<Password, String> {
     let mut rng = rand::rng();
 
     // Define character sets
@@ -331,10 +336,27 @@ pub fn generate_password(length: usize, no_symbols: bool) -> Password {
         password.swap(i, j);
     }
 
-    // Take only the requested length
-    // password_chars.into_iter().take(length).collect()
-    Password::new(unsafe { String::from_utf8_unchecked(password) })
-    // Password::new(String::from_utf8(password).unwrap())
+    for _ in 0..3 {
+        if redaction_map.values().any(|v| v.as_bytes() == password) {
+            password.shuffle(&mut rng);
+            continue;
+        }
+
+        // we've used only utf8 bytes, so it's safe to do unchecked
+        return Ok(Password::new(unsafe {
+            String::from_utf8_unchecked(password)
+        })?);
+    }
+
+    let cur_password_confliction_exhaust_retries =
+        PASSWORD_CONFLICT_EXHAUST_RETRIES_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    tracing::error!(
+        "Could not create a new non conflicting password. Exhausted all retries. Retries: {}",
+        cur_password_confliction_exhaust_retries
+    );
+
+    Err(PasswordGenerationError::Conflict)
 }
 
 #[cfg(test)]

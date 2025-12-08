@@ -823,11 +823,13 @@ SECURITY FEATURES:
         let length = length.unwrap_or(15);
         let no_symbols = no_symbols.unwrap_or(false);
 
-        let password = stakpak_shared::utils::generate_password(length, no_symbols);
+        let redaction_map = self.get_secret_manager().load_session_redaction_map();
+
+        let password = stakpak_shared::utils::generate_password(length, no_symbols, &redaction_map);
 
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(&password);
+            .redact_and_store_password(&password, redaction_map);
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
