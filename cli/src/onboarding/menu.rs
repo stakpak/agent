@@ -193,11 +193,7 @@ pub fn prompt_profile_name(config_path: Option<&str>) -> NavResult<Option<String
     loop {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
-        print!(
-            "{}▲ {}Enter profile name: ",
-            Colors::YELLOW,
-            Colors::CYAN
-        );
+        print!("{}▲ {}Enter profile name: ", Colors::YELLOW, Colors::CYAN);
 
         // Show error if any
         if let Some(ref error) = error_message {
@@ -245,8 +241,7 @@ pub fn prompt_profile_name(config_path: Option<&str>) -> NavResult<Option<String
                             AppConfig::list_available_profiles(custom_path.as_deref())
                             && existing_profiles.contains(&trimmed.to_string())
                         {
-                            error_message =
-                                Some(format!("Profile '{}' already exists", trimmed));
+                            error_message = Some(format!("Profile '{}' already exists", trimmed));
                             input.clear();
                             continue;
                         }
@@ -585,6 +580,237 @@ pub fn prompt_yes_no(prompt: &str, default: bool) -> NavResult<Option<bool>> {
                 }
                 KeyCode::Char(c) => {
                     input.push(c);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Select profile interactively with scrolling (max 7 visible)
+/// Returns Some(profile_name) or None if cancelled
+/// Special return value "CREATE_NEW_PROFILE" indicates user wants to create new profile
+pub async fn select_profile_interactive(config_path: Option<&std::path::Path>) -> Option<String> {
+    use crate::config::AppConfig;
+
+    // Get available profiles
+    let profiles = AppConfig::list_available_profiles(config_path).unwrap_or_default();
+
+    // Build options: "Create a new profile" first, then profiles
+    let mut options: Vec<(String, &str, bool)> = vec![(
+        "CREATE_NEW_PROFILE".to_string(),
+        "Create a new profile",
+        false,
+    )];
+
+    for profile in &profiles {
+        options.push((profile.clone(), profile.as_str(), false));
+    }
+
+    if options.len() == 1 {
+        // Only "Create a new profile" option, return it directly
+        return Some("CREATE_NEW_PROFILE".to_string());
+    }
+
+    // Use select_option but we need to customize it for scrolling
+    // For now, let's create a simplified version
+    select_profile_with_scrolling("Stakpak profiles", &options, config_path).await
+}
+
+/// Select profile with scrolling support (max 7 visible)
+async fn select_profile_with_scrolling(
+    title: &str,
+    options: &[(String, &str, bool)],
+    _config_path: Option<&std::path::Path>,
+) -> Option<String> {
+    let _ = _config_path; // Suppress unused parameter warning
+    use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+    use std::io::{Write, stdout};
+
+    let mut selected = 0;
+    let mut search_input = String::new();
+    let mut scroll_offset = 0;
+    const MAX_VISIBLE: usize = 7;
+
+    if enable_raw_mode().is_err() {
+        return None;
+    }
+
+    styled_output::render_title(title);
+    print!("\r\n");
+
+    let mut previous_height = 0;
+
+    loop {
+        if previous_height > 0 {
+            print!("\x1b[{}A", previous_height);
+            print!("\x1b[0J");
+        }
+
+        let mut current_height = 0;
+
+        // Render search line
+        print!(
+            "  {}Search: {}{}\r\n",
+            Colors::GRAY,
+            search_input,
+            Colors::RESET
+        );
+        current_height += 1;
+
+        // Filter options
+        let filtered: Vec<_> = if search_input.is_empty() {
+            options.iter().collect()
+        } else {
+            options
+                .iter()
+                .filter(|(_, name, _)| name.to_lowercase().contains(&search_input.to_lowercase()))
+                .collect()
+        };
+
+        if !filtered.is_empty() {
+            if selected >= filtered.len() {
+                selected = filtered.len().saturating_sub(1);
+            }
+
+            // Calculate scroll window
+            let total = filtered.len();
+            let visible_start = if total <= MAX_VISIBLE {
+                0
+            } else if selected < scroll_offset {
+                selected.max(0)
+            } else if selected >= scroll_offset + MAX_VISIBLE {
+                selected.saturating_sub(MAX_VISIBLE - 1)
+            } else {
+                scroll_offset
+            };
+
+            let visible_end = (visible_start + MAX_VISIBLE).min(total);
+            let visible_items = &filtered[visible_start..visible_end];
+
+            // Show ▲ if there are items above
+            if visible_start > 0 {
+                let hidden_above = visible_start;
+                print!(
+                    "  {}▲ {} more above{}\r\n",
+                    Colors::GRAY,
+                    hidden_above,
+                    Colors::RESET
+                );
+                current_height += 1;
+            }
+
+            // Render visible items with radio button circles
+            for (idx, (_, name, _)) in visible_items.iter().enumerate() {
+                let global_idx = visible_start + idx;
+                let is_selected = global_idx == selected;
+
+                if is_selected {
+                    // Selected: green filled circle + white text
+                    print!(
+                        "  {}●{} {}{}\r\n",
+                        Colors::GREEN,
+                        Colors::RESET,
+                        Colors::WHITE,
+                        name
+                    );
+                    print!("{}", Colors::RESET);
+                } else {
+                    // Unselected: gray circle border + gray text
+                    print!(
+                        "  {}○{} {}{}\r\n",
+                        Colors::GRAY,
+                        Colors::RESET,
+                        Colors::GRAY,
+                        name
+                    );
+                    print!("{}", Colors::RESET);
+                }
+                current_height += 1;
+            }
+
+            // Show ▼ if there are items below
+            if visible_end < total {
+                let hidden_below = total - visible_end;
+                print!(
+                    "  {}▼ {} more below{}\r\n",
+                    Colors::GRAY,
+                    hidden_below,
+                    Colors::RESET
+                );
+                current_height += 1;
+            }
+        } else {
+            print!("  {}No matches found{}\r\n", Colors::GRAY, Colors::RESET);
+            current_height += 1;
+        }
+
+        print!("\r\n");
+        current_height += 1;
+
+        styled_output::render_footer_shortcuts();
+        current_height += 1;
+
+        let _ = stdout().flush();
+        previous_height = current_height;
+
+        if let Ok(Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            modifiers,
+            ..
+        })) = event::read()
+        {
+            match code {
+                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    print!("\x1b[{}A", previous_height + 2);
+                    print!("\x1b[0J");
+                    let _ = stdout().flush();
+                    disable_raw_mode().ok();
+                    std::process::exit(130);
+                }
+                KeyCode::Enter => {
+                    if !filtered.is_empty() {
+                        print!("\x1b[{}A", previous_height + 2);
+                        print!("\x1b[0J");
+                        let _ = stdout().flush();
+                        disable_raw_mode().ok();
+                        return Some(filtered[selected].0.clone());
+                    }
+                }
+                KeyCode::Up => {
+                    if selected > 0 {
+                        selected -= 1;
+                        // Update scroll if needed
+                        if selected < scroll_offset {
+                            scroll_offset = selected;
+                        }
+                    }
+                }
+                KeyCode::Down => {
+                    if selected < filtered.len().saturating_sub(1) {
+                        selected += 1;
+                        // Update scroll if needed
+                        if selected >= scroll_offset + MAX_VISIBLE {
+                            scroll_offset = selected.saturating_sub(MAX_VISIBLE - 1);
+                        }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    search_input.push(c);
+                    selected = 0;
+                }
+                KeyCode::Backspace => {
+                    search_input.pop();
+                    selected = 0;
+                }
+                KeyCode::Esc => {
+                    print!("\x1b[{}A", previous_height + 2);
+                    print!("\x1b[0J");
+                    let _ = stdout().flush();
+                    disable_raw_mode().ok();
+                    return None;
                 }
                 _ => {}
             }

@@ -143,7 +143,18 @@ async fn main() {
     // Initialize rustls crypto provider
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 
-    let cli = Cli::parse();
+    // Handle default for "stakpak config" -> "stakpak config list"
+    let args: Vec<String> = std::env::args().collect();
+    let mut modified_args = args.clone();
+    if args.len() == 2 && args[1] == "config" {
+        modified_args.push("list".to_string());
+    }
+
+    let cli = if modified_args != args {
+        Cli::parse_from(&modified_args)
+    } else {
+        Cli::parse()
+    };
 
     // Only run auto-update in interactive mode (when no command is specified)
     if cli.command.is_none()

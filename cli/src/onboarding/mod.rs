@@ -9,8 +9,8 @@
 
 mod byom;
 mod config_templates;
-mod menu;
-mod navigation;
+pub mod menu;
+pub mod navigation;
 mod save_config;
 mod styled_output;
 

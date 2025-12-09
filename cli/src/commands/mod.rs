@@ -1,3 +1,4 @@
+use std::process::Command;
 use std::sync::Arc;
 
 use crate::{
@@ -64,6 +65,9 @@ fn parse_rulebook_metadata(content: &str) -> Result<(String, String, Vec<String>
 
 #[derive(Subcommand, PartialEq)]
 pub enum ConfigCommands {
+    /// List and select profiles interactively
+    #[command(name = "list", alias = "ls")]
+    List,
     /// Show current configuration
     Show,
     /// Print a complete sample configuration file
@@ -245,34 +249,100 @@ impl Commands {
                     );
                 }
             }
-            Commands::Config(config_command) => match config_command {
-                ConfigCommands::Show => {
-                    println!("Current configuration:");
-                    println!("  Profile: {}", config.profile_name);
-                    println!(
-                        "  Machine name: {}",
-                        config.machine_name.as_deref().unwrap_or("(not set)")
-                    );
-                    println!(
-                        "  Auto-append .stakpak to .gitignore: {}",
-                        config.auto_append_gitignore.unwrap_or(true)
-                    );
-                    println!("  API endpoint: {}", config.api_endpoint);
-                    let api_key_display = match &config.api_key {
-                        Some(key) if !key.is_empty() => "***".to_string(),
-                        _ => "(not set)".to_string(),
-                    };
-                    println!("  API key: {}", api_key_display);
+            Commands::Config(config_command) => {
+                match config_command {
+                    ConfigCommands::List => {
+                        // Interactive profile selection menu
+                        use crate::onboarding::menu::select_profile_interactive;
+                        use std::path::Path;
+                        let config_path: Option<&Path> = if config.config_path.is_empty() {
+                            None
+                        } else {
+                            Some(Path::new(&config.config_path))
+                        };
+                        if let Some(selected_profile) =
+                            select_profile_interactive(config_path).await
+                        {
+                            if selected_profile == "CREATE_NEW_PROFILE" {
+                                // Create new profile
+                                use crate::onboarding::{OnboardingMode, run_onboarding};
+                                let mut mutable_config = config.clone();
+                                run_onboarding(&mut mutable_config, OnboardingMode::New).await;
+
+                                // Ask if user wants to continue to stakpak
+                                use crate::onboarding::menu::prompt_yes_no;
+                                use crate::onboarding::navigation::NavResult;
+                                if let NavResult::Forward(Some(true)) =
+                                    prompt_yes_no("Continue to stakpak?", true)
+                                {
+                                    // Re-execute stakpak with the new profile
+                                    let new_profile = mutable_config.profile_name.clone();
+                                    let new_config_path: Option<&Path> =
+                                        if config.config_path.is_empty() {
+                                            None
+                                        } else {
+                                            Some(Path::new(&config.config_path))
+                                        };
+                                    re_execute_stakpak_with_profile(&new_profile, new_config_path);
+                                }
+                            } else {
+                                // Switch to selected profile
+                                let switch_config_path: Option<&Path> =
+                                    if config.config_path.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Path::new(&config.config_path))
+                                    };
+                                re_execute_stakpak_with_profile(
+                                    &selected_profile,
+                                    switch_config_path,
+                                );
+                            }
+                        }
+                    }
+                    ConfigCommands::Show => {
+                        println!("Current configuration:");
+                        println!("  Profile: {}", config.profile_name);
+                        println!(
+                            "  Machine name: {}",
+                            config.machine_name.as_deref().unwrap_or("(not set)")
+                        );
+                        println!(
+                            "  Auto-append .stakpak to .gitignore: {}",
+                            config.auto_append_gitignore.unwrap_or(true)
+                        );
+                        println!("  API endpoint: {}", config.api_endpoint);
+                        let api_key_display = match &config.api_key {
+                            Some(key) if !key.is_empty() => "***".to_string(),
+                            _ => "(not set)".to_string(),
+                        };
+                        println!("  API key: {}", api_key_display);
+                    }
+                    ConfigCommands::Sample => {
+                        print_sample_config();
+                    }
+                    ConfigCommands::New => {
+                        use crate::onboarding::{OnboardingMode, run_onboarding};
+                        let mut mutable_config = config.clone();
+                        run_onboarding(&mut mutable_config, OnboardingMode::New).await;
+
+                        use crate::onboarding::menu::prompt_yes_no;
+                        use crate::onboarding::navigation::NavResult;
+                        use std::path::Path;
+                        if let NavResult::Forward(Some(true)) =
+                            prompt_yes_no("Continue to stakpak?", true)
+                        {
+                            let new_profile = mutable_config.profile_name.clone();
+                            let new_config_path: Option<&Path> = if config.config_path.is_empty() {
+                                None
+                            } else {
+                                Some(Path::new(&config.config_path))
+                            };
+                            re_execute_stakpak_with_profile(&new_profile, new_config_path);
+                        }
+                    }
                 }
-                ConfigCommands::Sample => {
-                    print_sample_config();
-                }
-                ConfigCommands::New => {
-                    use crate::onboarding::{OnboardingMode, run_onboarding};
-                    let mut mutable_config = config.clone();
-                    run_onboarding(&mut mutable_config, OnboardingMode::New).await;
-                }
-            },
+            }
             Commands::Rulebooks(rulebook_command) => {
                 let client = get_client(&config).await?;
                 match rulebook_command {
@@ -519,4 +589,52 @@ machine_name = "my-development-machine"
 auto_append_gitignore = true
 "#
     );
+}
+
+/// Re-execute stakpak with a specific profile
+fn re_execute_stakpak_with_profile(profile: &str, config_path: Option<&std::path::Path>) {
+    let mut cmd = Command::new("stakpak");
+    cmd.arg("--profile").arg(profile);
+
+    if let Some(config_path) = config_path {
+        cmd.arg("--config").arg(config_path);
+    }
+
+    // Preserve other args but skip "config" subcommand
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        // Skip "config" subcommand and its value
+        if arg == "config" {
+            skip_next = true;
+            continue;
+        }
+        // Skip --profile and --config if they exist (we're setting them explicitly)
+        if arg == "--profile" || arg == "--config" {
+            skip_next = true;
+            continue;
+        }
+        // Skip the value after --profile= or --config=
+        if arg.starts_with("--profile=") || arg.starts_with("--config=") {
+            continue;
+        }
+        cmd.arg(arg);
+    }
+
+    let status = cmd.status();
+    match status {
+        Ok(s) if s.success() => {
+            std::process::exit(s.code().unwrap_or(0));
+        }
+        Ok(s) => {
+            std::process::exit(s.code().unwrap_or(1));
+        }
+        Err(_) => {
+            std::process::exit(1);
+        }
+    }
 }
