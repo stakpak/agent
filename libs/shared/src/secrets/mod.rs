@@ -156,9 +156,6 @@ pub fn redact_password(
     password: &str,
     old_redaction_map: &HashMap<String, String>,
 ) -> RedactionResult {
-    if password.is_empty() {
-        return RedactionResult::new(String::new(), HashMap::new());
-    }
 
     let mut redaction_map = old_redaction_map.clone();
     let reverse_redaction_map: HashMap<String, String> = old_redaction_map
@@ -1251,16 +1248,6 @@ export PORT=3000
         // The redaction map should contain our password
         let redacted_password = result.redaction_map.values().next().unwrap();
         assert_eq!(redacted_password, password);
-    }
-
-    #[test]
-    fn test_redact_password_empty() {
-        let password = "";
-        let result = redact_password(password, &HashMap::new());
-
-        // it should not be possible to be empty
-        assert_eq!(result.redacted_string, "");
-        assert!(result.redaction_map.is_empty());
     }
 
     #[test]
