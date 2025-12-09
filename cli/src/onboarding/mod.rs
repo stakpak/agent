@@ -30,6 +30,18 @@ use stakpak_shared::models::integrations::gemini::GeminiModel;
 use stakpak_shared::models::integrations::openai::OpenAIModel;
 use std::io::{self, Write};
 
+/// Helper function to get config path string from AppConfig
+/// Returns the config_path if not empty, otherwise gets the default path
+fn get_config_path_string(config: &AppConfig) -> String {
+    if config.config_path.is_empty() {
+        AppConfig::get_config_path::<&str>(None)
+            .display()
+            .to_string()
+    } else {
+        config.config_path.clone()
+    }
+}
+
 /// Onboarding mode
 pub enum OnboardingMode {
     /// Default onboarding for existing/default profile
@@ -64,14 +76,7 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
             crate::onboarding::styled_output::render_title("Creating new profile");
             print!("\r\n");
 
-            let config_path = if config.config_path.is_empty() {
-                AppConfig::get_config_path::<&str>(None)
-                    .display()
-                    .to_string()
-            } else {
-                config.config_path.clone()
-            };
-
+            let config_path = get_config_path_string(config);
             let custom_path = if config_path.is_empty() {
                 None
             } else {
@@ -290,13 +295,7 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
-                    let config_path = if config.config_path.is_empty() {
-                        AppConfig::get_config_path::<&str>(None)
-                            .display()
-                            .to_string()
-                    } else {
-                        config.config_path.clone()
-                    };
+                    let config_path = get_config_path_string(config);
 
                     if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
@@ -374,13 +373,7 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
-                    let config_path = if config.config_path.is_empty() {
-                        AppConfig::get_config_path::<&str>(None)
-                            .display()
-                            .to_string()
-                    } else {
-                        config.config_path.clone()
-                    };
+                    let config_path = get_config_path_string(config);
 
                     if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
@@ -458,13 +451,7 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
 
             match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
-                    let config_path = if config.config_path.is_empty() {
-                        AppConfig::get_config_path::<&str>(None)
-                            .display()
-                            .to_string()
-                    } else {
-                        config.config_path.clone()
-                    };
+                    let config_path = get_config_path_string(config);
 
                     if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
@@ -505,13 +492,7 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
 /// Handle BYOM setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
-    let config_path = if config.config_path.is_empty() {
-        AppConfig::get_config_path::<&str>(None)
-            .display()
-            .to_string()
-    } else {
-        config.config_path.clone()
-    };
+    let config_path = get_config_path_string(config);
 
     if let Some(profile) = configure_byom(2, 4) {
         if let Err(e) = preview_and_save_to_profile(&config_path, profile_name, profile.clone()) {
@@ -556,13 +537,7 @@ async fn handle_stakpak_api_for_new_profile(config: &AppConfig, profile_name: &s
     prompt_for_api_key(&mut temp_config).await;
 
     // Now save the new profile with the API key and endpoint
-    let config_path = if config.config_path.is_empty() {
-        AppConfig::get_config_path::<&str>(None)
-            .display()
-            .to_string()
-    } else {
-        config.config_path.clone()
-    };
+    let config_path = get_config_path_string(config);
 
     // Create profile config with Remote provider, new API key, and same endpoint
     use crate::config::ProfileConfig;

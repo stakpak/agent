@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -182,6 +183,15 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
     }
 }
 
+/// Helper function to convert AppConfig's config_path to Option<&Path>
+fn get_config_path_option(config: &AppConfig) -> Option<&Path> {
+    if config.config_path.is_empty() {
+        None
+    } else {
+        Some(Path::new(&config.config_path))
+    }
+}
+
 impl Commands {
     pub fn requires_auth(&self) -> bool {
         !matches!(
@@ -254,12 +264,7 @@ impl Commands {
                     ConfigCommands::List => {
                         // Interactive profile selection menu
                         use crate::onboarding::menu::select_profile_interactive;
-                        use std::path::Path;
-                        let config_path: Option<&Path> = if config.config_path.is_empty() {
-                            None
-                        } else {
-                            Some(Path::new(&config.config_path))
-                        };
+                        let config_path = get_config_path_option(&config);
                         if let Some(selected_profile) =
                             select_profile_interactive(config_path).await
                         {
@@ -277,25 +282,16 @@ impl Commands {
                                 {
                                     // Re-execute stakpak with the new profile
                                     let new_profile = mutable_config.profile_name.clone();
-                                    let new_config_path: Option<&Path> =
-                                        if config.config_path.is_empty() {
-                                            None
-                                        } else {
-                                            Some(Path::new(&config.config_path))
-                                        };
-                                    re_execute_stakpak_with_profile(&new_profile, new_config_path);
+                                    re_execute_stakpak_with_profile(
+                                        &new_profile,
+                                        get_config_path_option(&config),
+                                    );
                                 }
                             } else {
                                 // Switch to selected profile
-                                let switch_config_path: Option<&Path> =
-                                    if config.config_path.is_empty() {
-                                        None
-                                    } else {
-                                        Some(Path::new(&config.config_path))
-                                    };
                                 re_execute_stakpak_with_profile(
                                     &selected_profile,
-                                    switch_config_path,
+                                    get_config_path_option(&config),
                                 );
                             }
                         }
@@ -328,17 +324,14 @@ impl Commands {
 
                         use crate::onboarding::menu::prompt_yes_no;
                         use crate::onboarding::navigation::NavResult;
-                        use std::path::Path;
                         if let NavResult::Forward(Some(true)) =
                             prompt_yes_no("Continue to stakpak?", true)
                         {
                             let new_profile = mutable_config.profile_name.clone();
-                            let new_config_path: Option<&Path> = if config.config_path.is_empty() {
-                                None
-                            } else {
-                                Some(Path::new(&config.config_path))
-                            };
-                            re_execute_stakpak_with_profile(&new_profile, new_config_path);
+                            re_execute_stakpak_with_profile(
+                                &new_profile,
+                                get_config_path_option(&config),
+                            );
                         }
                     }
                 }
