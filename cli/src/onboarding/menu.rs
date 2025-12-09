@@ -163,6 +163,121 @@ pub fn select_option<T: Clone>(
     }
 }
 
+/// Validate profile name (alphanumeric and underscores only, no spaces or special chars)
+pub fn validate_profile_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Profile name cannot be empty".to_string());
+    }
+    if name == "all" {
+        return Err("Cannot use 'all' as a profile name. It's reserved for defaults.".to_string());
+    }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Profile name can only contain letters, numbers, and underscores".to_string());
+    }
+    Ok(())
+}
+
+/// Prompt for profile name with validation
+/// Returns NavResult to support back navigation
+pub fn prompt_profile_name(config_path: Option<&str>) -> NavResult<Option<String>> {
+    use crate::config::AppConfig;
+    use std::path::PathBuf;
+
+    let mut input = String::new();
+    let mut error_message: Option<String> = None;
+
+    if enable_raw_mode().is_err() {
+        return NavResult::Cancel;
+    }
+
+    loop {
+        // Clear the line and re-render prompt
+        print!("\r\x1b[K"); // Clear current line
+        print!(
+            "{}▲ {}Enter profile name: ",
+            Colors::YELLOW,
+            Colors::CYAN
+        );
+
+        // Show error if any
+        if let Some(ref error) = error_message {
+            print!("{}({}){} ", Colors::YELLOW, error, Colors::RESET);
+        }
+
+        // Show current input (RESET color to match question)
+        print!("{}{}", Colors::RESET, input);
+        let _ = io::stdout().flush();
+
+        match event::read() {
+            Ok(Event::Paste(pasted_text)) => {
+                input.push_str(&pasted_text);
+                error_message = None;
+            }
+            Ok(Event::Key(KeyEvent {
+                code,
+                kind: KeyEventKind::Press,
+                modifiers,
+                ..
+            })) => {
+                match code {
+                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        disable_raw_mode().ok();
+                        std::process::exit(130);
+                    }
+                    KeyCode::Enter => {
+                        let trimmed = input.trim();
+                        if trimmed.is_empty() {
+                            error_message = Some("Profile name cannot be empty".to_string());
+                            input.clear();
+                            continue;
+                        }
+
+                        // Validate format
+                        if let Err(e) = validate_profile_name(trimmed) {
+                            error_message = Some(e);
+                            input.clear();
+                            continue;
+                        }
+
+                        // Check if profile exists
+                        let custom_path = config_path.map(PathBuf::from);
+                        if let Ok(existing_profiles) =
+                            AppConfig::list_available_profiles(custom_path.as_deref())
+                            && existing_profiles.contains(&trimmed.to_string())
+                        {
+                            error_message =
+                                Some(format!("Profile '{}' already exists", trimmed));
+                            input.clear();
+                            continue;
+                        }
+
+                        // Clear the prompt line before returning
+                        print!("\r\x1b[K"); // Clear current line
+                        print!("\r\n");
+                        disable_raw_mode().ok();
+                        return NavResult::Forward(Some(trimmed.to_string()));
+                    }
+                    KeyCode::Esc => {
+                        print!("\r\n");
+                        disable_raw_mode().ok();
+                        return NavResult::Back;
+                    }
+                    KeyCode::Backspace => {
+                        input.pop();
+                        error_message = None;
+                    }
+                    KeyCode::Char(c) => {
+                        input.push(c);
+                        error_message = None;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Prompt for text input
 /// Returns NavResult to support back navigation
 pub fn prompt_text(prompt: &str, required: bool) -> NavResult<Option<String>> {

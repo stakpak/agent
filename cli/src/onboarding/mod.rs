@@ -21,24 +21,86 @@ use crate::onboarding::config_templates::{
     config_to_toml_preview, generate_anthropic_config, generate_gemini_config,
     generate_openai_config,
 };
-use crate::onboarding::menu::{prompt_password, select_option};
+use crate::onboarding::menu::{prompt_password, prompt_profile_name, select_option};
 use crate::onboarding::navigation::NavResult;
-use crate::onboarding::save_config::{preview_and_save, save_to_default_profile};
-use crate::onboarding::styled_output::StepStatus;
+use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
+use crate::onboarding::styled_output::{StepStatus, render_profile_name};
 use stakpak_shared::models::integrations::anthropic::AnthropicModel;
 use stakpak_shared::models::integrations::gemini::GeminiModel;
 use stakpak_shared::models::integrations::openai::OpenAIModel;
 use std::io::{self, Write};
 
+/// Onboarding mode
+pub enum OnboardingMode {
+    /// Default onboarding for existing/default profile
+    Default,
+    /// Creating a new profile
+    New,
+}
+
 /// Main onboarding flow entry point
-pub async fn run_onboarding(config: &mut AppConfig) {
-    print!("\r\n");
-    crate::onboarding::styled_output::render_title("Welcome to Stakpak");
-    print!("\r\n");
-    crate::onboarding::styled_output::render_info(
-        "Let's set up your configuration. You can connect to Stakpak API or use your own model/API keys.",
-    );
-    print!("\r\n");
+pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
+    let profile_name = match mode {
+        OnboardingMode::Default => {
+            // For default mode, use the current profile name
+            let profile = config.profile_name.clone();
+
+            print!("\r\n");
+            crate::onboarding::styled_output::render_title("Welcome to Stakpak");
+            print!("\r\n");
+            // Show profile name with empty line before it
+            render_profile_name(&profile);
+            print!("\r\n");
+            crate::onboarding::styled_output::render_info(
+                "Let's set up your configuration. You can connect to Stakpak API or use your own model/API keys.",
+            );
+            print!("\r\n");
+
+            profile
+        }
+        OnboardingMode::New => {
+            // For new profile mode, prompt for profile name first
+            print!("\r\n");
+            crate::onboarding::styled_output::render_title("Creating new profile");
+            print!("\r\n");
+
+            let config_path = if config.config_path.is_empty() {
+                AppConfig::get_config_path::<&str>(None)
+                    .display()
+                    .to_string()
+            } else {
+                config.config_path.clone()
+            };
+
+            let custom_path = if config_path.is_empty() {
+                None
+            } else {
+                Some(config_path.as_str())
+            };
+
+            let profile_name_result = prompt_profile_name(custom_path);
+            let profile_name = match profile_name_result {
+                NavResult::Forward(Some(name)) => name,
+                NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => {
+                    crate::onboarding::styled_output::render_warning("Profile creation cancelled.");
+                    return;
+                }
+            };
+
+            // Clear the title and prompt lines, then show profile name with empty line before it
+            print!("\x1b[2A"); // Move up 2 lines (to title line)
+            print!("\x1b[0J"); // Clear from cursor to end of screen
+            print!("\r\n"); // Empty line before profile name
+            render_profile_name(&profile_name);
+            print!("\r\n");
+            crate::onboarding::styled_output::render_info(
+                "Let's set up your configuration. You can connect to Stakpak API or use your own model/API keys.",
+            );
+            print!("\r\n");
+
+            profile_name
+        }
+    };
 
     // Save position after welcome message - this is where ALL step content starts
     // We'll always clear from here before rendering a new step
@@ -88,7 +150,7 @@ pub async fn run_onboarding(config: &mut AppConfig) {
                 // Cursor is now at the position right after welcome message
                 // Just re-save this position for step 2 (no need to restore/clear again)
                 print!("\x1b[s");
-                if handle_own_keys_flow(config).await {
+                if handle_own_keys_flow(config, &profile_name).await {
                     break;
                 }
                 // If we return false (user went back), loop to re-render step 1
@@ -116,7 +178,7 @@ pub async fn run_onboarding(config: &mut AppConfig) {
 
 /// Handle the "Own Keys" flow
 /// Returns true if configuration was completed, false if user went back
-async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
+async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> bool {
     // Provider selection with back navigation support
     loop {
         // CRITICAL: Clear previous step content WITHOUT touching welcome message
@@ -143,10 +205,18 @@ async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
         );
 
         let completed = match provider_choice {
-            NavResult::Forward(ProviderChoice::OpenAI) => handle_openai_setup(config).await,
-            NavResult::Forward(ProviderChoice::Gemini) => handle_gemini_setup(config).await,
-            NavResult::Forward(ProviderChoice::Anthropic) => handle_anthropic_setup(config).await,
-            NavResult::Forward(ProviderChoice::Byom) => handle_byom_setup(config).await,
+            NavResult::Forward(ProviderChoice::OpenAI) => {
+                handle_openai_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::Gemini) => {
+                handle_gemini_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::Anthropic) => {
+                handle_anthropic_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::Byom) => {
+                handle_byom_setup(config, profile_name).await
+            }
             NavResult::Back => {
                 // User wants to go back to step 1
                 // Clear step 2 content WITHOUT touching welcome message
@@ -172,7 +242,7 @@ async fn handle_own_keys_flow(config: &mut AppConfig) -> bool {
 
 /// Handle OpenAI setup
 /// Returns true if completed, false if cancelled/back
-async fn handle_openai_setup(config: &mut AppConfig) -> bool {
+async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
     print!("\x1b[0J"); // Clear from cursor to end of screen
@@ -218,7 +288,7 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
+                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -256,7 +326,7 @@ async fn handle_openai_setup(config: &mut AppConfig) -> bool {
 
 /// Handle Gemini setup
 /// Returns true if completed, false if cancelled/back
-async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
+async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
     print!("\x1b[0J"); // Clear from cursor to end of screen
@@ -302,7 +372,7 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
+                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -340,7 +410,7 @@ async fn handle_gemini_setup(config: &mut AppConfig) -> bool {
 
 /// Handle Anthropic setup
 /// Returns true if completed, false if cancelled/back
-async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
+async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
     print!("\x1b[0J"); // Clear from cursor to end of screen
@@ -386,7 +456,7 @@ async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
                         config.config_path.clone()
                     };
 
-                    if let Err(e) = save_to_default_profile(&config_path, profile.clone()) {
+                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
                         crate::onboarding::styled_output::render_error(&format!(
                             "Failed to save configuration: {}",
                             e
@@ -424,7 +494,7 @@ async fn handle_anthropic_setup(config: &mut AppConfig) -> bool {
 
 /// Handle BYOM setup
 /// Returns true if completed, false if cancelled/back
-async fn handle_byom_setup(config: &mut AppConfig) -> bool {
+async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     let config_path = if config.config_path.is_empty() {
         AppConfig::get_config_path::<&str>(None)
             .display()
@@ -434,7 +504,7 @@ async fn handle_byom_setup(config: &mut AppConfig) -> bool {
     };
 
     if let Some(profile) = configure_byom(2, 4) {
-        if let Err(e) = preview_and_save(&config_path, profile.clone()) {
+        if let Err(e) = preview_and_save_to_profile(&config_path, profile_name, profile.clone()) {
             crate::onboarding::styled_output::render_error(&format!(
                 "Failed to save configuration: {}",
                 e

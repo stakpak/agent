@@ -6,8 +6,12 @@ use crate::onboarding::styled_output;
 use std::fs;
 use std::path::PathBuf;
 
-/// Save profile configuration to default profile
-pub fn save_to_default_profile(config_path: &str, profile: ProfileConfig) -> Result<(), String> {
+/// Save profile configuration to a named profile
+pub fn save_to_profile(
+    config_path: &str,
+    profile_name: &str,
+    profile: ProfileConfig,
+) -> Result<(), String> {
     let path = PathBuf::from(config_path);
 
     // Load existing config or create new
@@ -20,8 +24,10 @@ pub fn save_to_default_profile(config_path: &str, profile: ProfileConfig) -> Res
         ConfigFile::default()
     };
 
-    // Save to default profile
-    config_file.profiles.insert("default".to_string(), profile);
+    // Save to specified profile
+    config_file
+        .profiles
+        .insert(profile_name.to_string(), profile);
 
     // Ensure config directory exists
     if let Some(parent) = path.parent() {
@@ -38,16 +44,23 @@ pub fn save_to_default_profile(config_path: &str, profile: ProfileConfig) -> Res
     Ok(())
 }
 
-/// Show configuration preview and confirm before saving
-pub fn preview_and_save(config_path: &str, profile: ProfileConfig) -> Result<(), String> {
+/// Show configuration preview and confirm before saving to a named profile
+pub fn preview_and_save_to_profile(
+    config_path: &str,
+    profile_name: &str,
+    profile: ProfileConfig,
+) -> Result<(), String> {
     // Show preview
     styled_output::render_config_preview(&config_to_toml_preview(&profile));
 
     // Save
-    save_to_default_profile(config_path, profile)?;
+    save_to_profile(config_path, profile_name, profile)?;
 
     println!();
-    styled_output::render_success("✓ Configuration saved successfully to [profiles.default]");
+    styled_output::render_success(&format!(
+        "✓ Configuration saved successfully to [profiles.{}]",
+        profile_name
+    ));
     println!();
 
     Ok(())

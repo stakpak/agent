@@ -34,7 +34,7 @@ use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
 
-use crate::onboarding::run_onboarding;
+use crate::onboarding::{OnboardingMode, run_onboarding};
 // use crate::code_index::{get_or_build_local_code_index, start_code_index_watcher};
 
 #[derive(Parser, PartialEq)]
@@ -216,7 +216,7 @@ async fn main() {
                 Some(command) => {
                     // check_update is only run in interactive mode (when no command is specified)
                     if config.api_key.is_none() && command.requires_auth() {
-                        run_onboarding(&mut config).await;
+                        run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
 
                     // Ensure .stakpak is in .gitignore (after workdir is set, before command execution)
@@ -232,7 +232,7 @@ async fn main() {
                 }
                 None => {
                     if config.api_key.is_none() && config.provider == ProviderType::Remote {
-                        run_onboarding(&mut config).await;
+                        run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
 

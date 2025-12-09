@@ -68,6 +68,8 @@ pub enum ConfigCommands {
     Show,
     /// Print a complete sample configuration file
     Sample,
+    /// Create a new profile
+    New,
 }
 
 #[derive(Subcommand, PartialEq)]
@@ -264,6 +266,11 @@ impl Commands {
                 }
                 ConfigCommands::Sample => {
                     print_sample_config();
+                }
+                ConfigCommands::New => {
+                    use crate::onboarding::{OnboardingMode, run_onboarding};
+                    let mut mutable_config = config.clone();
+                    run_onboarding(&mut mutable_config, OnboardingMode::New).await;
                 }
             },
             Commands::Rulebooks(rulebook_command) => {

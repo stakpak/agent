@@ -162,7 +162,18 @@ pub fn render_warning(message: &str) {
 
 /// Render an info message (magenta)
 pub fn render_info(message: &str) {
-    print!("{}ℹ️  {}{}\r\n", Colors::MAGENTA, message, Colors::RESET);
+    print!("{}{}{}\r\n", Colors::MAGENTA, message, Colors::RESET);
+}
+
+/// Render profile name display (Profile in GRAY, name in RESET)
+pub fn render_profile_name(profile_name: &str) {
+    print!(
+        "{}Profile{} {}{}\r\n",
+        Colors::GRAY,
+        Colors::RESET,
+        profile_name,
+        Colors::RESET
+    );
 }
 
 /// Render default models for a provider in neutral colors (white/gray)
