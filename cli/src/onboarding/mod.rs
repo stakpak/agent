@@ -141,8 +141,18 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                 print!("\x1b[u");
                 print!("\x1b[0J");
                 let _ = io::stdout().flush();
-                // Use existing OAuth flow
-                prompt_for_api_key(config).await;
+
+                // Handle Stakpak API based on mode
+                match mode {
+                    OnboardingMode::Default => {
+                        // Use existing OAuth flow - saves to default profile
+                        prompt_for_api_key(config).await;
+                    }
+                    OnboardingMode::New => {
+                        // For new profile, save API key to new profile, not default
+                        handle_stakpak_api_for_new_profile(config, &profile_name).await;
+                    }
+                }
                 break;
             }
             NavResult::Forward(InitialChoice::OwnKeys) => {
@@ -531,6 +541,53 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
         crate::onboarding::styled_output::render_warning("BYOM configuration cancelled.");
         false
     }
+}
+
+/// Handle Stakpak API setup for a new profile
+/// Saves API key to the new profile, copying endpoint from default but using new API key
+async fn handle_stakpak_api_for_new_profile(config: &AppConfig, profile_name: &str) {
+    use crate::apikey_auth::prompt_for_api_key;
+
+    // Create a temporary config with the new profile name for OAuth flow
+    let mut temp_config = config.clone();
+    temp_config.profile_name = profile_name.to_string();
+
+    // Get the API key via OAuth flow (this will update temp_config)
+    prompt_for_api_key(&mut temp_config).await;
+
+    // Now save the new profile with the API key and endpoint
+    let config_path = if config.config_path.is_empty() {
+        AppConfig::get_config_path::<&str>(None)
+            .display()
+            .to_string()
+    } else {
+        config.config_path.clone()
+    };
+
+    // Create profile config with Remote provider, new API key, and same endpoint
+    use crate::config::ProfileConfig;
+    use crate::config::ProviderType;
+    let new_profile = ProfileConfig {
+        provider: Some(ProviderType::Remote),
+        api_key: temp_config.api_key.clone(),
+        api_endpoint: Some(config.api_endpoint.clone()), // Copy endpoint from default
+        ..ProfileConfig::default()
+    };
+
+    // Save to the new profile
+    if let Err(e) =
+        crate::onboarding::save_config::save_to_profile(&config_path, profile_name, new_profile)
+    {
+        crate::onboarding::styled_output::render_error(&format!(
+            "Failed to save configuration: {}",
+            e
+        ));
+        std::process::exit(1);
+    }
+
+    println!();
+    crate::onboarding::styled_output::render_success("✓ Configuration saved successfully");
+    println!();
 }
 
 /// Initial choice enum
