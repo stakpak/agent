@@ -4,7 +4,6 @@ use rand::seq::{IndexedRandom, SliceRandom};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use walkdir::DirEntry;
 
 use crate::models::password::{Password, PasswordGenerationError};
@@ -289,7 +288,7 @@ temp*
     }
 }
 
-static PASSWORD_CONFLICT_EXHAUST_RETRIES_COUNTER: AtomicUsize = AtomicUsize::new(1);
+const MAX_RETRIES: usize = 10;
 
 /// Generate a secure password with alphanumeric characters and optional symbols
 pub fn generate_password(
@@ -339,9 +338,15 @@ pub fn generate_password(
         password.swap(i, j);
     }
 
-    for _ in 0..3 {
+    for attempt in 0..MAX_RETRIES {
         if redaction_map.values().any(|v| v.as_bytes() == password) {
             password.shuffle(&mut rng);
+
+            tracing::warn!(
+                "Password collision detected, regenerating (attempt {}/{})",
+                attempt + 1,
+                MAX_RETRIES
+            );
             continue;
         }
 
@@ -351,12 +356,9 @@ pub fn generate_password(
         })?);
     }
 
-    let cur_password_confliction_exhaust_retries =
-        PASSWORD_CONFLICT_EXHAUST_RETRIES_COUNTER.fetch_add(1, Ordering::Relaxed);
-
     tracing::error!(
-        "Could not create a new non conflicting password. Exhausted all retries. Retries: {}",
-        cur_password_confliction_exhaust_retries
+        "Could not create a non conflicting password after {} retries",
+        MAX_RETRIES
     );
 
     Err(PasswordGenerationError::Conflict)
