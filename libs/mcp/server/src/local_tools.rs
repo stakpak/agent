@@ -6,6 +6,7 @@ use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
 use stakpak_shared::models::password::Password;
+use stakpak_shared::models::password::PasswordGenerationError;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -800,7 +801,7 @@ SECRET HANDLING:
         description = "Generate a cryptographically secure password with the specified constraints. The generated password will be automatically redacted in the response for security.
 
 PARAMETERS:
-- length: The length of the password to generate (default: 15 characters)
+- length: The length of the password to generate (minimum: 8 characters, default: 15)
 - include_symbols: Whether to include symbols in the password (default: true)
 
 CHARACTER SETS:
@@ -828,11 +829,14 @@ SECURITY FEATURES:
 
         let password =
             stakpak_shared::utils::generate_password(length, include_symbols, &redaction_map)
-                .map_err(|err| {
-                    McpError::internal_error(
+                .map_err(|err| match err {
+                    PasswordGenerationError::TooShort => McpError::invalid_params(
                         err.to_string(),
-                        Some(json!({"error": err.to_string()})),
-                    )
+                        Some(json!({"length": length, "minimum": 8})),
+                    ),
+                    PasswordGenerationError::Conflict => {
+                        McpError::internal_error(err.to_string(), Some(json!({"length": length})))
+                    }
                 })?;
 
         let redacted_password = self

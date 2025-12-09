@@ -25,9 +25,9 @@ pub struct Password(#[schemars(with = "String", length(min = 8))] SecretString);
 
 #[derive(thiserror::Error, Debug, PartialEq)]
 pub enum PasswordGenerationError {
-    #[error("Failed to generate a unique password")]
+    #[error("Failed to generate a unique password after multiple retries")]
     Conflict,
-    #[error("Failed to generate a password. too short")]
+    #[error("Password must be at least 8 characters long")]
     TooShort,
 }
 
@@ -36,7 +36,10 @@ impl Password {
         let password: String = password.into();
 
         if password.len() < 8 {
-            tracing::error!("password is too short");
+            tracing::error!(
+                "Password validation failed: must be at least 8 characters long, received {} characters",
+                password.len()
+            );
             return Err(PasswordGenerationError::TooShort);
         }
 
