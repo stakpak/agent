@@ -294,7 +294,7 @@ static PASSWORD_CONFLICT_EXHAUST_RETRIES_COUNTER: AtomicUsize = AtomicUsize::new
 /// Generate a secure password with alphanumeric characters and optional symbols
 pub fn generate_password(
     length: usize,
-    no_symbols: bool,
+    include_symbols: bool,
     redaction_map: &HashMap<String, String>,
 ) -> Result<Password, PasswordGenerationError> {
     let mut rng = rand::rng();
@@ -311,7 +311,7 @@ pub fn generate_password(
     charset.extend_from_slice(uppercase);
     charset.extend_from_slice(digits);
 
-    if !no_symbols {
+    if include_symbols {
         charset.extend_from_slice(symbols);
     }
 
@@ -323,7 +323,7 @@ pub fn generate_password(
     password.push(*uppercase.choose(&mut rng).unwrap());
     password.push(*digits.choose(&mut rng).unwrap());
 
-    if !no_symbols {
+    if include_symbols {
         password.push(*symbols.choose(&mut rng).unwrap());
     }
 
@@ -369,7 +369,7 @@ mod password_tests {
     #[test]
     fn test_generate_password_length_too_short() {
         let redaction_map = HashMap::new();
-        let result = generate_password(7, false, &redaction_map);
+        let result = generate_password(7, true, &redaction_map);
 
         match result {
             Ok(_) => panic!("Expected an error, but got a valid password"),
@@ -380,17 +380,17 @@ mod password_tests {
     #[test]
     fn test_generate_password_length() {
         let redaction_map = HashMap::new();
-        let password = generate_password(10, false, &redaction_map).unwrap();
+        let password = generate_password(10, true, &redaction_map).unwrap();
         assert_eq!(password.expose_secret().len(), 10);
 
-        let password = generate_password(20, true, &redaction_map).unwrap();
+        let password = generate_password(20, false, &redaction_map).unwrap();
         assert_eq!(password.expose_secret().len(), 20);
     }
 
     #[test]
     fn test_generate_password_no_symbols() {
         let redaction_map = HashMap::new();
-        let password = generate_password(50, true, &redaction_map).unwrap();
+        let password = generate_password(50, false, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         for symbol in symbols.chars() {
@@ -405,7 +405,7 @@ mod password_tests {
     #[test]
     fn test_generate_password_with_symbols() {
         let redaction_map = HashMap::new();
-        let password = generate_password(50, false, &redaction_map).unwrap();
+        let password = generate_password(50, true, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         // At least one symbol should be present (due to our algorithm)
@@ -419,7 +419,7 @@ mod password_tests {
     #[test]
     fn test_generate_password_contains_required_chars() {
         let redaction_map = HashMap::new();
-        let password = generate_password(50, false, &redaction_map).unwrap();
+        let password = generate_password(50, true, &redaction_map).unwrap();
 
         let has_lowercase = password
             .expose_secret()
@@ -439,8 +439,8 @@ mod password_tests {
     #[test]
     fn test_generate_password_uniqueness() {
         let redaction_map = HashMap::new();
-        let password1 = generate_password(20, false, &redaction_map).unwrap();
-        let password2 = generate_password(20, false, &redaction_map).unwrap();
+        let password1 = generate_password(20, true, &redaction_map).unwrap();
+        let password2 = generate_password(20, true, &redaction_map).unwrap();
 
         // Very unlikely to generate the same password twice
         assert_ne!(password1.expose_secret(), password2.expose_secret());

@@ -151,8 +151,8 @@ pub struct GeneratePasswordRequest {
         range(min = 8)
     )]
     pub length: Option<usize>,
-    #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
-    pub no_symbols: Option<bool>,
+    #[schemars(description = "Whether to include symbols in the password (default: true)")]
+    pub include_symbols: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -801,12 +801,12 @@ SECRET HANDLING:
 
 PARAMETERS:
 - length: The length of the password to generate (default: 15 characters)
-- no_symbols: Whether to exclude symbols from the password (default: false, includes symbols)
+- include_symbols: Whether to include symbols in the password (default: true)
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
 - Numbers: 0-9 (always included)  
-- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
+- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless include_symbols=false)
 
 SECURITY FEATURES:
 - Uses cryptographically secure random number generation
@@ -816,19 +816,24 @@ SECURITY FEATURES:
     )]
     pub async fn generate_password(
         &self,
-        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
-            GeneratePasswordRequest,
-        >,
+        Parameters(GeneratePasswordRequest {
+            length,
+            include_symbols,
+        }): Parameters<GeneratePasswordRequest>,
     ) -> Result<CallToolResult, McpError> {
         let length = length.unwrap_or(15);
-        let no_symbols = no_symbols.unwrap_or(false);
+        let include_symbols = include_symbols.unwrap_or(true);
 
         let redaction_map = self.get_secret_manager().load_session_redaction_map();
 
-        let password = stakpak_shared::utils::generate_password(length, no_symbols, &redaction_map)
-            .map_err(|err| {
-                McpError::internal_error(err.to_string(), Some(json!({"error": err.to_string()})))
-            })?;
+        let password =
+            stakpak_shared::utils::generate_password(length, include_symbols, &redaction_map)
+                .map_err(|err| {
+                    McpError::internal_error(
+                        err.to_string(),
+                        Some(json!({"error": err.to_string()})),
+                    )
+                })?;
 
         let redacted_password = self
             .get_secret_manager()
