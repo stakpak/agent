@@ -2,10 +2,10 @@
 name = "stakpak-shared"
 version = { workspace = true }
 edition = "2024"
-description = "Shared utilities and models for Stakpak"
-license = "Apache-2.0"
-repository = "https://github.com/stakpak/agent"
-authors = ["Stakpak Team"]
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
 tracing = { workspace = true }

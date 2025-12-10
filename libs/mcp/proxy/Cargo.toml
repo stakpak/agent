@@ -2,13 +2,13 @@
 name = "stakpak-mcp-proxy"
 version.workspace = true
 edition.workspace = true
-description = "MCP proxy server for Stakpak"
-license = "Apache-2.0"
-repository = "https://github.com/stakpak/agent"
-authors = ["Stakpak Team"]
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
-stakpak-shared = { path = "../../shared" }
+stakpak-shared = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

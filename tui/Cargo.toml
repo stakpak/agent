@@ -2,15 +2,15 @@
 name = "stakpak-tui"
 version = { workspace = true }
 edition = "2024"
-description = "Terminal UI for Stakpak"
-license = "Apache-2.0"
-repository = "https://github.com/stakpak/agent"
-authors = ["Stakpak Team"]
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
-stakpak-shared = { path = "../libs/shared" }
-stakpak-api = { path = "../libs/api" }
-popup-widget = { package = "stakpak-popup-widget", path = "../libs/popup-widget" }
+stakpak-shared = { workspace = true }
+stakpak-api = { workspace = true }
+popup-widget = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

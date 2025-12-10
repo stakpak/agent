@@ -90,11 +90,18 @@ update_cargo_version() {
     local new_version=$1
     local temp_file=$(mktemp)
     
-    # Update the version line in Cargo.toml
-    sed "s/^version = \".*\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
+    # 1. Update [workspace.package] version
+    # This updates the first occurrence of version = "..." which is workspace.package
+    sed "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
     mv "$temp_file" Cargo.toml
     
-    print_success "Updated Cargo.toml version to $new_version"
+    # 2. Update internal dependencies versions in [workspace.dependencies]
+    # We look for lines starting with 'stakpak-' or 'popup-widget' and update their version field
+    local temp_file2=$(mktemp)
+    sed -E "/^(stakpak-|popup-widget)/s/version = \"[^\"]+\"/version = \"$new_version\"/" Cargo.toml > "$temp_file2"
+    mv "$temp_file2" Cargo.toml
+    
+    print_success "Updated workspace version and internal dependency versions to $new_version"
     
     # Update Cargo.lock to reflect the new version
     print_info "Updating Cargo.lock..."
