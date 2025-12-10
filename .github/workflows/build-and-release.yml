@@ -154,10 +154,22 @@ jobs:
           publish_package() {
             local pkg=$1
             echo "Publishing $pkg..."
-            if cargo publish -p "$pkg" --no-verify 2>&1 | grep -q "already uploaded"; then
+            # Capture output and exit code
+            set +e
+            OUTPUT=$(cargo publish -p "$pkg" --no-verify 2>&1)
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "$pkg published successfully"
+              echo "Waiting 15s for index propagation..."
+              sleep 15
+            elif echo "$OUTPUT" | grep -q "already uploaded"; then
               echo "$pkg version $VERSION already published, skipping"
             else
-              echo "$pkg published successfully"
+              echo "Error publishing $pkg:"
+              echo "$OUTPUT"
+              exit 1
             fi
           }
           
@@ -165,6 +177,7 @@ jobs:
           # Order matters: publish dependencies before dependents
           publish_package stakpak-shared
           publish_package stakpak-api
+          publish_package stakpak-popup-widget
           publish_package stakpak-mcp-client
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy

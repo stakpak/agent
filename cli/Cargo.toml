@@ -6,7 +6,7 @@ description = "Open source AI DevOps Agent in Your Terminal"
 license = "Apache-2.0"
 repository = "https://github.com/stakpak/agent"
 authors = ["Stakpak Team"]
-keywords = ["devops", "ai", "agent", "cli", "infrastructure", "kubernetes", "terraform"]
+keywords = ["devops", "ai", "agent", "cli", "infrastructure"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "../README.md"
 

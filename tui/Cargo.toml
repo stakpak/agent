@@ -10,7 +10,7 @@ authors = ["Stakpak Team"]
 [dependencies]
 stakpak-shared = { path = "../libs/shared" }
 stakpak-api = { path = "../libs/api" }
-popup-widget = { path = "../libs/popup-widget" }
+popup-widget = { package = "stakpak-popup-widget", path = "../libs/popup-widget" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -8,6 +8,7 @@ members = [
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
+    "libs/popup-widget",
 ]
 default-members = ["cli"]
 
