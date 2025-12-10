@@ -27,9 +27,6 @@ use crate::onboarding::menu::{
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
 use crate::onboarding::styled_output::{StepStatus, render_profile_name};
-use stakpak_shared::models::integrations::anthropic::AnthropicModel;
-use stakpak_shared::models::integrations::gemini::GeminiModel;
-use stakpak_shared::models::integrations::openai::OpenAIModel;
 use std::io::{self, Write};
 
 /// Helper function to get config path string from AppConfig
@@ -287,12 +284,8 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models
-    crate::onboarding::styled_output::render_default_models(
-        &OpenAIModel::default_smart_model(),
-        &OpenAIModel::default_eco_model(),
-        Some(&OpenAIModel::default_recovery_model()),
-    );
+    // Show default models (using same names as config templates)
+    crate::onboarding::styled_output::render_default_models("gpt-5", "gpt-5-mini");
 
     match prompt_password("Enter your OpenAI API key", true) {
         NavResult::Forward(Some(api_key)) => {
@@ -315,11 +308,11 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                         std::process::exit(1);
                     }
 
-                    println!();
+                    print!("\r\n");
                     crate::onboarding::styled_output::render_success(
                         "✓ Configuration saved successfully",
                     );
-                    println!();
+                    print!("\r\n");
 
                     // Update AppConfig with saved values so we can use them immediately
                     config.provider = profile
@@ -328,7 +321,6 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.openai = profile.openai.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    config.recovery_model = profile.recovery_model.clone();
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
@@ -365,11 +357,10 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models
+    // Show default models (using same names as config templates)
     crate::onboarding::styled_output::render_default_models(
-        &GeminiModel::default_smart_model(),
-        &GeminiModel::default_eco_model(),
-        Some(&GeminiModel::default_recovery_model()),
+        "gemini-3-pro-preview",
+        "gemini-2.5-flash",
     );
 
     match prompt_password("Enter your Gemini API key", true) {
@@ -393,11 +384,11 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                         std::process::exit(1);
                     }
 
-                    println!();
+                    print!("\r\n");
                     crate::onboarding::styled_output::render_success(
                         "✓ Configuration saved successfully",
                     );
-                    println!();
+                    print!("\r\n");
 
                     // Update AppConfig with saved values so we can use them immediately
                     config.provider = profile
@@ -406,7 +397,6 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.gemini = profile.gemini.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    config.recovery_model = profile.recovery_model.clone();
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
@@ -443,12 +433,8 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
 
-    // Show default models
-    crate::onboarding::styled_output::render_default_models(
-        &AnthropicModel::default_smart_model(),
-        &AnthropicModel::default_eco_model(),
-        Some(&AnthropicModel::default_recovery_model()),
-    );
+    // Show default models (using same names as config templates)
+    crate::onboarding::styled_output::render_default_models("claude-opus-4-5", "claude-haiku-4-5");
 
     match prompt_password("Enter your Anthropic API key", true) {
         NavResult::Forward(Some(api_key)) => {
@@ -471,11 +457,11 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
                         std::process::exit(1);
                     }
 
-                    println!();
+                    print!("\r\n");
                     crate::onboarding::styled_output::render_success(
                         "✓ Configuration saved successfully",
                     );
-                    println!();
+                    print!("\r\n");
 
                     // Update AppConfig with saved values so we can use them immediately
                     config.provider = profile
@@ -484,7 +470,6 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
                     config.anthropic = profile.anthropic.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    config.recovery_model = profile.recovery_model.clone();
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
@@ -530,16 +515,16 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     // Configure smart model
     crate::onboarding::styled_output::render_subtitle("Configure Smart Model");
-    let smart = match configure_hybrid_model() {
+    let smart = match configure_hybrid_model(None) {
         Some(model) => model,
         None => return false,
     };
 
     print!("\r\n");
 
-    // Configure eco model
+    // Configure eco model - pass smart provider to reuse API key if same
     crate::onboarding::styled_output::render_subtitle("Configure Eco Model");
-    let eco = match configure_hybrid_model() {
+    let eco = match configure_hybrid_model(Some(&smart)) {
         Some(model) => model,
         None => return false,
     };
@@ -559,9 +544,9 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 std::process::exit(1);
             }
 
-            println!();
+            print!("\r\n");
             crate::onboarding::styled_output::render_success("✓ Configuration saved successfully");
-            println!();
+            print!("\r\n");
 
             // Update AppConfig with saved values so we can use them immediately
             config.provider = profile
@@ -584,7 +569,10 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 }
 
 /// Configure a single model for hybrid setup
-fn configure_hybrid_model() -> Option<HybridModelConfig> {
+/// If `previous_config` is provided and uses the same provider, reuse the API key
+fn configure_hybrid_model(
+    previous_config: Option<&HybridModelConfig>,
+) -> Option<HybridModelConfig> {
     use crate::onboarding::config_templates::HybridProvider;
 
     // Select provider
@@ -602,13 +590,30 @@ fn configure_hybrid_model() -> Option<HybridModelConfig> {
     // Select model based on provider
     let model = select_model_for_provider(&provider)?;
 
-    // Get API key
-    let api_key = match crate::onboarding::menu::prompt_password(
-        &format!("Enter {} API key", provider.as_str()),
-        true,
-    ) {
-        NavResult::Forward(Some(key)) => key,
-        NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
+    // Check if we can reuse API key from previous config
+    let api_key = if let Some(prev) = previous_config {
+        if prev.provider == provider {
+            // Same provider, reuse API key
+            prev.api_key.clone()
+        } else {
+            // Different provider, ask for API key
+            match crate::onboarding::menu::prompt_password(
+                &format!("Enter {} API key", provider.as_str()),
+                true,
+            ) {
+                NavResult::Forward(Some(key)) => key,
+                NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
+            }
+        }
+    } else {
+        // No previous config, ask for API key
+        match crate::onboarding::menu::prompt_password(
+            &format!("Enter {} API key", provider.as_str()),
+            true,
+        ) {
+            NavResult::Forward(Some(key)) => key,
+            NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
+        }
     };
 
     Some(HybridModelConfig {
@@ -625,30 +630,22 @@ fn select_model_for_provider(
     let models: Vec<(String, &str, bool)> = match provider {
         crate::onboarding::config_templates::HybridProvider::OpenAI => {
             vec![
-                (OpenAIModel::GPT5.to_string(), "GPT-5", true),
-                (OpenAIModel::GPT5Mini.to_string(), "GPT-5 Mini", false),
-                (OpenAIModel::GPT5Nano.to_string(), "GPT-5 Nano", false),
+                ("gpt-5".to_string(), "GPT-5", true),
+                ("gpt-5-mini".to_string(), "GPT-5 Mini", false),
+                ("gpt-5-nano".to_string(), "GPT-5 Nano", false),
             ]
         }
         crate::onboarding::config_templates::HybridProvider::Gemini => {
             vec![
                 (
-                    GeminiModel::Gemini3Pro.to_string(),
+                    "gemini-3-pro-preview".to_string(),
                     "Gemini 3 Pro Preview",
                     true,
                 ),
+                ("gemini-2.5-pro".to_string(), "Gemini 2.5 Pro", false),
+                ("gemini-2.5-flash".to_string(), "Gemini 2.5 Flash", false),
                 (
-                    GeminiModel::Gemini25Pro.to_string(),
-                    "Gemini 2.5 Pro",
-                    false,
-                ),
-                (
-                    GeminiModel::Gemini25Flash.to_string(),
-                    "Gemini 2.5 Flash",
-                    false,
-                ),
-                (
-                    GeminiModel::Gemini25FlashLite.to_string(),
+                    "gemini-2.5-flash-lite".to_string(),
                     "Gemini 2.5 Flash Lite",
                     false,
                 ),
@@ -656,21 +653,9 @@ fn select_model_for_provider(
         }
         crate::onboarding::config_templates::HybridProvider::Anthropic => {
             vec![
-                (
-                    AnthropicModel::Claude45Opus.to_string(),
-                    "Claude Opus 4.5",
-                    true,
-                ),
-                (
-                    AnthropicModel::Claude45Sonnet.to_string(),
-                    "Claude Sonnet 4.5",
-                    false,
-                ),
-                (
-                    AnthropicModel::Claude45Haiku.to_string(),
-                    "Claude Haiku 4.5",
-                    false,
-                ),
+                ("claude-opus-4-5".to_string(), "Claude Opus 4.5", true),
+                ("claude-sonnet-4-5".to_string(), "Claude Sonnet 4.5", false),
+                ("claude-haiku-4-5".to_string(), "Claude Haiku 4.5", false),
             ]
         }
     };
@@ -752,9 +737,9 @@ async fn handle_stakpak_api_for_new_profile(config: &AppConfig, profile_name: &s
         std::process::exit(1);
     }
 
-    println!();
+    print!("\r\n");
     crate::onboarding::styled_output::render_success("✓ Configuration saved successfully");
-    println!();
+    print!("\r\n");
 }
 
 /// Initial choice enum
