@@ -135,7 +135,7 @@ struct Cli {
     command: Option<Commands>,
 }
 
-static DEFAULT_SUBAGENT_CONFIG: &str = include_str!("../../subagents.toml");
+static DEFAULT_SUBAGENT_CONFIG: &str = include_str!("../subagents.toml");
 
 #[tokio::main]
 async fn main() {
