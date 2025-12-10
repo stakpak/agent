@@ -2060,23 +2060,19 @@ SAFETY NOTES:
 /// Helper method to handle large output by truncating and saving to file
 fn sanitize_text_output(text: &str) -> String {
     text.chars()
-        .filter_map(|c| {
-            match c {
-                // Keep printable ASCII characters
-                c if c.is_ascii_graphic() => Some(c),
-                // Keep essential whitespace
-                '\n' | '\t' | ' ' | '\r' => Some(c),
-                // Keep valid Unicode alphanumeric characters
-                c if c.is_alphanumeric() => Some(c),
-                // Keep common punctuation and symbols
-                c if ".,;:!?()[]{}\"'`-–—…•".contains(c) => Some(c),
-                // Keep other printable Unicode characters (exclude control and replacement chars)
-                c if !c.is_control() && c != '\u{FFFD}' => Some(c),
-                // Remove control characters and replacement characters
-                _ => None,
+        .filter(|&c| {
+            // Drop replacement char
+            if c == '\u{FFFD}' {
+                return false;
             }
+            // Allow essential whitespace even though they're "control"
+            if matches!(c, '\n' | '\t' | '\r' | ' ') {
+                return true;
+            }
+            // Keep everything else that's not a control character
+            !c.is_control()
         })
-        .collect::<String>()
+        .collect()
 }
 
 fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
