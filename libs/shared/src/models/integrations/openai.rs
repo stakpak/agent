@@ -43,6 +43,30 @@ impl OpenAIModel {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize OpenAI model".to_string())
     }
+
+    /// Default smart model for OpenAI
+    pub const DEFAULT_SMART_MODEL: OpenAIModel = OpenAIModel::GPT5;
+
+    /// Default eco model for OpenAI
+    pub const DEFAULT_ECO_MODEL: OpenAIModel = OpenAIModel::GPT5Mini;
+
+    /// Default recovery model for OpenAI
+    pub const DEFAULT_RECOVERY_MODEL: OpenAIModel = OpenAIModel::GPT5Mini;
+
+    /// Get default smart model as string
+    pub fn default_smart_model() -> String {
+        Self::DEFAULT_SMART_MODEL.to_string()
+    }
+
+    /// Get default eco model as string
+    pub fn default_eco_model() -> String {
+        Self::DEFAULT_ECO_MODEL.to_string()
+    }
+
+    /// Get default recovery model as string
+    pub fn default_recovery_model() -> String {
+        Self::DEFAULT_RECOVERY_MODEL.to_string()
+    }
 }
 
 impl std::fmt::Display for OpenAIModel {

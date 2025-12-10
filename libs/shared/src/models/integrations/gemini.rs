@@ -52,6 +52,30 @@ impl GeminiModel {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize Gemini model".to_string())
     }
+
+    /// Default smart model for Gemini
+    pub const DEFAULT_SMART_MODEL: GeminiModel = GeminiModel::Gemini3Pro;
+
+    /// Default eco model for Gemini
+    pub const DEFAULT_ECO_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+
+    /// Default recovery model for Gemini
+    pub const DEFAULT_RECOVERY_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+
+    /// Get default smart model as string
+    pub fn default_smart_model() -> String {
+        Self::DEFAULT_SMART_MODEL.to_string()
+    }
+
+    /// Get default eco model as string
+    pub fn default_eco_model() -> String {
+        Self::DEFAULT_ECO_MODEL.to_string()
+    }
+
+    /// Get default recovery model as string
+    pub fn default_recovery_model() -> String {
+        Self::DEFAULT_RECOVERY_MODEL.to_string()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -37,6 +37,30 @@ impl AnthropicModel {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize Anthropic model".to_string())
     }
+
+    /// Default smart model for Anthropic
+    pub const DEFAULT_SMART_MODEL: AnthropicModel = AnthropicModel::Claude45Opus;
+
+    /// Default eco model for Anthropic
+    pub const DEFAULT_ECO_MODEL: AnthropicModel = AnthropicModel::Claude45Haiku;
+
+    /// Default recovery model for Anthropic
+    pub const DEFAULT_RECOVERY_MODEL: AnthropicModel = AnthropicModel::Claude45Haiku;
+
+    /// Get default smart model as string
+    pub fn default_smart_model() -> String {
+        Self::DEFAULT_SMART_MODEL.to_string()
+    }
+
+    /// Get default eco model as string
+    pub fn default_eco_model() -> String {
+        Self::DEFAULT_ECO_MODEL.to_string()
+    }
+
+    /// Get default recovery model as string
+    pub fn default_recovery_model() -> String {
+        Self::DEFAULT_RECOVERY_MODEL.to_string()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
