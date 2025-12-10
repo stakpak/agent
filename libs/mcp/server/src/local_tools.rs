@@ -901,8 +901,8 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let html_content = match response.text().await {
-            Ok(content) => content,
+        let html_bytes = match response.bytes().await {
+            Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to read response body: {}", e);
                 return Ok(CallToolResult::error(vec![
@@ -912,10 +912,11 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             }
         };
 
-        // is this enough? or do we need to sanitize the html before turning it to markdown
+        let html_content = String::from_utf8_lossy(&html_bytes).to_string();
         let markdown_content = html2md::rewrite_html(&html_content, false);
+        let sanitized_content = sanitize_text_output(&markdown_content);
 
-        let result = match handle_large_output(&markdown_content, "webpage") {
+        let result = match handle_large_output(&sanitized_content, "webpage") {
             Ok(result) => result,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -2057,6 +2058,27 @@ SAFETY NOTES:
 }
 
 /// Helper method to handle large output by truncating and saving to file
+fn sanitize_text_output(text: &str) -> String {
+    text.chars()
+        .filter_map(|c| {
+            match c {
+                // Keep printable ASCII characters
+                c if c.is_ascii_graphic() => Some(c),
+                // Keep essential whitespace
+                '\n' | '\t' | ' ' | '\r' => Some(c),
+                // Keep valid Unicode alphanumeric characters
+                c if c.is_alphanumeric() => Some(c),
+                // Keep common punctuation and symbols
+                c if ".,;:!?()[]{}\"'`-–—…•".contains(c) => Some(c),
+                // Keep other printable Unicode characters (exclude control and replacement chars)
+                c if !c.is_control() && c != '\u{FFFD}' => Some(c),
+                // Remove control characters and replacement characters
+                _ => None,
+            }
+        })
+        .collect::<String>()
+}
+
 fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
     const MAX_LINES: usize = 300;
 
