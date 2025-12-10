@@ -3,21 +3,20 @@
 <p align="center">
 
 <p align="center">
-  <img src="./assets/stakpaklogo.png" width="130" alt="Stakpak Logo" />
+  <img src="https://raw.githubusercontent.com/stakpak/agent/main/assets/Stakpaklogo.png" width="600" />
 </p>
 
 <h3 align="center">Open source AI DevOps Agent in Your Terminal</h3>
 
-<p align="left">
-StakPak is an open-source DevOps agent to help you secure, deploy, and maintain production-ready
-infrastructure. Use it to handle incidents, analyze your cloud cost, secure your IAM and containerize
-your app right from the terminal.
+<p align="center">
+Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy, and run infra from the terminal.
 </p>
 
 <br />
 
 <!-- Badges Section -->
 <p align="center">
+
 
   <!-- License -->
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" />
@@ -41,9 +40,9 @@ your app right from the terminal.
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white&style=flat-square" />
   </a>
 
-  ![til](./assets/stakpak-overview.gif)
+![til](./assets/stakpak-overview.gif)
 
-  [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
 </p>
 
