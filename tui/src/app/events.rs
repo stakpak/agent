@@ -2,7 +2,7 @@ use ratatui::style::Color;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::{
     integrations::openai::{AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress},
-    llm::LLMTokenUsage,
+    llm::{LLMModel, LLMTokenUsage},
 };
 use uuid::Uuid;
 
@@ -113,6 +113,9 @@ pub enum InputEvent {
     StreamUsage(LLMTokenUsage),
     RequestTotalUsage,
     TotalUsage(LLMTokenUsage),
+
+    // Model events
+    StreamModel(LLMModel),
 }
 
 #[derive(Debug)]

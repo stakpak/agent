@@ -3,6 +3,7 @@ use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
     LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
 };
+use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use futures_util::StreamExt;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
@@ -30,6 +31,8 @@ pub enum OpenAIModel {
     #[default]
     #[serde(rename = "gpt-5-2025-08-07")]
     GPT5,
+    #[serde(rename = "gpt-5.1-2025-11-13")]
+    GPT51,
     #[serde(rename = "gpt-5-mini-2025-08-07")]
     GPT5Mini,
     #[serde(rename = "gpt-5-nano-2025-08-07")]
@@ -69,6 +72,91 @@ impl OpenAIModel {
     }
 }
 
+impl ContextAware for OpenAIModel {
+    fn context_info(&self) -> ModelContextInfo {
+        let model_name = self.to_string();
+
+        if model_name.starts_with("o3") {
+            return ModelContextInfo {
+                max_tokens: 200_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 2.0,
+                    output_cost_per_million: 8.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("o4-mini") {
+            return ModelContextInfo {
+                max_tokens: 200_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 1.10,
+                    output_cost_per_million: 4.40,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("gpt-5-mini") {
+            return ModelContextInfo {
+                max_tokens: 400_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.25,
+                    output_cost_per_million: 2.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("gpt-5-nano") {
+            return ModelContextInfo {
+                max_tokens: 400_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.05,
+                    output_cost_per_million: 0.40,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("gpt-5") {
+            return ModelContextInfo {
+                max_tokens: 400_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 1.25,
+                    output_cost_per_million: 10.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        ModelContextInfo::default()
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            OpenAIModel::O3 => "O3".to_string(),
+            OpenAIModel::O4Mini => "O4-mini".to_string(),
+            OpenAIModel::GPT5 => "GPT-5".to_string(),
+            OpenAIModel::GPT51 => "GPT-5.1".to_string(),
+            OpenAIModel::GPT5Mini => "GPT-5 Mini".to_string(),
+            OpenAIModel::GPT5Nano => "GPT-5 Nano".to_string(),
+            OpenAIModel::Custom(name) => format!("Custom ({})", name),
+        }
+    }
+}
+
 impl std::fmt::Display for OpenAIModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -79,6 +167,7 @@ impl std::fmt::Display for OpenAIModel {
             OpenAIModel::GPT5Nano => write!(f, "gpt-5-nano-2025-08-07"),
             OpenAIModel::GPT5Mini => write!(f, "gpt-5-mini-2025-08-07"),
             OpenAIModel::GPT5 => write!(f, "gpt-5-2025-08-07"),
+            OpenAIModel::GPT51 => write!(f, "gpt-5.1-2025-11-13"),
 
             OpenAIModel::Custom(model_name) => write!(f, "{}", model_name),
         }

@@ -4,6 +4,7 @@ use crate::models::llm::{
     LLMMessageContent, LLMMessageTypedContent, LLMTool,
 };
 use crate::models::llm::{LLMTokenUsage, PromptTokensDetails};
+use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use futures_util::StreamExt;
 use itertools::Itertools;
 use reqwest::Response;
@@ -60,6 +61,69 @@ impl AnthropicModel {
     /// Get default recovery model as string
     pub fn default_recovery_model() -> String {
         Self::DEFAULT_RECOVERY_MODEL.to_string()
+    }
+}
+
+impl ContextAware for AnthropicModel {
+    fn context_info(&self) -> ModelContextInfo {
+        let model_name = self.to_string();
+
+        if model_name.starts_with("claude-haiku") {
+            return ModelContextInfo {
+                max_tokens: 200_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 1.0,
+                    output_cost_per_million: 5.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("claude-sonnet") {
+            return ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![
+                    ContextPricingTier {
+                        label: "<200K tokens".to_string(),
+                        input_cost_per_million: 3.0,
+                        output_cost_per_million: 15.0,
+                        upper_bound: Some(200_000),
+                    },
+                    ContextPricingTier {
+                        label: ">200K tokens".to_string(),
+                        input_cost_per_million: 6.0,
+                        output_cost_per_million: 22.5,
+                        upper_bound: None,
+                    },
+                ],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        if model_name.starts_with("claude-opus") {
+            return ModelContextInfo {
+                max_tokens: 200_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 5.0,
+                    output_cost_per_million: 25.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            };
+        }
+
+        panic!("Unknown model: {}", model_name);
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            AnthropicModel::Claude45Sonnet => "Claude Sonnet 4.5".to_string(),
+            AnthropicModel::Claude45Haiku => "Claude Haiku 4.5".to_string(),
+            AnthropicModel::Claude45Opus => "Claude Opus 4.5".to_string(),
+        }
     }
 }
 
@@ -668,7 +732,10 @@ pub async fn process_stream(
                                 let usage = LLMTokenUsage {
                                     prompt_tokens: usage.input_tokens,
                                     completion_tokens: usage.output_tokens,
-                                    total_tokens: usage.input_tokens + usage.output_tokens,
+                                    total_tokens: usage.input_tokens
+                                        + usage.cache_creation_input_tokens.unwrap_or(0)
+                                        + usage.cache_read_input_tokens.unwrap_or(0)
+                                        + usage.output_tokens,
                                     prompt_tokens_details: Some(PromptTokensDetails {
                                         input_tokens: Some(usage.input_tokens),
                                         output_tokens: Some(usage.output_tokens),
