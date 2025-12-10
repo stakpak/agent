@@ -3,9 +3,9 @@
 //! This module provides a styled, interactive onboarding experience that guides users
 //! through setting up their Stakpak configuration, including:
 //! - Stakpak API authentication (OAuth flow)
-//! - Provider selection (OpenAI, Gemini, Anthropic)
+//! - Provider selection (OpenAI, Anthropic, Google, Hybrid Providers, BYOM)
 //! - Bring Your Own Model (BYOM) configuration
-//! - Hybrid configurations (mixing providers)
+//! - Hybrid provider configurations (mixing providers)
 
 mod byom;
 mod config_templates;
@@ -18,8 +18,8 @@ use crate::apikey_auth::prompt_for_api_key;
 use crate::config::AppConfig;
 use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
-    config_to_toml_preview, generate_anthropic_config, generate_gemini_config,
-    generate_openai_config,
+    HybridModelConfig, config_to_toml_preview, generate_anthropic_config, generate_gemini_config,
+    generate_hybrid_config, generate_openai_config,
 };
 use crate::onboarding::menu::{prompt_password, prompt_profile_name, select_option};
 use crate::onboarding::navigation::NavResult;
@@ -210,9 +210,14 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
             "Choose provider or bring your own model",
             &[
                 (ProviderChoice::OpenAI, "OpenAI", false),
-                (ProviderChoice::Gemini, "Gemini", false),
                 (ProviderChoice::Anthropic, "Anthropic", false),
-                (ProviderChoice::Byom, "Bring Your Own Model", false),
+                (ProviderChoice::Google, "Google", false),
+                (
+                    ProviderChoice::Hybrid,
+                    "Hybrid providers (e.g., Google and Anthropic)",
+                    false,
+                ),
+                (ProviderChoice::Byom, "Bring your own model", false),
             ],
             1,
             3,
@@ -223,11 +228,14 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
             NavResult::Forward(ProviderChoice::OpenAI) => {
                 handle_openai_setup(config, profile_name).await
             }
-            NavResult::Forward(ProviderChoice::Gemini) => {
-                handle_gemini_setup(config, profile_name).await
-            }
             NavResult::Forward(ProviderChoice::Anthropic) => {
                 handle_anthropic_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::Google) => {
+                handle_gemini_setup(config, profile_name).await
+            }
+            NavResult::Forward(ProviderChoice::Hybrid) => {
+                handle_hybrid_setup(config, profile_name).await
             }
             NavResult::Forward(ProviderChoice::Byom) => {
                 handle_byom_setup(config, profile_name).await
@@ -489,6 +497,220 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
     }
 }
 
+/// Handle Hybrid Providers setup
+/// Returns true if completed, false if cancelled/back
+async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool {
+    let config_path = get_config_path_string(config);
+
+    // Clear previous step content WITHOUT touching welcome message
+    print!("\x1b[u");
+    print!("\x1b[0J"); // Clear from cursor to end of screen
+    print!("\x1b[K"); // Clear current line
+    let _ = io::stdout().flush();
+
+    // Render step 3 - start immediately after welcome message (no extra newline)
+    crate::onboarding::styled_output::render_title("Hybrid Providers Configuration");
+    print!("\r\n");
+
+    // Show step indicators on one line
+    let steps = vec![
+        ("Step 1".to_string(), StepStatus::Completed),
+        ("Step 2".to_string(), StepStatus::Completed),
+        ("Step 3".to_string(), StepStatus::Active),
+    ];
+    crate::onboarding::styled_output::render_steps(&steps);
+    print!("\r\n");
+
+    crate::onboarding::styled_output::render_info(
+        "You'll configure smart_model and eco_model separately, each from different providers if desired.",
+    );
+    print!("\r\n");
+
+    // Configure smart model
+    crate::onboarding::styled_output::render_subtitle("Configure Smart Model");
+    let smart = match configure_hybrid_model("smart", 2, 4) {
+        Some(model) => model,
+        None => return false,
+    };
+
+    print!("\r\n");
+
+    // Configure eco model
+    crate::onboarding::styled_output::render_subtitle("Configure Eco Model");
+    let eco = match configure_hybrid_model("eco", 3, 4) {
+        Some(model) => model,
+        None => return false,
+    };
+
+    let profile = generate_hybrid_config(smart, eco);
+
+    // Show confirmation
+    crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(&profile));
+
+    match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
+        NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
+            if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
+                crate::onboarding::styled_output::render_error(&format!(
+                    "Failed to save configuration: {}",
+                    e
+                ));
+                std::process::exit(1);
+            }
+
+            println!();
+            crate::onboarding::styled_output::render_success("✓ Configuration saved successfully");
+            println!();
+
+            // Update AppConfig with saved values so we can use them immediately
+            config.provider = profile
+                .provider
+                .unwrap_or(crate::config::ProviderType::Local);
+            config.openai = profile.openai.clone();
+            config.anthropic = profile.anthropic.clone();
+            config.gemini = profile.gemini.clone();
+            config.smart_model = profile.smart_model.clone();
+            config.eco_model = profile.eco_model.clone();
+            config.recovery_model = profile.recovery_model.clone();
+            if let Some(key) = &profile.api_key {
+                config.api_key = Some(key.clone());
+            }
+
+            true
+        }
+        NavResult::Forward(Some(false)) | NavResult::Back | NavResult::Cancel => false,
+    }
+}
+
+/// Configure a single model for hybrid setup
+fn configure_hybrid_model(
+    model_type: &str,
+    current_step: usize,
+    total_steps: usize,
+) -> Option<HybridModelConfig> {
+    use crate::onboarding::config_templates::HybridProvider;
+
+    // Select provider
+    let providers = [
+        (HybridProvider::OpenAI, "OpenAI", false),
+        (HybridProvider::Gemini, "Gemini", false),
+        (HybridProvider::Anthropic, "Anthropic", false),
+    ];
+
+    let provider = match select_option(
+        &format!("Select provider for {} model", model_type),
+        &providers
+            .iter()
+            .map(|(p, n, r)| (*p, *n, *r))
+            .collect::<Vec<_>>(),
+        current_step,
+        total_steps,
+        true, // Can go back
+    ) {
+        NavResult::Forward(p) => p,
+        NavResult::Back | NavResult::Cancel => return None,
+    };
+
+    // Select model based on provider
+    let model = select_model_for_provider(&provider, model_type, current_step + 1, total_steps)?;
+
+    // Get API key
+    let api_key = match crate::onboarding::menu::prompt_password(
+        &format!("Enter {} API key", provider.as_str()),
+        true,
+    ) {
+        NavResult::Forward(Some(key)) => key,
+        NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
+    };
+
+    Some(HybridModelConfig {
+        provider,
+        model,
+        api_key,
+    })
+}
+
+/// Select model for a provider
+fn select_model_for_provider(
+    provider: &crate::onboarding::config_templates::HybridProvider,
+    model_type: &str,
+    current_step: usize,
+    total_steps: usize,
+) -> Option<String> {
+    use crate::onboarding::config_templates::HybridProvider;
+
+    let models = match provider {
+        HybridProvider::OpenAI => {
+            vec![
+                (OpenAIModel::GPT5.to_string(), "GPT-5", true),
+                (OpenAIModel::GPT5Mini.to_string(), "GPT-5 Mini", false),
+                (OpenAIModel::GPT5Nano.to_string(), "GPT-5 Nano", false),
+            ]
+        }
+        HybridProvider::Gemini => {
+            vec![
+                (
+                    GeminiModel::Gemini3Pro.to_string(),
+                    "Gemini 3 Pro Preview",
+                    true,
+                ),
+                (
+                    GeminiModel::Gemini25Pro.to_string(),
+                    "Gemini 2.5 Pro",
+                    false,
+                ),
+                (
+                    GeminiModel::Gemini25Flash.to_string(),
+                    "Gemini 2.5 Flash",
+                    false,
+                ),
+                (
+                    GeminiModel::Gemini25FlashLite.to_string(),
+                    "Gemini 2.5 Flash Lite",
+                    false,
+                ),
+            ]
+        }
+        HybridProvider::Anthropic => {
+            vec![
+                (
+                    AnthropicModel::Claude45Opus.to_string(),
+                    "Claude Opus 4.5",
+                    true,
+                ),
+                (
+                    AnthropicModel::Claude45Sonnet.to_string(),
+                    "Claude Sonnet 4.5",
+                    false,
+                ),
+                (
+                    AnthropicModel::Claude45Haiku.to_string(),
+                    "Claude Haiku 4.5",
+                    false,
+                ),
+            ]
+        }
+    };
+
+    let options: Vec<_> = models
+        .iter()
+        .map(|(val, name, rec)| ((*val).to_string(), *name, *rec))
+        .collect();
+
+    match select_option(
+        &format!("Select {} model", model_type),
+        &options
+            .iter()
+            .map(|(v, n, r)| (v.clone(), *n, *r))
+            .collect::<Vec<_>>(),
+        current_step,
+        total_steps,
+        true, // Can go back
+    ) {
+        NavResult::Forward(model) => Some(model),
+        NavResult::Back | NavResult::Cancel => None,
+    }
+}
+
 /// Handle BYOM setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
@@ -576,7 +798,8 @@ enum InitialChoice {
 #[derive(Clone, Copy, PartialEq)]
 enum ProviderChoice {
     OpenAI,
-    Gemini,
     Anthropic,
+    Google,
+    Hybrid,
     Byom,
 }
