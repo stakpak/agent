@@ -32,6 +32,8 @@ Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy,
   <!-- Discord Community -->
   <a href="https://discord.gg/QTZjETP7GB"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white&style=flat-square" /></a>
 
+:star: Help us reach more developers and grow the Stakpak community. Star this repo!
+
 ![til](./assets/stakpak-overview.gif)
 
 </p>
