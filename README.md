@@ -1,9 +1,10 @@
 
 
 <p align="center">
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/stakpak/agent/main/assets/Stakpaklogo.png" width="400" />
+  <picture>
+    <source srcset="assets/stakpak-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/stakpak-light.png" width="400" />
+  </picture>
 </p>
 
 <h3 align="center">Open source AI DevOps Agent in Your Terminal</h3>
@@ -16,33 +17,22 @@ Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy,
 
 <!-- Badges Section -->
 <p align="center">
-
-
+  <!-- Built With Ratatui -->
+  <a href="https://ratatui.rs/"><img src="https://ratatui.rs/built-with-ratatui/badge.svg" /></a>
   <!-- License -->
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" />
-
   <!-- Release (latest GitHub tag) -->
   <img src="https://img.shields.io/github/v/release/stakpak/agent?style=flat-square" />
-
   <!-- Build CI status (GitHub Actions) -->
   <img src="https://github.com/stakpak/agent/actions/workflows/ci.yml/badge.svg?style=flat-square" />
-
   <!-- Downloads (GitHub releases total) -->
   <img src="https://img.shields.io/github/downloads/stakpak/agent/total?style=flat-square" />
-
   <!-- Documentation -->
-  <a href="https://stakpak.gitbook.io/docs/">
-    <img src="https://img.shields.io/badge/Docs-Documentation-0A84FF?style=flat-square" />
-  </a>
-
+  <a href="https://stakpak.gitbook.io/docs/"><img src="https://img.shields.io/badge/Docs-Documentation-0A84FF?style=flat-square" /></a>
   <!-- Discord Community -->
-  <a href="https://discord.gg/QTZjETP7GB">
-    <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white&style=flat-square" />
-  </a>
+  <a href="https://discord.gg/QTZjETP7GB"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white&style=flat-square" /></a>
 
 ![til](./assets/stakpak-overview.gif)
-
-[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
 </p>
 
