@@ -21,7 +21,9 @@ use crate::onboarding::config_templates::{
     HybridModelConfig, config_to_toml_preview, generate_anthropic_config, generate_gemini_config,
     generate_hybrid_config, generate_openai_config,
 };
-use crate::onboarding::menu::{prompt_password, prompt_profile_name, select_option};
+use crate::onboarding::menu::{
+    prompt_password, prompt_profile_name, select_option, select_option_no_header,
+};
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
 use crate::onboarding::styled_output::{StepStatus, render_profile_name};
@@ -528,7 +530,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     // Configure smart model
     crate::onboarding::styled_output::render_subtitle("Configure Smart Model");
-    let smart = match configure_hybrid_model("smart", 2, 4) {
+    let smart = match configure_hybrid_model() {
         Some(model) => model,
         None => return false,
     };
@@ -537,7 +539,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     // Configure eco model
     crate::onboarding::styled_output::render_subtitle("Configure Eco Model");
-    let eco = match configure_hybrid_model("eco", 3, 4) {
+    let eco = match configure_hybrid_model() {
         Some(model) => model,
         None => return false,
     };
@@ -582,11 +584,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 }
 
 /// Configure a single model for hybrid setup
-fn configure_hybrid_model(
-    model_type: &str,
-    current_step: usize,
-    total_steps: usize,
-) -> Option<HybridModelConfig> {
+fn configure_hybrid_model() -> Option<HybridModelConfig> {
     use crate::onboarding::config_templates::HybridProvider;
 
     // Select provider
@@ -596,22 +594,13 @@ fn configure_hybrid_model(
         (HybridProvider::Anthropic, "Anthropic", false),
     ];
 
-    let provider = match select_option(
-        &format!("Select provider for {} model", model_type),
-        &providers
-            .iter()
-            .map(|(p, n, r)| (*p, *n, *r))
-            .collect::<Vec<_>>(),
-        current_step,
-        total_steps,
-        true, // Can go back
-    ) {
+    let provider = match select_option_no_header(&providers, true) {
         NavResult::Forward(p) => p,
         NavResult::Back | NavResult::Cancel => return None,
     };
 
     // Select model based on provider
-    let model = select_model_for_provider(&provider, model_type, current_step + 1, total_steps)?;
+    let model = select_model_for_provider(&provider)?;
 
     // Get API key
     let api_key = match crate::onboarding::menu::prompt_password(
@@ -632,21 +621,16 @@ fn configure_hybrid_model(
 /// Select model for a provider
 fn select_model_for_provider(
     provider: &crate::onboarding::config_templates::HybridProvider,
-    model_type: &str,
-    current_step: usize,
-    total_steps: usize,
 ) -> Option<String> {
-    use crate::onboarding::config_templates::HybridProvider;
-
-    let models = match provider {
-        HybridProvider::OpenAI => {
+    let models: Vec<(String, &str, bool)> = match provider {
+        crate::onboarding::config_templates::HybridProvider::OpenAI => {
             vec![
                 (OpenAIModel::GPT5.to_string(), "GPT-5", true),
                 (OpenAIModel::GPT5Mini.to_string(), "GPT-5 Mini", false),
                 (OpenAIModel::GPT5Nano.to_string(), "GPT-5 Nano", false),
             ]
         }
-        HybridProvider::Gemini => {
+        crate::onboarding::config_templates::HybridProvider::Gemini => {
             vec![
                 (
                     GeminiModel::Gemini3Pro.to_string(),
@@ -670,7 +654,7 @@ fn select_model_for_provider(
                 ),
             ]
         }
-        HybridProvider::Anthropic => {
+        crate::onboarding::config_templates::HybridProvider::Anthropic => {
             vec![
                 (
                     AnthropicModel::Claude45Opus.to_string(),
@@ -691,21 +675,7 @@ fn select_model_for_provider(
         }
     };
 
-    let options: Vec<_> = models
-        .iter()
-        .map(|(val, name, rec)| ((*val).to_string(), *name, *rec))
-        .collect();
-
-    match select_option(
-        &format!("Select {} model", model_type),
-        &options
-            .iter()
-            .map(|(v, n, r)| (v.clone(), *n, *r))
-            .collect::<Vec<_>>(),
-        current_step,
-        total_steps,
-        true, // Can go back
-    ) {
+    match select_option_no_header(&models, true) {
         NavResult::Forward(model) => Some(model),
         NavResult::Back | NavResult::Cancel => None,
     }

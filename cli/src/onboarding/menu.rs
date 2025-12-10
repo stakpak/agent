@@ -9,14 +9,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::io::{self, Write, stdout};
 use std::time::{Duration, Instant};
 
-/// Select from a list of options with search capability
+/// Internal helper: Select from a list of options with search capability
 /// Returns NavResult to support back navigation
-pub fn select_option<T: Clone>(
-    title: &str,
+fn select_option_internal<T: Clone>(
     options: &[(T, &str, bool)], // (value, display_name, is_recommended)
-    current_step: usize,
-    total_steps: usize,
     can_go_back: bool,
+    header_height: usize,
 ) -> NavResult<T> {
     let mut selected = 0;
     let mut search_input = String::new();
@@ -25,37 +23,13 @@ pub fn select_option<T: Clone>(
         return NavResult::Cancel;
     }
 
-    // Note: Caller should have already cleared the step content area
-    // We just render this step's content fresh - start immediately, no extra newline
-    styled_output::render_title(title); // render_title already includes \r\n
-
-    // Render progress steps on one line
-    let steps: Vec<_> = (0..total_steps)
-        .map(|i| {
-            let status = if i < current_step {
-                StepStatus::Completed
-            } else if i == current_step {
-                StepStatus::Active
-            } else {
-                StepStatus::Pending
-            };
-            (format!("Step {}", i + 1), status)
-        })
-        .collect();
-    styled_output::render_steps(&steps); // render_steps already includes \r\n
-    print!("\r\n"); // One empty line before interactive area
-
-    // Track total height including title and steps (3 lines: title, steps, 1 empty line)
-    const HEADER_HEIGHT: usize = 3;
-    // Initial render of the interactive area
-    // We track how many lines we printed so we can move back up
     let mut previous_height = 0;
 
     loop {
         // If we previously rendered content, move cursor up and clear from there
         if previous_height > 0 {
-            print!("\x1b[{}A", previous_height); // Move up N lines
-            print!("\x1b[0J"); // Clear from cursor down
+            print!("\x1b[{}A", previous_height);
+            print!("\x1b[0J");
         }
 
         let mut current_height = 0;
@@ -112,8 +86,7 @@ pub fn select_option<T: Clone>(
         {
             match code {
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    // Clear everything including title and steps before exiting
-                    print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
+                    print!("\x1b[{}A", previous_height + header_height);
                     print!("\x1b[0J");
                     let _ = stdout().flush();
                     disable_raw_mode().ok();
@@ -121,8 +94,7 @@ pub fn select_option<T: Clone>(
                 }
                 KeyCode::Enter => {
                     if !filtered.is_empty() {
-                        // Clear everything including title and steps
-                        print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
+                        print!("\x1b[{}A", previous_height + header_height);
                         print!("\x1b[0J");
                         let _ = stdout().flush();
                         disable_raw_mode().ok();
@@ -146,8 +118,7 @@ pub fn select_option<T: Clone>(
                     selected = 0;
                 }
                 KeyCode::Esc => {
-                    // Clear everything including title and steps
-                    print!("\x1b[{}A", previous_height + HEADER_HEIGHT);
+                    print!("\x1b[{}A", previous_height + header_height);
                     print!("\x1b[0J");
                     let _ = stdout().flush();
                     disable_raw_mode().ok();
@@ -161,6 +132,47 @@ pub fn select_option<T: Clone>(
             }
         }
     }
+}
+
+/// Select from a list of options with search capability
+/// Returns NavResult to support back navigation
+pub fn select_option<T: Clone>(
+    title: &str,
+    options: &[(T, &str, bool)], // (value, display_name, is_recommended)
+    current_step: usize,
+    total_steps: usize,
+    can_go_back: bool,
+) -> NavResult<T> {
+    // Render header: title and step indicators
+    styled_output::render_title(title);
+    let steps: Vec<_> = (0..total_steps)
+        .map(|i| {
+            let status = if i < current_step {
+                StepStatus::Completed
+            } else if i == current_step {
+                StepStatus::Active
+            } else {
+                StepStatus::Pending
+            };
+            (format!("Step {}", i + 1), status)
+        })
+        .collect();
+    styled_output::render_steps(&steps);
+    print!("\r\n");
+
+    // Header height: title (1) + steps (1) + empty line (1) = 3
+    select_option_internal(options, can_go_back, 3)
+}
+
+/// Select from a list of options without rendering title and step indicators
+/// Used for sub-steps within a larger step (e.g., hybrid provider configuration)
+/// Returns NavResult to support back navigation
+pub fn select_option_no_header<T: Clone>(
+    options: &[(T, &str, bool)], // (value, display_name, is_recommended)
+    can_go_back: bool,
+) -> NavResult<T> {
+    // No header, so header_height is 0
+    select_option_internal(options, can_go_back, 0)
 }
 
 /// Validate profile name (alphanumeric and underscores only, no spaces or special chars)
