@@ -3,7 +3,7 @@
 <p align="center">
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/stakpak/agent/main/assets/Stakpaklogo.png" width="600" />
+  <img src="https://raw.githubusercontent.com/stakpak/agent/main/assets/Stakpaklogo.png" width="400" />
 </p>
 
 <h3 align="center">Open source AI DevOps Agent in Your Terminal</h3>
