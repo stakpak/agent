@@ -38,8 +38,6 @@ Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy,
 
 </p>
 
-# Stakpak
-
 You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
 Stakpak is built different:
 - **Secret Substitution** - The LLM works with your credentials without ever seeing them
