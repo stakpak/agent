@@ -199,18 +199,6 @@ docker run -it \
    --entrypoint stakpak ghcr.io/stakpak/agent:latest
 ```
 
-### Keyboard Shortcuts
-
-<img src="assets/keyboardshortcuts.jpeg" width="800">
-
-- Use `Arrow keys` or **Tab** to select options
-- Press `Esc` to exit the prompt
-- `?` for Shortcuts
-- `/` for commands
-- `↵` to send message
-- `Shift + Enter` or `Ctrl + J` to insert newline
-- `Ctrl + C` to quit
-
 ### MCP Modes
 
 You can use Stakpak as a secure MCP proxy or expose its security-hardened tools through an [MCP](https://modelcontextprotocol.io/) server.
