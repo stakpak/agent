@@ -2,8 +2,8 @@
 
 <p align="center">
   <picture>
-    <source srcset="assets/stakpak-dark.png" media="(prefers-color-scheme: dark)">
-    <img src="assets/stakpak-light.png" width="400" />
+    <source srcset="assets/stakpak-light.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/stakpak-dark.png" width="400" />
   </picture>
 </p>
 
