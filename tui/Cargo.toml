@@ -2,6 +2,10 @@
 name = "stakpak-tui"
 version = { workspace = true }
 edition = "2024"
+description = "Terminal UI for Stakpak"
+license = "Apache-2.0"
+repository = "https://github.com/stakpak/agent"
+authors = ["Stakpak Team"]
 
 [dependencies]
 stakpak-shared = { path = "../libs/shared" }
