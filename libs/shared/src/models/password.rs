@@ -8,7 +8,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Password(#[schemars(with = "String", length(min = 8))] SecretString);
 
-// if `Password` needs to be serialized
+// if `Password` needs to be serialized without redaction
 //
 // #[derive(Serialize, Clone)]
 // pub struct Password(#[serde(serialize_with = "serialize_exposed_password")] SecretString);
