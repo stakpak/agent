@@ -19,7 +19,7 @@ async fn test_local_db_operations() {
 
     let config = LocalClientConfig {
         stakpak_base_url: None,
-        store_path: Some(db_path.clone()),
+        store_path: Some(db_path),
         anthropic_config: None,
         openai_config: None,
         gemini_config: None,
