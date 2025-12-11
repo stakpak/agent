@@ -1,7 +1,6 @@
 // Secret redaction implementation based on gitleaks (https://github.com/gitleaks/gitleaks)
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitleaksConfig {
@@ -222,16 +221,10 @@ impl RegexCompilable for GitleaksConfig {
     }
 }
 
-/// Lazy-loaded gitleaks configuration
-pub static GITLEAKS_CONFIG: LazyLock<GitleaksConfig> =
-    LazyLock::new(|| create_gitleaks_config(false));
-
-/// Lazy-loaded gitleaks configuration with privacy rules
-pub static GITLEAKS_CONFIG_WITH_PRIVACY: LazyLock<GitleaksConfig> =
-    LazyLock::new(|| create_gitleaks_config(true));
-
 /// Creates a gitleaks configuration with optional privacy rules
-fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
+///
+/// Privacy rules detect and redact private data like IP addresses and AWS account IDs.
+pub fn create_gitleaks_config(include_privacy_rules: bool) -> GitleaksConfig {
     // Load main gitleaks configuration
     let config_str = include_str!("gitleaks.toml");
     let mut config: GitleaksConfig =
@@ -355,14 +348,14 @@ pub fn calculate_entropy(text: &str) -> f64 {
 /// 3. Apply allowlists to exclude known false positives
 /// 4. Check keywords to ensure relevance
 ///
-/// When privacy_mode is enabled, also detects private data like IP addresses and AWS account IDs
-pub fn detect_secrets(input: &str, path: Option<&str>, privacy_mode: bool) -> Vec<DetectedSecret> {
+/// `config` The gitleaks configuration with compiled rules to use.
+/// The config can include privacy rules for detecting private data like IP addresses and AWS account IDs.
+pub fn detect_secrets(
+    input: &str,
+    path: Option<&str>,
+    config: &GitleaksConfig,
+) -> Vec<DetectedSecret> {
     let mut detected_secrets = Vec::new();
-    let config = if privacy_mode {
-        &*GITLEAKS_CONFIG_WITH_PRIVACY
-    } else {
-        &*GITLEAKS_CONFIG
-    };
 
     // Apply each compiled rule from the configuration
     for rule in &config.rules {
@@ -592,27 +585,10 @@ pub fn contains_any_keyword(input: &str, keywords: &[String]) -> bool {
         .any(|keyword| input_lower.contains(&keyword.to_lowercase()))
 }
 
-/// Forces initialization of the gitleaks configuration
-///
-/// This function should be called during application startup to preload and compile
-/// the gitleaks rules, avoiding delays on the first call to detect_secrets.
-///
-/// When privacy_mode is enabled, also loads privacy rules for detecting IP addresses and AWS account IDs
-///
-/// Returns the number of successfully compiled rules.
-pub fn initialize_gitleaks_config(privacy_mode: bool) -> usize {
-    // Force evaluation of the lazy static
-    let config = if privacy_mode {
-        &*GITLEAKS_CONFIG_WITH_PRIVACY
-    } else {
-        &*GITLEAKS_CONFIG
-    };
-    config.rules.len()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::test_utils::{TEST_GITLEAKS_CONFIG, TEST_GITLEAKS_CONFIG_WITH_PRIVACY};
 
     #[test]
     fn test_entropy_calculation() {
@@ -635,7 +611,7 @@ mod tests {
 
     #[test]
     fn test_additional_rules_loaded() {
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
 
         // Check that the Anthropic API key rule from additional_rules.toml is loaded
         let anthropic_rule = config.rules.iter().find(|r| r.id == "anthropic-api-key");
@@ -657,10 +633,11 @@ mod tests {
 
     #[test]
     fn test_anthropic_api_key_detection() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         // Use a more realistic API key that doesn't contain alphabet sequences
         let test_input =
             "ANTHROPIC_API_KEY=sk-ant-api03-Kx9mP2nQ8rT4vW7yZ3cF6hJ1lN5sA9bD2eG5kM8pR1tX4zB7";
-        let secrets = detect_secrets(test_input, None, false);
+        let secrets = detect_secrets(test_input, None, &config);
 
         // Should detect the Anthropic API key
         let anthropic_secret = secrets.iter().find(|s| s.rule_id == "anthropic-api-key");
@@ -676,14 +653,16 @@ mod tests {
 
     #[test]
     fn test_privacy_mode_aws_account_id() {
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
         let test_input = "AWS_ACCOUNT_ID=987654321098";
 
         // Should not detect AWS account ID in regular mode
-        let secrets = detect_secrets(test_input, None, false);
+        let secrets = detect_secrets(test_input, None, &config);
         assert!(!secrets.iter().any(|s| s.rule_id == "aws-account-id"));
 
         // Should detect AWS account ID in privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let secrets_privacy = detect_secrets(test_input, None, &config_privacy);
         let aws_secret = secrets_privacy
             .iter()
             .find(|s| s.rule_id == "aws-account-id");
@@ -699,14 +678,16 @@ mod tests {
 
     #[test]
     fn test_privacy_mode_public_ip() {
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
         let test_input = "SERVER_IP=203.0.113.195";
 
         // Should not detect public IP in regular mode
-        let secrets = detect_secrets(test_input, None, false);
+        let secrets = detect_secrets(test_input, None, &config);
         assert!(!secrets.iter().any(|s| s.rule_id == "public-ipv4"));
 
         // Should detect public IP in privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let secrets_privacy = detect_secrets(test_input, None, &config_privacy);
         let ip_secret = secrets_privacy.iter().find(|s| s.rule_id == "public-ipv4");
         assert!(
             ip_secret.is_some(),
@@ -720,23 +701,26 @@ mod tests {
 
     #[test]
     fn test_privacy_mode_private_ip_excluded() {
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
         let test_input = "LOCAL_IP=192.168.1.1";
 
         // Should not detect private IP even in privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let secrets_privacy = detect_secrets(test_input, None, &config_privacy);
         assert!(!secrets_privacy.iter().any(|s| s.rule_id == "public-ipv4"));
     }
 
     #[test]
     fn test_privacy_mode_aws_arn() {
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
         let test_input = "ARN=arn:aws:s3:::my-bucket/object";
 
         // Should not detect AWS account ID in regular mode
-        let secrets = detect_secrets(test_input, None, false);
+        let secrets = detect_secrets(test_input, None, &config);
         assert!(!secrets.iter().any(|s| s.rule_id == "aws-account-id"));
 
         // Should detect AWS account ID in ARN in privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let secrets_privacy = detect_secrets(test_input, None, &config_privacy);
         // This specific ARN doesn't contain an account ID, so it shouldn't be detected
         assert!(
             !secrets_privacy
@@ -746,7 +730,7 @@ mod tests {
 
         // Test with an ARN that contains an account ID
         let test_input_with_account = "ARN=arn:aws:iam::987654321098:role/MyRole";
-        let secrets_with_account = detect_secrets(test_input_with_account, None, true);
+        let secrets_with_account = detect_secrets(test_input_with_account, None, &config_privacy);
         let aws_secret = secrets_with_account
             .iter()
             .find(|s| s.rule_id == "aws-account-id");
@@ -762,13 +746,13 @@ mod tests {
 
     #[test]
     fn test_privacy_mode_initialization() {
-        // Test that privacy mode initialization works
-        let regular_count = initialize_gitleaks_config(false);
-        let privacy_count = initialize_gitleaks_config(true);
+        // Test that privacy mode creates configs with different rule counts
+        let regular_config = &*TEST_GITLEAKS_CONFIG;
+        let privacy_config = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
 
         // Privacy mode should have more rules
         assert!(
-            privacy_count > regular_count,
+            privacy_config.rules.len() > regular_config.rules.len(),
             "Privacy mode should have more rules than regular mode"
         );
     }
@@ -778,7 +762,8 @@ mod tests {
         let test_input = "AWS_ACCOUNT_ID=987654321098"; // Different from allowlist
 
         // Test with privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let config = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+        let secrets_privacy = detect_secrets(test_input, None, &config);
         println!("Privacy mode detected {} secrets", secrets_privacy.len());
         for secret in &secrets_privacy {
             println!(
@@ -788,7 +773,8 @@ mod tests {
         }
 
         // Test without privacy mode
-        let secrets_regular = detect_secrets(test_input, None, false);
+        let config_regular = &*TEST_GITLEAKS_CONFIG;
+        let secrets_regular = detect_secrets(test_input, None, &config_regular);
         println!("Regular mode detected {} secrets", secrets_regular.len());
         for secret in &secrets_regular {
             println!(
@@ -798,7 +784,7 @@ mod tests {
         }
 
         // Check if privacy config loaded properly
-        let config_with_privacy = &*GITLEAKS_CONFIG_WITH_PRIVACY;
+        let config_with_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
         let aws_rule = config_with_privacy
             .rules
             .iter()
@@ -855,7 +841,8 @@ mod tests {
         let test_input = "SERVER_IP=8.8.8.8";
 
         // Test with privacy mode
-        let secrets_privacy = detect_secrets(test_input, None, true);
+        let config_with_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+        let secrets_privacy = detect_secrets(test_input, None, &config_with_privacy);
         println!("Privacy mode detected {} secrets", secrets_privacy.len());
         for secret in &secrets_privacy {
             println!(
@@ -865,7 +852,6 @@ mod tests {
         }
 
         // Check if privacy config loaded properly
-        let config_with_privacy = &*GITLEAKS_CONFIG_WITH_PRIVACY;
         let ip_rule = config_with_privacy
             .rules
             .iter()
@@ -906,6 +892,8 @@ mod tests {
     fn test_comprehensive_ip_detection() {
         println!("=== COMPREHENSIVE IP DETECTION TEST ===");
 
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+
         let test_cases = vec![
             // Public IPs that should be detected
             ("16.170.172.114", true),
@@ -924,7 +912,7 @@ mod tests {
         ];
 
         for (ip, should_detect) in test_cases {
-            let secrets = detect_secrets(ip, None, true);
+            let secrets = detect_secrets(ip, None, &config_privacy);
             let detected = secrets.iter().any(|s| s.rule_id == "public-ipv4");
 
             println!(
@@ -949,7 +937,7 @@ mod tests {
         ];
 
         for context in context_tests {
-            let secrets = detect_secrets(context, None, true);
+            let secrets = detect_secrets(context, None, &config_privacy);
             let detected = secrets.iter().any(|s| s.rule_id == "public-ipv4");
             println!("Context: '{}' | Detected: {}", context, detected);
             assert!(detected, "Should detect IP in context: {}", context);
@@ -960,9 +948,11 @@ mod tests {
     fn test_standalone_ip_detection() {
         println!("=== TESTING STANDALONE IP DETECTION ===");
 
+        let config = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+
         // Test standalone IP that should be detected
         let standalone_ip = "16.170.172.114";
-        let secrets = detect_secrets(standalone_ip, None, true);
+        let secrets = detect_secrets(standalone_ip, None, &config);
 
         println!(
             "Standalone IP '{}' detected {} secrets",
@@ -975,7 +965,7 @@ mod tests {
 
         // Test IP with context that should be detected
         let ip_with_context = "SERVER_IP=16.170.172.114";
-        let secrets_with_context = detect_secrets(ip_with_context, None, true);
+        let secrets_with_context = detect_secrets(ip_with_context, None, &config);
 
         println!(
             "IP with context '{}' detected {} secrets",
@@ -987,7 +977,6 @@ mod tests {
         }
 
         // Test keyword filtering
-        let config = &*GITLEAKS_CONFIG_WITH_PRIVACY;
         let ip_rule = config.rules.iter().find(|r| r.id == "public-ipv4");
         if let Some(rule) = ip_rule {
             println!("IP rule keywords: {:?}", rule.keywords);
@@ -1006,13 +995,15 @@ mod tests {
     fn test_user_provided_json_snippet() {
         println!("=== TESTING USER PROVIDED JSON SNIPPET ===");
 
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+
         let json_snippet = r#"{
     "UserId": "AIDAX5UI4H55WM6GS6NIJ",
     "Account": "544388841223",
     "Arn": "arn:aws:iam::544388841223:user/terraform-mac"
 }"#;
 
-        let secrets = detect_secrets(json_snippet, None, true);
+        let secrets = detect_secrets(json_snippet, None, &config_privacy);
         let aws_secrets: Vec<_> = secrets
             .iter()
             .filter(|s| s.rule_id == "aws-account-id")
@@ -1044,6 +1035,8 @@ mod tests {
     fn test_aws_account_id_json_field() {
         println!("=== TESTING AWS ACCOUNT ID JSON FIELD DETECTION ===");
 
+        let config_privacy = &*TEST_GITLEAKS_CONFIG_WITH_PRIVACY;
+
         let test_cases = vec![
             // JSON field patterns that should be detected
             r#""Account": "544388841223""#,
@@ -1059,7 +1052,7 @@ mod tests {
         ];
 
         for test_case in test_cases {
-            let secrets = detect_secrets(test_case, None, true);
+            let secrets = detect_secrets(test_case, None, &config_privacy);
             let detected = secrets.iter().any(|s| s.rule_id == "aws-account-id");
 
             println!("Test case: '{}' | Detected: {}", test_case, detected);

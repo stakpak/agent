@@ -16,6 +16,7 @@ use similar::TextDiff;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use stakpak_shared::secret_manager::SecretManagerError;
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
@@ -231,7 +232,9 @@ If the command's output exceeds 300 lines the result will be truncated and the f
 
                 let redacted_output = self
                     .get_secret_manager()
-                    .redact_and_store_secrets(&command_result.output, None);
+                    .redact_and_store_secrets(&command_result.output, None)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
                 if command_result.exit_code != 0 {
                     return Ok(CallToolResult::error(vec![
@@ -295,7 +298,9 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
         // Restore secrets in the command before execution
         let actual_command = self
             .get_secret_manager()
-            .restore_secrets_in_string(&command);
+            .restore_secrets_in_string(&command)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         let timeout_duration = timeout.map(std::time::Duration::from_secs);
 
@@ -366,18 +371,18 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                     )]));
                 }
 
-                let redacted_tasks: Vec<TaskInfo> = tasks
-                    .into_iter()
-                    .map(|mut task| {
-                        if let Some(ref output) = task.output {
-                            task.output = Some(
-                                self.get_secret_manager()
-                                    .redact_and_store_secrets(output, None),
-                            );
-                        }
-                        task
-                    })
-                    .collect();
+                let mut redacted_tasks: Vec<TaskInfo> = Vec::with_capacity(tasks.len());
+                for mut task in tasks {
+                    if let Some(ref output) = task.output {
+                        task.output = Some(
+                            self.get_secret_manager()
+                                .redact_and_store_secrets(output, None)
+                                .await
+                                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                        );
+                    }
+                    redacted_tasks.push(task);
+                }
 
                 // Create markdown table format
                 let mut table = String::new();
@@ -400,10 +405,14 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
 
                     let redacted_command = self
                         .get_secret_manager()
-                        .redact_and_store_secrets(&task.command, None);
+                        .redact_and_store_secrets(&task.command, None)
+                        .await
+                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                     let redacted_output = if let Some(ref out) = task.output {
                         self.get_secret_manager()
                             .redact_and_store_secrets(out, None)
+                            .await
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?
                     } else {
                         "No output yet".to_string()
                     };
@@ -521,20 +530,23 @@ This tool enables proper task synchronization and coordination in complex workfl
             .await
         {
             Ok(tasks) => {
-                let redacted_tasks: Vec<TaskInfo> = tasks
-                    .into_iter()
-                    .map(|mut task| {
-                        if let Some(ref output) = task.output {
-                            task.output = Some(
-                                self.get_secret_manager()
-                                    .redact_and_store_secrets(output, None),
-                            );
-                        }
-                        task
-                    })
-                    .collect();
+                let mut redacted_tasks: Vec<TaskInfo> = Vec::with_capacity(tasks.len());
+                for mut task in tasks {
+                    if let Some(ref output) = task.output {
+                        task.output = Some(
+                            self.get_secret_manager()
+                                .redact_and_store_secrets(output, None)
+                                .await
+                                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                        );
+                    }
+                    redacted_tasks.push(task);
+                }
 
-                let table = self.format_tasks_table(&redacted_tasks, &task_ids);
+                let table = self
+                    .format_tasks_table(&redacted_tasks, &task_ids)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -582,15 +594,17 @@ Use this tool to check the progress and results of long-running background tasks
 
                 let redacted_command = self
                     .get_secret_manager()
-                    .redact_and_store_secrets(&task_info.command, None);
+                    .redact_and_store_secrets(&task_info.command, None)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
                 let redacted_output = if let Some(ref output) = task_info.output {
-                    match handle_large_output(
-                        &self
-                            .get_secret_manager()
-                            .redact_and_store_secrets(output, None),
-                        "task.output",
-                    ) {
+                    let redacted_output_str = self
+                        .get_secret_manager()
+                        .redact_and_store_secrets(output, None)
+                        .await
+                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    match handle_large_output(&redacted_output_str, "task.output") {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -788,7 +802,7 @@ SECRET HANDLING:
             }
         } else {
             // Handle local file creation
-            self.create_local(&path, &file_text)
+            self.create_local(&path, &file_text).await
         }
     }
 
@@ -823,7 +837,9 @@ SECURITY FEATURES:
 
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(&password, &password);
+            .redact_and_store_password(&password, &password)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
@@ -1057,7 +1073,16 @@ SAFETY NOTES:
         private_key_path: Option<String>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
-        let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
+        let actual_command = self
+            .get_secret_manager()
+            .restore_secrets_in_string(command)
+            .await
+            .map_err(|e| {
+                CallToolResult::error(vec![
+                    Content::text("SECRET_RESTORE_ERROR"),
+                    Content::text(format!("Failed to restore secrets in command: {}", e)),
+                ])
+            })?;
 
         if let Some(remote_str) = &remote {
             // Remote execution
@@ -1319,7 +1344,9 @@ SAFETY NOTES:
 
                     let redacted_result = self
                         .get_secret_manager()
-                        .redact_and_store_secrets(&result, Some(path));
+                        .redact_and_store_secrets(&result, Some(path))
+                        .await
+                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
@@ -1396,7 +1423,9 @@ SAFETY NOTES:
 
                     let redacted_result = self
                         .get_secret_manager()
-                        .redact_and_store_secrets(&result, Some(original_path));
+                        .redact_and_store_secrets(&result, Some(original_path))
+                        .await
+                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
@@ -1531,8 +1560,16 @@ SAFETY NOTES:
         new_str: &str,
         replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
-        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
+        let actual_old_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(old_str)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let actual_new_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(new_str)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
@@ -1593,7 +1630,9 @@ SAFETY NOTES:
 
         let redacted_output = self
             .get_secret_manager()
-            .redact_and_store_secrets(&output, Some(original_path));
+            .redact_and_store_secrets(&output, Some(original_path))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
@@ -1608,8 +1647,16 @@ SAFETY NOTES:
         new_str: &str,
         replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
-        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
+        let actual_old_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(old_str)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let actual_new_str = self
+            .get_secret_manager()
+            .restore_secrets_in_string(new_str)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
@@ -1669,7 +1716,9 @@ SAFETY NOTES:
 
         let redacted_output = self
             .get_secret_manager()
-            .redact_and_store_secrets(&output, Some(path));
+            .redact_and_store_secrets(&output, Some(path))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
@@ -1715,7 +1764,9 @@ SAFETY NOTES:
         // Restore secrets in the file content before writing
         let actual_file_text = self
             .get_secret_manager()
-            .restore_secrets_in_string(file_text);
+            .restore_secrets_in_string(file_text)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         // Create the file using the correct SFTP method
         if let Err(e) = conn
@@ -1739,8 +1790,8 @@ SAFETY NOTES:
         ))]))
     }
 
-    /// Create a local file with the specified content  
-    fn create_local(&self, path: &str, file_text: &str) -> Result<CallToolResult, McpError> {
+    /// Create a local file with the specified content
+    async fn create_local(&self, path: &str, file_text: &str) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
         if path_obj.exists() {
@@ -1764,7 +1815,9 @@ SAFETY NOTES:
         // Restore secrets in the file content before writing
         let actual_file_text = self
             .get_secret_manager()
-            .restore_secrets_in_string(file_text);
+            .restore_secrets_in_string(file_text)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         match fs::write(path, actual_file_text) {
             Ok(_) => {
@@ -1943,7 +1996,15 @@ SAFETY NOTES:
                     }
                 }
 
-                let progress_table = self.format_tasks_table(&all_tasks, task_ids);
+                let progress_table = self
+                    .format_tasks_table(&all_tasks, task_ids)
+                    .await
+                    .map_err(|e| {
+                        stakpak_shared::task_manager::TaskError::ExecutionFailed(format!(
+                            "Failed to format tasks table: {}",
+                            e
+                        ))
+                    })?;
 
                 let _ = ctx
                     .peer
@@ -1980,7 +2041,11 @@ SAFETY NOTES:
         }
     }
 
-    fn format_tasks_table(&self, tasks: &[TaskInfo], target_task_ids: &[String]) -> String {
+    async fn format_tasks_table(
+        &self,
+        tasks: &[TaskInfo],
+        target_task_ids: &[String],
+    ) -> Result<String, SecretManagerError> {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let mut table = String::new();
@@ -2000,7 +2065,7 @@ SAFETY NOTES:
         if tasks.is_empty() {
             table.push_str("No background tasks found.\n");
             table.push_str("═══════════════════════════════════════\n\n");
-            return table;
+            return Ok(table);
         }
 
         // Sort tasks by start time (newest first)
@@ -2019,7 +2084,8 @@ SAFETY NOTES:
 
             let redacted_command = self
                 .get_secret_manager()
-                .redact_and_store_secrets(&task.command, None);
+                .redact_and_store_secrets(&task.command, None)
+                .await?;
 
             let truncated_command = redacted_command
                 .chars()
@@ -2053,7 +2119,7 @@ SAFETY NOTES:
         ));
         table.push_str("═══════════════════════════════════════\n\n");
 
-        table
+        Ok(table)
     }
 }
 

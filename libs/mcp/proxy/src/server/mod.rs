@@ -16,7 +16,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::secret_manager::{SecretManagerHandle, launch_secret_manager};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -31,17 +31,19 @@ pub struct ProxyServer {
     // Track if upstream clients have been initialized
     clients_initialized: Arc<Mutex<bool>>,
     // Secret manager for redacting secrets in tool responses
-    secret_manager: SecretManager,
+    secret_manager: Arc<SecretManagerHandle>,
 }
 
 impl ProxyServer {
     pub fn new(config: ClientPoolConfig, redact_secrets: bool, privacy_mode: bool) -> Self {
+        let secret_manager_handle = launch_secret_manager(redact_secrets, privacy_mode, None);
+
         Self {
             pool: Arc::new(ClientPool::new()),
             request_id_to_client: Arc::new(Mutex::new(HashMap::new())),
             client_config: Arc::new(Mutex::new(Some(config))),
             clients_initialized: Arc::new(Mutex::new(false)),
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            secret_manager: secret_manager_handle,
         }
     }
 
@@ -257,7 +259,9 @@ impl ServerHandler for ProxyServer {
                     let arguments_str = serde_json::to_string(arguments).unwrap_or_default();
                     let restored_arguments_str = self
                         .secret_manager
-                        .restore_secrets_in_string(&arguments_str);
+                        .restore_secrets_in_string(&arguments_str)
+                        .await
+                        .unwrap_or(arguments_str);
 
                     if let Ok(restored_arguments) = serde_json::from_str(&restored_arguments_str) {
                         tool_params.arguments = Some(restored_arguments);
@@ -275,20 +279,19 @@ impl ServerHandler for ProxyServer {
                 })?;
 
                 // Redact secrets in the result content
-                let redacted_content: Vec<Content> = result
-                    .content
-                    .into_iter()
-                    .map(|content| {
-                        if let Some(text_content) = content.raw.as_text() {
-                            let redacted_text = self
-                                .secret_manager
-                                .redact_and_store_secrets(&text_content.text, None);
-                            Content::text(&redacted_text)
-                        } else {
-                            content
-                        }
-                    })
-                    .collect();
+                let mut redacted_content: Vec<Content> = Vec::with_capacity(result.content.len());
+                for content in result.content {
+                    if let Some(text_content) = content.raw.as_text() {
+                        let redacted_text = self
+                            .secret_manager
+                            .redact_and_store_secrets(&text_content.text, None)
+                            .await
+                            .unwrap_or_else(|_| text_content.text.clone());
+                        redacted_content.push(Content::text(&redacted_text));
+                    } else {
+                        redacted_content.push(content);
+                    }
+                }
 
                 result.content = redacted_content;
 
