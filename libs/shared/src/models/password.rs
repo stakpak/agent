@@ -1,3 +1,5 @@
+use std::string::FromUtf8Error;
+
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -29,6 +31,8 @@ pub enum PasswordGenerationError {
     Conflict,
     #[error("Password must be at least 8 characters long")]
     TooShort,
+    #[error("Password is not UTF8 String")]
+    NonUTF8(#[from] FromUtf8Error),
 }
 
 impl Password {

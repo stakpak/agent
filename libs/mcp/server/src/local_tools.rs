@@ -837,6 +837,10 @@ SECURITY FEATURES:
                     PasswordGenerationError::Conflict => {
                         McpError::internal_error(err.to_string(), Some(json!({"length": length})))
                     }
+                    PasswordGenerationError::NonUTF8(err) => McpError::internal_error(
+                        err.to_string(),
+                        Some(json!({"error": err.to_string()})),
+                    ),
                 })?;
 
         let redacted_password = self

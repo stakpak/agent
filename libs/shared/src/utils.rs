@@ -350,10 +350,7 @@ pub fn generate_password(
             continue;
         }
 
-        // we've used only utf8 bytes, so it's safe to do unchecked
-        return Ok(Password::new(unsafe {
-            String::from_utf8_unchecked(password)
-        })?);
+        return Ok(Password::new(String::from_utf8(password)?)?);
     }
 
     tracing::error!(
