@@ -8,6 +8,7 @@ use futures_util::StreamExt;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -504,12 +505,28 @@ impl Gemini {
             .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+
+            // Try to parse as JSON and extract error message
+            let error_message = if let Ok(json) = serde_json::from_str::<Value>(&error_text) {
+                if let Some(error_obj) = json.get("error") {
+                    if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                        message.to_string()
+                    } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                        format!("API error: {}", code)
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                }
+            } else {
+                error_text
+            };
+
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "{}: {}",
-                    response.status(),
-                    response.text().await.unwrap_or_default()
-                ),
+                format!("{}: {}", status, error_message),
             )));
         }
 
@@ -520,6 +537,24 @@ impl Gemini {
                 e
             )))
         })?;
+
+        // Check if the response contains an error field before deserializing
+        if let Ok(json) = serde_json::from_str::<Value>(&response_text)
+            && let Some(error_obj) = json.get("error")
+        {
+            let error_message = if let Some(message) =
+                error_obj.get("message").and_then(|m| m.as_str())
+            {
+                message.to_string()
+            } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                format!("API error: {}", code)
+            } else {
+                serde_json::to_string(error_obj).unwrap_or_else(|_| "Unknown API error".to_string())
+            };
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                error_message,
+            )));
+        }
 
         let gemini_response: GeminiResponse =
             serde_json::from_str(&response_text).map_err(|e| {
@@ -575,9 +610,27 @@ impl Gemini {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
+            let error_text = response.text().await.unwrap_or_default();
+
+            // Try to parse as JSON and extract error message
+            let error_message = if let Ok(json) = serde_json::from_str::<Value>(&error_text) {
+                if let Some(error_obj) = json.get("error") {
+                    if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                        message.to_string()
+                    } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                        format!("API error: {}", code)
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                }
+            } else {
+                error_text
+            };
+
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!("{}: {}", status, error_body),
+                format!("{}: {}", status, error_message),
             )));
         }
 

@@ -46,19 +46,44 @@ impl RemoteClient {
         if response.status().is_success() {
             Ok(response)
         } else {
-            match response.json::<ApiError>().await {
-                Ok(response) => {
-                    if response.error.key == "EXCEEDED_API_LIMIT" {
-                        Err(format!(
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+
+            // Try to parse as JSON and extract error message
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&error_body) {
+                // Try ApiError format first (Stakpak API format)
+                if let Ok(api_error) = serde_json::from_value::<ApiError>(json.clone()) {
+                    if api_error.error.key == "EXCEEDED_API_LIMIT" {
+                        return Err(format!(
                             "{}.\n\nPlease top up your account at https://stakpak.dev/settings/billing to keep Stakpaking.",
-                            response.error.message
-                        ))
+                            api_error.error.message
+                        ));
                     } else {
-                        Err(response.error.message)
+                        return Err(api_error.error.message);
                     }
                 }
-                Err(e) => Err(e.to_string()),
+
+                // Try generic error format (e.g., {"error": {"message": "..."}})
+                if let Some(error_obj) = json.get("error") {
+                    let error_message =
+                        if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                            message.to_string()
+                        } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                            format!("API error: {}", code)
+                        } else if let Some(key) = error_obj.get("key").and_then(|k| k.as_str()) {
+                            format!("API error: {}", key)
+                        } else {
+                            serde_json::to_string(error_obj)
+                                .unwrap_or_else(|_| "Unknown API error".to_string())
+                        };
+                    return Err(error_message);
+                }
             }
+
+            // Fallback to raw error body if JSON parsing fails
+            Err(error_body)
         }
     }
 
@@ -406,7 +431,8 @@ impl AgentProvider for RemoteClient {
     ) -> Result<ChatCompletionResponse, String> {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(model.to_string(), messages, tools, None);
+        let model_string = model.to_string();
+        let input = ChatCompletionRequest::new(model_string.clone(), messages, tools, None);
 
         let response = self
             .client
@@ -419,6 +445,22 @@ impl AgentProvider for RemoteClient {
         let response = self.handle_response_error(response).await?;
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        // Check if the response contains an error field before deserializing
+        if let Some(error_obj) = value.get("error") {
+            let error_message = if let Some(message) =
+                error_obj.get("message").and_then(|m| m.as_str())
+            {
+                message.to_string()
+            } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                format!("API error: {}", code)
+            } else if let Some(key) = error_obj.get("key").and_then(|k| k.as_str()) {
+                format!("API error: {}", key)
+            } else {
+                serde_json::to_string(error_obj).unwrap_or_else(|_| "Unknown API error".to_string())
+            };
+            return Err(error_message);
+        }
 
         match serde_json::from_value::<ChatCompletionResponse>(value.clone()) {
             Ok(response) => Ok(response),
@@ -447,7 +489,8 @@ impl AgentProvider for RemoteClient {
     > {
         let url = format!("{}/agents/openai/v1/chat/completions", self.base_url);
 
-        let input = ChatCompletionRequest::new(model.to_string(), messages, tools, Some(true));
+        let model_string = model.to_string();
+        let input = ChatCompletionRequest::new(model_string.clone(), messages, tools, Some(true));
 
         let response = self
             .client
@@ -479,19 +522,39 @@ impl AgentProvider for RemoteClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
+
+            // Try to parse as JSON and extract error message
+            let error_message =
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&error_body) {
+                    // Try ApiError format first (Stakpak API format)
+                    if let Ok(api_error) = serde_json::from_value::<ApiError>(json.clone()) {
+                        api_error.error.message
+                    } else if let Some(error_obj) = json.get("error") {
+                        // Generic error format
+                        if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                            message.to_string()
+                        } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                            format!("API error: {}", code)
+                        } else {
+                            error_body
+                        }
+                    } else {
+                        error_body
+                    }
+                } else {
+                    error_body
+                };
+
             return Err(format!(
                 "Server returned non-stream response ({}): {}",
-                status, error_body
+                status, error_message
             ));
         }
 
         let response = self.handle_response_error(response).await?;
-        let stream = response.bytes_stream().eventsource().map(|event| {
+        let stream = response.bytes_stream().eventsource().map(move |event| {
             event
-                .map_err(|err| {
-                    eprintln!("stream: failed to read response: {:?}", err);
-                    ApiStreamError::Unknown("Failed to read response".to_string())
-                })
+                .map_err(|_| ApiStreamError::Unknown("Failed to read response".to_string()))
                 .and_then(|event| match event.event.as_str() {
                     "error" => Err(ApiStreamError::from(event.data)),
                     _ => serde_json::from_str::<ChatCompletionStreamResponse>(&event.data).map_err(

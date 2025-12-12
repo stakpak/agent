@@ -381,14 +381,15 @@ impl OpenAI {
         let api_endpoint = config.api_endpoint.as_ref().map_or(DEFAULT_BASE_URL, |v| v);
         let api_key = config.api_key.as_ref().map_or("", |v| v);
 
+        let final_payload_str = serde_json::to_string(&payload)
+            .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?;
+
         let response = client
             .post(api_endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
-            .body(serde_json::to_string(&payload).map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string()))
-            })?)
+            .body(final_payload_str)
             .send()
             .await;
 
@@ -402,12 +403,31 @@ impl OpenAI {
         };
 
         match response.json::<Value>().await {
-            Ok(json) => match serde_json::from_value::<OpenAIOutput>(json.clone()) {
-                Ok(json_response) => Ok(json_response.into()),
-                Err(e) => Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                    e.to_string(),
-                ))),
-            },
+            Ok(json) => {
+                // Check if the response contains an error field
+                if let Some(error_obj) = json.get("error") {
+                    let error_message =
+                        if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                            message.to_string()
+                        } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                            format!("API error: {}", code)
+                        } else {
+                            serde_json::to_string(error_obj)
+                                .unwrap_or_else(|_| "Unknown API error".to_string())
+                        };
+                    return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                        error_message,
+                    )));
+                }
+
+                // Try to deserialize as successful response
+                match serde_json::from_value::<OpenAIOutput>(json.clone()) {
+                    Ok(json_response) => Ok(json_response.into()),
+                    Err(e) => Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                        e.to_string(),
+                    ))),
+                }
+            }
             Err(e) => Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
                 e.to_string(),
             ))),
@@ -465,13 +485,15 @@ impl OpenAI {
         let api_endpoint = config.api_endpoint.as_ref().map_or(DEFAULT_BASE_URL, |v| v);
         let api_key = config.api_key.as_ref().map_or("", |v| v);
 
-        // Send the POST request
+        let final_payload_str = serde_json::to_string(&payload)
+            .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?;
+
         let response = client
             .post(api_endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
-            .json(&payload)
+            .body(final_payload_str)
             .send()
             .await;
 
@@ -485,12 +507,27 @@ impl OpenAI {
         };
 
         if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+
+            // Try to parse as JSON and extract error message
+            let error_message = if let Ok(json) = serde_json::from_str::<Value>(&error_text) {
+                if let Some(error_obj) = json.get("error") {
+                    if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                        message.to_string()
+                    } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                        format!("API error: {}", code)
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                }
+            } else {
+                error_text
+            };
+
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "{}: {}",
-                    response.status(),
-                    response.text().await.unwrap_or_default(),
-                ),
+                error_message,
             )));
         }
 

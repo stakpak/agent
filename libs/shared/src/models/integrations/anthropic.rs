@@ -394,6 +394,24 @@ impl Anthropic {
 
         match response.json::<Value>().await {
             Ok(json) => {
+                // Check if the response contains an error field
+                if let Some(error_obj) = json.get("error") {
+                    let error_message = if let Some(message) =
+                        error_obj.get("message").and_then(|m| m.as_str())
+                    {
+                        message.to_string()
+                    } else if let Some(error_type) = error_obj.get("type").and_then(|t| t.as_str())
+                    {
+                        format!("API error: {}", error_type)
+                    } else {
+                        serde_json::to_string(error_obj)
+                            .unwrap_or_else(|_| "Unknown API error".to_string())
+                    };
+                    return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                        error_message,
+                    )));
+                }
+
                 // I have to copy this here to print the original response in case we find an error
                 let pretty_json = serde_json::to_string_pretty(&json).unwrap_or_default();
                 match serde_json::from_value::<AnthropicOutput>(json) {
