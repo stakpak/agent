@@ -3,7 +3,7 @@ use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter, tool_result,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter, tool_result,
     user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -17,7 +17,6 @@ use stakpak_api::{
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::local_store::LocalStore;
@@ -70,7 +69,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     });
 
     let protocol = if config.enable_mtls { "https" } else { "http" };
-    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+    let _local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
     let certificate_chain_for_server = certificate_chain.clone();
     let subagent_configs = config.subagent_configs.clone();
@@ -121,16 +120,14 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         .await;
     });
 
-    // Initialize clients and tools
-    let clients = ClientManager::new(
-        ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        None,
-        certificate_chain,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
+    // Initialize MCP client via stdio proxy
+    let mcp_client = stakpak_mcp_client::connect(None)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
+        .await
+        .map_err(|e| e.to_string())?;
+    let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_for_filter.as_ref());
 
     let client: Box<dyn AgentProvider> = match ctx.provider {
         ProviderType::Remote => {
@@ -309,7 +306,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
                 // Add timeout for tool execution
                 let tool_execution = async {
-                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                    run_tool_call(&mcp_client, &mcp_tools, tool_call, None, current_session_id)
+                        .await
                 };
 
                 let result = match tokio::time::timeout(

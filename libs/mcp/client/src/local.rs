@@ -1,17 +1,12 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-use reqwest::Client;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{ClientCapabilities, ClientInfo, Implementation},
     service::RunningService,
-    transport::{
-        StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
-    },
+    transport::TokioChildProcess,
 };
-use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use tokio::process::Command;
 use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]
@@ -54,28 +49,15 @@ impl ClientHandler for LocalClientHandler {
     }
 }
 
-pub async fn local_client(
-    host: String,
+pub async fn connect(
     progress_tx: Option<Sender<ToolCallResultProgress>>,
-    certificate_chain: Arc<Option<CertificateChain>>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
-    let mut client_builder = Client::builder();
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run").arg("--").arg("mcp").arg("proxy");
 
-    // Configure mTLS if certificate chain is provided
-    if let Some(cert_chain) = certificate_chain.as_ref() {
-        tracing::info!("🔐 Configuring mTLS client with certificate chain");
-        let tls_config = cert_chain.create_client_config()?;
-        client_builder = client_builder.use_preconfigured_tls(tls_config);
-    }
-
-    let http_client = client_builder.build()?;
-    let transport = StreamableHttpClientTransport::with_client(
-        http_client,
-        StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", host)),
-    );
+    let proc = TokioChildProcess::new(cmd)?;
     let client_handler = LocalClientHandler { progress_tx };
-    let client: RunningService<RoleClient, LocalClientHandler> =
-        client_handler.serve(transport).await?;
+    let client: RunningService<RoleClient, LocalClientHandler> = client_handler.serve(proc).await?;
 
     Ok(client)
 }

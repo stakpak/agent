@@ -1,7 +1,6 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
 use crate::config::ProviderType;
-use crate::utils::network;
-use crate::{commands::agent::run::helpers::convert_tools_map_with_filter, config::AppConfig};
+use crate::{commands::agent::run::helpers::convert_tools_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
@@ -10,9 +9,7 @@ use stakpak_api::{
     local::{LocalClient, LocalClientConfig},
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
@@ -21,7 +18,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -33,8 +29,8 @@ pub struct StakpakAcpAgent {
     client: Arc<dyn AgentProvider>,
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     next_session_id: Cell<u64>,
-    mcp_server_host: Option<String>,
-    clients: Option<Arc<ClientManager>>,
+    mcp_client: Option<Arc<McpClient>>,
+    mcp_tools: Vec<rmcp::model::Tool>,
     tools: Option<Vec<Tool>>,
     current_session_id: Cell<Option<Uuid>>,
     progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
@@ -101,26 +97,21 @@ impl StakpakAcpAgent {
             }
         };
 
-        // Initialize MCP server and tools (optional for ACP)
-        let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(
-            &config,
-            client.clone(),
-            session_update_tx.clone(),
-        )
-        .await
-        {
-            Ok((host, client_manager, tool_list)) => {
-                log::info!("MCP server initialized successfully");
-                (host, Some(client_manager), tool_list)
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to initialize MCP server: {}, continuing without tools",
-                    e
-                );
-                (String::new(), None, Vec::new())
-            }
-        };
+        // Initialize MCP client and tools (optional for ACP)
+        let (mcp_client, mcp_tools, tools) =
+            match Self::initialize_mcp_server_and_tools(&config).await {
+                Ok((client, mcp_tools, tool_list)) => {
+                    log::info!("MCP client initialized successfully");
+                    (Some(client), mcp_tools, tool_list)
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to initialize MCP client: {}, continuing without tools",
+                        e
+                    );
+                    (None, Vec::new(), Vec::new())
+                }
+            };
 
         // Create cancellation channels
         let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
@@ -136,12 +127,8 @@ impl StakpakAcpAgent {
             client,
             session_update_tx,
             next_session_id: Cell::new(0),
-            mcp_server_host: if mcp_server_host.is_empty() {
-                None
-            } else {
-                Some(mcp_server_host)
-            },
-            clients,
+            mcp_client,
+            mcp_tools,
             tools: if tools.is_empty() { None } else { Some(tools) },
             current_session_id: Cell::new(None),
             progress_tx: None,
@@ -710,7 +697,6 @@ impl StakpakAcpAgent {
         &self,
         tool_calls: Vec<ToolCall>,
         session_id: &acp::SessionId,
-        tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
     ) -> Result<Vec<ChatMessage>, acp::Error> {
         log::info!(
             "🔧 DEBUG: Starting tool call processing with {} tool calls",
@@ -927,9 +913,9 @@ impl StakpakAcpAgent {
                             e
                         )))
                     })?
-            } else if let Some(ref clients) = self.clients {
+            } else if let Some(ref mcp_client) = self.mcp_client {
                 log::info!(
-                    "🔧 DEBUG: Executing tool call: {} with MCP clients",
+                    "🔧 DEBUG: Executing tool call: {} with MCP client",
                     tool_call.function.name
                 );
 
@@ -937,8 +923,8 @@ impl StakpakAcpAgent {
                 let tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
                 crate::commands::agent::run::tooling::run_tool_call(
-                    clients,
-                    tools_map,
+                    mcp_client,
+                    &self.mcp_tools,
                     &tool_call,
                     tool_cancel_rx,
                     self.current_session_id.get(),
@@ -1110,67 +1096,22 @@ impl StakpakAcpAgent {
 
     pub async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
-        client: Arc<dyn AgentProvider>,
-        _session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
-    ) -> Result<(String, Arc<ClientManager>, Vec<Tool>), String> {
-        // Find available bind address
-        let (bind_address, listener) = network::find_available_bind_address_with_listener()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Generate certificates for mTLS
-        let certificate_chain = Arc::new(Some(
-            CertificateChain::generate().map_err(|e| e.to_string())?,
-        ));
-
-        let protocol = "https";
-        let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
-
-        // Start MCP server in background
-        let certificate_chain_for_server = certificate_chain.clone();
-        let client_for_server = client.clone();
-
-        tokio::spawn(async move {
-            let _ = start_server(
-                MCPServerConfig {
-                    client: Some(client_for_server),
-                    redact_secrets: true,
-                    privacy_mode: false,
-                    enabled_tools: EnabledToolsConfig { slack: false },
-                    tool_mode: ToolMode::Combined,
-                    bind_address,
-                    certificate_chain: certificate_chain_for_server,
-                    subagent_configs: None,
-                },
-                Some(listener),
-                None,
-            )
-            .await;
-        });
-
-        // Initialize MCP clients
-        let clients = Arc::new(
-            ClientManager::new(
-                config
-                    .mcp_server_host
-                    .clone()
-                    .unwrap_or(local_mcp_server_host.clone()),
-                None, // progress_tx will be set later in run_stdio
-                certificate_chain,
-            )
-            .await
-            .map_err(|e| format!("Failed to create MCP clients: {}", e))?,
+    ) -> Result<(Arc<McpClient>, Vec<rmcp::model::Tool>, Vec<Tool>), String> {
+        // Initialize MCP client via stdio proxy
+        let mcp_client = Arc::new(
+            stakpak_mcp_client::connect(None) // progress_tx will be set later in run_stdio
+                .await
+                .map_err(|e| format!("Failed to connect to MCP proxy: {}", e))?,
         );
 
-        // Get tools from MCP clients
-        let tools_map: HashMap<String, Vec<rmcp::model::Tool>> = clients
-            .get_tools()
+        // Get tools from MCP client
+        let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
             .await
             .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-        let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
+        let tools = convert_tools_with_filter(&mcp_tools, config.allowed_tools.as_ref());
 
-        Ok((local_mcp_server_host, clients, tools))
+        Ok((mcp_client, mcp_tools, tools))
     }
 
     async fn process_acp_streaming_response_with_cancellation(
@@ -1460,15 +1401,15 @@ impl StakpakAcpAgent {
                 // Set up progress channel for streaming tool results
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<ToolCallResultProgress>(100);
 
-                // Reinitialize MCP clients with progress channel
-                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, self.client.clone(), tx.clone()).await {
-                    Ok((host, client_manager, tool_list)) => {
-                        log::info!("MCP server reinitialized with progress channel");
-                        (host, Some(client_manager), tool_list)
+                // Reinitialize MCP client with progress channel
+                let (mcp_client, mcp_tools, tools) = match Self::initialize_mcp_server_and_tools(&self.config).await {
+                    Ok((client, mcp_tools, tool_list)) => {
+                        log::info!("MCP client reinitialized with progress channel");
+                        (Some(client), mcp_tools, tool_list)
                     }
                     Err(e) => {
-                        log::warn!("Failed to reinitialize MCP server with progress channel: {}, continuing without tools", e);
-                        (String::new(), None, Vec::new())
+                        log::warn!("Failed to reinitialize MCP client with progress channel: {}, continuing without tools", e);
+                        (None, Vec::new(), Vec::new())
                     }
                 };
 
@@ -1484,8 +1425,8 @@ impl StakpakAcpAgent {
                     client: self.client.clone(),
                     session_update_tx: tx.clone(),
                     next_session_id: self.next_session_id.clone(),
-                    mcp_server_host: if mcp_server_host.is_empty() { None } else { Some(mcp_server_host) },
-                    clients,
+                    mcp_client,
+                    mcp_tools,
                     tools: if tools.is_empty() { None } else { Some(tools) },
                     current_session_id: self.current_session_id.clone(),
                     progress_tx: Some(progress_tx),
@@ -1602,8 +1543,8 @@ impl Clone for StakpakAcpAgent {
             client: self.client.clone(),
             session_update_tx: self.session_update_tx.clone(),
             next_session_id: Cell::new(self.next_session_id.get()),
-            mcp_server_host: self.mcp_server_host.clone(),
-            clients: self.clients.clone(),
+            mcp_client: self.mcp_client.clone(),
+            mcp_tools: self.mcp_tools.clone(),
             tools: self.tools.clone(),
             current_session_id: Cell::new(self.current_session_id.get()),
             progress_tx: self.progress_tx.clone(),
@@ -1797,16 +1738,6 @@ impl acp::Agent for StakpakAcpAgent {
         let tools = self.tools.clone().unwrap_or_default();
         log::info!("Available tools: {}", tools.len());
 
-        // Get tools map for tool execution
-        let tools_map = if let Some(ref clients) = self.clients {
-            clients
-                .get_tools()
-                .await
-                .map_err(|_e| acp::Error::internal_error())?
-        } else {
-            std::collections::HashMap::new()
-        };
-
         // Get current conversation history
         let messages = {
             let messages = self.messages.lock().await;
@@ -1991,11 +1922,7 @@ impl acp::Agent for StakpakAcpAgent {
 
                 // Process tool calls with cancellation support
                 let tool_results = self
-                    .process_tool_calls_with_cancellation(
-                        tool_calls.clone(),
-                        &args.session_id,
-                        &tools_map,
-                    )
+                    .process_tool_calls_with_cancellation(tool_calls.clone(), &args.session_id)
                     .await
                     .map_err(|e| {
                         log::error!("Tool call processing failed: {}", e);
