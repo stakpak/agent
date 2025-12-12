@@ -155,24 +155,31 @@ impl ServerHandler for ProxyServer {
             if !*initialized {
                 let config = self.client_config.lock().await.take();
                 if let Some(config) = config {
-                    // Initialize clients asynchronously (don't wait for completion)
                     let pool = self.pool.clone();
                     let peer = Arc::new(Mutex::new(Some(ctx.peer.clone())));
-                    tokio::spawn(async move {
-                        for (name, server_config) in config.servers {
-                            let pool_clone = pool.clone();
-                            let peer_clone = peer.clone();
-                            tokio::spawn(async move {
-                                Self::initialize_single_client(
-                                    pool_clone,
-                                    name,
-                                    server_config,
-                                    peer_clone,
-                                )
-                                .await;
-                            });
-                        }
-                    });
+
+                    // Initialize all clients and wait for them to complete
+                    let mut handles = Vec::new();
+                    for (name, server_config) in config.servers {
+                        let pool_clone = pool.clone();
+                        let peer_clone = peer.clone();
+                        let handle = tokio::spawn(async move {
+                            Self::initialize_single_client(
+                                pool_clone,
+                                name,
+                                server_config,
+                                peer_clone,
+                            )
+                            .await;
+                        });
+                        handles.push(handle);
+                    }
+
+                    // Wait for all clients to initialize
+                    for handle in handles {
+                        let _ = handle.await;
+                    }
+
                     *initialized = true;
                 }
             }

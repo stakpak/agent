@@ -5436,7 +5436,6 @@ version = "0.3.2"
 dependencies = [
  "anyhow",
  "futures",
- "reqwest",
  "rmcp",
  "serde_json",
  "stakpak-shared",
