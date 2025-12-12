@@ -327,16 +327,10 @@ pub fn generate_password(
     }
 
     // Fill the rest with random characters from the full charset
-    for _ in 0..length - password.len() {
-        let random_char = charset.choose(&mut rng).unwrap();
-        password.push(*random_char);
-    }
+    password.extend((0..(length - password.len())).map(|_| charset.choose(&mut rng).unwrap()));
 
     // Shuffle the password to randomize the order
-    for i in 0..password.len() {
-        let j = rng.random_range(0..password.len());
-        password.swap(i, j);
-    }
+    password.shuffle(&mut rng);
 
     for attempt in 0..MAX_RETRIES {
         if redaction_map.values().any(|v| v.as_bytes() == password) {
