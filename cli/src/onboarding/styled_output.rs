@@ -38,7 +38,7 @@ pub fn render_steps(steps: &[(String, StepStatus)]) {
         }
 
         let (indicator, color) = match status {
-            StepStatus::Active => ("▲", Colors::YELLOW),
+            StepStatus::Active => ("◆", Colors::YELLOW),
             StepStatus::Completed => ("◆", Colors::GREEN),
             StepStatus::Pending => ("", Colors::GRAY),
         };
@@ -177,7 +177,7 @@ pub fn render_profile_name(profile_name: &str) {
 }
 
 /// Render default models for a provider in neutral colors (white/gray)
-pub fn render_default_models(smart_model: &str, eco_model: &str, recovery_model: Option<&str>) {
+pub fn render_default_models(smart_model: &str, eco_model: &str) {
     print!("{}Default models:{}\r\n", Colors::WHITE, Colors::RESET);
     print!(
         "  {}Smart: {}{}\r\n",
@@ -186,13 +186,5 @@ pub fn render_default_models(smart_model: &str, eco_model: &str, recovery_model:
         smart_model
     );
     print!("  {}Eco: {}{}\r\n", Colors::GRAY, Colors::WHITE, eco_model);
-    if let Some(recovery) = recovery_model {
-        print!(
-            "  {}Recovery: {}{}\r\n",
-            Colors::GRAY,
-            Colors::WHITE,
-            recovery
-        );
-    }
     print!("\r\n");
 }
