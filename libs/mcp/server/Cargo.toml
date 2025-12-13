@@ -2,10 +2,14 @@
 name = "stakpak-mcp-server"
 version = { workspace = true }
 edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
-stakpak-api = { path = "../../api" }
-stakpak-shared = { path = "../../shared" }
+stakpak-api = { workspace = true }
+stakpak-shared = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -1,7 +1,11 @@
 [package]
-name = "popup-widget"
-version = "0.1.0"
+name = "stakpak-popup-widget"
+version = { workspace = true }
 edition = "2021"
+description = "Popup widget for Ratatui"
+license = "Apache-2.0"
+repository = "https://github.com/stakpak/agent"
+authors = ["Stakpak Team"]
 
 [dependencies]
 ratatui = { workspace = true }
