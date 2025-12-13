@@ -2,16 +2,16 @@
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
-use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
-use stakpak_shared::models::integrations::gemini::GeminiConfig;
-use stakpak_shared::models::integrations::openai::OpenAIConfig;
+use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
+use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
+use stakpak_shared::models::integrations::openai::{OpenAIConfig, OpenAIModel};
 
 /// Generate OpenAI configuration template
 pub fn generate_openai_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("gpt-5".to_string()),
-        eco_model: Some("gpt-5-mini".to_string()),
+        smart_model: Some(OpenAIModel::default_smart_model()),
+        eco_model: Some(OpenAIModel::default_eco_model()),
         openai: Some(OpenAIConfig {
             api_key: Some(api_key),
             api_endpoint: None,
@@ -24,8 +24,8 @@ pub fn generate_openai_config(api_key: String) -> ProfileConfig {
 pub fn generate_gemini_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("gemini-3-pro-preview".to_string()),
-        eco_model: Some("gemini-2.5-flash".to_string()),
+        smart_model: Some(GeminiModel::default_smart_model()),
+        eco_model: Some(GeminiModel::default_eco_model()),
         gemini: Some(GeminiConfig {
             api_key: Some(api_key),
             api_endpoint: None,
@@ -38,8 +38,8 @@ pub fn generate_gemini_config(api_key: String) -> ProfileConfig {
 pub fn generate_anthropic_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("claude-opus-4-5".to_string()),
-        eco_model: Some("claude-haiku-4-5".to_string()),
+        smart_model: Some(AnthropicModel::default_smart_model()),
+        eco_model: Some(AnthropicModel::default_eco_model()),
         anthropic: Some(AnthropicConfig {
             api_key: Some(api_key),
             api_endpoint: None,

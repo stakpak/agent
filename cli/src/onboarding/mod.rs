@@ -27,10 +27,12 @@ use crate::onboarding::menu::{
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
 use crate::onboarding::styled_output::{StepStatus, render_profile_name};
+use stakpak_shared::models::integrations::anthropic::AnthropicModel;
+use stakpak_shared::models::integrations::gemini::GeminiModel;
+use stakpak_shared::models::integrations::openai::OpenAIModel;
+use stakpak_shared::models::model_pricing::ContextAware;
 use std::io::{self, Write};
 
-/// Helper function to get config path string from AppConfig
-/// Returns the config_path if not empty, otherwise gets the default path
 fn get_config_path_string(config: &AppConfig) -> String {
     if config.config_path.is_empty() {
         AppConfig::get_config_path::<&str>(None)
@@ -53,13 +55,11 @@ pub enum OnboardingMode {
 pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
     let profile_name = match mode {
         OnboardingMode::Default => {
-            // For default mode, use the current profile name
             let profile = config.profile_name.clone();
 
             print!("\r\n");
             crate::onboarding::styled_output::render_title("Welcome to Stakpak");
             print!("\r\n");
-            // Show profile name with empty line before it
             render_profile_name(&profile);
             print!("\r\n");
             crate::onboarding::styled_output::render_info(
@@ -70,7 +70,6 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
             profile
         }
         OnboardingMode::New => {
-            // For new profile mode, prompt for profile name first
             print!("\r\n");
             crate::onboarding::styled_output::render_title("Creating new profile");
             print!("\r\n");
@@ -91,10 +90,9 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                 }
             };
 
-            // Clear the title and prompt lines, then show profile name with empty line before it
-            print!("\x1b[2A"); // Move up 2 lines (to title line)
-            print!("\x1b[0J"); // Clear from cursor to end of screen
-            print!("\r\n"); // Empty line before profile name
+            print!("\x1b[2A");
+            print!("\x1b[0J");
+            print!("\r\n");
             render_profile_name(&profile_name);
             print!("\r\n");
             crate::onboarding::styled_output::render_info(
@@ -106,22 +104,14 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
         }
     };
 
-    // Save position after welcome message - this is where ALL step content starts
-    // We'll always clear from here before rendering a new step
-    // This position will be used by all subsequent steps
     print!("\x1b[s");
 
     // Initial decision: Stakpak API or Own Keys
     loop {
-        // CRITICAL: Restore to step content start and clear everything from there
-        // This ensures we only see the current step, not previous steps
-        // We restore to the position saved after welcome message
-        print!("\x1b[u"); // Restore to position after welcome
-        // Clear from cursor to end of screen AND clear the current line
-        print!("\x1b[0J"); // Clear from cursor to end of screen
-        print!("\x1b[K"); // Clear from cursor to end of current line
+        print!("\x1b[u");
+        print!("\x1b[0J");
+        print!("\x1b[K");
         let _ = io::stdout().flush();
-        // Re-save position to ensure it's correct
         print!("\x1b[s");
 
         let initial_choice = select_option(
@@ -141,44 +131,33 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
 
         match initial_choice {
             NavResult::Forward(InitialChoice::StakpakAPI) => {
-                // Clear step content before OAuth flow
                 print!("\x1b[u");
                 print!("\x1b[0J");
                 let _ = io::stdout().flush();
 
-                // Handle Stakpak API based on mode
                 match mode {
                     OnboardingMode::Default => {
-                        // Use existing OAuth flow - saves to default profile
                         prompt_for_api_key(config).await;
                     }
                     OnboardingMode::New => {
-                        // For new profile, save API key to new profile, not default
                         handle_stakpak_api_for_new_profile(config, &profile_name).await;
                     }
                 }
                 break;
             }
             NavResult::Forward(InitialChoice::OwnKeys) => {
-                // select_option already cleared everything including title and steps
-                // Cursor is now at the position right after welcome message
-                // Just re-save this position for step 2 (no need to restore/clear again)
                 print!("\x1b[s");
                 if handle_own_keys_flow(config, &profile_name).await {
                     break;
                 }
-                // If we return false (user went back), loop to re-render step 1
                 continue;
             }
             NavResult::Back => {
-                // Shouldn't happen on first step, but handle gracefully
                 break;
             }
             NavResult::Cancel => {
-                // Clear step content
                 print!("\x1b[u");
                 print!("\x1b[0J");
-                // User cancelled (ESC on first step = exit)
                 print!("\r\n");
                 crate::onboarding::styled_output::render_warning(
                     "Onboarding cancelled. You can run this again later.",
@@ -190,19 +169,12 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
     }
 }
 
-/// Handle the "Own Keys" flow
-/// Returns true if configuration was completed, false if user went back
 async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> bool {
-    // Provider selection with back navigation support
     loop {
-        // CRITICAL: Clear previous step content WITHOUT touching welcome message
-        // On first iteration, cursor is already at correct position (select_option cleared everything)
-        // On subsequent iterations (after back navigation), restore and clear
         print!("\x1b[u");
-        print!("\x1b[0J"); // Clear from cursor to end of screen
-        print!("\x1b[K"); // Clear current line
+        print!("\x1b[0J");
+        print!("\x1b[K");
         let _ = io::stdout().flush();
-        // Re-save position after clearing for next step or back navigation
         print!("\x1b[s");
 
         let provider_choice = select_option(
@@ -240,18 +212,14 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
                 handle_byom_setup(config, profile_name).await
             }
             NavResult::Back => {
-                // User wants to go back to step 1
-                // Clear step 2 content WITHOUT touching welcome message
                 print!("\x1b[u");
-                print!("\x1b[0J"); // Clear from cursor to end of screen
-                print!("\x1b[K"); // Clear current line
+                print!("\x1b[0J");
+                print!("\x1b[K");
                 let _ = io::stdout().flush();
-                // Re-save position after welcome for step 1
                 print!("\x1b[s");
                 return false;
             }
             NavResult::Cancel => {
-                // Shouldn't happen, but handle gracefully
                 return false;
             }
         };
@@ -285,13 +253,15 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
     print!("\r\n");
 
     // Show default models (using same names as config templates)
-    crate::onboarding::styled_output::render_default_models("gpt-5", "gpt-5-mini");
+    crate::onboarding::styled_output::render_default_models(
+        &OpenAIModel::DEFAULT_SMART_MODEL.model_name(),
+        &OpenAIModel::DEFAULT_ECO_MODEL.model_name(),
+    );
 
     match prompt_password("Enter your OpenAI API key", true) {
         NavResult::Forward(Some(api_key)) => {
             let profile = generate_openai_config(api_key);
 
-            // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
             ));
@@ -314,7 +284,6 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     );
                     print!("\r\n");
 
-                    // Update AppConfig with saved values so we can use them immediately
                     config.provider = profile
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
@@ -359,8 +328,8 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     // Show default models (using same names as config templates)
     crate::onboarding::styled_output::render_default_models(
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash",
+        &GeminiModel::DEFAULT_SMART_MODEL.model_name(),
+        &GeminiModel::DEFAULT_ECO_MODEL.model_name(),
     );
 
     match prompt_password("Enter your Gemini API key", true) {
@@ -434,7 +403,10 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
     print!("\r\n");
 
     // Show default models (using same names as config templates)
-    crate::onboarding::styled_output::render_default_models("claude-opus-4-5", "claude-haiku-4-5");
+    crate::onboarding::styled_output::render_default_models(
+        &AnthropicModel::DEFAULT_SMART_MODEL.model_name(),
+        &AnthropicModel::DEFAULT_ECO_MODEL.model_name(),
+    );
 
     match prompt_password("Enter your Anthropic API key", true) {
         NavResult::Forward(Some(api_key)) => {
@@ -627,40 +599,61 @@ fn configure_hybrid_model(
 fn select_model_for_provider(
     provider: &crate::onboarding::config_templates::HybridProvider,
 ) -> Option<String> {
-    let models: Vec<(String, &str, bool)> = match provider {
+    use std::collections::HashSet;
+
+    let (candidates, smart_id) = match provider {
         crate::onboarding::config_templates::HybridProvider::OpenAI => {
-            vec![
-                ("gpt-5".to_string(), "GPT-5", true),
-                ("gpt-5-mini".to_string(), "GPT-5 Mini", false),
-                ("gpt-5-nano".to_string(), "GPT-5 Nano", false),
-            ]
+            let smart = OpenAIModel::DEFAULT_SMART_MODEL;
+            let eco = OpenAIModel::DEFAULT_ECO_MODEL;
+            (
+                vec![
+                    (smart.to_string(), smart.model_name()),
+                    (eco.to_string(), eco.model_name()),
+                ],
+                smart.to_string(),
+            )
         }
         crate::onboarding::config_templates::HybridProvider::Gemini => {
-            vec![
-                (
-                    "gemini-3-pro-preview".to_string(),
-                    "Gemini 3 Pro Preview",
-                    true,
-                ),
-                ("gemini-2.5-pro".to_string(), "Gemini 2.5 Pro", false),
-                ("gemini-2.5-flash".to_string(), "Gemini 2.5 Flash", false),
-                (
-                    "gemini-2.5-flash-lite".to_string(),
-                    "Gemini 2.5 Flash Lite",
-                    false,
-                ),
-            ]
+            let smart = GeminiModel::DEFAULT_SMART_MODEL;
+            let eco = GeminiModel::DEFAULT_ECO_MODEL;
+            (
+                vec![
+                    (smart.to_string(), smart.model_name()),
+                    (eco.to_string(), eco.model_name()),
+                ],
+                smart.to_string(),
+            )
         }
         crate::onboarding::config_templates::HybridProvider::Anthropic => {
-            vec![
-                ("claude-opus-4-5".to_string(), "Claude Opus 4.5", true),
-                ("claude-sonnet-4-5".to_string(), "Claude Sonnet 4.5", false),
-                ("claude-haiku-4-5".to_string(), "Claude Haiku 4.5", false),
-            ]
+            let smart = AnthropicModel::DEFAULT_SMART_MODEL;
+            let eco = AnthropicModel::DEFAULT_ECO_MODEL;
+            (
+                vec![
+                    (smart.to_string(), smart.model_name()),
+                    (eco.to_string(), eco.model_name()),
+                ],
+                smart.to_string(),
+            )
         }
     };
 
-    match select_option_no_header(&models, true) {
+    let mut options = Vec::new();
+    let mut seen = HashSet::new();
+
+    for (id, name) in candidates {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let is_recommended = id == smart_id;
+        options.push((id, name, is_recommended));
+    }
+
+    let options_refs: Vec<(String, &str, bool)> = options
+        .iter()
+        .map(|(id, name, rec)| (id.clone(), name.as_str(), *rec))
+        .collect();
+
+    match select_option_no_header(&options_refs, true) {
         NavResult::Forward(model) => Some(model),
         NavResult::Back | NavResult::Cancel => None,
     }
