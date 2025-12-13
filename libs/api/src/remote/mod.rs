@@ -51,9 +51,7 @@ impl RemoteClient {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
 
-            // Try to parse as JSON and extract error message
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&error_body) {
-                // Try ApiError format first (Stakpak API format)
                 if let Ok(api_error) = serde_json::from_value::<ApiError>(json.clone()) {
                     if api_error.error.key == "EXCEEDED_API_LIMIT" {
                         return Err(format!(
@@ -65,7 +63,6 @@ impl RemoteClient {
                     }
                 }
 
-                // Try generic error format (e.g., {"error": {"message": "..."}})
                 if let Some(error_obj) = json.get("error") {
                     let error_message =
                         if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
@@ -82,7 +79,6 @@ impl RemoteClient {
                 }
             }
 
-            // Fallback to raw error body if JSON parsing fails
             Err(error_body)
         }
     }
@@ -446,7 +442,6 @@ impl AgentProvider for RemoteClient {
 
         let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
-        // Check if the response contains an error field before deserializing
         if let Some(error_obj) = value.get("error") {
             let error_message = if let Some(message) =
                 error_obj.get("message").and_then(|m| m.as_str())
@@ -523,7 +518,6 @@ impl AgentProvider for RemoteClient {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
 
-            // Try to parse as JSON and extract error message
             let error_message =
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&error_body) {
                     // Try ApiError format first (Stakpak API format)
