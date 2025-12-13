@@ -64,24 +64,6 @@ impl std::str::FromStr for ToolMode {
     }
 }
 
-#[derive(Clone)]
-pub struct AuthConfig {
-    pub token: Option<String>,
-}
-
-impl AuthConfig {
-    pub async fn new(disabled: bool) -> Self {
-        let token = if disabled {
-            None
-        } else {
-            let token = stakpak_shared::utils::generate_password(64, true);
-            Some(token)
-        };
-
-        Self { token }
-    }
-}
-
 pub struct MCPServerConfig {
     pub client: Option<Arc<dyn AgentProvider>>,
     pub bind_address: String,
