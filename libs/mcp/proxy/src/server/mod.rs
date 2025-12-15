@@ -227,6 +227,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListToolsResult {
             tools: all_tools,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -331,6 +332,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListPromptsResult {
             prompts: all_prompts,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -385,6 +387,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListResourcesResult {
             resources: all_resources,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -415,6 +418,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListResourceTemplatesResult {
             resource_templates: all_templates,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 

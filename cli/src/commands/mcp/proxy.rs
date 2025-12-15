@@ -24,6 +24,14 @@ pub async fn run_proxy(disable_secret_redaction: bool, privacy_mode: bool) -> Re
         },
     );
 
+    servers.insert(
+        "paks".to_string(),
+        ServerConfig::Http {
+            url: "https://apiv2.stakpak.dev/v1/paks/mcp".to_string(),
+            headers: None,
+        },
+    );
+
     let config = ClientPoolConfig::with_servers(servers);
 
     let server = ProxyServer::new(config, !disable_secret_redaction, privacy_mode)
