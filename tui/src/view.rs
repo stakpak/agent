@@ -18,6 +18,11 @@ use ratatui::{
 use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
+    if state.show_shell_mode && state.active_shell_command.is_some() {
+        render_fullscreen_terminal(f, state);
+        return;
+    }
+
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
@@ -481,5 +486,50 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let widget =
         Paragraph::new(Line::from(final_spans)).wrap(ratatui::widgets::Wrap { trim: false });
+    f.render_widget(widget, area);
+}
+
+fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
+    let area = f.area();
+    // Clear screen
+    f.render_widget(ratatui::widgets::Clear, area);
+
+    // Render Terminal content
+    let lines = crate::services::handlers::shell::screen_to_lines(
+        state.shell_screen.screen(),
+        state.shell_scroll,
+        false,
+    );
+
+    // Get command name for title
+    let cmd_name = state
+        .active_shell_command
+        .as_ref()
+        .map(|cmd| cmd.command.clone())
+        .unwrap_or_else(|| "Terminal".to_string());
+
+    // Get scroll info
+    let scroll_pos = state.shell_scroll;
+    let max_scroll = state.shell_screen.screen().scrollback();
+    let (rows, cols) = state.shell_screen.screen().size();
+
+    // Use a Cool Blue border
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            format!(
+                " Shell Command {} [Focused] (Scroll: {}/{} - Size: {}x{}) ",
+                cmd_name, scroll_pos, max_scroll, rows, cols
+            ),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    // Determine the layout area - ensure it takes the full screen
+    // We already use f.area(), so the block will size to the window.
+    let widget = Paragraph::new(lines).block(block);
+
     f.render_widget(widget, area);
 }

@@ -42,6 +42,12 @@ pub enum MessageContent {
         colors: BubbleColors,
         tool_type: String,
     },
+    RenderRefreshedTerminal(
+        String,             // Title
+        Vec<Line<'static>>, // Content
+        Option<BubbleColors>,
+        usize, // Width
+    ),
 }
 
 fn term_color(color: Color) -> Color {
@@ -785,6 +791,18 @@ fn get_wrapped_message_lines_internal(
                 tool_type: _,
             } => {
                 let borrowed_lines = get_wrapped_bash_bubble_lines(title, content, colors);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderRefreshedTerminal(title, content, colors, _stored_width) => {
+                // Use the current terminal width, not the stored width
+                let rendered_lines = crate::services::bash_block::render_refreshed_terminal_bubble(
+                    title,
+                    content,
+                    colors.clone(),
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }

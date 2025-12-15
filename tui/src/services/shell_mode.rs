@@ -15,24 +15,14 @@ fn get_process_registry() -> Arc<Mutex<HashMap<String, u32>>> {
         .clone()
 }
 
-// Master function combining all detection methods
-fn is_interactive_prompt(line: &str) -> bool {
-    let phrases = ["password", "passphrase"];
-    phrases
-        .iter()
-        .any(|phrase| line.to_lowercase().contains(phrase))
-}
-
-/// The shell prompt prefix used in the TUI
 pub const SHELL_PROMPT_PREFIX: &str = "$ ";
 
 #[derive(Debug, Clone)]
 pub enum ShellEvent {
     Output(String),
     Error(String),
-    WaitingForInput, // Command is waiting for user input
-    Completed(i32),  // Exit code
-    Clear,           // Clear the output display
+    Completed(i32), // Exit code
+    Clear,          // Clear the output display
 }
 
 #[derive(Clone)]
@@ -262,6 +252,8 @@ pub fn run_background_shell_command(
 pub fn run_pty_command(
     command: String,
     output_tx: mpsc::Sender<ShellEvent>,
+    rows: u16,
+    cols: u16,
 ) -> Result<ShellCommand, Box<dyn std::error::Error>> {
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read;
@@ -275,23 +267,12 @@ pub fn run_pty_command(
         stdin_tx: stdin_tx.clone(),
     };
 
-    // Check if this is a clear command
-    if is_clear_command(&command) {
-        // Send clear event instead of running the command
-        let output_tx_clone = output_tx.clone();
-        std::thread::spawn(move || {
-            let _ = output_tx_clone.blocking_send(ShellEvent::Clear);
-            let _ = output_tx_clone.blocking_send(ShellEvent::Completed(0));
-        });
-        return Ok(shell_cmd);
-    }
-
     std::thread::spawn(move || {
         let pty_system = native_pty_system();
 
         let pair = match pty_system.openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         }) {
@@ -310,8 +291,9 @@ pub fn run_pty_command(
                 .unwrap_or_else(|_| std::path::PathBuf::from("/"))
         });
 
-        let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", &command]);
+        let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.args(["-i", "-c", &command]);
         cmd.cwd(&current_dir);
 
         let mut child = match pair.slave.spawn_command(cmd) {
@@ -351,10 +333,7 @@ pub fn run_pty_command(
                     eprintln!("Failed to write to PTY: {}", e);
                     break;
                 }
-                if let Err(e) = writeln!(writer) {
-                    eprintln!("Failed to write newline to PTY: {}", e);
-                    break;
-                }
+
                 if let Err(e) = writer.flush() {
                     eprintln!("Failed to flush PTY: {}", e);
                     break;
@@ -382,30 +361,15 @@ pub fn run_pty_command(
                 Ok(n) => {
                     accumulated.extend_from_slice(&buffer[..n]);
 
-                    // Process accumulated data
-                    if let Ok(text) = String::from_utf8(accumulated.clone()) {
-                        // Look for interactive prompt patterns
-                        if !text.ends_with('\n') {
-                            // This is likely an interactive prompt without newline
-                            if is_interactive_prompt(&text) {
-                                let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
-                            }
-                            // Always send the output so user can see the prompt
-                            let _ = output_tx.blocking_send(ShellEvent::Output(text.clone()));
-                            accumulated.clear();
-                        } else {
-                            // Process complete lines
-                            for line in text.lines() {
-                                if is_interactive_prompt(line) {
-                                    let _ = output_tx.blocking_send(ShellEvent::WaitingForInput);
-                                }
-                                // Always send the output so user can see the prompt
-                                let _ =
-                                    output_tx.blocking_send(ShellEvent::Output(line.to_string()));
-                            }
-                            accumulated.clear();
-                        }
+                    // Process data
+                    if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
+                        let _ = output_tx.blocking_send(ShellEvent::Output(text));
+                    } else {
+                        // Lossy conversion for non-utf8
+                        let text = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        let _ = output_tx.blocking_send(ShellEvent::Output(text));
                     }
+                    accumulated.clear();
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // No data available, sleep briefly

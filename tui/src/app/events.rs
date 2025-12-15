@@ -20,6 +20,7 @@ pub enum InputEvent {
     EndLoadingOperation(LoadingOperation),
     InputChanged(char),
     ShellMode,
+    RunShellCommand(String),
     GetStatus(String),
     Error(String),
     SetSessions(Vec<SessionInfo>),

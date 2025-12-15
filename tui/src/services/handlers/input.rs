@@ -41,7 +41,7 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         let _ = input_tx.try_send(InputEvent::RulebookSearchInputChanged(c));
         return;
     }
-    handle_input_changed(state, c);
+    handle_input_changed(state, c, input_tx);
 }
 
 /// Handle InputBackspace event - routes to appropriate handler based on popup state
@@ -150,7 +150,7 @@ pub fn handle_input_submitted_event(
 }
 
 /// Handle character input change
-pub fn handle_input_changed(state: &mut AppState, c: char) {
+pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
     state.show_shortcuts = false;
 
     if c == '$' && (state.input().is_empty() || state.is_dialog_open) && !state.show_sessions_dialog
@@ -158,7 +158,7 @@ pub fn handle_input_changed(state: &mut AppState, c: char) {
         state.text_area.set_text("");
         // Shell mode toggle will be handled by shell module
         use super::shell;
-        shell::handle_shell_mode(state);
+        shell::handle_shell_mode(state, input_tx);
         return;
     }
 
@@ -270,8 +270,8 @@ fn handle_input_submitted(
             state.text_area.set_text("");
             state.show_helper_dropdown = false;
 
-            // Run the shell command with the shell event channel
-            state.run_shell_command(command.clone(), shell_tx);
+            // Run the shell command via event
+            let _ = shell_tx.try_send(InputEvent::RunShellCommand(command.clone()));
         }
         return;
     }
@@ -409,6 +409,9 @@ fn handle_input_submitted(
         let was_at_bottom = state.scroll == max_scroll;
 
         let mut final_input = state.input().to_string();
+
+        // If there is an active shell session, terminate it before submitting new message
+        crate::services::handlers::shell::terminate_active_shell_session(state);
 
         // Process any pending pastes first
         for (placeholder, long_text) in state.pending_pastes.drain(..) {

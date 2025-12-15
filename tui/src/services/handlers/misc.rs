@@ -64,6 +64,12 @@ pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
             .approval_popup
             .recreate_with_terminal_size(state.terminal_size);
     }
+
+    // Resize shell parser
+    // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
+    let shell_rows = height.saturating_sub(2).max(1);
+    let shell_cols = width.saturating_sub(4).max(1);
+    state.shell_screen.set_size(shell_rows, shell_cols);
 }
 
 /// Handle toggle cursor visible event

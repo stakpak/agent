@@ -61,6 +61,121 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for Shell Mode
+    if state.show_shell_mode
+        && state.active_shell_command.is_some()
+        && !state.is_dialog_open
+        && !state.approval_popup.is_visible()
+    {
+        match event {
+            InputEvent::InputChanged(c) => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, &c.to_string());
+                return;
+            }
+            InputEvent::InputBackspace => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x7f");
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\n");
+                return;
+            }
+            InputEvent::CursorLeft => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[D");
+                return;
+            }
+            InputEvent::CursorRight => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[C");
+                return;
+            }
+            InputEvent::Up => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[A");
+                return;
+            }
+            InputEvent::Down => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[B");
+                return;
+            }
+            // Handle Scrolling
+            // Note: vt100's scrollback() returns VIEW position, not buffer size.
+            // To get actual scrollback size, we set_scrollback to a large value
+            // and read the clamped result.
+            InputEvent::ScrollUp => {
+                // Probe actual scrollback size
+                state.shell_screen.set_scrollback(usize::MAX);
+                let max = state.shell_screen.screen().scrollback() as u16;
+                // Calculate new scroll position
+                let new_scroll = state.shell_scroll.saturating_add(1).min(max);
+                state.shell_screen.set_scrollback(new_scroll as usize);
+                state.shell_scroll = new_scroll;
+                eprintln!("ScrollUp: shell_scroll={}, max={}", state.shell_scroll, max);
+                return;
+            }
+            InputEvent::ScrollDown => {
+                state.shell_scroll = state.shell_scroll.saturating_sub(1);
+                state
+                    .shell_screen
+                    .set_scrollback(state.shell_scroll as usize);
+                eprintln!("ScrollDown: shell_scroll={}", state.shell_scroll);
+                return;
+            }
+            InputEvent::PageUp => {
+                // Probe actual scrollback size
+                state.shell_screen.set_scrollback(usize::MAX);
+                let max = state.shell_screen.screen().scrollback() as u16;
+                // Calculate new scroll position
+                let new_scroll = state
+                    .shell_scroll
+                    .saturating_add(state.terminal_size.height / 2)
+                    .min(max);
+                state.shell_screen.set_scrollback(new_scroll as usize);
+                state.shell_scroll = new_scroll;
+                eprintln!("PageUp: shell_scroll={}, max={}", state.shell_scroll, max);
+                return;
+            }
+            InputEvent::PageDown => {
+                state.shell_scroll = state
+                    .shell_scroll
+                    .saturating_sub(state.terminal_size.height / 2);
+                state
+                    .shell_screen
+                    .set_scrollback(state.shell_scroll as usize);
+                eprintln!("PageDown: shell_scroll={}", state.shell_scroll);
+                return;
+            }
+            InputEvent::HandleEsc => {
+                shell::send_shell_input(state, "\x1b");
+                return;
+            }
+            InputEvent::Tab => {
+                shell::send_shell_input(state, "\t");
+                return;
+            }
+            InputEvent::AttemptQuit => {
+                shell::send_shell_input(state, "\x03");
+                return;
+            }
+            InputEvent::InputDelete => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x15");
+                return;
+            }
+            InputEvent::InputDeleteWord => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x17");
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // Route events to appropriate handlers
     match event {
         // Input handlers
@@ -71,7 +186,7 @@ pub fn update(
             input::handle_input_backspace_event(state, input_tx);
         }
         InputEvent::InputChangedNewline => {
-            input::handle_input_changed(state, '\n');
+            input::handle_input_changed(state, '\n', input_tx);
         }
         InputEvent::InputSubmitted => {
             input::handle_input_submitted_event(
@@ -194,8 +309,11 @@ pub fn update(
             tool::handle_approval_popup_escape(state);
         }
         // Shell handlers
+        InputEvent::RunShellCommand(command) => {
+            shell::handle_run_shell_command(state, command, input_tx);
+        }
         InputEvent::ShellMode => {
-            shell::handle_shell_mode(state);
+            shell::handle_shell_mode(state, input_tx);
         }
         InputEvent::ShellOutput(line) => {
             shell::handle_shell_output(state, line);

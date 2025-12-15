@@ -165,6 +165,10 @@ pub struct AppState {
     pub ctrl_c_timer: Option<std::time::Instant>,
     pub mouse_capture_enabled: bool,
     pub terminal_size: Size,
+    pub shell_screen: vt100::Parser,
+    pub shell_scroll: u16,
+    pub interactive_shell_message_id: Option<Uuid>,
+    pub shell_interaction_occurred: bool,
 }
 
 pub struct AppStateOptions<'a> {
@@ -310,6 +314,10 @@ impl AppState {
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
             last_message_tool_calls: Vec::new(),
+            shell_screen: vt100::Parser::new(24, 80, 1000),
+            shell_scroll: 0,
+            interactive_shell_message_id: None,
+            shell_interaction_occurred: false,
 
             // Profile switcher initialization
             show_profile_switcher: false,
@@ -405,8 +413,19 @@ impl AppState {
             AdaptiveColors::dark_magenta(),
         );
         self.messages.push(Message::plain_text("SPACING_MARKER"));
+        let rows = if self.terminal_size.height > 0 {
+            self.terminal_size.height
+        } else {
+            24
+        };
+        let cols = if self.terminal_size.width > 0 {
+            self.terminal_size.width
+        } else {
+            80
+        };
+
         #[cfg(unix)]
-        let shell_cmd = match run_pty_command(command.clone(), shell_tx) {
+        let shell_cmd = match run_pty_command(command.clone(), shell_tx, rows, cols) {
             Ok(cmd) => cmd,
             Err(e) => {
                 push_error_message(self, &format!("Failed to run command: {}", e), None);
@@ -419,6 +438,7 @@ impl AppState {
 
         self.active_shell_command = Some(shell_cmd.clone());
         self.active_shell_command_output = Some(String::new());
+        self.shell_screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {
@@ -429,9 +449,7 @@ impl AppState {
                     ShellEvent::Error(line) => {
                         let _ = input_tx.send(InputEvent::ShellError(line)).await;
                     }
-                    ShellEvent::WaitingForInput => {
-                        let _ = input_tx.send(InputEvent::ShellWaitingForInput).await;
-                    }
+
                     ShellEvent::Completed(code) => {
                         let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
                         break;

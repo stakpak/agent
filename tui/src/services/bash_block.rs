@@ -1317,6 +1317,15 @@ pub fn render_styled_lines(
     owned_lines
 }
 
+pub fn render_refreshed_terminal_bubble(
+    title: &str,
+    content: &[Line<'static>],
+    colors: Option<BubbleColors>,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    render_styled_header_and_borders(title, content.to_vec(), colors, terminal_width)
+}
+
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
     let tool_call_name = tool_call.function.name.clone();
     let tool_calls = [
