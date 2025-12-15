@@ -33,6 +33,7 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
+use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -345,6 +346,18 @@ pub async fn run_interactive(
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                         tools_queue.clear();
                         messages.push(user_msg);
+
+                        if matches!(provider_type, ProviderType::Local)
+                            && let Some(ref user_id) = ctx_clone.user_id
+                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                        {
+                            capture_event(
+                                user_id,
+                                ctx_clone.machine_name.as_deref(),
+                                true,
+                                TelemetryEvent::UserPrompted,
+                            );
+                        }
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(

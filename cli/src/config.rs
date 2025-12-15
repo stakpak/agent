@@ -68,6 +68,8 @@ pub struct ProfileConfig {
 pub struct Settings {
     pub machine_name: Option<String>,
     pub auto_append_gitignore: Option<bool>,
+    pub user_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -101,6 +103,8 @@ pub struct AppConfig {
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
+    pub user_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -135,6 +139,8 @@ impl From<AppConfig> for Settings {
         Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
+            user_id: config.user_id,
+            collect_telemetry: config.collect_telemetry,
         }
     }
 }
@@ -144,6 +150,8 @@ impl From<OldAppConfig> for Settings {
         Settings {
             machine_name: old_config.machine_name,
             auto_append_gitignore: old_config.auto_append_gitignore,
+            user_id: Some(uuid::Uuid::new_v4().to_string()),
+            collect_telemetry: Some(true),
         }
     }
 }
@@ -185,6 +193,8 @@ impl Default for ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                user_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -200,6 +210,8 @@ impl ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                user_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -231,7 +243,15 @@ impl ConfigFile {
     }
 
     fn set_app_config_settings(&mut self, config: AppConfig) {
-        self.settings = config.into();
+        let existing_user_id = self.settings.user_id.clone();
+        let existing_collect_telemetry = self.settings.collect_telemetry;
+
+        self.settings = Settings {
+            machine_name: config.machine_name,
+            auto_append_gitignore: config.auto_append_gitignore,
+            user_id: config.user_id.or(existing_user_id),
+            collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
+        };
     }
 
     fn contains_readonly(&self) -> bool {
@@ -452,6 +472,8 @@ impl AppConfig {
             smart_model: profile_config.smart_model,
             eco_model: profile_config.eco_model,
             recovery_model: profile_config.recovery_model,
+            user_id: settings.user_id,
+            collect_telemetry: settings.collect_telemetry,
         }
     }
 
@@ -640,6 +662,8 @@ auto_append_gitignore = true
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            user_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         }
     }
 
@@ -756,6 +780,8 @@ auto_append_gitignore = true
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                user_id: Some("test-user-id".into()),
+                collect_telemetry: Some(true),
             },
         };
 
@@ -1002,6 +1028,8 @@ auto_append_gitignore = true
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            user_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         };
 
         config.save().unwrap();

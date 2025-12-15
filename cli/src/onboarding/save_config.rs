@@ -1,17 +1,26 @@
 //! Configuration saving utilities
 
-use crate::config::{ConfigFile, ProfileConfig};
+use crate::config::{ConfigFile, ProfileConfig, ProviderType};
 use crate::onboarding::config_templates::config_to_toml_preview;
 use crate::onboarding::styled_output;
+use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use std::fs;
 use std::path::PathBuf;
 
+/// Telemetry settings returned after saving a profile
+#[derive(Clone, Debug, Default)]
+pub struct TelemetrySettings {
+    pub user_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
+}
+
 /// Save profile configuration to a named profile
+/// Returns telemetry settings that may have been generated
 pub fn save_to_profile(
     config_path: &str,
     profile_name: &str,
     profile: ProfileConfig,
-) -> Result<(), String> {
+) -> Result<TelemetrySettings, String> {
     let path = PathBuf::from(config_path);
 
     // Load existing config or create new
@@ -24,7 +33,16 @@ pub fn save_to_profile(
         ConfigFile::default()
     };
 
-    // Save to specified profile
+    let is_local_provider = matches!(profile.provider, Some(ProviderType::Local));
+    let is_first_telemetry_setup = config_file.settings.user_id.is_none();
+
+    if is_local_provider && config_file.settings.user_id.is_none() {
+        config_file.settings.user_id = Some(uuid::Uuid::new_v4().to_string());
+    }
+    if is_local_provider && config_file.settings.collect_telemetry.is_none() {
+        config_file.settings.collect_telemetry = Some(true);
+    }
+
     config_file
         .profiles
         .insert(profile_name.to_string(), profile);
@@ -41,7 +59,23 @@ pub fn save_to_profile(
 
     fs::write(&path, config_str).map_err(|e| format!("Failed to write config file: {}", e))?;
 
-    Ok(())
+    if is_local_provider
+        && is_first_telemetry_setup
+        && let Some(ref user_id) = config_file.settings.user_id
+        && config_file.settings.collect_telemetry.unwrap_or(true)
+    {
+        capture_event(
+            user_id,
+            config_file.settings.machine_name.as_deref(),
+            true,
+            TelemetryEvent::FirstOpen,
+        );
+    }
+
+    Ok(TelemetrySettings {
+        user_id: config_file.settings.user_id,
+        collect_telemetry: config_file.settings.collect_telemetry,
+    })
 }
 
 /// Show configuration preview and confirm before saving to a named profile
@@ -49,12 +83,12 @@ pub fn preview_and_save_to_profile(
     config_path: &str,
     profile_name: &str,
     profile: ProfileConfig,
-) -> Result<(), String> {
+) -> Result<TelemetrySettings, String> {
     // Show preview
     styled_output::render_config_preview(&config_to_toml_preview(&profile));
 
     // Save
-    save_to_profile(config_path, profile_name, profile)?;
+    let telemetry_settings = save_to_profile(config_path, profile_name, profile)?;
 
     println!();
     styled_output::render_success(&format!(
@@ -63,5 +97,5 @@ pub fn preview_and_save_to_profile(
     ));
     println!();
 
-    Ok(())
+    Ok(telemetry_settings)
 }

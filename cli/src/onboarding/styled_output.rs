@@ -188,3 +188,46 @@ pub fn render_default_models(smart_model: &str, eco_model: &str) {
     print!("  {}Eco: {}{}\r\n", Colors::GRAY, Colors::WHITE, eco_model);
     print!("\r\n");
 }
+
+/// Render a styled telemetry disclaimer box for local providers
+pub fn render_telemetry_disclaimer() {
+    let border = Colors::CYAN;
+    let r = Colors::RESET;
+
+    print!("\r\n");
+    print!(
+        "{}╭──────────────────────────────────────────────────────────╮{}\r\n",
+        border, r
+    );
+    print!(
+        "{}│{}  {}Anonymous Usage Tracking{}                                {}│{}\r\n",
+        border,
+        r,
+        Colors::GREEN,
+        r,
+        border,
+        r
+    );
+    print!(
+        "{}│{}  We collect anonymous telemetry to improve Stakpak.      {}│{}\r\n",
+        border, r, border, r
+    );
+    print!(
+        "{}│{}  No prompts, code, or personal data is collected.        {}│{}\r\n",
+        border, r, border, r
+    );
+    print!(
+        "{}│{}  Opt-out: set {}collect_telemetry = false{} in config        {}│{}\r\n",
+        border,
+        r,
+        Colors::YELLOW,
+        r,
+        border,
+        r
+    );
+    print!(
+        "{}╰──────────────────────────────────────────────────────────╯{}\r\n",
+        border, r
+    );
+    print!("\r\n");
+}
