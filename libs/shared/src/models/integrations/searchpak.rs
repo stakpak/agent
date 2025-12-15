@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_BASE_URL: &str = "http://localhost:8000";
 
 pub fn default_scrape_limit() -> u32 {
-    return 5;
+    5
 }
 
 // Results

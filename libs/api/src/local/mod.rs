@@ -28,7 +28,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use std::io::Write;
 
 mod context_managers;
 mod db;
@@ -449,7 +448,6 @@ impl AgentProvider for LocalClient {
     }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        
         eprintln!("search_docs called with: {:?}", input);
 
         let client = SearchPakClient::new(None);
