@@ -52,8 +52,10 @@ impl ClientHandler for LocalClientHandler {
 pub async fn connect(
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<RunningService<RoleClient, LocalClientHandler>> {
-    let mut cmd = Command::new("cargo");
-    cmd.arg("run").arg("--").arg("mcp").arg("proxy");
+    // Get the path to the current executable and use it for the proxy
+    let current_exe = std::env::current_exe()?;
+    let mut cmd = Command::new(current_exe);
+    cmd.arg("mcp").arg("proxy");
 
     let proc = TokioChildProcess::new(cmd)?;
     let client_handler = LocalClientHandler { progress_tx };
