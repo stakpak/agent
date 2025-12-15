@@ -494,12 +494,28 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
     // Clear screen
     f.render_widget(ratatui::widgets::Clear, area);
 
-    // Render Terminal content
-    let lines = crate::services::handlers::shell::screen_to_lines(
-        state.shell_screen.screen(),
-        state.shell_scroll,
-        false,
-    );
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let total_lines = state.shell_history_lines.len();
+
+    // Calculate max scroll based on history buffer size
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll_pos = (state.shell_scroll as usize).min(max_scroll);
+
+    // When not scrolled (scroll_pos == 0), render vt100 screen directly for smooth typing
+    // When scrolled, use the history buffer to view older content
+    let visible_lines: Vec<ratatui::text::Line<'static>> = if scroll_pos == 0 {
+        // Render current vt100 screen directly (smooth, no history artifacts)
+        crate::services::handlers::shell::capture_styled_screen(&mut state.shell_screen)
+    } else {
+        // Scrolled view - use history buffer
+        let start_idx = total_lines.saturating_sub(visible_height + scroll_pos);
+        let end_idx = total_lines.saturating_sub(scroll_pos);
+        state
+            .shell_history_lines
+            .get(start_idx..end_idx)
+            .unwrap_or(&[])
+            .to_vec()
+    };
 
     // Get command name for title
     let cmd_name = state
@@ -508,9 +524,6 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
         .map(|cmd| cmd.command.clone())
         .unwrap_or_else(|| "Terminal".to_string());
 
-    // Get scroll info
-    let scroll_pos = state.shell_scroll;
-    let max_scroll = state.shell_screen.screen().scrollback();
     let (rows, cols) = state.shell_screen.screen().size();
 
     // Use a Cool Blue border
@@ -527,9 +540,7 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
         ))
         .border_style(Style::default().fg(Color::Cyan));
 
-    // Determine the layout area - ensure it takes the full screen
-    // We already use f.area(), so the block will size to the window.
-    let widget = Paragraph::new(lines).block(block);
+    let widget = Paragraph::new(visible_lines).block(block);
 
     f.render_widget(widget, area);
 }

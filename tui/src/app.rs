@@ -167,6 +167,7 @@ pub struct AppState {
     pub terminal_size: Size,
     pub shell_screen: vt100::Parser,
     pub shell_scroll: u16,
+    pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
     pub interactive_shell_message_id: Option<Uuid>,
     pub shell_interaction_occurred: bool,
 }
@@ -316,6 +317,7 @@ impl AppState {
             last_message_tool_calls: Vec::new(),
             shell_screen: vt100::Parser::new(24, 80, 1000),
             shell_scroll: 0,
+            shell_history_lines: Vec::new(),
             interactive_shell_message_id: None,
             shell_interaction_occurred: false,
 

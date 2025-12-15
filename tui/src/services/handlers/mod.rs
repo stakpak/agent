@@ -104,49 +104,39 @@ pub fn update(
                 return;
             }
             // Handle Scrolling
-            // Note: vt100's scrollback() returns VIEW position, not buffer size.
-            // To get actual scrollback size, we set_scrollback to a large value
-            // and read the clamped result.
+            // Now using shell_history_lines buffer for safe scrolling
+            // No more vt100 scroll positions - just update shell_scroll for view slicing
             InputEvent::ScrollUp => {
-                // Probe actual scrollback size
-                state.shell_screen.set_scrollback(usize::MAX);
-                let max = state.shell_screen.screen().scrollback() as u16;
-                // Calculate new scroll position
-                let new_scroll = state.shell_scroll.saturating_add(1).min(max);
-                state.shell_screen.set_scrollback(new_scroll as usize);
-                state.shell_scroll = new_scroll;
-                eprintln!("ScrollUp: shell_scroll={}, max={}", state.shell_scroll, max);
+                let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                let total_lines = state.shell_history_lines.len();
+                let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                state.shell_scroll = state.shell_scroll.saturating_add(1).min(max_scroll);
+                eprintln!(
+                    "ScrollUp: shell_scroll={}, max={}",
+                    state.shell_scroll, max_scroll
+                );
                 return;
             }
             InputEvent::ScrollDown => {
                 state.shell_scroll = state.shell_scroll.saturating_sub(1);
-                state
-                    .shell_screen
-                    .set_scrollback(state.shell_scroll as usize);
                 eprintln!("ScrollDown: shell_scroll={}", state.shell_scroll);
                 return;
             }
             InputEvent::PageUp => {
-                // Probe actual scrollback size
-                state.shell_screen.set_scrollback(usize::MAX);
-                let max = state.shell_screen.screen().scrollback() as u16;
-                // Calculate new scroll position
-                let new_scroll = state
-                    .shell_scroll
-                    .saturating_add(state.terminal_size.height / 2)
-                    .min(max);
-                state.shell_screen.set_scrollback(new_scroll as usize);
-                state.shell_scroll = new_scroll;
-                eprintln!("PageUp: shell_scroll={}, max={}", state.shell_scroll, max);
+                let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                let total_lines = state.shell_history_lines.len();
+                let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                let page_size = state.terminal_size.height / 2;
+                state.shell_scroll = state.shell_scroll.saturating_add(page_size).min(max_scroll);
+                eprintln!(
+                    "PageUp: shell_scroll={}, max={}",
+                    state.shell_scroll, max_scroll
+                );
                 return;
             }
             InputEvent::PageDown => {
-                state.shell_scroll = state
-                    .shell_scroll
-                    .saturating_sub(state.terminal_size.height / 2);
-                state
-                    .shell_screen
-                    .set_scrollback(state.shell_scroll as usize);
+                let page_size = state.terminal_size.height / 2;
+                state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
                 eprintln!("PageDown: shell_scroll={}", state.shell_scroll);
                 return;
             }

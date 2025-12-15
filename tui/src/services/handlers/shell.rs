@@ -33,56 +33,30 @@ fn convert_vt100_color(c: vt100::Color) -> Color {
     }
 }
 
-/// Convert the FULL screen content (scrollback + visible) to ratatui Lines.
-/// This captures the entire terminal history for display in chat.
-pub fn screen_to_full_history(parser: &mut vt100::Parser) -> Vec<Line<'static>> {
-    // Save current scroll position
-    let saved_scroll = parser.screen().scrollback();
-
-    // Get the total scrollback size by probing
-    parser.set_scrollback(usize::MAX);
-    let total_scrollback = parser.screen().scrollback();
+/// Capture styled screen content at scroll position 0 (which is safe).
+/// Returns styled Lines for the current visible screen.
+pub fn capture_styled_screen(parser: &mut vt100::Parser) -> Vec<Line<'static>> {
+    // Always capture at scroll position 0 (safe)
+    parser.set_scrollback(0);
 
     let (rows, cols) = parser.screen().size();
+    let mut lines = Vec::new();
 
-    let mut all_lines = Vec::new();
-
-    if total_scrollback == 0 {
-        // No scrollback - just capture visible screen
-        parser.set_scrollback(0);
-        for row in 0..rows {
-            all_lines.push(row_to_line(parser.screen(), row, cols));
-        }
-    } else {
-        // Start at max scroll (oldest content) and capture row 0 at each position
-        // Each scroll position adds one new line at the top
-        for scroll_pos in (1..=total_scrollback).rev() {
-            parser.set_scrollback(scroll_pos);
-            // At each scroll position, the topmost row (row 0) is a new historical line
-            all_lines.push(row_to_line(parser.screen(), 0, cols));
-        }
-
-        // At scroll position 0, capture all visible rows (current screen)
-        parser.set_scrollback(0);
-        for row in 0..rows {
-            all_lines.push(row_to_line(parser.screen(), row, cols));
-        }
+    for row in 0..rows {
+        lines.push(row_to_line(parser.screen(), row, cols));
     }
 
-    // Restore scroll position
-    parser.set_scrollback(saved_scroll);
-
     // Trim trailing empty lines
-    while let Some(last_line) = all_lines.last() {
+    while let Some(last_line) = lines.last() {
         let is_empty = last_line.spans.iter().all(|s| s.content.trim().is_empty());
         if is_empty {
-            all_lines.pop();
+            lines.pop();
         } else {
             break;
         }
     }
 
-    all_lines
+    lines
 }
 
 /// Helper to convert a single row to a Line
@@ -137,88 +111,6 @@ fn row_to_line(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'static> {
         current_line.push(Span::styled(current_text, current_style));
     }
     Line::from(current_line)
-}
-
-// Convert screen content to ratatui Lines
-// Note: vt100's Parser.set_scrollback() should be called BEFORE this function
-// to set the desired scroll position. Then screen.cell(row, col) already
-// returns the correct cells for the scrolled view.
-pub fn screen_to_lines(
-    screen: &vt100::Screen,
-    _scroll_offset: u16,
-    trim: bool,
-) -> Vec<Line<'static>> {
-    let (rows, cols) = screen.size();
-
-    let mut lines = Vec::new();
-
-    for row in 0..rows {
-        let mut current_line = Vec::new();
-        let mut current_text = String::new();
-        let mut current_style = Style::default();
-
-        for col in 0..cols {
-            if let Some(cell) = screen.cell(row, col) {
-                let fg = convert_vt100_color(cell.fgcolor());
-                let bg = convert_vt100_color(cell.bgcolor());
-                let mut style = Style::default();
-                if fg != Color::Reset {
-                    style = style.fg(fg);
-                }
-                if bg != Color::Reset {
-                    style = style.bg(bg);
-                }
-                if cell.bold() {
-                    style = style.add_modifier(ratatui::style::Modifier::BOLD);
-                }
-                if cell.italic() {
-                    style = style.add_modifier(ratatui::style::Modifier::ITALIC);
-                }
-                if cell.inverse() {
-                    style = style.add_modifier(ratatui::style::Modifier::REVERSED);
-                }
-                if cell.underline() {
-                    style = style.add_modifier(ratatui::style::Modifier::UNDERLINED);
-                }
-
-                if style != current_style {
-                    if !current_text.is_empty() {
-                        current_line.push(Span::styled(current_text.clone(), current_style));
-                        current_text.clear();
-                    }
-                    current_style = style;
-                }
-
-                current_text.push_str(&cell.contents());
-            } else {
-                // Empty cell
-                if !current_text.is_empty() {
-                    current_line.push(Span::styled(current_text.clone(), current_style));
-                    current_text.clear();
-                }
-                current_style = Style::default();
-                current_text.push(' ');
-            }
-        }
-        if !current_text.is_empty() {
-            current_line.push(Span::styled(current_text, current_style));
-        }
-        lines.push(Line::from(current_line));
-    }
-
-    // Only trim trailing empty lines if requested
-    if trim {
-        while let Some(last_line) = lines.last() {
-            let is_empty = last_line.spans.iter().all(|s| s.content.trim().is_empty());
-            if is_empty {
-                lines.pop();
-            } else {
-                break;
-            }
-        }
-    }
-
-    lines
 }
 
 pub fn send_shell_input(state: &mut AppState, data: &str) {
@@ -329,28 +221,26 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
             .unwrap_or_else(|| "sh".to_string());
 
         // Update the message in chat to reflect background status
+        // Use the accumulated history for the background view
+        let fresh_lines = state.shell_history_lines.clone();
         if let Some(id) = state.interactive_shell_message_id {
             for msg in &mut state.messages {
                 if msg.id == id {
-                    if let MessageContent::RenderRefreshedTerminal(_, lines, _, width) =
-                        &msg.content
-                    {
-                        let new_colors = BubbleColors {
-                            border_color: Color::DarkGray,
-                            title_color: Color::DarkGray,
-                            content_color: AdaptiveColors::text(),
-                            tool_type: "Interactive Bash".to_string(),
-                        };
-                        msg.content = MessageContent::RenderRefreshedTerminal(
-                            format!(
-                                "Shell Command {} (Background - Ctrl+Y to resume)",
-                                command_name
-                            ),
-                            lines.clone(),
-                            Some(new_colors),
-                            *width,
-                        );
-                    }
+                    let new_colors = BubbleColors {
+                        border_color: Color::DarkGray,
+                        title_color: Color::DarkGray,
+                        content_color: AdaptiveColors::text(),
+                        tool_type: "Interactive Bash".to_string(),
+                    };
+                    msg.content = MessageContent::RenderRefreshedTerminal(
+                        format!(
+                            "Shell Command {} (Background - Ctrl+Y to resume)",
+                            command_name
+                        ),
+                        fresh_lines.clone(),
+                        Some(new_colors),
+                        state.terminal_size.width as usize,
+                    );
                     break;
                 }
             }
@@ -477,8 +367,71 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
         )
     };
 
-    // 4. Convert FULL screen history (scrollback + visible) to lines for background view
-    let screen_lines = screen_to_full_history(&mut state.shell_screen);
+    // 4. Capture styled screen content at scroll=0 (safe)
+    let screen_lines = capture_styled_screen(&mut state.shell_screen);
+
+    // Smart history accumulation:
+    // vt100 tracks scrollback count - that tells us how many lines have scrolled off
+    // We can use this to know when to preserve older content
+    let (term_rows, _) = state.shell_screen.screen().size();
+
+    // Probe actual scrollback size
+    state.shell_screen.set_scrollback(usize::MAX);
+    let scrollback_count = state.shell_screen.screen().scrollback();
+    state.shell_screen.set_scrollback(0); // Reset to normal view
+
+    // Calculate expected total lines (scrollback + visible)
+    let expected_total = scrollback_count + term_rows as usize;
+
+    // If we have more expected lines than current history, we need to grow
+    // But we can only safely capture the visible screen, so we track growth
+    if state.shell_history_lines.is_empty() {
+        // First capture - just set it
+        state.shell_history_lines = screen_lines.clone();
+    } else if !screen_lines.is_empty() {
+        // Check if content has grown beyond what we have
+        let current_history_len = state.shell_history_lines.len();
+
+        if expected_total > current_history_len {
+            // Content has grown - we need to shift and add new lines
+            // The new lines are the difference between expected and current
+            let lines_to_add = expected_total - current_history_len;
+
+            // Keep history but limit it to prevent memory bloat
+            const MAX_HISTORY: usize = 5000;
+
+            // Append the current visible lines minus overlap
+            // The last (term_rows - lines_to_add) lines of history should overlap with
+            // the first (term_rows - lines_to_add) lines of screen
+            if lines_to_add < screen_lines.len() {
+                // Take only the NEW lines from screen (the bottom portion)
+                let new_lines_start = screen_lines.len() - lines_to_add;
+                for line in screen_lines[new_lines_start..].iter() {
+                    state.shell_history_lines.push(line.clone());
+                }
+            } else {
+                // All lines are new (e.g. huge output dump)
+                state
+                    .shell_history_lines
+                    .extend(screen_lines.iter().cloned());
+            }
+
+            // Trim history if too large
+            if state.shell_history_lines.len() > MAX_HISTORY {
+                let trim_amount = state.shell_history_lines.len() - MAX_HISTORY;
+                state.shell_history_lines.drain(0..trim_amount);
+            }
+        } else {
+            // No scrolling happened, just update the visible portion
+            // Replace the last term_rows lines with current screen
+            let history_len = state.shell_history_lines.len();
+            let replace_start = history_len.saturating_sub(term_rows as usize);
+            state.shell_history_lines.truncate(replace_start);
+            state
+                .shell_history_lines
+                .extend(screen_lines.iter().cloned());
+        }
+    }
 
     // 5. Update UI
     // Ensure we have a target message ID for the interactive shell
