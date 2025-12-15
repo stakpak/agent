@@ -18,6 +18,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
     OpenAIModel, Tool,
 };
+use stakpak_shared::models::integrations::searchpak::SearchPakClient;
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
@@ -27,6 +28,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use std::io::Write;
 
 mod context_managers;
 mod db;
@@ -446,9 +448,38 @@ impl AgentProvider for LocalClient {
         Ok(())
     }
 
-    async fn search_docs(&self, _input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        // TODO: Implement search docs
-        Ok(Vec::new())
+    async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
+        
+        eprintln!("search_docs called with: {:?}", input);
+
+        let client = SearchPakClient::new(None);
+        let query = if let Some(exclude) = &input.exclude_keywords {
+            format!("{} -{}", input.keywords, exclude)
+        } else {
+            input.keywords.clone()
+        };
+
+        let results = client
+            .search_and_scrape(query)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let contents = results
+            .into_iter()
+            .map(|result| {
+                let text = format!(
+                    "Title: {}\nURL: {}\nContent: {}\n",
+                    result.title.unwrap_or_default(),
+                    result.url,
+                    result.content.unwrap_or_default()
+                );
+                Content::text(text)
+            })
+            .collect();
+
+        eprintln!("Results: {:?}", contents);
+
+        Ok(contents)
     }
 
     async fn search_memory(&self, _input: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
