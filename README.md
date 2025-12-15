@@ -50,7 +50,7 @@ Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deploy
 ```bash
 curl -sSL https://stakpak.dev/install.sh | sh
 ```
-[For more installation options...](https://github.com/stakpak/agent/edit/main/README.md#installation)
+[For more installation options...](https://github.com/stakpak/agent#installation)
 
 ## 🔒 Security Hardened
 
