@@ -61,11 +61,12 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
-    // Intercept keys for Shell Mode
+    // Intercept keys for Shell Mode (only when not loading)
     if state.show_shell_mode
         && state.active_shell_command.is_some()
         && !state.is_dialog_open
         && !state.approval_popup.is_visible()
+        && !state.shell_loading
     {
         match event {
             InputEvent::InputChanged(c) => {
@@ -103,9 +104,7 @@ pub fn update(
                 shell::send_shell_input(state, "\x1b[B");
                 return;
             }
-            // Handle Scrolling
-            // Now using shell_history_lines buffer for safe scrolling
-            // No more vt100 scroll positions - just update shell_scroll for view slicing
+
             InputEvent::ScrollUp => {
                 let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
                 let total_lines = state.shell_history_lines.len();
