@@ -79,6 +79,7 @@ pub struct AppState {
     pub is_tool_call_shell_command: bool,
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub shell_loading: bool, // True while shell PTY is initializing
 
     // ========== Tool Call State ==========
     pub pending_bash_message_id: Option<Uuid>,
@@ -264,6 +265,7 @@ impl AppState {
             is_pasting: false,
             ondemand_shell_mode: false,
             shell_tool_calls: None,
+            shell_loading: false,
             attached_images: Vec::new(),
             pending_path_start: None,
             dialog_message_id: None,

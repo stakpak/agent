@@ -177,6 +177,10 @@ pub fn handle_run_shell_command(
     state.shell_screen = vt100::Parser::new(rows, cols, 1000);
     // Reset interaction flag for new command
     state.shell_interaction_occurred = false;
+    // Show loading indicator while shell initializes
+    state.shell_loading = true;
+    // Clear history for new session
+    state.shell_history_lines.clear();
 
     let input_tx = input_tx.clone();
     tokio::spawn(async move {
@@ -221,7 +225,22 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
             .unwrap_or_else(|| "sh".to_string());
 
         // Update the message in chat to reflect background status
-        // Use the accumulated history for the background view
+        // First, update history with current screen state to ensure it's complete
+        // This captures the live screen and syncs with history
+        let current_screen = capture_styled_screen(&mut state.shell_screen);
+        let (term_rows, _) = state.shell_screen.screen().size();
+
+        // Merge current screen into history: replace the tail with current visible content
+        // This ensures the background view has all accumulated + current content
+        if !current_screen.is_empty() {
+            let history_len = state.shell_history_lines.len();
+            let replace_start = history_len.saturating_sub(term_rows as usize);
+            state.shell_history_lines.truncate(replace_start);
+            state
+                .shell_history_lines
+                .extend(current_screen.iter().cloned());
+        }
+
         let fresh_lines = state.shell_history_lines.clone();
         if let Some(id) = state.interactive_shell_message_id {
             for msg in &mut state.messages {
@@ -325,6 +344,9 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     if state.active_shell_command.is_none() {
         return;
     }
+
+    // First output received - hide loading indicator
+    state.shell_loading = false;
 
     // 1. Append to raw output log (truncated)
     if let Some(output) = state.active_shell_command_output.as_mut() {

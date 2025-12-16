@@ -10,7 +10,7 @@ use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Rect},
+    layout::{Constraint, Direction, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -494,6 +494,63 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
     // Clear screen
     f.render_widget(ratatui::widgets::Clear, area);
 
+    // Get command name for title
+    let cmd_name = state
+        .active_shell_command
+        .as_ref()
+        .map(|cmd| cmd.command.clone())
+        .unwrap_or_else(|| "Terminal".to_string());
+
+    let (rows, cols) = state.shell_screen.screen().size();
+
+    // Show loading indicator while shell is initializing
+    if state.shell_loading {
+        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
+        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+        let loading_text = format!("{} Starting shell...", spinner);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(
+                format!(
+                    " Shell Command {} [Initializing] (Size: {}x{}) ",
+                    cmd_name, rows, cols
+                ),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .border_style(Style::default().fg(Color::Yellow));
+
+        // Center the loading message
+        let center_y = area.height / 2;
+        let center_x = area.width.saturating_sub(loading_text.len() as u16) / 2;
+
+        let loading_line = Line::from(vec![
+            Span::styled(" ".repeat(center_x as usize), Style::default()),
+            Span::styled(
+                loading_text,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+
+        // Fill with empty lines above and below
+        let mut lines: Vec<Line> = Vec::new();
+        for i in 0..area.height.saturating_sub(2) {
+            if i == center_y.saturating_sub(1) {
+                lines.push(loading_line.clone());
+            } else {
+                lines.push(Line::from(""));
+            }
+        }
+
+        let widget = Paragraph::new(lines).block(block);
+        f.render_widget(widget, area);
+        return;
+    }
+
     let visible_height = area.height.saturating_sub(2) as usize;
     let total_lines = state.shell_history_lines.len();
 
@@ -517,15 +574,6 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
             .to_vec()
     };
 
-    // Get command name for title
-    let cmd_name = state
-        .active_shell_command
-        .as_ref()
-        .map(|cmd| cmd.command.clone())
-        .unwrap_or_else(|| "Terminal".to_string());
-
-    let (rows, cols) = state.shell_screen.screen().size();
-
     // Use a Cool Blue border
     let block = Block::default()
         .borders(Borders::ALL)
@@ -543,4 +591,18 @@ fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
     let widget = Paragraph::new(visible_lines).block(block);
 
     f.render_widget(widget, area);
+
+    // Set cursor position from vt100 parser when not scrolled (live view)
+    // Only show cursor when viewing live output, not when scrolled into history
+    if scroll_pos == 0 {
+        let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
+        // Add 1 for the block border offset
+        let cursor_x = cursor_col.saturating_add(1);
+        let cursor_y = cursor_row.saturating_add(1);
+
+        // Only set cursor if within visible area
+        if cursor_x < area.width && cursor_y < area.height {
+            f.set_cursor_position(Position::new(cursor_x, cursor_y));
+        }
+    }
 }
