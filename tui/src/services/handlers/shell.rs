@@ -8,13 +8,15 @@ use crate::app::{AppState, OutputEvent, ToolCallStatus};
 use crate::services::bash_block::preprocess_terminal_output;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::push_error_message;
-use crate::services::message::{BubbleColors, Message, MessageContent};
+use crate::services::message::{
+    BubbleColors, Message, MessageContent, invalidate_message_lines_cache,
+};
 #[cfg(not(unix))]
 use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::helper::truncate_output;
 use stakpak_shared::models::integrations::openai::{
@@ -182,6 +184,32 @@ pub fn handle_run_shell_command(
     // Clear history for new session
     state.shell_history_lines.clear();
 
+    // Create initial shell message with loading indicator
+    let loading_colors = BubbleColors {
+        border_color: Color::Yellow,
+        title_color: Color::Yellow,
+        content_color: AdaptiveColors::text(),
+        tool_type: "Interactive Bash".to_string(),
+    };
+    let loading_content = vec![Line::from(vec![Span::styled(
+        "  Starting shell...",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )])];
+    let new_id = Uuid::new_v4();
+    state.interactive_shell_message_id = Some(new_id);
+    state.messages.push(Message {
+        id: new_id,
+        content: MessageContent::RenderRefreshedTerminal(
+            format!("Shell Command {} [Initializing]", command),
+            loading_content,
+            Some(loading_colors),
+            state.terminal_size.width as usize,
+        ),
+        is_collapsed: None,
+    });
+
     let input_tx = input_tx.clone();
     tokio::spawn(async move {
         while let Some(event) = shell_rx.recv().await {
@@ -278,6 +306,9 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
             }
             state.ondemand_shell_mode = false;
         }
+
+        // Invalidate cache so the gray border is rendered
+        invalidate_message_lines_cache(state);
         return;
     }
 
@@ -286,10 +317,39 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     if state.active_shell_command.is_some() {
         state.show_shell_mode = true;
         state.text_area.set_shell_mode(true);
-        // Message title update will happen in next handle_shell_output or we can force it here
-        if state.interactive_shell_message_id.is_some() {
-            // Find message and update title to Focused
-            // (Optional optimization: let handle_shell_output do it on next frame)
+
+        // Update message to show focused state with cyan border
+        if let Some(id) = state.interactive_shell_message_id {
+            let command_name = state
+                .active_shell_command
+                .as_ref()
+                .map(|c| c.command.clone())
+                .unwrap_or_else(|| "sh".to_string());
+
+            // Capture current screen for live view
+            let current_screen = capture_styled_screen(&mut state.shell_screen);
+
+            let focused_colors = BubbleColors {
+                border_color: Color::Cyan,
+                title_color: Color::Cyan,
+                content_color: AdaptiveColors::text(),
+                tool_type: "Interactive Bash".to_string(),
+            };
+
+            for msg in &mut state.messages {
+                if msg.id == id {
+                    msg.content = MessageContent::RenderRefreshedTerminal(
+                        format!("Shell Command {} [Focused]", command_name),
+                        current_screen,
+                        Some(focused_colors),
+                        state.terminal_size.width as usize,
+                    );
+                    break;
+                }
+            }
+
+            // Invalidate cache so the cyan border is rendered
+            invalidate_message_lines_cache(state);
         }
         return;
     }
@@ -488,6 +548,9 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
             state.terminal_size.width as usize,
         );
     }
+
+    // Invalidate message cache so the updated content is rendered
+    invalidate_message_lines_cache(state);
 }
 
 /// Handle shell error event

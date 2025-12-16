@@ -148,7 +148,8 @@ pub fn update(
                 return;
             }
             InputEvent::AttemptQuit => {
-                shell::send_shell_input(state, "\x03");
+                // Ctrl+C backgrounds the shell instead of sending SIGINT
+                shell::handle_shell_mode(state, input_tx);
                 return;
             }
             InputEvent::InputDelete => {

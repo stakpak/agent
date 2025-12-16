@@ -18,11 +18,6 @@ use ratatui::{
 use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
-    if state.show_shell_mode && state.active_shell_command.is_some() {
-        render_fullscreen_terminal(f, state);
-        return;
-    }
-
     // Calculate the required height for the input area based on content
     let input_area_width = f.area().width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
@@ -120,13 +115,70 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
+    if state.show_shell_mode
+        && state.active_shell_command.is_some()
+        && !state.shell_loading
+        && !state.is_dialog_open
+        && !state.approval_popup.is_visible()
+    {
+        let (_, cursor_col) = state.shell_screen.screen().cursor_position();
+
+        if let Some(shell_msg_id) = state.interactive_shell_message_id
+            && let Some(msg) = state.messages.iter().find(|m| m.id == shell_msg_id)
+            && let crate::services::message::MessageContent::RenderRefreshedTerminal(
+                _,
+                content,
+                _,
+                _,
+            ) = &msg.content
+        {
+            let shell_content_lines = content.len();
+
+            if shell_content_lines > 0 {
+                let processed_lines =
+                    get_wrapped_message_lines_cached(state, message_area_width);
+                let total_lines = processed_lines.len();
+                let visible_height = padded_message_area.height as usize;
+
+                let trailing_offset = if total_lines > visible_height { 4 } else { 1 };
+                let content_end = total_lines.saturating_sub(trailing_offset);
+
+                let shell_block_height = shell_content_lines + 2;
+
+                let shell_start_in_content = content_end.saturating_sub(shell_block_height);
+
+                let cursor_line_in_content = shell_start_in_content + shell_content_lines;
+
+                let visible_start = if state.stay_at_bottom || total_lines <= visible_height
+                {
+                    total_lines.saturating_sub(visible_height)
+                } else {
+                    state.scroll.max(0)
+                };
+
+                if cursor_line_in_content >= visible_start {
+                    let cursor_y = padded_message_area.y
+                        + (cursor_line_in_content - visible_start) as u16;
+
+                    let cursor_x = padded_message_area.x + 2 + cursor_col;
+
+                    if cursor_y >= padded_message_area.y
+                        && cursor_y < padded_message_area.y + padded_message_area.height
+                        && cursor_x < padded_message_area.x + padded_message_area.width
+                    {
+                        f.set_cursor_position(Position::new(cursor_x, cursor_y));
+                    }
+                }
+            }
+        }
+    }
+
     let padded_loading_area = Rect {
         x: loading_area.x + 1,
         y: loading_area.y,
         width: loading_area.width.saturating_sub(2),
         height: loading_area.height,
     };
-    // Render loading indicator in dedicated area
     render_loading_indicator(f, state, padded_loading_area);
 
     if state.show_collapsed_messages {
@@ -487,122 +539,4 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     let widget =
         Paragraph::new(Line::from(final_spans)).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(widget, area);
-}
-
-fn render_fullscreen_terminal(f: &mut Frame, state: &mut AppState) {
-    let area = f.area();
-    // Clear screen
-    f.render_widget(ratatui::widgets::Clear, area);
-
-    // Get command name for title
-    let cmd_name = state
-        .active_shell_command
-        .as_ref()
-        .map(|cmd| cmd.command.clone())
-        .unwrap_or_else(|| "Terminal".to_string());
-
-    let (rows, cols) = state.shell_screen.screen().size();
-
-    // Show loading indicator while shell is initializing
-    if state.shell_loading {
-        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-        let loading_text = format!("{} Starting shell...", spinner);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled(
-                format!(
-                    " Shell Command {} [Initializing] (Size: {}x{}) ",
-                    cmd_name, rows, cols
-                ),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .border_style(Style::default().fg(Color::Yellow));
-
-        // Center the loading message
-        let center_y = area.height / 2;
-        let center_x = area.width.saturating_sub(loading_text.len() as u16) / 2;
-
-        let loading_line = Line::from(vec![
-            Span::styled(" ".repeat(center_x as usize), Style::default()),
-            Span::styled(
-                loading_text,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
-
-        // Fill with empty lines above and below
-        let mut lines: Vec<Line> = Vec::new();
-        for i in 0..area.height.saturating_sub(2) {
-            if i == center_y.saturating_sub(1) {
-                lines.push(loading_line.clone());
-            } else {
-                lines.push(Line::from(""));
-            }
-        }
-
-        let widget = Paragraph::new(lines).block(block);
-        f.render_widget(widget, area);
-        return;
-    }
-
-    let visible_height = area.height.saturating_sub(2) as usize;
-    let total_lines = state.shell_history_lines.len();
-
-    // Calculate max scroll based on history buffer size
-    let max_scroll = total_lines.saturating_sub(visible_height);
-    let scroll_pos = (state.shell_scroll as usize).min(max_scroll);
-
-    // When not scrolled (scroll_pos == 0), render vt100 screen directly for smooth typing
-    // When scrolled, use the history buffer to view older content
-    let visible_lines: Vec<ratatui::text::Line<'static>> = if scroll_pos == 0 {
-        // Render current vt100 screen directly (smooth, no history artifacts)
-        crate::services::handlers::shell::capture_styled_screen(&mut state.shell_screen)
-    } else {
-        // Scrolled view - use history buffer
-        let start_idx = total_lines.saturating_sub(visible_height + scroll_pos);
-        let end_idx = total_lines.saturating_sub(scroll_pos);
-        state
-            .shell_history_lines
-            .get(start_idx..end_idx)
-            .unwrap_or(&[])
-            .to_vec()
-    };
-
-    // Use a Cool Blue border
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(
-            format!(
-                " Shell Command {} [Focused] (Scroll: {}/{} - Size: {}x{}) ",
-                cmd_name, scroll_pos, max_scroll, rows, cols
-            ),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let widget = Paragraph::new(visible_lines).block(block);
-
-    f.render_widget(widget, area);
-
-    // Set cursor position from vt100 parser when not scrolled (live view)
-    // Only show cursor when viewing live output, not when scrolled into history
-    if scroll_pos == 0 {
-        let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
-        // Add 1 for the block border offset
-        let cursor_x = cursor_col.saturating_add(1);
-        let cursor_y = cursor_row.saturating_add(1);
-
-        // Only set cursor if within visible area
-        if cursor_x < area.width && cursor_y < area.height {
-            f.set_cursor_position(Position::new(cursor_x, cursor_y));
-        }
-    }
 }
