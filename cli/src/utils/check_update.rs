@@ -140,6 +140,7 @@ pub async fn get_latest_release() -> Result<LatestRelease, Box<dyn Error>> {
     headers.insert(USER_AGENT, HeaderValue::from_static("update-checker"));
 
     let client = create_tls_client(TlsClientConfig::default().with_headers(headers))?;
+
     let url = "https://apiv2.stakpak.dev/github/releases".to_string();
 
     let response = client.get(&url).send().await?;
