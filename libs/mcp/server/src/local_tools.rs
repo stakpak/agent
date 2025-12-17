@@ -1150,53 +1150,114 @@ SAFETY NOTES:
         let mut stderr_buf = String::new();
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
+        
+        // Stall detection: track last output time and whether we've sent stall notification
+        let mut last_output_time = std::time::Instant::now();
+        let mut stall_notified = false;
+        const STALL_TIMEOUT_SECS: u64 = 5;
+        
+        // Patterns that indicate command is waiting for input
+        const INPUT_PROMPT_PATTERNS: &[&str] = &[
+            "password:", "Password:", "[sudo]", "(yes/no)", 
+            "[y/N]", "[Y/n]", "Continue?", "Are you sure",
+            "Enter passphrase", "Confirm:", "passphrase for",
+        ];
+        
+        // Helper to check if output matches input prompt patterns
+        fn matches_input_prompt(output: &str) -> bool {
+            let lower = output.to_lowercase();
+            INPUT_PROMPT_PATTERNS.iter().any(|p| lower.contains(&p.to_lowercase()))
+        }
 
         // Helper function to stream output and wait for process completion
         let stream_and_wait = async {
+            // Stall check interval
+            let mut stall_check_interval = tokio::time::interval(Duration::from_secs(1));
+            stall_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            
             // Read from both streams concurrently
             loop {
+                // Use biased selection so interval gets priority
                 tokio::select! {
-                    Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
-                        if n == 0 {
-                            break;
+                    biased;
+                    
+                    _ = stall_check_interval.tick() => {
+                        // Check for stall condition: no output for 5 seconds
+                        if !stall_notified && last_output_time.elapsed().as_secs() >= STALL_TIMEOUT_SECS {
+                            stall_notified = true;
+                            // Send stall notification - don't require pattern matching for now
+                            // Just notify that command is taking a while with no output
+                            let stall_msg = if matches_input_prompt(&result) {
+                                "__INTERACTIVE_STALL__: Command appears to be waiting for user input (password, confirmation, etc.). This command may require interactive mode."
+                            } else {
+                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. It may be waiting for input or hung."
+                            };
+                            let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                                progress_token: ProgressToken(NumberOrString::Number(0)),
+                                progress: 50.0,
+                                total: Some(100.0),
+                                message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: stall_msg.to_string(),
+                                }).unwrap_or_default()),
+                            }).await;
                         }
-                        let line = stderr_buf.trim_end_matches('\n').to_string();
-                        stderr_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50.0,
-                            total: Some(100.0),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: line,
-                            }).unwrap_or_default()),
-                        }).await;
                     }
-                    Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
-                        if n == 0 {
-                            break;
+                    
+                    read_result = tokio::time::timeout(Duration::from_millis(100), stderr_reader.read_line(&mut stderr_buf)) => {
+                        match read_result {
+                            Ok(Ok(0)) => break, // EOF
+                            Ok(Ok(_)) => {
+                                last_output_time = std::time::Instant::now();
+                                stall_notified = false;
+                                let line = stderr_buf.trim_end_matches('\n').to_string();
+                                stderr_buf.clear();
+                                result.push_str(&format!("{}\n", line));
+                                let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                                    progress_token: ProgressToken(NumberOrString::Number(0)),
+                                    progress: 50.0,
+                                    total: Some(100.0),
+                                    message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                        id: progress_id,
+                                        message: line,
+                                    }).unwrap_or_default()),
+                                }).await;
+                            }
+                            Ok(Err(_)) => break, // Read error
+                            Err(_) => {} // Timeout - continue loop
                         }
-                        let line = stdout_buf.trim_end_matches('\n').to_string();
-                        stdout_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        // skip if message is empty
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50.0,
-                            total: Some(100.0),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: format!("{}\n", line),
-                            }).unwrap_or_default()),
-                        }).await;
                     }
-                    else => break,
+                    
+                    read_result = tokio::time::timeout(Duration::from_millis(100), stdout_reader.read_line(&mut stdout_buf)) => {
+                        match read_result {
+                            Ok(Ok(0)) => break, // EOF
+                            Ok(Ok(_)) => {
+                                last_output_time = std::time::Instant::now();
+                                stall_notified = false;
+                                let line = stdout_buf.trim_end_matches('\n').to_string();
+                                stdout_buf.clear();
+                                result.push_str(&format!("{}\n", line));
+                                if !line.is_empty() {
+                                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                                        progress_token: ProgressToken(NumberOrString::Number(0)),
+                                        progress: 50.0,
+                                        total: Some(100.0),
+                                        message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                            id: progress_id,
+                                            message: format!("{}\n", line),
+                                        }).unwrap_or_default()),
+                                    }).await;
+                                }
+                            }
+                            Ok(Err(_)) => break, // Read error
+                            Err(_) => {} // Timeout - continue loop
+                        }
+                    }
+                }
+                
+                // Check if process has exited
+                if let Ok(Some(_)) = child.try_wait() {
+                    break;
                 }
             }
 

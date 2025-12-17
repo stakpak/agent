@@ -20,6 +20,18 @@ pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultP
     if state.completed_tool_calls.contains(&tool_call_id) {
         return;
     }
+    
+    // Check for interactive stall notification
+    const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
+    if progress.message.contains(INTERACTIVE_STALL_MARKER) {
+        // Push warning message about interactive command
+        state.messages.push(Message::info(
+            "⚠️ Command appears to be waiting for user input (password, confirmation, etc.).\nUse Ctrl+Y to open interactive shell mode if this command requires interaction.\n\n",
+            Some(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow)),
+        ));
+        invalidate_message_lines_cache(state);
+        return; // Don't add this marker to the streaming buffer
+    }
 
     // Ensure loading state is true during streaming tool results
     // Only set it if it's not already true to avoid unnecessary state changes
