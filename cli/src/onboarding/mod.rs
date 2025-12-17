@@ -63,7 +63,7 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
             render_profile_name(&profile);
             print!("\r\n");
             crate::onboarding::styled_output::render_info(
-                "Let's set up your configuration. You can connect to Stakpak API or use your own model/API keys.",
+                "Configuring stakpak. You can connect to Stakpak API or use your own model/API keys.",
             );
             print!("\r\n");
 
@@ -96,7 +96,7 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
             render_profile_name(&profile_name);
             print!("\r\n");
             crate::onboarding::styled_output::render_info(
-                "Let's set up your configuration. You can connect to Stakpak API or use your own model/API keys.",
+                "Configuring stakpak. You can connect to Stakpak API or use your own model/API keys.",
             );
             print!("\r\n");
 
@@ -170,12 +170,19 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
 }
 
 async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> bool {
+    let mut disclaimer_shown = false;
+
     loop {
         print!("\x1b[u");
         print!("\x1b[0J");
         print!("\x1b[K");
         let _ = io::stdout().flush();
         print!("\x1b[s");
+
+        if !disclaimer_shown {
+            crate::onboarding::styled_output::render_telemetry_disclaimer();
+            disclaimer_shown = true;
+        }
 
         let provider_choice = select_option(
             "Choose provider or bring your own model",
@@ -270,13 +277,17 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
                     let config_path = get_config_path_string(config);
 
-                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
-                        crate::onboarding::styled_output::render_error(&format!(
-                            "Failed to save configuration: {}",
-                            e
-                        ));
-                        std::process::exit(1);
-                    }
+                    let telemetry =
+                        match save_to_profile(&config_path, profile_name, profile.clone()) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                crate::onboarding::styled_output::render_error(&format!(
+                                    "Failed to save configuration: {}",
+                                    e
+                                ));
+                                std::process::exit(1);
+                            }
+                        };
 
                     print!("\r\n");
                     crate::onboarding::styled_output::render_success(
@@ -293,6 +304,8 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
+                    config.anonymous_id = telemetry.anonymous_id;
+                    config.collect_telemetry = telemetry.collect_telemetry;
 
                     true
                 }
@@ -345,13 +358,17 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
                     let config_path = get_config_path_string(config);
 
-                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
-                        crate::onboarding::styled_output::render_error(&format!(
-                            "Failed to save configuration: {}",
-                            e
-                        ));
-                        std::process::exit(1);
-                    }
+                    let telemetry =
+                        match save_to_profile(&config_path, profile_name, profile.clone()) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                crate::onboarding::styled_output::render_error(&format!(
+                                    "Failed to save configuration: {}",
+                                    e
+                                ));
+                                std::process::exit(1);
+                            }
+                        };
 
                     print!("\r\n");
                     crate::onboarding::styled_output::render_success(
@@ -369,6 +386,8 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
+                    config.anonymous_id = telemetry.anonymous_id;
+                    config.collect_telemetry = telemetry.collect_telemetry;
 
                     true
                 }
@@ -421,13 +440,17 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
                 NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
                     let config_path = get_config_path_string(config);
 
-                    if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
-                        crate::onboarding::styled_output::render_error(&format!(
-                            "Failed to save configuration: {}",
-                            e
-                        ));
-                        std::process::exit(1);
-                    }
+                    let telemetry =
+                        match save_to_profile(&config_path, profile_name, profile.clone()) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                crate::onboarding::styled_output::render_error(&format!(
+                                    "Failed to save configuration: {}",
+                                    e
+                                ));
+                                std::process::exit(1);
+                            }
+                        };
 
                     print!("\r\n");
                     crate::onboarding::styled_output::render_success(
@@ -445,6 +468,8 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
                     if let Some(key) = &profile.api_key {
                         config.api_key = Some(key.clone());
                     }
+                    config.anonymous_id = telemetry.anonymous_id;
+                    config.collect_telemetry = telemetry.collect_telemetry;
 
                     true
                 }
@@ -508,13 +533,16 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     match crate::onboarding::menu::prompt_yes_no("Proceed with this configuration?", true) {
         NavResult::Forward(Some(true)) | NavResult::Forward(None) => {
-            if let Err(e) = save_to_profile(&config_path, profile_name, profile.clone()) {
-                crate::onboarding::styled_output::render_error(&format!(
-                    "Failed to save configuration: {}",
-                    e
-                ));
-                std::process::exit(1);
-            }
+            let telemetry = match save_to_profile(&config_path, profile_name, profile.clone()) {
+                Ok(t) => t,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to save configuration: {}",
+                        e
+                    ));
+                    std::process::exit(1);
+                }
+            };
 
             print!("\r\n");
             crate::onboarding::styled_output::render_success("✓ Configuration saved successfully");
@@ -533,6 +561,8 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
             if let Some(key) = &profile.api_key {
                 config.api_key = Some(key.clone());
             }
+            config.anonymous_id = telemetry.anonymous_id;
+            config.collect_telemetry = telemetry.collect_telemetry;
 
             true
         }
@@ -665,13 +695,17 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     let config_path = get_config_path_string(config);
 
     if let Some(profile) = configure_byom(2, 4) {
-        if let Err(e) = preview_and_save_to_profile(&config_path, profile_name, profile.clone()) {
-            crate::onboarding::styled_output::render_error(&format!(
-                "Failed to save configuration: {}",
-                e
-            ));
-            std::process::exit(1);
-        }
+        let telemetry =
+            match preview_and_save_to_profile(&config_path, profile_name, profile.clone()) {
+                Ok(t) => t,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to save configuration: {}",
+                        e
+                    ));
+                    std::process::exit(1);
+                }
+            };
 
         // Update AppConfig with saved values so we can use them immediately
         config.provider = profile
@@ -686,6 +720,8 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
         if let Some(key) = &profile.api_key {
             config.api_key = Some(key.clone());
         }
+        config.anonymous_id = telemetry.anonymous_id;
+        config.collect_telemetry = telemetry.collect_telemetry;
 
         true
     } else {

@@ -49,13 +49,9 @@ pub fn spawn_fs_handler(
                     response_tx,
                 } => {
                     log::info!("Processing ACP read_text_file: {:?}", path);
-                    let request = acp::ReadTextFileRequest {
-                        meta: None,
-                        session_id,
-                        path,
-                        line,
-                        limit,
-                    };
+                    let request = acp::ReadTextFileRequest::new(session_id, path)
+                        .line(line)
+                        .limit(limit);
                     let result = match conn.read_text_file(request).await {
                         Ok(response) => Ok(response.content),
                         Err(e) => Err(format!("ACP read_text_file failed: {}", e)),
@@ -69,12 +65,7 @@ pub fn spawn_fs_handler(
                     response_tx,
                 } => {
                     log::info!("Processing ACP write_text_file: {:?}", path);
-                    let request = acp::WriteTextFileRequest {
-                        meta: None,
-                        session_id,
-                        path,
-                        content,
-                    };
+                    let request = acp::WriteTextFileRequest::new(session_id, path, content);
                     let result = match conn.write_text_file(request).await {
                         Ok(_) => Ok(()),
                         Err(e) => Err(format!("ACP write_text_file failed: {}", e)),
