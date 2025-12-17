@@ -46,6 +46,11 @@ Stakpak is built different:
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
+### Try Stakpak Now
+```bash
+curl -sSL https://stakpak.dev/install.sh | sh
+```
+[For more installation options...](https://github.com/stakpak/agent#installation)
 
 ## 🔒 Security Hardened
 

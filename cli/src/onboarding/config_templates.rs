@@ -2,17 +2,16 @@
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
-use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
-use stakpak_shared::models::integrations::gemini::GeminiConfig;
-use stakpak_shared::models::integrations::openai::OpenAIConfig;
+use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
+use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
+use stakpak_shared::models::integrations::openai::{OpenAIConfig, OpenAIModel};
 
 /// Generate OpenAI configuration template
 pub fn generate_openai_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("gpt-5".to_string()),
-        eco_model: Some("gpt-5-mini".to_string()),
-        recovery_model: Some("gpt-5-mini".to_string()),
+        smart_model: Some(OpenAIModel::default_smart_model()),
+        eco_model: Some(OpenAIModel::default_eco_model()),
         openai: Some(OpenAIConfig {
             api_key: Some(api_key),
             api_endpoint: None,
@@ -25,9 +24,8 @@ pub fn generate_openai_config(api_key: String) -> ProfileConfig {
 pub fn generate_gemini_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("gemini-3-pro-preview".to_string()),
-        eco_model: Some("gemini-2.5-flash".to_string()),
-        recovery_model: Some("gemini-2.5-flash".to_string()),
+        smart_model: Some(GeminiModel::default_smart_model()),
+        eco_model: Some(GeminiModel::default_eco_model()),
         gemini: Some(GeminiConfig {
             api_key: Some(api_key),
             api_endpoint: None,
@@ -40,9 +38,8 @@ pub fn generate_gemini_config(api_key: String) -> ProfileConfig {
 pub fn generate_anthropic_config(api_key: String) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some("claude-opus-4-5".to_string()),
-        eco_model: Some("claude-haiku-4-5".to_string()),
-        recovery_model: Some("claude-haiku-4-5".to_string()),
+        smart_model: Some(AnthropicModel::default_smart_model()),
+        eco_model: Some(AnthropicModel::default_eco_model()),
         anthropic: Some(AnthropicConfig {
             api_key: Some(api_key),
             api_endpoint: None,
@@ -61,7 +58,6 @@ pub fn generate_byom_single_config(
         provider: Some(ProviderType::Local),
         smart_model: Some(model.clone()),
         eco_model: Some(model),
-        recovery_model: None,
         openai: Some(OpenAIConfig {
             api_key,
             api_endpoint: Some(endpoint),
@@ -102,7 +98,6 @@ pub fn generate_hybrid_config(smart: HybridModelConfig, eco: HybridModelConfig) 
         provider: Some(ProviderType::Local),
         smart_model: Some(smart.model.clone()),
         eco_model: Some(eco.model.clone()),
-        recovery_model: None,
         ..ProfileConfig::default()
     };
 
@@ -163,10 +158,6 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
 
     if let Some(ref eco_model) = profile.eco_model {
         toml.push_str(&format!("eco_model = \"{}\"\n", eco_model));
-    }
-
-    if let Some(ref recovery_model) = profile.recovery_model {
-        toml.push_str(&format!("recovery_model = \"{}\"\n", recovery_model));
     }
 
     if let Some(ref openai) = profile.openai {
