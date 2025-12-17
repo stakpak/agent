@@ -51,10 +51,11 @@ get_current_version() {
 }
 
 # Function to validate semantic version format
+# Accepts: X.Y.Z or X.Y.Z-beta.N
 validate_version() {
     local version=$1
-    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        print_error "Invalid version format: $version. Expected format: X.Y.Z"
+    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+        print_error "Invalid version format: $version. Expected format: X.Y.Z or X.Y.Z-beta.N"
         return 1
     fi
     return 0

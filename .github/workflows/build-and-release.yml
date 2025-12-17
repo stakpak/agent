@@ -2,7 +2,13 @@ name: Build and Release
 
 on:
   push:
-    branches: [main, beta, "v*-beta*"]
+    # Branches trigger builds only (no release)
+    # - main: production builds
+    # - beta: beta channel builds  
+    branches: [main, beta]
+    # Tags trigger full release workflow
+    # - v1.2.3: stable release
+    # - v1.2.3-beta.1: beta/prerelease
     tags: ["v*"]
   # pull_request:
   #   branches: [main]
@@ -29,8 +35,7 @@ jobs:
         id: check
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG#v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$TAG" >> $GITHUB_OUTPUT
           if [[ "$TAG" == *"-beta"* ]]; then
             echo "is_beta=true" >> $GITHUB_OUTPUT
           else
@@ -152,8 +157,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}
-            ${{ needs.setup.outputs.is_beta == 'false' && format('ghcr.io/{0}:latest', github.repository) || '' }}
+            ghcr.io/${{ github.repository }}:${{ needs.setup.outputs.version }}
+            ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}:latest', github.repository) || '' }}
 
   docker_warden:
     needs: [setup, docker]
@@ -178,10 +183,10 @@ jobs:
           context: .warden
           push: true
           build-args: |
-            BASE_IMAGE_TAG=v${{ needs.setup.outputs.version }}
+            BASE_IMAGE_TAG=${{ needs.setup.outputs.version }}
           tags: |
-            ghcr.io/${{ github.repository }}-warden:v${{ needs.setup.outputs.version }}
-            ${{ needs.setup.outputs.is_beta == 'false' && format('ghcr.io/{0}-warden:latest', github.repository) || '' }}
+            ghcr.io/${{ github.repository }}-warden:${{ needs.setup.outputs.version }}
+            ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}-warden:latest', github.repository) || '' }}
 
   update-release-notes:
     needs: release
