@@ -448,9 +448,10 @@ impl AgentProvider for LocalClient {
     }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        eprintln!("search_docs called with: {:?}", input);
+        let mut client = SearchPakClient::new(None, None);
 
-        let client = SearchPakClient::new(None);
+        client.ensure_running().await.map_err(|e| e.to_string())?;
+
         let query = if let Some(exclude) = &input.exclude_keywords {
             format!("{} -{}", input.keywords, exclude)
         } else {
@@ -475,7 +476,7 @@ impl AgentProvider for LocalClient {
             })
             .collect();
 
-        eprintln!("Results: {:?}", contents);
+        client.stop().await.map_err(|e| e.to_string())?;
 
         Ok(contents)
     }
