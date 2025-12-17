@@ -1,10 +1,14 @@
 use anyhow::Result;
 use rmcp::{
-    RoleClient,
+    RoleClient, ServiceExt,
     model::{CallToolRequestParam, ClientRequest, Meta, Request, Tool},
     service::{PeerRequestOptions, RequestHandle, RunningService},
+    transport::StreamableHttpClientTransport,
+    transport::streamable_http_client::StreamableHttpClientTransportConfig,
 };
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -14,9 +18,38 @@ pub use local::LocalClientHandler;
 
 pub type McpClient = RunningService<RoleClient, LocalClientHandler>;
 
-/// Connect to the MCP proxy via stdio
+/// Connect to the MCP proxy via stdio (legacy method)
 pub async fn connect(progress_tx: Option<Sender<ToolCallResultProgress>>) -> Result<McpClient> {
     local::connect(progress_tx).await
+}
+
+/// Connect to an MCP server via HTTPS with optional mTLS
+pub async fn connect_https(
+    url: &str,
+    certificate_chain: Option<Arc<CertificateChain>>,
+    progress_tx: Option<Sender<ToolCallResultProgress>>,
+) -> Result<McpClient> {
+    let mut client_builder = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .tcp_keepalive(std::time::Duration::from_secs(60));
+
+    // Configure mTLS if certificate chain is provided
+    if let Some(cert_chain) = certificate_chain {
+        let tls_config = cert_chain.create_client_config()?;
+        client_builder = client_builder.use_preconfigured_tls(tls_config);
+    }
+
+    let http_client = client_builder.build()?;
+
+    let config = StreamableHttpClientTransportConfig::with_uri(url);
+    let transport =
+        StreamableHttpClientTransport::<reqwest::Client>::with_client(http_client, config);
+
+    let client_handler = LocalClientHandler::new(progress_tx);
+    let client: McpClient = client_handler.serve(transport).await?;
+
+    Ok(client)
 }
 
 /// Get all available tools from the MCP client

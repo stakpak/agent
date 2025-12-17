@@ -7,6 +7,7 @@ use crate::commands::agent::run::helpers::{
     add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
+use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -23,7 +24,7 @@ use stakpak_api::{
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::McpClient;
+
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
@@ -182,17 +183,26 @@ pub async fn run_interactive(
                 }
             };
 
-            let (mcp_client, mcp_tools, _tools) =
-                match initialize_mcp_server_and_tools(&ctx_clone, Some(mcp_progress_tx.clone()))
-                    .await
+            let (mcp_client, mcp_tools, _tools, _server_shutdown_tx, _proxy_shutdown_tx) =
+                match mcp_init::initialize_mcp_server_and_tools(
+                    &ctx_clone,
+                    Some(mcp_progress_tx.clone()),
+                )
+                .await
                 {
-                    Ok((client, mcp_tools, tool_list)) => (Some(client), mcp_tools, tool_list),
+                    Ok(result) => (
+                        Some(result.client),
+                        result.mcp_tools,
+                        result.tools,
+                        Some(result.server_shutdown_tx),
+                        Some(result.proxy_shutdown_tx),
+                    ),
                     Err(e) => {
                         log::warn!(
                             "Failed to initialize MCP client: {}, continuing without tools",
                             e
                         );
-                        (None, Vec::new(), Vec::new())
+                        (None, Vec::new(), Vec::new(), None, None)
                     }
                 };
 
@@ -1168,36 +1178,4 @@ https://stakpak.dev/{}/agent-sessions/{}",
     } // End of 'profile_switch_loop
 
     Ok(())
-}
-
-async fn initialize_mcp_server_and_tools(
-    config: &AppConfig,
-    progress_tx: Option<
-        tokio::sync::mpsc::Sender<
-            stakpak_shared::models::integrations::openai::ToolCallResultProgress,
-        >,
-    >,
-) -> Result<
-    (
-        Arc<McpClient>,
-        Vec<rmcp::model::Tool>,
-        Vec<stakpak_shared::models::integrations::openai::Tool>,
-    ),
-    String,
-> {
-    // Initialize MCP client via stdio proxy
-    let mcp_client = Arc::new(
-        stakpak_mcp_client::connect(progress_tx)
-            .await
-            .map_err(|e| format!("Failed to connect to MCP proxy: {}", e))?,
-    );
-
-    // Get tools from MCP client
-    let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
-        .await
-        .map_err(|e| format!("Failed to get tools: {}", e))?;
-
-    let tools = convert_tools_with_filter(&mcp_tools, config.allowed_tools.as_ref());
-
-    Ok((mcp_client, mcp_tools, tools))
 }

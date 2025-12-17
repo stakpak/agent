@@ -63,6 +63,7 @@ rcgen = "0.12.1"
 rustls-pemfile = "2.1.2"
 tokio-rustls = "0.26.0"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+axum = "0.8"
 time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"

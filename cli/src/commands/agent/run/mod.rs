@@ -1,5 +1,6 @@
 pub mod checkpoint;
 pub mod helpers;
+pub mod mcp_init;
 pub mod mode_async;
 pub mod mode_interactive;
 pub mod profile_switch;

@@ -14,6 +14,12 @@ pub struct LocalClientHandler {
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 }
 
+impl LocalClientHandler {
+    pub fn new(progress_tx: Option<Sender<ToolCallResultProgress>>) -> Self {
+        Self { progress_tx }
+    }
+}
+
 impl ClientHandler for LocalClientHandler {
     async fn on_progress(
         &self,
@@ -58,7 +64,7 @@ pub async fn connect(
     cmd.arg("mcp").arg("proxy");
 
     let proc = TokioChildProcess::new(cmd)?;
-    let client_handler = LocalClientHandler { progress_tx };
+    let client_handler = LocalClientHandler::new(progress_tx);
     let client: RunningService<RoleClient, LocalClientHandler> = client_handler.serve(proc).await?;
 
     Ok(client)

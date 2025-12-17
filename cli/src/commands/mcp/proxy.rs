@@ -1,38 +1,18 @@
 use rmcp::{ServiceExt, transport::stdio};
-use stakpak_mcp_proxy::{
-    client::{ClientPoolConfig, ServerConfig},
-    server::ProxyServer,
-};
-use std::collections::HashMap;
+use stakpak_mcp_proxy::{client::ClientPoolConfig, server::ProxyServer};
 
-pub async fn run_proxy(disable_secret_redaction: bool, privacy_mode: bool) -> Result<(), String> {
-    let mut servers: HashMap<String, ServerConfig> = HashMap::new();
-
-    // Get the path to the current executable for spawning the MCP server
-    let current_exe = std::env::current_exe()
-        .map_err(|e| format!("Failed to get current executable path: {}", e))?
-        .to_string_lossy()
-        .to_string();
-
-    // Always add the stakpak MCP server as a stdio server
-    servers.insert(
-        "stakpak".to_string(),
-        ServerConfig::Stdio {
-            command: current_exe,
-            args: vec!["mcp".to_string(), "start".to_string()],
-            env: None,
-        },
-    );
-
-    servers.insert(
-        "paks".to_string(),
-        ServerConfig::Http {
-            url: "https://apiv2.stakpak.dev/v1/paks/mcp".to_string(),
-            headers: None,
-        },
-    );
-
-    let config = ClientPoolConfig::with_servers(servers);
+/// Start the proxy server that reads config from file and connects to external MCP servers.
+/// This is a standalone proxy - no local tools.
+pub async fn run_proxy(
+    config_path: String,
+    disable_secret_redaction: bool,
+    privacy_mode: bool,
+) -> Result<(), String> {
+    let config = match ClientPoolConfig::from_toml_file(&config_path) {
+        Ok(config) => config,
+        Err(_) => ClientPoolConfig::from_json_file(&config_path)
+            .map_err(|e| format!("Failed to load config from {}: {}", config_path, e))?,
+    };
 
     let server = ProxyServer::new(config, !disable_secret_redaction, privacy_mode)
         .serve(stdio())

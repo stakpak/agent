@@ -5443,6 +5443,7 @@ version = "0.3.3"
 dependencies = [
  "anyhow",
  "futures",
+ "reqwest",
  "rmcp",
  "serde_json",
  "stakpak-shared",
@@ -5456,6 +5457,8 @@ name = "stakpak-mcp-proxy"
 version = "0.3.3"
 dependencies = [
  "anyhow",
+ "axum 0.8.7",
+ "axum-server",
  "reqwest",
  "rmcp",
  "serde",
