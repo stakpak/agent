@@ -12,13 +12,15 @@ use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use stakpak_shared::models::integrations::gemini::GeminiConfig;
+use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
     OpenAIModel, Tool,
 };
-use stakpak_shared::models::integrations::searchpak::SearchPakClient;
+use stakpak_shared::models::integrations::searchpak::{
+    AnalysisResult, ScrapedContent, SearchPakClient, ValidationResult,
+};
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
@@ -96,10 +98,12 @@ impl LocalClient {
             .smart_model
             .map(LLMModel::from)
             .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet));
+
         let eco_model = config
             .eco_model
             .map(LLMModel::from)
             .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku));
+
         let recovery_model = config
             .recovery_model
             .map(LLMModel::from)
@@ -449,34 +453,94 @@ impl AgentProvider for LocalClient {
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
         let mut client = SearchPakClient::new(None, None);
-
         client.ensure_running().await.map_err(|e| e.to_string())?;
 
-        let query = if let Some(exclude) = &input.exclude_keywords {
+        let initial_query = if let Some(exclude) = &input.exclude_keywords {
             format!("{} -{}", input.keywords, exclude)
         } else {
             input.keywords.clone()
         };
 
-        let results = client
-            .search_and_scrape(query)
-            .await
-            .map_err(|e| e.to_string())?;
+        let llm_config = self.get_llm_config();
+        let search_model = get_search_model(self.eco_model.clone());
+        let analysis = analyze_search_query(&llm_config, &search_model, &initial_query).await?;
+        let required_documentation = analysis.required_documentation;
+        let mut current_query = analysis.reformulated_query;
+        let mut previous_queries = Vec::new();
+        let mut final_valid_docs = Vec::new();
+        let mut accumulated_needed_urls = Vec::new();
 
-        let contents = results
-            .into_iter()
-            .map(|result| {
-                let text = format!(
-                    "Title: {}\nURL: {}\nContent: {}\n",
-                    result.title.unwrap_or_default(),
-                    result.url,
-                    result.content.unwrap_or_default()
-                );
-                Content::text(text)
-            })
-            .collect();
+        const MAX_ITERATIONS: usize = 3;
+
+        for _iteration in 0..MAX_ITERATIONS {
+            previous_queries.push(current_query.clone());
+
+            let search_results = client
+                .search_and_scrape(current_query.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if search_results.is_empty() {
+                break;
+            }
+
+            let validation_result = validate_search_docs(
+                &llm_config,
+                &search_model,
+                &search_results,
+                &current_query,
+                &required_documentation,
+                &previous_queries,
+                &accumulated_needed_urls,
+            )
+            .await?;
+
+            for url in &validation_result.needed_urls {
+                if !accumulated_needed_urls.contains(url) {
+                    accumulated_needed_urls.push(url.clone());
+                }
+            }
+
+            for doc in validation_result.valid_docs.into_iter() {
+                let is_duplicate = final_valid_docs
+                    .iter()
+                    .any(|existing_doc: &ScrapedContent| existing_doc.url == doc.url);
+
+                if !is_duplicate {
+                    final_valid_docs.push(doc);
+                }
+            }
+
+            if validation_result.is_satisfied {
+                break;
+            }
+
+            if let Some(new_query) = validation_result.new_query {
+                if new_query != current_query && !previous_queries.contains(&new_query) {
+                    current_query = new_query;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
 
         client.stop().await.map_err(|e| e.to_string())?;
+
+        if final_valid_docs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let contents = final_valid_docs
+            .into_iter()
+            .map(|result| {
+                Content::text(format!(
+                    "Title: {:?}\nURL: {}\nContent: {:?}",
+                    result.title, result.url, result.content
+                ))
+            })
+            .collect();
 
         Ok(contents)
     }
@@ -725,5 +789,127 @@ impl LocalClient {
         let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
+    }
+}
+
+async fn analyze_search_query(
+    llm_config: &LLMProviderConfig,
+    model: &LLMModel,
+    query: &str,
+) -> Result<AnalysisResult, String> {
+    let system_prompt = r#"You are a query analyzer. Analyze the user's search query and output JSON only:
+{
+  "required_documentation": ["list of document types/topics needed"],
+  "reformulated_query": "optimized search query"
+}"#;
+
+    let user_prompt = format!(
+        "Analyze this search query and determine what documentation is needed: '{}'",
+        query
+    );
+
+    let response = chat(
+        llm_config,
+        LLMInput {
+            model: model.clone(),
+            messages: vec![
+                LLMMessage {
+                    role: "system".into(),
+                    content: LLMMessageContent::String(system_prompt.to_string()),
+                },
+                LLMMessage {
+                    role: "user".into(),
+                    content: LLMMessageContent::String(user_prompt.to_string()),
+                },
+            ],
+            max_tokens: 2000,
+            tools: None,
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let content = response.choices[0].message.content.to_string();
+
+    serde_json::from_str::<AnalysisResult>(&content)
+        .map_err(|e| format!("Failed to parse analysis: {}", e))
+}
+
+async fn validate_search_docs(
+    llm_config: &LLMProviderConfig,
+    model: &LLMModel,
+    docs: &[ScrapedContent],
+    query: &str,
+    required_documentation: &[String],
+    previous_queries: &[String],
+    accumulated_needed_urls: &[String],
+) -> Result<ValidationResult, String> {
+    let docs_preview = docs
+        .iter()
+        .take(5)
+        .map(|r| format!("- {} ({})", r.title.clone().unwrap_or_default(), r.url))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system_prompt = r#"You are a search result validator. Output JSON only:
+{
+  "is_satisfied": bool,
+  "valid_docs": [{"url": "..."}],
+  "needed_urls": ["urls still needed"],
+  "new_query": "refined query if not satisfied",
+  "reason": "explanation"
+}"#;
+
+    let user_prompt = format!(
+        "Original Query: '{}'\nRequired Documentation: {:?}\nPrevious Queries: {:?}\nAccumulated Needed URLs: {:?}\nCurrent Results:\n{}\n\nAre these results sufficient? Which are valid? What's still needed?",
+        query, required_documentation, previous_queries, accumulated_needed_urls, docs_preview
+    );
+
+    let response = chat(
+        llm_config,
+        LLMInput {
+            model: model.clone(),
+            messages: vec![
+                LLMMessage {
+                    role: "system".into(),
+                    content: LLMMessageContent::String(system_prompt.to_string()),
+                },
+                LLMMessage {
+                    role: "user".into(),
+                    content: LLMMessageContent::String(user_prompt.to_string()),
+                },
+            ],
+            max_tokens: 4000,
+            tools: None,
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let content = response.choices[0].message.content.to_string();
+
+    let mut validation: ValidationResult =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse validation: {}", e))?;
+
+    // Enrich valid_docs with full content from search results
+    validation.valid_docs = validation
+        .valid_docs
+        .into_iter()
+        .filter_map(|valid_doc| {
+            docs.iter()
+                .find(|result| result.url == valid_doc.url)
+                .cloned()
+        })
+        .collect();
+
+    Ok(validation)
+}
+
+fn get_search_model(model: LLMModel) -> LLMModel {
+    match model {
+        LLMModel::Anthropic(_) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
+        LLMModel::OpenAI(_) => LLMModel::OpenAI(OpenAIModel::O4Mini),
+        LLMModel::Gemini(_) => LLMModel::Gemini(GeminiModel::Gemini25Flash),
+        _ => model,
     }
 }

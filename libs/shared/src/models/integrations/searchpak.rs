@@ -25,7 +25,7 @@ pub struct ScrapedContent {
     pub url: String,
     pub title: Option<String>,
     pub content: Option<String>,
-    pub metadata: serde_json::Value,
+    pub metadata: Option<serde_json::Value>,
     pub error: Option<String>,
 }
 
@@ -46,6 +46,20 @@ pub struct SearchRequest {
     pub limit: u32,
     pub lang: String,
     pub engines: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AnalysisResult {
+    pub required_documentation: Vec<String>,
+    pub reformulated_query: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ValidationResult {
+    pub is_satisfied: bool,
+    pub valid_docs: Vec<ScrapedContent>,
+    pub needed_urls: Vec<String>,
+    pub new_query: Option<String>,
 }
 
 impl SearchRequest {
@@ -288,7 +302,6 @@ impl SearchPakClient {
             })
     }
 
-    /// Finds two available ports, ensuring they're different
     fn find_two_available_ports() -> Result<(u16, u16), AgentError> {
         let port1 = crate::container::find_available_port().ok_or_else(|| {
             AgentError::BadRequest(BadRequestErrorMessage::ApiError(
@@ -296,12 +309,11 @@ impl SearchPakClient {
             ))
         })?;
 
-        // Try up to 5 times to find a second different port
         for _ in 0..5 {
-            if let Some(port2) = crate::container::find_available_port() {
-                if port2 != port1 {
-                    return Ok((port1, port2));
-                }
+            if let Some(port2) = crate::container::find_available_port()
+                && port2 != port1
+            {
+                return Ok((port1, port2));
             }
         }
 
@@ -310,7 +322,6 @@ impl SearchPakClient {
         )))
     }
 
-    /// Waits for both services to become healthy
     async fn wait_for_health(&self) -> Result<(), AgentError> {
         let max_attempts = HEALTH_CHECK_TIMEOUT_SECS / HEALTH_CHECK_INTERVAL_SECS;
         let mut api_healthy = false;
@@ -429,12 +440,10 @@ impl SearchPakClient {
     }
 
     pub async fn ensure_running(&mut self) -> Result<(), AgentError> {
-        // Try to load existing configuration
         if let Some(config) = Self::load_config() {
             self.api_url = format!("http://localhost:{}", config.api_port);
             self.searxng_url = format!("http://localhost:{}", config.searxng_port);
 
-            // Check if services are already running
             if self.health_check_api().await.is_ok() && self.health_check_searxng().await.is_ok() {
                 return Ok(());
             }
