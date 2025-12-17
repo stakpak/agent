@@ -36,7 +36,7 @@ crossterm = { workspace = true }
 open = { workspace = true }
 glob = "0.3"
 # ACP dependencies
-agent-client-protocol = "0.4.7"
+agent-client-protocol = "0.9.0"
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 tokio-util = { version = "0.7", features = ["compat"] }
