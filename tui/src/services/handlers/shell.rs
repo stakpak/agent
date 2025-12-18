@@ -236,6 +236,29 @@ pub fn handle_run_shell_command(
     state.text_area.set_shell_mode(true);
 }
 
+/// Handle run shell with command event - runs the command directly using $SHELL -c
+/// This gives us a proper ShellCompleted signal when the command finishes
+pub fn handle_run_shell_with_command(
+    state: &mut AppState,
+    command: String,
+    input_tx: &Sender<InputEvent>,
+) {
+    // Store the command value for later tool call result
+    state.shell_pending_command_value = Some(command.clone());
+    state.shell_pending_command_executed = true;
+    state.shell_pending_command_output = Some(String::new());
+    state.shell_pending_command_output_count = 0;
+    
+    // Run the command directly via $SHELL -c 'command'
+    // This will exit when the command completes, giving us ShellCompleted
+    let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
+    // Escape single quotes in the command by replacing ' with '\''
+    let escaped_command = command.replace('\'', "'\\''");
+    let shell_command = format!("{} -c '{}'", shell, escaped_command);
+    
+    handle_run_shell_command(state, shell_command, input_tx);
+}
+
 // In handle_shell_mode (shell.rs):
 
 pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
@@ -407,6 +430,14 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // First output received - hide loading indicator
     state.shell_loading = false;
+    
+    // If we're tracking a pending command (from interactive stall), capture all output
+    if state.shell_pending_command_executed {
+        state.shell_pending_command_output_count += 1;
+        if let Some(output) = state.shell_pending_command_output.as_mut() {
+            output.push_str(&raw_data);
+        }
+    }
 
     // 1. Append to raw output log (truncated)
     if let Some(output) = state.active_shell_command_output.as_mut() {
@@ -418,11 +449,16 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     state.shell_screen.process(raw_data.as_bytes());
 
     // 3. Determine Styling based on Focus
-    let command_name = state
+    // Get the shell command for the title (simple version)
+    let shell_name = state
         .active_shell_command
         .as_ref()
-        .map(|c| c.command.clone())
-        .unwrap_or_else(|| "sh".to_string());
+        .map(|c| {
+            // Extract just the shell name from the path
+            c.command.split('/').last().unwrap_or(&c.command).split_whitespace().next().unwrap_or("sh")
+        })
+        .unwrap_or("sh")
+        .to_string();
 
     let (colors, title) = if state.show_shell_mode {
         (
@@ -432,7 +468,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
                 content_color: AdaptiveColors::text(),
                 tool_type: "Interactive Bash".to_string(),
             },
-            format!("Shell Command {} [Focused]", command_name),
+            format!("Shell Command {} [Focused]", shell_name),
         )
     } else {
         (
@@ -444,13 +480,16 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
             },
             format!(
                 "Shell Command {} (Background - Ctrl+Y to focus)",
-                command_name
+                shell_name
             ),
         )
     };
 
     // 4. Capture styled screen content at scroll=0 (safe)
     let screen_lines = capture_styled_screen(&mut state.shell_screen);
+    
+    // Note: Command completion is now detected via ShellCompleted event
+    // which is triggered when the command process exits (using $SHELL -c approach)
 
     // Smart history accumulation:
     // vt100 tracks scrollback count - that tells us how many lines have scrolled off
@@ -516,6 +555,16 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     }
 
     // 5. Update UI
+    // Prepended lines (like command injection) that are NOT part of terminal history
+    let mut display_lines = screen_lines.clone();
+    if let Some(cmd) = state.shell_pending_command_value.clone() {
+        let command_line = Line::from(vec![
+            Span::styled("$ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+        ]);
+        display_lines.insert(0, command_line);
+    }
+
     // Ensure we have a target message ID for the interactive shell
     let target_id = if let Some(id) = state.interactive_shell_message_id {
         Some(id)
@@ -528,7 +577,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
             id: new_id,
             content: MessageContent::RenderRefreshedTerminal(
                 title.clone(),
-                screen_lines.clone(),
+                display_lines.clone(),
                 Some(colors.clone()),
                 state.terminal_size.width as usize,
             ),
@@ -543,7 +592,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     {
         msg.content = MessageContent::RenderRefreshedTerminal(
             title,
-            screen_lines,
+            display_lines,
             Some(colors),
             state.terminal_size.width as usize,
         );
@@ -582,6 +631,51 @@ pub fn handle_shell_completed(
 ) {
     // Command completed, reset active command state
     state.waiting_for_shell_input = false;
+    
+    // If this was from an interactive stall command, capture and log the result
+    if state.shell_pending_command_executed {
+        // Update the shell message to show completed state
+        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+            if let Some(msg) = state.messages.iter_mut().find(|m| m.id == shell_msg_id) {
+                if let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content {
+                    let completed_colors = BubbleColors {
+                        border_color: Color::Green,
+                        title_color: Color::Green,
+                        content_color: AdaptiveColors::text(),
+                        tool_type: "Interactive Bash".to_string(),
+                    };
+                    msg.content = MessageContent::RenderRefreshedTerminal(
+                        "Shell Command [Completed]".to_string(),
+                        content.clone(),
+                        Some(completed_colors),
+                        *width,
+                    );
+                }
+            }
+        }
+        
+        if let Some(cmd_value) = state.shell_pending_command_value.take() {
+            if let Some(output) = state.shell_pending_command_output.take() {
+                // Debug: print the tool call result
+                eprintln!("\n=== INTERACTIVE STALL COMMAND COMPLETED ===");
+                eprintln!("Command: {}", cmd_value);
+                eprintln!("Output:\n{}", output);
+                eprintln!("===========================================\n");
+            }
+        }
+        
+        // Reset the tracking state
+        state.shell_pending_command_executed = false;
+        state.shell_pending_command_output_count = 0;
+        
+        // Tab out of shell mode
+        state.show_shell_mode = false;
+        state.text_area.set_shell_mode(false);
+        
+        // Invalidate cache to show the updated message
+        invalidate_message_lines_cache(state);
+    }
+    
     if let Some(dialog_command) = &state.dialog_command {
         let dialog_command_id = dialog_command.id.clone();
         let result = shell_command_to_tool_call_result(state);

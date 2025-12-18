@@ -121,7 +121,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         && !state.is_dialog_open
         && !state.approval_popup.is_visible()
     {
-        let (_, cursor_col) = state.shell_screen.screen().cursor_position();
+        let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
 
         if let Some(shell_msg_id) = state.interactive_shell_message_id
             && let Some(msg) = state.messages.iter().find(|m| m.id == shell_msg_id)
@@ -143,11 +143,17 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
                 let trailing_offset = if total_lines > visible_height { 4 } else { 1 };
                 let content_end = total_lines.saturating_sub(trailing_offset);
 
-                let shell_block_height = shell_content_lines + 2;
+                let shell_block_height = shell_content_lines + 2; // +2 for top/bottom borders
 
                 let shell_start_in_content = content_end.saturating_sub(shell_block_height);
 
-                let cursor_line_in_content = shell_start_in_content + shell_content_lines;
+                // Use the cursor row from vt100 to calculate position within the shell content
+                // The cursor_row is 0-indexed from the top of the visible terminal
+                // We need to add:
+                // - 1 for the top border of the shell block
+                // - 1 for the command line (if prepended for display)
+                let command_line_offset: usize = if state.shell_pending_command_value.is_some() { 1 } else { 0 };
+                let cursor_line_in_content = shell_start_in_content + 1 + command_line_offset + cursor_row as usize;
 
                 let visible_start = if state.stay_at_bottom || total_lines <= visible_height
                 {

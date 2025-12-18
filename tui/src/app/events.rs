@@ -21,6 +21,8 @@ pub enum InputEvent {
     InputChanged(char),
     ShellMode,
     RunShellCommand(String),
+    /// Spawn the user's shell and then execute a command in it (for interactive stall recovery)
+    RunShellWithCommand(String),
     GetStatus(String),
     Error(String),
     SetSessions(Vec<SessionInfo>),
@@ -68,6 +70,8 @@ pub enum InputEvent {
     AutoApproveCurrentTool,
     ToggleDialogFocus,
     RetryLastToolCall,
+    /// Interactive stall detected - automatically switch to shell mode and fire the command
+    InteractiveStallDetected(String),
     AttemptQuit,
     ToggleCollapsedMessages,
     ToggleContextPopup,

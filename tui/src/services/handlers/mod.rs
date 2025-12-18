@@ -275,13 +275,19 @@ pub fn update(
 
         // Tool handlers
         InputEvent::StreamToolResult(progress) => {
-            tool::handle_stream_tool_result(state, progress);
+            if let Some(command) = tool::handle_stream_tool_result(state, progress) {
+                // Interactive stall detected - trigger shell mode with the command
+                tool::handle_interactive_stall_detected(state, command, input_tx);
+            }
         }
         InputEvent::MessageToolCalls(tool_calls) => {
             tool::handle_message_tool_calls(state, tool_calls);
         }
         InputEvent::RetryLastToolCall => {
             tool::handle_retry_tool_call(state, input_tx, cancel_tx);
+        }
+        InputEvent::InteractiveStallDetected(command) => {
+            tool::handle_interactive_stall_detected(state, command, input_tx);
         }
         InputEvent::ToggleApprovalStatus => {
             tool::handle_toggle_approval_status(state);
@@ -301,6 +307,9 @@ pub fn update(
         // Shell handlers
         InputEvent::RunShellCommand(command) => {
             shell::handle_run_shell_command(state, command, input_tx);
+        }
+        InputEvent::RunShellWithCommand(command) => {
+            shell::handle_run_shell_with_command(state, command, input_tx);
         }
         InputEvent::ShellMode => {
             shell::handle_shell_mode(state, input_tx);

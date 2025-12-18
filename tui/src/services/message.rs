@@ -32,6 +32,7 @@ pub enum MessageContent {
     Markdown(String),
     PlainText(String),
     RenderPendingBorderBlock(ToolCall, bool),
+    RenderPendingBorderBlockWithStallWarning(ToolCall, bool),
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
     RenderResultBorderBlock(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
@@ -729,6 +730,51 @@ fn get_wrapped_message_lines_internal(
                 } else {
                     render_bash_block(tool_call, &full_command, false, width, *is_auto_approved)
                 };
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+
+            MessageContent::RenderPendingBorderBlockWithStallWarning(tool_call, is_auto_approved) => {
+                let full_command = extract_full_command_arguments(tool_call);
+                let mut rendered_lines = render_bash_block(tool_call, &full_command, false, width, *is_auto_approved);
+                
+                // Insert stall warning inside the block (before the bottom border)
+                // Find the bottom border line (last line before SPACING_MARKER)
+                if rendered_lines.len() >= 2 {
+                    let insert_pos = rendered_lines.len() - 2; // Before bottom border and SPACING_MARKER
+                    let inner_width = if width > 4 { width - 4 } else { 40 };
+                    let border_color = Color::Cyan;
+                    
+                    // Add warning line inside the block (use simple ASCII to avoid width issues)
+                    let warning_text = "[!] Command waiting for user input";
+                    let warning_display_width = unicode_width::UnicodeWidthStr::width(warning_text);
+                    let warning_padding = inner_width.saturating_sub(warning_display_width + 1); // +4 for "  " prefix and " │" suffix spacing
+                    let warning_line = Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::styled(
+                            format!("  {}{}", warning_text, " ".repeat(warning_padding)),
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]);
+                    
+                    let info_text = "Switching to interactive shell mode...";
+                    let info_display_width = unicode_width::UnicodeWidthStr::width(info_text);
+                    let info_padding = inner_width.saturating_sub(info_display_width + 1);
+                    let info_line = Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::styled(
+                            format!("  {}{}", info_text, " ".repeat(info_padding)),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]);
+                    
+                    rendered_lines.insert(insert_pos, warning_line);
+                    rendered_lines.insert(insert_pos + 1, info_line);
+                }
+                
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);

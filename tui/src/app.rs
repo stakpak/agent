@@ -80,6 +80,11 @@ pub struct AppState {
     pub ondemand_shell_mode: bool,
     pub shell_tool_calls: Option<Vec<ToolCallResult>>,
     pub shell_loading: bool, // True while shell PTY is initializing
+    pub shell_pending_command: Option<String>, // Command to execute after shell is ready
+    pub shell_pending_command_value: Option<String>, // The command value that was executed
+    pub shell_pending_command_executed: bool,   // True after the pending command has been sent to shell
+    pub shell_pending_command_output: Option<String>, // Captured output since the command was executed
+    pub shell_pending_command_output_count: usize, // Number of output events since command was sent
 
     // ========== Tool Call State ==========
     pub pending_bash_message_id: Option<Uuid>,
@@ -266,6 +271,11 @@ impl AppState {
             ondemand_shell_mode: false,
             shell_tool_calls: None,
             shell_loading: false,
+            shell_pending_command: None,
+            shell_pending_command_value: None,
+            shell_pending_command_executed: false,
+            shell_pending_command_output: None,
+            shell_pending_command_output_count: 0,
             attached_images: Vec::new(),
             pending_path_start: None,
             dialog_message_id: None,

@@ -14,23 +14,44 @@ use tokio::sync::mpsc::Sender;
 use super::shell::extract_command_from_tool_call;
 
 /// Handle stream tool result event
-pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress) {
+/// Returns Some(command) if an interactive stall was detected and shell mode should be triggered
+pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
-        return;
+        return None;
     }
     
     // Check for interactive stall notification
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
-        // Push warning message about interactive command
-        state.messages.push(Message::info(
-            "⚠️ Command appears to be waiting for user input (password, confirmation, etc.).\nUse Ctrl+Y to open interactive shell mode if this command requires interaction.\n\n",
-            Some(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow)),
-        ));
+        // Stop the loader
+        state.loading = false;
+        state.is_streaming = false;
+        
+        // Extract command from the latest tool call
+        if let Some(tool_call) = &state.latest_tool_call {
+            if let Ok(command) = extract_command_from_tool_call(tool_call) {
+                // Update the pending bash message to show stall warning
+                if let Some(pending_id) = state.pending_bash_message_id {
+                    for msg in &mut state.messages {
+                        if msg.id == pending_id {
+                            // Update to the stall warning variant
+                            if let crate::services::message::MessageContent::RenderPendingBorderBlock(tc, auto) = &msg.content {
+                                msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto);
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                invalidate_message_lines_cache(state);
+                return Some(command);
+            }
+        }
+        
         invalidate_message_lines_cache(state);
-        return; // Don't add this marker to the streaming buffer
+        return None; // Don't add this marker to the streaming buffer
     }
 
     // Ensure loading state is true during streaming tool results
@@ -71,6 +92,8 @@ pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultP
     if !state.stay_at_bottom {
         state.content_changed_while_scrolled_up = true;
     }
+    
+    None
 }
 
 /// Handle message tool calls event
@@ -151,6 +174,29 @@ pub fn handle_retry_mechanism(state: &mut AppState) {
     if state.messages.len() >= 2 {
         state.messages.pop();
     }
+}
+
+/// Handle interactive stall detection - automatically switch to shell mode and run the command
+pub fn handle_interactive_stall_detected(
+    state: &mut AppState,
+    command: String,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
+    // Close any confirmation dialog
+    state.is_dialog_open = false;
+    
+    // Set up shell mode state
+    if let Some(tool_call) = &state.latest_tool_call {
+        state.dialog_command = Some(tool_call.clone());
+    }
+    state.ondemand_shell_mode = false;
+    
+    if state.shell_tool_calls.is_none() {
+        state.shell_tool_calls = Some(Vec::new());
+    }
+    
+    // Trigger running the shell with the command - this spawns the user's shell and then executes the command
+    let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
 }
 
 /// Handle toggle approval status event
