@@ -8,6 +8,7 @@ members = [
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
+    "examples/mcp-clients/rust-client"
 ]
 default-members = ["cli"]
 
@@ -25,7 +26,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { version = "0.8.3", features = [
+rmcp = { version = "0.9.1", features = [
     "base64",
     "macros",
     "client",
@@ -43,7 +44,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
-reqwest = { version = "=0.12.15", features = [
+reqwest = { version = "0.12.26", features = [
     "json",
     "stream",
     "rustls-tls",

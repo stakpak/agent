@@ -19,7 +19,7 @@ use stakpak_api::{
 };
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::CertificateStrategy;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
 use stakpak_shared::models::subagent::SubagentConfigs;
@@ -62,17 +62,27 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let allowed_tools_for_filter = config.allowed_tools.clone(); // Clone before moving config
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
-    // Generate certificates if mTLS is enabled
-    let certificate_chain = Arc::new(if config.enable_mtls {
-        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
+    // Generate ephemeral certificates if mTLS is enabled
+    let (certificate_chain, server_config_for_server) = if config.enable_mtls {
+        let strategy = CertificateStrategy::Ephemeral;
+        let chain = Arc::new(Some(
+            strategy
+                .get_certificate_chain()
+                .map_err(|e| e.to_string())?,
+        ));
+        let server_config = Some(
+            strategy
+                .load_server_config()
+                .map_err(|e| format!("Failed to create server config: {}", e))?,
+        );
+        (chain, server_config)
     } else {
-        None
-    });
+        (Arc::new(None), None)
+    };
 
     let protocol = if config.enable_mtls { "https" } else { "http" };
     let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
-    let certificate_chain_for_server = certificate_chain.clone();
     let subagent_configs = config.subagent_configs.clone();
 
     // Create AgentProvider instance
@@ -113,7 +123,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 tool_mode: ToolMode::Combined,
                 subagent_configs,
                 bind_address,
-                certificate_chain: certificate_chain_for_server,
+                server_config: Arc::new(server_config_for_server),
             },
             Some(listener),
             None,

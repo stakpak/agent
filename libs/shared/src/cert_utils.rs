@@ -1,9 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyUsagePurpose, SanType,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use rustls_pemfile::{certs, pkcs8_private_keys};
+use std::fs::{self, File};
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use time::OffsetDateTime;
 
@@ -11,6 +15,71 @@ pub struct CertificateChain {
     pub ca_cert: rcgen::Certificate,
     pub server_cert: rcgen::Certificate,
     pub client_cert: rcgen::Certificate,
+}
+
+pub fn default_cert_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .context("Could not determine home directory")?;
+    Ok(PathBuf::from(home).join(".stakpak").join("certs"))
+}
+
+/// Certificate management strategy for different use cases
+#[derive(Debug, Clone)]
+pub enum CertificateStrategy {
+    /// Generate in memory certificates
+    Ephemeral,
+    /// Load persistent certificates from disk
+    Persistent(PathBuf),
+}
+
+impl CertificateStrategy {
+    pub fn load_server_config(&self) -> Result<ServerConfig> {
+        match self {
+            Self::Ephemeral => {
+                let chain = CertificateChain::generate()?;
+                chain.create_server_config()
+            }
+            Self::Persistent(path) => CertificateChain::load_server_config(path),
+        }
+    }
+
+    pub fn load_client_config(&self) -> Result<ClientConfig> {
+        match self {
+            Self::Ephemeral => {
+                let chain = CertificateChain::generate()?;
+                chain.create_client_config()
+            }
+            Self::Persistent(path) => CertificateChain::load_client_config(path),
+        }
+    }
+
+    /// Get the certificate chain (only works for Ephemeral strategy)
+    /// For Persistent strategy, returns an error as certificates are already on disk
+    pub fn get_certificate_chain(&self) -> Result<CertificateChain> {
+        match self {
+            Self::Ephemeral => CertificateChain::generate(),
+            Self::Persistent(path) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot get certificate chain for Persistent strategy. Certificates are stored at: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    /// Check if certificates exist
+    pub fn exists(&self) -> bool {
+        match self {
+            Self::Ephemeral => true, // Ephemeral certs are always available since they're generated on demand
+            Self::Persistent(path) => CertificateChain::exists_in_directory(path),
+        }
+    }
+
+    /// Get default certifications directory
+    pub fn default_persistent() -> Result<Self> {
+        Ok(Self::Persistent(default_cert_dir()?))
+    }
 }
 
 impl CertificateChain {
@@ -97,6 +166,62 @@ impl CertificateChain {
         })
     }
 
+    /// Load server configuration from PEM files on disk
+    /// Use this for the 'start' command
+    pub fn load_server_config(dir: &Path) -> Result<ServerConfig> {
+        // Check if all files exist
+        if !Self::exists_in_directory(dir) {
+            return Err(anyhow::anyhow!(
+                "Certificates not found at {:?}\nRun 'stakpak mcp setup' to generate them",
+                dir
+            ));
+        }
+
+        let ca_file = File::open(dir.join("ca.pem")).context("Failed to open CA certificate")?;
+        let ca_certs: Vec<CertificateDer> = certs(&mut BufReader::new(ca_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse CA certificate")?;
+
+        let server_cert_file =
+            File::open(dir.join("server-cert.pem")).context("Failed to open server certificate")?;
+        let server_cert_chain: Vec<CertificateDer> = certs(&mut BufReader::new(server_cert_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse server certificate")?;
+
+        let server_key_file =
+            File::open(dir.join("server-key.pem")).context("Failed to open server private key")?;
+        let mut server_keys = pkcs8_private_keys(&mut BufReader::new(server_key_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse server private key")?;
+
+        if server_keys.is_empty() {
+            return Err(anyhow::anyhow!("No private key found in server-key.pem"));
+        }
+
+        let server_private_key = PrivateKeyDer::Pkcs8(server_keys.remove(0));
+
+        let mut root_cert_store = RootCertStore {
+            roots: Vec::with_capacity(ca_certs.len()),
+        };
+        for cert in ca_certs {
+            root_cert_store.add(cert)?;
+        }
+
+        let client_cert_verifier =
+            rustls::server::WebPkiClientVerifier::builder(Arc::new(root_cert_store))
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build client cert verifier: {}", e))?;
+
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(client_cert_verifier)
+            .with_single_cert(server_cert_chain, server_private_key)?;
+
+        Ok(config)
+    }
+
+    /// Create server configuration from in memory certificates
+    /// Used by `CertificateStrategy::Ephemeral` for testing and development.
+    /// For production use, prefer `load_server_config()` with `CertificateStrategy::Persistent` for better security and certificate persistence.
     pub fn create_server_config(&self) -> Result<ServerConfig> {
         // Sign server certificate with CA
         let server_cert_der = self.server_cert.serialize_der_with_signer(&self.ca_cert)?;
@@ -124,6 +249,56 @@ impl CertificateChain {
         Ok(config)
     }
 
+    /// Load client configuration from PEM files on disk
+    /// Use this for clients to load existing certificates
+    pub fn load_client_config(dir: &Path) -> Result<ClientConfig> {
+        if !Self::exists_in_directory(dir) {
+            return Err(anyhow::anyhow!(
+                "Certificates not found at {:?}\nRun 'stakpak mcp setup' to generate them",
+                dir
+            ));
+        }
+
+        let ca_file = File::open(dir.join("ca.pem")).context("Failed to open CA certificate")?;
+        let ca_certs: Vec<CertificateDer> = certs(&mut BufReader::new(ca_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse CA certificate")?;
+
+        let client_cert_file =
+            File::open(dir.join("client-cert.pem")).context("Failed to open client certificate")?;
+        let client_certs: Vec<CertificateDer> = certs(&mut BufReader::new(client_cert_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse client certificate")?;
+
+        let client_key_file =
+            File::open(dir.join("client-key.pem")).context("Failed to open client private key")?;
+        let mut client_keys = pkcs8_private_keys(&mut BufReader::new(client_key_file))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse client private key")?;
+
+        if client_keys.is_empty() {
+            return Err(anyhow::anyhow!("No private key found in client-key.pem"));
+        }
+
+        let client_key = PrivateKeyDer::Pkcs8(client_keys.remove(0));
+
+        let mut root_cert_store = RootCertStore {
+            roots: Vec::with_capacity(ca_certs.len()),
+        };
+        for cert in ca_certs {
+            root_cert_store.add(cert)?;
+        }
+
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_client_auth_cert(client_certs, client_key)?;
+
+        Ok(config)
+    }
+
+    /// Create client configuration from in memory certificates
+    /// Used by `CertificateStrategy::Ephemeral` for testing and development.
+    /// For production use, prefer `load_client_config()` with `CertificateStrategy::Persistent` for certificate persistance
     pub fn create_client_config(&self) -> Result<ClientConfig> {
         // Sign client certificate with CA
         let client_cert_der = self.client_cert.serialize_der_with_signer(&self.ca_cert)?;
@@ -163,6 +338,81 @@ impl CertificateChain {
 
     pub fn get_client_key_pem(&self) -> Result<String> {
         Ok(self.client_cert.serialize_private_key_pem())
+    }
+
+    /// Save certificates to a directory
+    pub fn save_to_directory(&self, dir: &Path) -> Result<()> {
+        fs::create_dir_all(dir)
+            .context(format!("Failed to create certificate directory: {:?}", dir))?;
+
+        let ca_pem = self.get_ca_cert_pem()?;
+        fs::write(dir.join("ca.pem"), ca_pem).context("Failed to write CA certificate")?;
+
+        let server_cert_pem = self.get_server_cert_pem()?;
+        fs::write(dir.join("server-cert.pem"), server_cert_pem)
+            .context("Failed to write server certificate")?;
+
+        let server_key_pem = self.get_server_key_pem()?;
+        fs::write(dir.join("server-key.pem"), server_key_pem)
+            .context("Failed to write server key")?;
+
+        let client_cert_pem = self.get_client_cert_pem()?;
+        fs::write(dir.join("client-cert.pem"), client_cert_pem)
+            .context("Failed to write client certificate")?;
+
+        let client_key_pem = self.get_client_key_pem()?;
+        fs::write(dir.join("client-key.pem"), client_key_pem)
+            .context("Failed to write client key")?;
+
+        // Set restrictive permissions on private keys (Unix only)
+        // Note: On Windows, file permissions are managed differently
+        // Windows users should ensure the certificate directory has appropriate access controls
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let key_perms = fs::Permissions::from_mode(0o600);
+            let _ = fs::set_permissions(dir.join("server-key.pem"), key_perms.clone());
+            let _ = fs::set_permissions(dir.join("client-key.pem"), key_perms);
+        }
+
+        Ok(())
+    }
+
+    /// Check if all required certificates exist in a directory
+    pub fn exists_in_directory(dir: &Path) -> bool {
+        dir.join("ca.pem").exists()
+            && dir.join("server-cert.pem").exists()
+            && dir.join("server-key.pem").exists()
+            && dir.join("client-cert.pem").exists()
+            && dir.join("client-key.pem").exists()
+    }
+
+    /// Generate new certificates and save to a directory
+    /// Use this for the 'setup' command
+    pub fn generate_and_save(dir: Option<&Path>, force: bool) -> Result<Self> {
+        let cert_dir = match dir {
+            Some(d) => d.to_path_buf(),
+            None => default_cert_dir()?,
+        };
+
+        // Check if certificates already exist
+        if Self::exists_in_directory(&cert_dir) && !force {
+            return Err(anyhow::anyhow!(
+                "Certificates already exist at {:?}\nUse --force to overwrite, or delete the directory manually",
+                cert_dir
+            ));
+        }
+
+        tracing::info!("Generating new certificate chain");
+        let chain = Self::generate()?;
+
+        chain
+            .save_to_directory(&cert_dir)
+            .context("Failed to save certificates")?;
+
+        tracing::info!("Certificates saved to {:?}", cert_dir);
+
+        Ok(chain)
     }
 }
 
@@ -214,7 +464,7 @@ mod tests {
         let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
 
         // Use a fixed port for testing
-        let test_port = 8443;
+        let test_port = 8423;
         let server_addr = format!("127.0.0.1:{}", test_port).parse().unwrap();
 
         let server_handle = tokio::spawn(async move {

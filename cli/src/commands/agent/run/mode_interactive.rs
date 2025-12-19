@@ -26,7 +26,7 @@ use stakpak_api::{
 };
 use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::CertificateStrategy;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
@@ -1204,16 +1204,23 @@ async fn initialize_mcp_server_and_tools(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Generate certificates for mTLS
+    // Generate ephemeral certificates for mTLS
+    let strategy = CertificateStrategy::Ephemeral;
     let certificate_chain = Arc::new(Some(
-        CertificateChain::generate().map_err(|e| e.to_string())?,
+        strategy
+            .get_certificate_chain()
+            .map_err(|e| e.to_string())?,
     ));
 
     let protocol = "https";
     let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
     // Start MCP server in background
-    let certificate_chain_for_server = certificate_chain.clone();
+    let server_config_for_server = Some(
+        strategy
+            .load_server_config()
+            .map_err(|e| format!("Failed to create server config: {}", e))?,
+    );
     let client_for_server = client.clone();
 
     tokio::spawn(async move {
@@ -1225,7 +1232,7 @@ async fn initialize_mcp_server_and_tools(
                 enabled_tools: EnabledToolsConfig { slack: false },
                 tool_mode: ToolMode::Combined,
                 bind_address,
-                certificate_chain: certificate_chain_for_server,
+                server_config: Arc::new(server_config_for_server),
                 subagent_configs: None,
             },
             Some(listener),
