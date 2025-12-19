@@ -909,7 +909,7 @@ fn get_search_model(model: LLMModel) -> LLMModel {
     match model {
         LLMModel::Anthropic(_) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
         LLMModel::OpenAI(_) => LLMModel::OpenAI(OpenAIModel::O4Mini),
-        LLMModel::Gemini(_) => LLMModel::Gemini(GeminiModel::Gemini25Flash),
+        LLMModel::Gemini(_) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
         _ => model,
     }
 }
