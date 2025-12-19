@@ -59,12 +59,10 @@ impl CertificateStrategy {
     pub fn get_certificate_chain(&self) -> Result<CertificateChain> {
         match self {
             Self::Ephemeral => CertificateChain::generate(),
-            Self::Persistent(path) => {
-                return Err(anyhow::anyhow!(
-                    "Cannot get certificate chain for Persistent strategy. Certificates are stored at: {}",
-                    path.display()
-                ));
-            }
+            Self::Persistent(path) => Err(anyhow::anyhow!(
+                "Cannot get certificate chain for Persistent strategy. Certificates are stored at: {}",
+                path.display()
+            )),
         }
     }
 

@@ -151,14 +151,16 @@ impl McpCommands {
             } => {
                 server::run_server(
                     config,
-                    config_dir,
-                    port,
-                    disable_secret_redaction,
-                    privacy_mode,
-                    tool_mode,
-                    enable_slack_tools,
-                    index_big_project,
-                    disable_mcp_mtls,
+                    server::ServerOptions {
+                        config_dir,
+                        port,
+                        disable_secret_redaction,
+                        privacy_mode,
+                        tool_mode,
+                        enable_slack_tools,
+                        index_big_project,
+                        disable_mcp_mtls,
+                    },
                 )
                 .await
             }

@@ -7,6 +7,19 @@ use tokio::net::TcpListener;
 
 use crate::{commands::get_client, config::AppConfig, utils::network};
 
+/// Configuration options for running the MCP server
+pub struct ServerOptions {
+    pub config_dir: Option<PathBuf>,
+    pub port: Option<u16>,
+    pub disable_secret_redaction: bool,
+    pub privacy_mode: bool,
+    pub tool_mode: ToolMode,
+    pub enable_slack_tools: bool,
+    #[allow(dead_code)]
+    pub index_big_project: bool,
+    pub disable_mcp_mtls: bool,
+}
+
 pub async fn setup_certificates(out_dir: Option<PathBuf>, force: bool) -> Result<(), String> {
     println!("Stakpak MCP Certificate Setup\n");
 
@@ -49,18 +62,8 @@ pub async fn setup_certificates(out_dir: Option<PathBuf>, force: bool) -> Result
     }
 }
 
-pub async fn run_server(
-    config: AppConfig,
-    config_dir: Option<PathBuf>,
-    port: Option<u16>,
-    disable_secret_redaction: bool,
-    privacy_mode: bool,
-    tool_mode: ToolMode,
-    enable_slack_tools: bool,
-    _index_big_project: bool,
-    disable_mcp_mtls: bool,
-) -> Result<(), String> {
-    match tool_mode {
+pub async fn run_server(config: AppConfig, options: ServerOptions) -> Result<(), String> {
+    match options.tool_mode {
         ToolMode::RemoteOnly | ToolMode::Combined => {
             // Placeholder for code indexing logic
         }
@@ -68,7 +71,7 @@ pub async fn run_server(
     }
 
     // Bind to port (custom port or auto-select)
-    let listener = if let Some(port) = port {
+    let listener = if let Some(port) = options.port {
         TcpListener::bind(format!("0.0.0.0:{}", port))
             .await
             .map_err(|e| format!("Failed to bind to port {}: {}", port, e))?
@@ -83,8 +86,9 @@ pub async fn run_server(
         .to_string();
 
     // Load persisted certificates
-    let server_config = if !disable_mcp_mtls {
-        let cert_dir = config_dir
+    let server_config = if !options.disable_mcp_mtls {
+        let cert_dir = options
+            .config_dir
             .or_else(|| stakpak_shared::cert_utils::default_cert_dir().ok())
             .ok_or_else(|| "Could not determine certificate directory".to_string())?;
 
@@ -131,12 +135,12 @@ pub async fn run_server(
     start_server(
         MCPServerConfig {
             client: Some(get_client(&config).await?),
-            redact_secrets: !disable_secret_redaction,
-            privacy_mode,
+            redact_secrets: !options.disable_secret_redaction,
+            privacy_mode: options.privacy_mode,
             enabled_tools: EnabledToolsConfig {
-                slack: enable_slack_tools,
+                slack: options.enable_slack_tools,
             },
-            tool_mode,
+            tool_mode: options.tool_mode,
             subagent_configs: None,
             bind_address,
             server_config: Arc::new(server_config),
