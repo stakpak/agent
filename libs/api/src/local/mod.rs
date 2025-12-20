@@ -18,7 +18,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
     OpenAIModel, Tool,
 };
-use stakpak_shared::models::integrations::searchpak::*;
+use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
@@ -47,7 +47,7 @@ pub struct LocalClient {
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
-    pub _search_services_guard: Option<Arc<SearchServicesGuard>>,
+    pub _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
 }
 
 pub struct LocalClientConfig {
@@ -136,7 +136,7 @@ impl LocalClient {
             eco_model,
             recovery_model,
             hook_registry: Some(Arc::new(hook_registry)),
-            _search_services_guard: Some(Arc::new(SearchServicesGuard)),
+            _search_services_orchestrator: Some(Arc::new(SearchServicesOrchestrator)),
         })
     }
 }
@@ -452,10 +452,12 @@ impl AgentProvider for LocalClient {
     }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        let config = start_search_services().await.map_err(|e| e.to_string())?;
+        let config = SearchServicesOrchestrator::start()
+            .await
+            .map_err(|e| e.to_string())?;
 
         let api_url = format!("http://localhost:{}", config.api_port);
-        let search_client = SearchPakClient::new(api_url);
+        let search_client = SearchClient::new(api_url);
 
         let initial_query = if let Some(exclude) = &input.exclude_keywords {
             format!("{} -{}", input.keywords, exclude)
