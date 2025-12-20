@@ -18,9 +18,7 @@ use stakpak_shared::models::integrations::openai::{
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
     OpenAIModel, Tool,
 };
-use stakpak_shared::models::integrations::searchpak::{
-    AnalysisResult, ScrapedContent, SearchPakClient, ValidationResult,
-};
+use stakpak_shared::models::integrations::searchpak::*;
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
@@ -49,7 +47,7 @@ pub struct LocalClient {
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
-    pub search_pak_client: Arc<tokio::sync::Mutex<Option<SearchPakClient>>>,
+    pub _search_services_guard: Option<Arc<SearchServicesGuard>>,
 }
 
 pub struct LocalClientConfig {
@@ -138,7 +136,7 @@ impl LocalClient {
             eco_model,
             recovery_model,
             hook_registry: Some(Arc::new(hook_registry)),
-            search_pak_client: Arc::new(tokio::sync::Mutex::new(None)),
+            _search_services_guard: Some(Arc::new(SearchServicesGuard)),
         })
     }
 }
@@ -454,14 +452,10 @@ impl AgentProvider for LocalClient {
     }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        // Lazily initialize the search client if needed
-        let mut client_guard = self.search_pak_client.lock().await;
-        if client_guard.is_none() {
-            let mut client = SearchPakClient::new(None, None);
-            client.ensure_running().await.map_err(|e| e.to_string())?;
-            *client_guard = Some(client);
-        }
-        let client = client_guard.as_ref().unwrap();
+        let config = start_search_services().await.map_err(|e| e.to_string())?;
+
+        let api_url = format!("http://localhost:{}", config.api_port);
+        let search_client = SearchPakClient::new(api_url);
 
         let initial_query = if let Some(exclude) = &input.exclude_keywords {
             format!("{} -{}", input.keywords, exclude)
@@ -483,7 +477,7 @@ impl AgentProvider for LocalClient {
         for _iteration in 0..MAX_ITERATIONS {
             previous_queries.push(current_query.clone());
 
-            let search_results = client
+            let search_results = search_client
                 .search_and_scrape(current_query.clone())
                 .await
                 .map_err(|e| e.to_string())?;
@@ -595,17 +589,6 @@ impl LocalClient {
             openai_config: self.openai_config.clone(),
             gemini_config: self.gemini_config.clone(),
         }
-    }
-
-    /// Cleanup resources when the session ends.
-    /// Stops the SearchPak containers if they were started.
-    pub async fn cleanup(&self) -> Result<(), String> {
-        let mut client_guard = self.search_pak_client.lock().await;
-        if let Some(client) = client_guard.as_mut() {
-            client.stop().await.map_err(|e| e.to_string())?;
-            *client_guard = None;
-        }
-        Ok(())
     }
 
     async fn run_agent_completion(
