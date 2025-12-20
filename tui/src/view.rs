@@ -1,8 +1,5 @@
 use crate::app::{AppState, LoadingType};
-use crate::constants::{
-    CONTEXT_HIGH_UTIL_THRESHOLD, CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO,
-    CONTEXT_MAX_UTIL_TOKENS_RECOVERY, DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES,
-};
+use crate::constants::{DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
 use crate::services::hint_helper::render_hint_or_shortcuts;
@@ -18,7 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate the required height for the input area based on content
@@ -402,12 +399,13 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     if !state.show_sessions_dialog {
         if used_context.total_tokens > 0 {
-            // Use eco limit if eco model is selected
-            let max_tokens = match state.model {
-                AgentModel::Eco => CONTEXT_MAX_UTIL_TOKENS_ECO,
-                AgentModel::Smart => CONTEXT_MAX_UTIL_TOKENS,
-                AgentModel::Recovery => CONTEXT_MAX_UTIL_TOKENS_RECOVERY,
-            };
+            // Get context info from model
+            let context_info = state
+                .llm_model
+                .as_ref()
+                .map(|model| model.context_info())
+                .unwrap_or_default();
+            let max_tokens = context_info.max_tokens as u32;
 
             let capped_tokens = used_context.total_tokens.min(max_tokens);
             let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
@@ -419,7 +417,10 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
                     state.total_session_usage.total_tokens,
                 )
             );
-            let high_utilization = capped_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
+
+            // Calculate high utilization threshold (e.g. 90%)
+            let high_util_threshold = (max_tokens as f64 * 0.9) as u32;
+            let high_utilization = capped_tokens >= high_util_threshold;
 
             state.context_usage_percent = ctx_percentage;
 

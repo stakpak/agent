@@ -11,6 +11,7 @@ use crate::services::message::Message;
 use crate::services::message::get_wrapped_collapsed_message_lines_cached;
 use ratatui::layout::Size;
 use ratatui::style::Color;
+use stakpak_shared::models::llm::LLMModel;
 use uuid::Uuid;
 
 /// Handle error event
@@ -255,4 +256,9 @@ pub fn handle_assistant_message(state: &mut AppState, msg: String) {
 /// Handle get status event
 pub fn handle_get_status(state: &mut AppState, account_info: String) {
     state.account_info = account_info;
+}
+
+/// Handle stream model event
+pub fn handle_stream_model(state: &mut AppState, model: LLMModel) {
+    state.llm_model = Some(model);
 }

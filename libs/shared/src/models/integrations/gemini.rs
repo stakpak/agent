@@ -3,10 +3,12 @@ use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMMessage,
     LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
 };
+use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use futures_util::StreamExt;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -28,10 +30,6 @@ pub enum GeminiModel {
     Gemini25Flash,
     #[serde(rename = "gemini-2.5-flash-lite")]
     Gemini25FlashLite,
-    #[serde(rename = "gemini-2.0-flash")]
-    Gemini20Flash,
-    #[serde(rename = "gemini-2.0-flash-lite")]
-    Gemini20FlashLite,
 }
 
 impl std::fmt::Display for GeminiModel {
@@ -41,8 +39,6 @@ impl std::fmt::Display for GeminiModel {
             GeminiModel::Gemini25Pro => write!(f, "gemini-2.5-pro"),
             GeminiModel::Gemini25Flash => write!(f, "gemini-2.5-flash"),
             GeminiModel::Gemini25FlashLite => write!(f, "gemini-2.5-flash-lite"),
-            GeminiModel::Gemini20Flash => write!(f, "gemini-2.0-flash"),
-            GeminiModel::Gemini20FlashLite => write!(f, "gemini-2.0-flash-lite"),
         }
     }
 }
@@ -51,6 +47,102 @@ impl GeminiModel {
     pub fn from_string(s: &str) -> Result<Self, String> {
         serde_json::from_value(serde_json::Value::String(s.to_string()))
             .map_err(|_| "Failed to deserialize Gemini model".to_string())
+    }
+
+    /// Default smart model for Gemini
+    pub const DEFAULT_SMART_MODEL: GeminiModel = GeminiModel::Gemini3Pro;
+
+    /// Default eco model for Gemini
+    pub const DEFAULT_ECO_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+
+    /// Default recovery model for Gemini
+    pub const DEFAULT_RECOVERY_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+
+    /// Get default smart model as string
+    pub fn default_smart_model() -> String {
+        Self::DEFAULT_SMART_MODEL.to_string()
+    }
+
+    /// Get default eco model as string
+    pub fn default_eco_model() -> String {
+        Self::DEFAULT_ECO_MODEL.to_string()
+    }
+
+    /// Get default recovery model as string
+    pub fn default_recovery_model() -> String {
+        Self::DEFAULT_RECOVERY_MODEL.to_string()
+    }
+}
+
+impl ContextAware for GeminiModel {
+    fn context_info(&self) -> ModelContextInfo {
+        match self {
+            GeminiModel::Gemini3Pro => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![
+                    ContextPricingTier {
+                        label: "<200k tokens".to_string(),
+                        input_cost_per_million: 2.0,
+                        output_cost_per_million: 12.0,
+                        upper_bound: Some(200_000),
+                    },
+                    ContextPricingTier {
+                        label: ">200k tokens".to_string(),
+                        input_cost_per_million: 4.0,
+                        output_cost_per_million: 18.0,
+                        upper_bound: None,
+                    },
+                ],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25Pro => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![
+                    ContextPricingTier {
+                        label: "<200k tokens".to_string(),
+                        input_cost_per_million: 1.25,
+                        output_cost_per_million: 10.0,
+                        upper_bound: Some(200_000),
+                    },
+                    ContextPricingTier {
+                        label: ">200k tokens".to_string(),
+                        input_cost_per_million: 2.50,
+                        output_cost_per_million: 15.0,
+                        upper_bound: None,
+                    },
+                ],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25Flash => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.30,
+                    output_cost_per_million: 2.50,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            },
+            GeminiModel::Gemini25FlashLite => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.1,
+                    output_cost_per_million: 0.4,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            },
+        }
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            GeminiModel::Gemini3Pro => "Gemini 3 Pro".to_string(),
+            GeminiModel::Gemini25Pro => "Gemini 2.5 Pro".to_string(),
+            GeminiModel::Gemini25Flash => "Gemini 2.5 Flash".to_string(),
+            GeminiModel::Gemini25FlashLite => "Gemini 2.5 Flash Lite".to_string(),
+        }
     }
 }
 
@@ -177,6 +269,7 @@ pub struct GeminiGenerationConfig {
 // Gemini API Response Structs
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiResponse {
     pub candidates: Option<Vec<GeminiCandidate>>,
     pub usage_metadata: Option<GeminiUsageMetadata>,
@@ -185,6 +278,7 @@ pub struct GeminiResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiCandidate {
     pub content: Option<GeminiContent>,
     pub finish_reason: Option<String>,
@@ -192,6 +286,7 @@ pub struct GeminiCandidate {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiUsageMetadata {
     pub prompt_token_count: Option<u32>,
     pub cached_content_token_count: Option<u32>,
@@ -410,12 +505,28 @@ impl Gemini {
             .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::ApiError(e.to_string())))?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+
+            // Try to parse as JSON and extract error message
+            let error_message = if let Ok(json) = serde_json::from_str::<Value>(&error_text) {
+                if let Some(error_obj) = json.get("error") {
+                    if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                        message.to_string()
+                    } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                        format!("API error: {}", code)
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                }
+            } else {
+                error_text
+            };
+
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "{}: {}",
-                    response.status(),
-                    response.text().await.unwrap_or_default()
-                ),
+                format!("{}: {}", status, error_message),
             )));
         }
 
@@ -426,6 +537,24 @@ impl Gemini {
                 e
             )))
         })?;
+
+        // Check if the response contains an error field before deserializing
+        if let Ok(json) = serde_json::from_str::<Value>(&response_text)
+            && let Some(error_obj) = json.get("error")
+        {
+            let error_message = if let Some(message) =
+                error_obj.get("message").and_then(|m| m.as_str())
+            {
+                message.to_string()
+            } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                format!("API error: {}", code)
+            } else {
+                serde_json::to_string(error_obj).unwrap_or_else(|_| "Unknown API error".to_string())
+            };
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                error_message,
+            )));
+        }
 
         let gemini_response: GeminiResponse =
             serde_json::from_str(&response_text).map_err(|e| {
@@ -481,9 +610,27 @@ impl Gemini {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
+            let error_text = response.text().await.unwrap_or_default();
+
+            // Try to parse as JSON and extract error message
+            let error_message = if let Ok(json) = serde_json::from_str::<Value>(&error_text) {
+                if let Some(error_obj) = json.get("error") {
+                    if let Some(message) = error_obj.get("message").and_then(|m| m.as_str()) {
+                        message.to_string()
+                    } else if let Some(code) = error_obj.get("code").and_then(|c| c.as_str()) {
+                        format!("API error: {}", code)
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                }
+            } else {
+                error_text
+            };
+
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!("{}: {}", status, error_body),
+                format!("{}: {}", status, error_message),
             )));
         }
 
@@ -802,8 +949,6 @@ async fn process_gemini_stream(
             },
         },
     }];
-
-    eprint!("{:?}", completion_response);
 
     Ok(completion_response)
 }

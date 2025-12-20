@@ -1,11 +1,3 @@
-// ========== Context & Token Limits ==========
-pub const CONTEXT_LESS_CHARGE_LIMIT: u32 = 200_000;
-pub const CONTEXT_MAX_UTIL_TOKENS: u32 = 1_000_000; // Claude Sonnect 4.5 limit
-pub const CONTEXT_MAX_UTIL_TOKENS_ECO: u32 = 200_000; // Claude Haiku 4.5 limit
-pub const CONTEXT_MAX_UTIL_TOKENS_RECOVERY: u32 = 400_000; // GPT5 limit
-pub const CONTEXT_HIGH_UTIL_THRESHOLD: u32 = CONTEXT_LESS_CHARGE_LIMIT * 9 / 10;
-pub const CONTEXT_APPROACH_PERCENT: u64 = 85;
-
 // ========== Input & Shell Constants ==========
 pub const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
@@ -22,44 +14,6 @@ pub const EXCEEDED_API_LIMIT_ERROR_MESSAGE: &str = "Exceeded credits plan limit.
 
 // ========== File Paths ==========
 pub const AUTO_APPROVE_CONFIG_PATH: &str = ".stakpak/session/auto_approve.json";
-
-#[derive(Clone, Copy)]
-pub struct ContextPricingTier {
-    pub tier_label: &'static str,
-    pub input_cost: &'static str,
-    pub output_cost: &'static str,
-    /// Inclusive upper bound for the tier, if applicable.
-    pub upper_bound: Option<u32>,
-}
-
-pub const CONTEXT_PRICING_TABLE: [ContextPricingTier; 2] = [
-    ContextPricingTier {
-        tier_label: "<200K tokens",
-        input_cost: "$3/1M",
-        output_cost: "$15/1M",
-        upper_bound: Some(CONTEXT_LESS_CHARGE_LIMIT),
-    },
-    ContextPricingTier {
-        tier_label: "200K-1M tokens",
-        input_cost: "$6/1M",
-        output_cost: "$22.5/1M",
-        upper_bound: None,
-    },
-];
-
-pub const CONTEXT_PRICING_TABLE_ECO: [ContextPricingTier; 1] = [ContextPricingTier {
-    tier_label: "0-200K tokens",
-    input_cost: "$1/1M",
-    output_cost: "$5/1M",
-    upper_bound: Some(CONTEXT_MAX_UTIL_TOKENS_ECO),
-}];
-
-pub const CONTEXT_PRICING_TABLE_RECOVERY: [ContextPricingTier; 1] = [ContextPricingTier {
-    tier_label: "0-400K tokens",
-    input_cost: "$1.25/1M",
-    output_cost: "$10/1M",
-    upper_bound: Some(CONTEXT_MAX_UTIL_TOKENS_RECOVERY),
-}];
 
 pub const SUMMARIZE_PROMPT_BASE: &str = "\
 You are the Stakpak session summarizer. You have full context of the session, including workspace state, current working directory, and file activity.\n\

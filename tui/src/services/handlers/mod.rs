@@ -373,8 +373,12 @@ pub fn update(
         InputEvent::GetStatus(account_info) => {
             misc::handle_get_status(state, account_info);
         }
-
-        _ => {}
+        InputEvent::StreamModel(model) => {
+            misc::handle_stream_model(state, model);
+        }
+        InputEvent::RunToolCall(_) => {}
+        InputEvent::ToolResult(_) => {}
+        InputEvent::ApprovalPopupSubmit => {}
     }
 
     navigation::adjust_scroll(state, message_area_height, message_area_width);

@@ -68,6 +68,10 @@ pub struct ProfileConfig {
 pub struct Settings {
     pub machine_name: Option<String>,
     pub auto_append_gitignore: Option<bool>,
+    /// Unique ID for anonymous telemetry (formerly user_id)
+    #[serde(alias = "user_id")]
+    pub anonymous_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -101,6 +105,8 @@ pub struct AppConfig {
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
+    pub anonymous_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -135,6 +141,8 @@ impl From<AppConfig> for Settings {
         Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
+            anonymous_id: config.anonymous_id,
+            collect_telemetry: config.collect_telemetry,
         }
     }
 }
@@ -144,6 +152,8 @@ impl From<OldAppConfig> for Settings {
         Settings {
             machine_name: old_config.machine_name,
             auto_append_gitignore: old_config.auto_append_gitignore,
+            anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+            collect_telemetry: Some(true),
         }
     }
 }
@@ -151,9 +161,13 @@ impl From<OldAppConfig> for Settings {
 impl From<OldAppConfig> for ConfigFile {
     // OldAppConfigConfig will always create a 'default' ConfigFile
     fn from(old_config: OldAppConfig) -> Self {
+        let settings: Settings = old_config.clone().into();
         ConfigFile {
-            profiles: HashMap::from([("default".to_string(), old_config.clone().into())]),
-            settings: old_config.into(),
+            profiles: HashMap::from([(
+                "default".to_string(),
+                ProfileConfig::migrated_from_old_config(old_config),
+            )]),
+            settings,
         }
     }
 }
@@ -178,6 +192,19 @@ impl From<AppConfig> for ProfileConfig {
     }
 }
 
+impl From<ConfigFile> for AppConfig {
+    fn from(file: ConfigFile) -> Self {
+        let profile_name = "default";
+        let profile = file.profiles.get(profile_name).cloned().unwrap_or_default();
+        Self::build(
+            "default",
+            PathBuf::from(STAKPAK_CONFIG_PATH),
+            file.settings,
+            profile,
+        )
+    }
+}
+
 impl Default for ConfigFile {
     fn default() -> Self {
         ConfigFile {
@@ -185,6 +212,8 @@ impl Default for ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -200,6 +229,8 @@ impl ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -231,7 +262,16 @@ impl ConfigFile {
     }
 
     fn set_app_config_settings(&mut self, config: AppConfig) {
-        self.settings = config.into();
+        // Preserve existing anonymous_id and collect_telemetry if AppConfig values are None
+        let existing_anonymous_id = self.settings.anonymous_id.clone();
+        let existing_collect_telemetry = self.settings.collect_telemetry;
+
+        self.settings = Settings {
+            machine_name: config.machine_name,
+            auto_append_gitignore: config.auto_append_gitignore,
+            anonymous_id: config.anonymous_id.or(existing_anonymous_id),
+            collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
+        };
     }
 
     fn contains_readonly(&self) -> bool {
@@ -294,6 +334,14 @@ impl ProfileConfig {
             api_endpoint: default_profile.and_then(|p| p.api_endpoint.clone()),
             api_key: default_profile.and_then(|p| p.api_key.clone()),
             warden: Some(WardenConfig::readonly_profile()),
+            ..ProfileConfig::default()
+        }
+    }
+
+    fn migrated_from_old_config(old_config: OldAppConfig) -> Self {
+        ProfileConfig {
+            api_endpoint: Some(old_config.api_endpoint),
+            api_key: old_config.api_key,
             ..ProfileConfig::default()
         }
     }
@@ -452,6 +500,8 @@ impl AppConfig {
             smart_model: profile_config.smart_model,
             eco_model: profile_config.eco_model,
             recovery_model: profile_config.recovery_model,
+            anonymous_id: settings.anonymous_id,
+            collect_telemetry: settings.collect_telemetry,
         }
     }
 
@@ -640,6 +690,8 @@ auto_append_gitignore = true
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            anonymous_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         }
     }
 
@@ -756,6 +808,8 @@ auto_append_gitignore = true
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some("test-user-id".into()),
+                collect_telemetry: Some(true),
             },
         };
 
@@ -1002,6 +1056,8 @@ auto_append_gitignore = true
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            anonymous_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         };
 
         config.save().unwrap();
