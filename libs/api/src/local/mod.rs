@@ -49,6 +49,7 @@ pub struct LocalClient {
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+    pub search_pak_client: Arc<tokio::sync::Mutex<Option<SearchPakClient>>>,
 }
 
 pub struct LocalClientConfig {
@@ -137,6 +138,7 @@ impl LocalClient {
             eco_model,
             recovery_model,
             hook_registry: Some(Arc::new(hook_registry)),
+            search_pak_client: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 }
@@ -452,8 +454,14 @@ impl AgentProvider for LocalClient {
     }
 
     async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        let mut client = SearchPakClient::new(None, None);
-        client.ensure_running().await.map_err(|e| e.to_string())?;
+        // Lazily initialize the search client if needed
+        let mut client_guard = self.search_pak_client.lock().await;
+        if client_guard.is_none() {
+            let mut client = SearchPakClient::new(None, None);
+            client.ensure_running().await.map_err(|e| e.to_string())?;
+            *client_guard = Some(client);
+        }
+        let client = client_guard.as_ref().unwrap();
 
         let initial_query = if let Some(exclude) = &input.exclude_keywords {
             format!("{} -{}", input.keywords, exclude)
@@ -526,8 +534,6 @@ impl AgentProvider for LocalClient {
             }
         }
 
-        client.stop().await.map_err(|e| e.to_string())?;
-
         if final_valid_docs.is_empty() {
             return Ok(Vec::new());
         }
@@ -589,6 +595,17 @@ impl LocalClient {
             openai_config: self.openai_config.clone(),
             gemini_config: self.gemini_config.clone(),
         }
+    }
+
+    /// Cleanup resources when the session ends.
+    /// Stops the SearchPak containers if they were started.
+    pub async fn cleanup(&self) -> Result<(), String> {
+        let mut client_guard = self.search_pak_client.lock().await;
+        if let Some(client) = client_guard.as_mut() {
+            client.stop().await.map_err(|e| e.to_string())?;
+            *client_guard = None;
+        }
+        Ok(())
     }
 
     async fn run_agent_completion(

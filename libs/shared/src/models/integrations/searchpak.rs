@@ -120,6 +120,7 @@ pub struct SearchPakConfig {
     pub api_container_id: String,
 }
 
+#[derive(Debug)]
 pub struct SearchPakClient {
     client: ClientWithMiddleware,
     api_url: String,
@@ -363,10 +364,46 @@ impl SearchPakClient {
     }
 
     async fn start_containers(&mut self) -> Result<(), AgentError> {
+        // Check if Docker is available
+        if !crate::container::is_docker_available() {
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                "Docker is not installed or not accessible. Please install Docker to use web search functionality.".to_string(),
+            )));
+        }
+
         let searxng_image = env::var("SEARXNG_IMAGE")
             .unwrap_or_else(|_| "299shehab299/searchpak:searxng".to_string());
         let api_image =
             env::var("API_IMAGE").unwrap_or_else(|_| "299shehab299/searchpak:api".to_string());
+
+        // Check if images exist locally
+        if !crate::container::image_exists_locally(&searxng_image).map_err(|e| {
+            AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                "Failed to check SearXNG image: {}",
+                e
+            )))
+        })? {
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                format!(
+                    "Docker image '{}' not found locally. Please pull it with: docker pull {}",
+                    searxng_image, searxng_image
+                ),
+            )));
+        }
+
+        if !crate::container::image_exists_locally(&api_image).map_err(|e| {
+            AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                "Failed to check API image: {}",
+                e
+            )))
+        })? {
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                format!(
+                    "Docker image '{}' not found locally. Please pull it with: docker pull {}",
+                    api_image, api_image
+                ),
+            )));
+        }
 
         let (searxng_port, api_port) = Self::find_two_available_ports()?;
 

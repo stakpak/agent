@@ -18,6 +18,31 @@ pub fn find_available_port() -> Option<u16> {
     }
 }
 
+/// Checks if Docker is installed and accessible
+pub fn is_docker_available() -> bool {
+    Command::new("docker")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Checks if a Docker image exists locally
+pub fn image_exists_locally(image: &str) -> Result<bool, String> {
+    let output = Command::new("docker")
+        .args(["images", "-q", image])
+        .output()
+        .map_err(|e| format!("Failed to execute docker images command: {}", e))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(!stdout.is_empty())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("Docker images command failed: {}", stderr))
+    }
+}
+
 pub fn run_container_detached(config: ContainerConfig) -> Result<String, String> {
     let mut cmd = Command::new("docker");
 
