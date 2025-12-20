@@ -15,6 +15,9 @@ const MIN_LIMIT: u32 = 1;
 const MAX_LIMIT: u32 = 100;
 const CONFIG_FILE: &str = "search_config.json";
 
+const DEFAULT_SEARXNG_IMAGE: &str = "ghcr.io/stakpak/local_search_service/searxng-service:latest";
+const DEFAULT_API_IMAGE: &str = "ghcr.io/stakpak/local_search_service/search-api-service:latest";
+
 // Results
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -242,10 +245,9 @@ impl SearchServicesOrchestrator {
             )));
         }
 
-        let searxng_image = env::var("SEARXNG_IMAGE")
-            .unwrap_or_else(|_| "299shehab299/searchpak:searxng".to_string());
-        let api_image =
-            env::var("API_IMAGE").unwrap_or_else(|_| "299shehab299/searchpak:api".to_string());
+        let searxng_image =
+            env::var("SEARXNG_IMAGE").unwrap_or_else(|_| DEFAULT_SEARXNG_IMAGE.to_string());
+        let api_image = env::var("API_IMAGE").unwrap_or_else(|_| DEFAULT_API_IMAGE.to_string());
 
         Self::ensure_image_exists(&searxng_image)?;
         Self::ensure_image_exists(&api_image)?;
