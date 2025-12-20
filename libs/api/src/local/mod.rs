@@ -532,12 +532,14 @@ impl AgentProvider for LocalClient {
             return Ok(Vec::new());
         }
 
-        let contents = final_valid_docs
+        let contents: Vec<Content> = final_valid_docs
             .into_iter()
             .map(|result| {
                 Content::text(format!(
-                    "Title: {:?}\nURL: {}\nContent: {:?}",
-                    result.title, result.url, result.content
+                    "Title: {}\nURL: {}\nContent: {}",
+                    result.title.unwrap_or_default(),
+                    result.url,
+                    result.content.unwrap_or_default(),
                 ))
             })
             .collect();

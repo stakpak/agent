@@ -11,10 +11,6 @@ pub struct ContainerConfig {
     pub volumes: Vec<String>,     // Format: "host_path:container_path"
 }
 
-pub fn is_available_port(port: u16) -> bool {
-    TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok()
-}
-
 pub fn find_available_port() -> Option<u16> {
     match TcpListener::bind("0.0.0.0:0") {
         Ok(listener) => listener.local_addr().ok().map(|addr| addr.port()),
