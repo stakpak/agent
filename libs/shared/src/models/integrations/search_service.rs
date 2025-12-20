@@ -221,57 +221,17 @@ impl SearchClient {
 pub struct SearchServicesOrchestrator;
 
 impl SearchServicesOrchestrator {
-    pub fn find_two_available_ports() -> Result<(u16, u16), AgentError> {
-        let port1 = crate::container::find_available_port().ok_or_else(|| {
-            AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                "Failed to find first available port".to_string(),
-            ))
-        })?;
-
-        for _ in 0..5 {
-            if let Some(port2) = crate::container::find_available_port()
-                && port2 != port1
-            {
-                return Ok((port1, port2));
-            }
-        }
-
-        Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-            "Failed to find two different available ports".to_string(),
-        )))
-    }
-
-    pub fn ensure_image_exists(image: &str) -> Result<(), AgentError> {
-        if !crate::container::image_exists_locally(image).map_err(|e| {
-            AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                "Failed to check image: {}",
-                e
-            )))
-        })? {
-            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "Docker image '{}' not found locally. Please pull it with: docker pull {}",
-                    image, image
-                ),
-            )));
-        }
-        Ok(())
-    }
-
     pub async fn start() -> Result<SearchConfig, AgentError> {
-        // 1. Try to load existing config
         if let Some(config) = Self::load_config() {
             let api_url = format!("http://localhost:{}", config.api_port);
             let searxng_url = format!("http://localhost:{}", config.searxng_port);
 
-            // 2. Check if services are healthy
             if Self::health_check_api(&api_url).await.is_ok()
                 && Self::health_check_searxng(&searxng_url).await.is_ok()
             {
                 return Ok(config);
             }
 
-            // 3. If not healthy, stop containers
             let _ = crate::container::stop_container(&config.searxng_container_id);
             let _ = crate::container::stop_container(&config.api_container_id);
         }
@@ -287,7 +247,6 @@ impl SearchServicesOrchestrator {
         let api_image =
             env::var("API_IMAGE").unwrap_or_else(|_| "299shehab299/searchpak:api".to_string());
 
-        // Check if images exist locally
         Self::ensure_image_exists(&searxng_image)?;
         Self::ensure_image_exists(&api_image)?;
 
@@ -479,6 +438,43 @@ impl SearchServicesOrchestrator {
             )));
         }
 
+        Ok(())
+    }
+
+    fn find_two_available_ports() -> Result<(u16, u16), AgentError> {
+        let port1 = crate::container::find_available_port().ok_or_else(|| {
+            AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                "Failed to find first available port".to_string(),
+            ))
+        })?;
+
+        for _ in 0..5 {
+            if let Some(port2) = crate::container::find_available_port()
+                && port2 != port1
+            {
+                return Ok((port1, port2));
+            }
+        }
+
+        Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+            "Failed to find two different available ports".to_string(),
+        )))
+    }
+
+    fn ensure_image_exists(image: &str) -> Result<(), AgentError> {
+        if !crate::container::image_exists_locally(image).map_err(|e| {
+            AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                "Failed to check image: {}",
+                e
+            )))
+        })? {
+            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                format!(
+                    "Docker image '{}' not found locally. Please pull it with: docker pull {}",
+                    image, image
+                ),
+            )));
+        }
         Ok(())
     }
 }
