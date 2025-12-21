@@ -178,6 +178,58 @@ data:
 # LLM can still work with the structure and reference the token
 ```
 
+## Password Type Protection
+
+### Overview
+
+use a dedicated `Password` type from the `secrecy` crate to provide compile time protection against accidental password logging
+
+### Implementation
+
+The `Password` type (defined in `libs/shared/src/models/password.rs`) wraps `SecretString` and provides:
+
+- **Automatic Log Protection**: Accidental `println!("{:?}", struct)` won't leak passwords
+- **Type Safety**: Enforces at compile time that any Password value is not empty and longer than 8 characters
+
+### Usage
+
+All password fields in structs now use `Option<Password>` instead of `Option<String>`:
+
+```rust
+use stakpak_shared::models::Password;
+
+#[derive(Serialize, Deserialize)]
+pub struct RemoteConnectionInfo {
+    pub connection_string: String,
+    pub password: Option<Password>,
+    pub private_key_path: Option<String>,
+}
+
+// Creating a password
+let password = Password::new("my_secret_password");
+
+// Debug output (redacted)
+println!("{:?}", password);
+// => Password(SecretString(Secret([REDACTED])))
+
+// Accessing the password when needed
+let connection_result = session.authenticate_password(
+    username,
+    password.expose_secret()  // Explicit call required
+);
+```
+
+### Structs Using Password Type
+
+The following structs have been updated to use `Password`:
+
+- `RemoteConnectionInfo` (libs/shared/src/remote_connection.rs)
+- `RunCommandRequest` (libs/mcp/server/src/local_tools.rs)
+- `ViewRequest` (libs/mcp/server/src/local_tools.rs)
+- `StrReplaceRequest` (libs/mcp/server/src/local_tools.rs)
+- `CreateRequest` (libs/mcp/server/src/local_tools.rs)
+- `RemoveRequest` (libs/mcp/server/src/local_tools.rs)
+
 ## Configuration
 
 The feature is controlled by the `redact_secrets` flag in the MCP server configuration:

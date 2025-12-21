@@ -1,5 +1,6 @@
 pub mod gitleaks;
 use crate::helper::generate_simple_id;
+use crate::models::password::Password;
 /// Re-export the gitleaks initialization function for external access
 pub use gitleaks::initialize_gitleaks_config;
 use gitleaks::{DetectedSecret, detect_secrets};
@@ -151,39 +152,31 @@ pub fn restore_secrets(redacted_string: &str, redaction_map: &HashMap<String, St
     restored
 }
 
-/// Redacts a specific password value from the content without running secret detection
+/// Redacts a specific password value without running secret detection
 pub fn redact_password(
-    content: &str,
-    password: &str,
+    password: &Password,
     old_redaction_map: &HashMap<String, String>,
 ) -> RedactionResult {
-    if password.is_empty() {
-        return RedactionResult::new(content.to_string(), HashMap::new());
-    }
+    let password_str = password.expose_secret();
 
-    let mut redacted_string = content.to_string();
     let mut redaction_map = old_redaction_map.clone();
-    let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
+    let reverse_redaction_map: HashMap<String, String> = old_redaction_map
         .clone()
         .into_iter()
         .map(|(k, v)| (v, k))
         .collect();
 
     // Check if we already have a redaction key for this password
-    let redaction_key = if let Some(existing_key) = reverse_redaction_map.get(password) {
+    let redaction_key = if let Some(existing_key) = reverse_redaction_map.get(password_str) {
         existing_key.clone()
     } else {
         let key = generate_redaction_key("password");
         // Store the mapping
-        redaction_map.insert(key.clone(), password.to_string());
-        reverse_redaction_map.insert(password.to_string(), key.clone());
+        redaction_map.insert(key.clone(), password_str.to_string());
         key
     };
 
-    // Replace all occurrences of the password
-    redacted_string = redacted_string.replace(password, &redaction_key);
-
-    RedactionResult::new(redacted_string, redaction_map)
+    RedactionResult::new(redaction_key, redaction_map)
 }
 
 /// Generates a random redaction key
@@ -1243,12 +1236,10 @@ export PORT=3000
 
     #[test]
     fn test_redact_password_basic() {
-        let content = "User password is supersecret123 and should be hidden";
-        let password = "supersecret123";
-        let result = redact_password(content, password, &HashMap::new());
+        let password = Password::new("supersecret123").unwrap();
+        let result = redact_password(&password, &HashMap::new());
 
-        // Should redact the password
-        assert!(!result.redacted_string.contains(password));
+        // Should return a redaction key
         assert!(
             result
                 .redacted_string
@@ -1258,34 +1249,7 @@ export PORT=3000
 
         // The redaction map should contain our password
         let redacted_password = result.redaction_map.values().next().unwrap();
-        assert_eq!(redacted_password, password);
-    }
-
-    #[test]
-    fn test_redact_password_empty() {
-        let content = "Some content without password";
-        let password = "";
-        let result = redact_password(content, password, &HashMap::new());
-
-        // Should not change anything
-        assert_eq!(result.redacted_string, content);
-        assert!(result.redaction_map.is_empty());
-    }
-
-    #[test]
-    fn test_redact_password_multiple_occurrences() {
-        let content = "Password is mypass123 and again mypass123 appears here";
-        let password = "mypass123";
-        let result = redact_password(content, password, &HashMap::new());
-
-        // Should redact both occurrences with the same key
-        assert!(!result.redacted_string.contains(password));
-        assert_eq!(result.redaction_map.len(), 1);
-
-        // Count redaction keys in the result
-        let redaction_key = result.redaction_map.keys().next().unwrap();
-        let count = result.redacted_string.matches(redaction_key).count();
-        assert_eq!(count, 2);
+        assert_eq!(redacted_password, "supersecret123");
     }
 
     #[test]
@@ -1297,9 +1261,8 @@ export PORT=3000
             "mypassword".to_string(),
         );
 
-        let content = "The password mypassword should use existing key";
-        let password = "mypassword";
-        let result = redact_password(content, password, &existing_map);
+        let password = Password::new("mypassword").unwrap();
+        let result = redact_password(&password, &existing_map);
 
         // Should reuse the existing key
         assert_eq!(result.redaction_map.len(), 1);
@@ -1308,11 +1271,7 @@ export PORT=3000
                 .redaction_map
                 .contains_key("[REDACTED_SECRET:password:abc123]")
         );
-        assert!(
-            result
-                .redacted_string
-                .contains("[REDACTED_SECRET:password:abc123]")
-        );
+        assert_eq!(result.redacted_string, "[REDACTED_SECRET:password:abc123]");
     }
 
     #[test]
@@ -1324,9 +1283,8 @@ export PORT=3000
             "some_api_key".to_string(),
         );
 
-        let content = "API key is some_api_key and password is newpassword123";
-        let password = "newpassword123";
-        let result = redact_password(content, password, &existing_map);
+        let password = Password::new("newpassword123").unwrap();
+        let result = redact_password(&password, &existing_map);
 
         // Should preserve existing mapping and add new one
         assert_eq!(result.redaction_map.len(), 2);
@@ -1355,33 +1313,41 @@ export PORT=3000
             result.redaction_map.get(password_key).unwrap(),
             "newpassword123"
         );
+        assert_eq!(&result.redacted_string, password_key);
     }
 
     #[test]
     fn test_redact_password_no_match() {
-        let content = "This content has no matching password";
-        let password = "notfound";
-        let result = redact_password(content, password, &HashMap::new());
+        let password = Password::new("notfound123").unwrap();
+        let result = redact_password(&password, &HashMap::new());
 
-        // Should still create a redaction key but content unchanged
-        assert_eq!(result.redacted_string, content);
+        // Should still create a redaction key
         assert_eq!(result.redaction_map.len(), 1);
-        assert_eq!(result.redaction_map.values().next().unwrap(), "notfound");
+        assert_eq!(result.redaction_map.values().next().unwrap(), "notfound123");
+        assert!(
+            result
+                .redacted_string
+                .contains("[REDACTED_SECRET:password:")
+        );
+        assert!(!result.redacted_string.contains("notfound123"));
     }
 
     #[test]
     fn test_redact_password_integration_with_restore() {
-        let content = "Login with username admin and password secret456";
-        let password = "secret456";
-        let result = redact_password(content, password, &HashMap::new());
+        let password = Password::new("secret456").unwrap();
+        let result = redact_password(&password, &HashMap::new());
 
         // Redact the password
-        assert!(!result.redacted_string.contains(password));
-        assert!(result.redacted_string.contains("username admin"));
+        assert!(
+            result
+                .redacted_string
+                .contains("[REDACTED_SECRET:password:")
+        );
+        assert!(!result.redacted_string.contains("secret456"));
 
         // Restore should bring back the original
         let restored = restore_secrets(&result.redacted_string, &result.redaction_map);
-        assert_eq!(restored, content);
+        assert_eq!(restored, "secret456");
     }
 
     #[test]
