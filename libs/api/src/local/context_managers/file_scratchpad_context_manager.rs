@@ -61,6 +61,14 @@ impl FileScratchpadContextManager {
         }
     }
 
+    pub fn get_scratchpad_path(&self) -> &PathBuf {
+        &self.scratchpad_file_path
+    }
+
+    pub fn get_todo_path(&self) -> &PathBuf {
+        &self.todo_file_path
+    }
+
     fn load_scratchpad(&self) -> String {
         fs::read_to_string(&self.scratchpad_file_path).unwrap_or_default()
     }
