@@ -184,12 +184,12 @@ REMOTE EXECUTION:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
-- Examples: 
+- Examples:
   * 'user@server.com' (uses default port 22 and auto-discovered keys)
   * 'user@server.com:2222' with password authentication
   * Remote paths: 'ssh://user@host/path' or 'user@host:/path'
 
-SECRET HANDLING: 
+SECRET HANDLING:
 - Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
 - You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
 - Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
@@ -248,7 +248,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
 
 REMOTE EXECUTION SUPPORT:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH background execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth  
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
 - Examples:
   * 'user@server.com' - Remote background task with auto-discovered keys
@@ -258,7 +258,7 @@ Use this for port-forwarding, starting servers, tailing logs, or other long-runn
 
 PARAMETERS:
 - command: The shell command to execute (locally or remotely)
-- description: Optional description of the command (not used in execution)  
+- description: Optional description of the command (not used in execution)
 - timeout: Optional timeout in seconds after which the task will be terminated
 - remote: Optional remote connection string for SSH execution
 - password: Optional password for remote authentication
@@ -341,7 +341,7 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
   - Task ID: Full unique identifier (required for cancel_task)
-  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
+  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)
   - Start Time: When the task was started
   - Duration: How long the task has been running or took to complete
   - Output: Command output preview (truncated to 80 chars, redacted for security)
@@ -387,7 +387,8 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         "No output yet".to_string()
                     };
 
-                    let escaped_command = task.command
+                    let escaped_command = task
+                        .command
                         .chars()
                         .take(100)
                         .collect::<String>()
@@ -758,7 +759,7 @@ PARAMETERS:
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
-- Numbers: 0-9 (always included)  
+- Numbers: 0-9 (always included)
 - Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
 
 SECURITY FEATURES:
@@ -895,7 +896,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
 
 REMOTE FILE REMOVAL:
 - Supports SSH connections for remote file operations
-- Use format: 'user@host:/path' or 'user@host#port:/path' 
+- Use format: 'user@host:/path' or 'user@host#port:/path'
 - IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/file.txt' not 'file.txt')
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
@@ -1674,7 +1675,7 @@ SAFETY NOTES:
         ))]))
     }
 
-    /// Create a local file with the specified content  
+    /// Create a local file with the specified content
     fn create_local(&self, path: &str, file_text: &str) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
@@ -1952,7 +1953,8 @@ SAFETY NOTES:
                 "running".to_string()
             };
 
-            let truncated_command = task.command
+            let truncated_command = task
+                .command
                 .chars()
                 .take(30)
                 .collect::<String>()
