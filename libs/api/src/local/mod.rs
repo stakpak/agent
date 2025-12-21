@@ -72,11 +72,14 @@ const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_gener
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
-        let store_path = config.store_path.map(std::path::PathBuf::from).unwrap_or_else(|| {
-            std::env::home_dir()
-                .unwrap_or_default()
-                .join(DEFAULT_STORE_PATH)
-        });
+        let store_path = config
+            .store_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::home_dir()
+                    .unwrap_or_default()
+                    .join(DEFAULT_STORE_PATH)
+            });
 
         if let Some(parent) = store_path.parent() {
             std::fs::create_dir_all(parent)
