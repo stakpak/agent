@@ -3,8 +3,10 @@ use std::sync::Arc;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
 use stakpak_shared::cert_utils::CertificateChain;
 
-use crate::{commands::get_client, config::AppConfig, utils::network};
+use crate::utils::network;
+use crate::{commands::get_client, config::AppConfig};
 
+/// Start the MCP server (standalone HTTP/HTTPS server with tools)
 pub async fn run_server(
     config: AppConfig,
     disable_secret_redaction: bool,
