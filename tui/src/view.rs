@@ -160,7 +160,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
                     }
 
                     let lines = crate::services::message::get_processed_message_lines(
-                        &[msg.clone()],
+                        std::slice::from_ref(msg),
                         message_area_width,
                     );
 

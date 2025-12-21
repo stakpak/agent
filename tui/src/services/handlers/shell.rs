@@ -417,6 +417,29 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
             .map(|c| c.command.clone())
             .unwrap_or_else(|| "sh".to_string());
 
+        // If this was from an interactive stall, add the result to shell_tool_calls
+        // so it gets sent with the user's message
+        if state.shell_pending_command_executed {
+            let cmd_value = state.shell_pending_command_value.take();
+            let shell_output = state.shell_pending_command_output.take();
+
+            // Build the tool call result with captured output
+            let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
+
+            // Add to shell_tool_calls so it gets sent with user message
+            if state.shell_tool_calls.is_none() {
+                state.shell_tool_calls = Some(Vec::new());
+            }
+            if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                tool_calls.push(result);
+            }
+
+            // Reset the tracking state
+            state.shell_pending_command_executed = false;
+            state.shell_pending_command_output_count = 0;
+            state.dialog_command = None;
+        }
+
         // Update the message in chat to reflect termination
         if let Some(id) = state.interactive_shell_message_id {
             for msg in &mut state.messages {
@@ -483,7 +506,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
             // Extract just the shell name from the path
             c.command
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or(&c.command)
                 .split_whitespace()
                 .next()
@@ -663,6 +686,7 @@ pub fn handle_shell_waiting_for_input(
 pub fn handle_shell_completed(
     state: &mut AppState,
     output_tx: &Sender<OutputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
     message_area_height: usize,
     message_area_width: usize,
 ) {
@@ -672,35 +696,27 @@ pub fn handle_shell_completed(
     // If this was from an interactive stall command, capture and log the result
     if state.shell_pending_command_executed {
         // Update the shell message to show completed state
-        if let Some(shell_msg_id) = state.interactive_shell_message_id {
-            if let Some(msg) = state.messages.iter_mut().find(|m| m.id == shell_msg_id) {
-                if let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content
-                {
-                    let completed_colors = BubbleColors {
-                        border_color: Color::Green,
-                        title_color: Color::Green,
-                        content_color: AdaptiveColors::text(),
-                        tool_type: "Interactive Bash".to_string(),
-                    };
-                    msg.content = MessageContent::RenderRefreshedTerminal(
-                        "Shell Command [Completed]".to_string(),
-                        content.clone(),
-                        Some(completed_colors),
-                        *width,
-                    );
-                }
-            }
+        if let Some(shell_msg_id) = state.interactive_shell_message_id
+            && let Some(msg) = state.messages.iter_mut().find(|m| m.id == shell_msg_id)
+            && let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content
+        {
+            let completed_colors = BubbleColors {
+                border_color: Color::Green,
+                title_color: Color::Green,
+                content_color: AdaptiveColors::text(),
+                tool_type: "Interactive Bash".to_string(),
+            };
+            msg.content = MessageContent::RenderRefreshedTerminal(
+                "Shell Command [Completed]".to_string(),
+                content.clone(),
+                Some(completed_colors),
+                *width,
+            );
         }
 
-        if let Some(cmd_value) = state.shell_pending_command_value.take() {
-            if let Some(output) = state.shell_pending_command_output.take() {
-                // Debug: print the tool call result
-                eprintln!("\n=== INTERACTIVE STALL COMMAND COMPLETED ===");
-                eprintln!("Command: {}", cmd_value);
-                eprintln!("Output:\n{}", output);
-                eprintln!("===========================================\n");
-            }
-        }
+        // Get the command and output for tool call result
+        let cmd_value = state.shell_pending_command_value.take();
+        let shell_output = state.shell_pending_command_output.take();
 
         // Reset the tracking state
         state.shell_pending_command_executed = false;
@@ -710,13 +726,74 @@ pub fn handle_shell_completed(
         state.show_shell_mode = false;
         state.text_area.set_shell_mode(false);
 
+        // Build and send the tool call result if we have a dialog_command
+        if let Some(dialog_command) = &state.dialog_command {
+            let dialog_command_id = dialog_command.id.clone();
+            let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
+
+            // Check the index of dialog_command in tool_calls_execution_order
+            let index = state
+                .last_message_tool_calls
+                .iter()
+                .position(|tool_call| tool_call.id == dialog_command_id);
+
+            let should_stop = if let Some(index) = index {
+                index != state.last_message_tool_calls.len() - 1
+            } else {
+                false
+            };
+
+            // Get the ids of the tool calls after that id
+            let tool_calls_after_index = if let Some(index) = index {
+                state
+                    .last_message_tool_calls
+                    .iter()
+                    .skip(index + 1)
+                    .cloned()
+                    .collect::<Vec<ToolCall>>()
+            } else {
+                Vec::new()
+            };
+
+            // Move those rejected tool calls to message_tool_calls
+            if !tool_calls_after_index.is_empty() {
+                for tool_call in tool_calls_after_index.iter() {
+                    state
+                        .session_tool_calls_queue
+                        .insert(tool_call.id.clone(), ToolCallStatus::Pending);
+                }
+            }
+
+            // CRITICAL: Send cancel signal to abort the running MCP tool call
+            // This unblocks the tool call that's waiting in the background
+            if let Some(ref cancel_tx) = cancel_tx {
+                let _ = cancel_tx.send(());
+            }
+            state.is_streaming = false;
+
+            let _ = output_tx.try_send(OutputEvent::SendToolResult(
+                result,
+                should_stop,
+                tool_calls_after_index.clone(),
+            ));
+
+            if let Some(dialog_cmd) = &state.dialog_command
+                && let Some(latest_tool_call) = &state.latest_tool_call
+                && dialog_cmd.id == latest_tool_call.id
+            {
+                state.latest_tool_call = None;
+            }
+            state.dialog_command = None;
+            state.toggle_approved_message = true;
+        }
+
         // Invalidate cache to show the updated message
         invalidate_message_lines_cache(state);
     }
 
     if let Some(dialog_command) = &state.dialog_command {
         let dialog_command_id = dialog_command.id.clone();
-        let result = shell_command_to_tool_call_result(state);
+        let result = shell_command_to_tool_call_result(state, None, None);
 
         // check the index of dialog_command in tool_calls_execution_order
         let index = state
@@ -769,7 +846,7 @@ pub fn handle_shell_completed(
         state.text_area.set_shell_mode(false);
     }
     if state.ondemand_shell_mode {
-        let new_tool_call_result = shell_command_to_tool_call_result(state);
+        let new_tool_call_result = shell_command_to_tool_call_result(state, None, None);
         if let Some(ref mut tool_calls) = state.shell_tool_calls {
             tool_calls.push(new_tool_call_result);
         }
@@ -847,20 +924,46 @@ pub fn handle_shell_kill(state: &mut AppState) {
 }
 
 /// Convert shell command to tool call result
-pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
+/// Includes the actual shell output if provided
+pub fn shell_command_to_tool_call_result(
+    state: &mut AppState,
+    command_value: Option<String>,
+    shell_output: Option<String>,
+) -> ToolCallResult {
     let id = if let Some(cmd) = &state.dialog_command {
         cmd.id.clone()
     } else {
         format!("tool_{}", Uuid::new_v4())
     };
 
-    let command = state
-        .active_shell_command
-        .as_ref()
-        .map(|cmd| cmd.command.clone())
-        .unwrap_or_default();
+    // Use the original command value if provided, otherwise fall back to active_shell_command
+    let command = command_value.unwrap_or_else(|| {
+        state
+            .active_shell_command
+            .as_ref()
+            .map(|cmd| cmd.command.clone())
+            .unwrap_or_default()
+    });
 
     let args = format!("{{\"command\": \"{}\"}}", command);
+
+    // Build the result string with actual output
+    let result_text = if let Some(output) = shell_output {
+        // Clean up the output - remove excessive whitespace and truncate if needed
+        let cleaned_output = output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if cleaned_output.is_empty() {
+            "Command completed (no output)".to_string()
+        } else {
+            truncate_output(&cleaned_output)
+        }
+    } else {
+        "Interactive shell exited".to_string()
+    };
 
     let call = ToolCall {
         id,
@@ -872,7 +975,7 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
     };
     ToolCallResult {
         call,
-        result: String::from("Interactive shell exited"),
+        result: result_text,
         status: ToolCallResultStatus::Success,
     }
 }

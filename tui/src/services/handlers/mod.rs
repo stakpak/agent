@@ -327,6 +327,7 @@ pub fn update(
             shell::handle_shell_completed(
                 state,
                 output_tx,
+                cancel_tx,
                 message_area_height,
                 message_area_width,
             );

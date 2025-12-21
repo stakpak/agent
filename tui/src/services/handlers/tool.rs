@@ -33,24 +33,28 @@ pub fn handle_stream_tool_result(
         state.is_streaming = false;
 
         // Extract command from the latest tool call
-        if let Some(tool_call) = &state.latest_tool_call {
-            if let Ok(command) = extract_command_from_tool_call(tool_call) {
-                // Update the pending bash message to show stall warning
-                if let Some(pending_id) = state.pending_bash_message_id {
-                    for msg in &mut state.messages {
-                        if msg.id == pending_id {
-                            // Update to the stall warning variant
-                            if let crate::services::message::MessageContent::RenderPendingBorderBlock(tc, auto) = &msg.content {
-                                msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto);
-                            }
-                            break;
+        if let Some(tool_call) = &state.latest_tool_call
+            && let Ok(command) = extract_command_from_tool_call(tool_call)
+        {
+            // Update the pending bash message to show stall warning
+            if let Some(pending_id) = state.pending_bash_message_id {
+                for msg in &mut state.messages {
+                    if msg.id == pending_id {
+                        // Update to the stall warning variant
+                        if let crate::services::message::MessageContent::RenderPendingBorderBlock(
+                            tc,
+                            auto,
+                        ) = &msg.content
+                        {
+                            msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto);
                         }
+                        break;
                     }
                 }
-
-                invalidate_message_lines_cache(state);
-                return Some(command);
             }
+
+            invalidate_message_lines_cache(state);
+            return Some(command);
         }
 
         invalidate_message_lines_cache(state);
