@@ -6,6 +6,7 @@ use rmcp::model::{
 use rmcp::service::{NotificationContext, Peer, RunningService};
 use rmcp::{RoleClient, RoleServer};
 use serde::Deserialize;
+use stakpak_shared::cert_utils::CertificateChain;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -111,6 +112,8 @@ pub enum ServerConfig {
     Http {
         url: String,
         headers: Option<HashMap<String, String>>,
+        /// Optional certificate chain for mTLS (used for local server connections)
+        certificate_chain: Arc<Option<CertificateChain>>,
     },
 }
 
@@ -178,7 +181,11 @@ impl ClientPoolConfig {
                 ServerConfigJson::CommandBased { command, args, env } => {
                     ServerConfig::Stdio { command, args, env }
                 }
-                ServerConfigJson::UrlBased { url, headers } => ServerConfig::Http { url, headers },
+                ServerConfigJson::UrlBased { url, headers } => ServerConfig::Http {
+                    url,
+                    headers,
+                    certificate_chain: Arc::new(None),
+                },
             };
             servers.insert(name, server_config);
         }

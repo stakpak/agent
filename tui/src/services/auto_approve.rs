@@ -200,7 +200,8 @@ impl AutoApproveManager {
     }
 
     pub fn get_policy_for_tool(&self, tool_call: &ToolCall) -> AutoApprovePolicy {
-        let tool_name = &tool_call.function.name;
+        let binding = tool_call.function.name.clone();
+        let tool_name = crate::utils::strip_tool_name(&binding);
 
         // Check if there's a specific policy for this tool
         if let Some(policy) = self.config.tools.get(tool_name) {
@@ -213,7 +214,11 @@ impl AutoApproveManager {
 
     pub fn get_policy_for_tool_name(&self, tool_name: &str) -> AutoApprovePolicy {
         // Check if there's a specific policy for this tool
-        if let Some(policy) = self.config.tools.get(tool_name) {
+        if let Some(policy) = self
+            .config
+            .tools
+            .get(crate::utils::strip_tool_name(tool_name))
+        {
             return policy.clone();
         }
 

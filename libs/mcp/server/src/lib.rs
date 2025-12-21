@@ -1,6 +1,10 @@
 use anyhow::Result;
-use rmcp::transport::streamable_http_server::{
-    StreamableHttpService, session::local::LocalSessionManager,
+use rmcp::{
+    ServiceExt,
+    transport::{
+        stdio,
+        streamable_http_server::{StreamableHttpService, session::local::LocalSessionManager},
+    },
 };
 use std::hash::Hash;
 use std::sync::Arc;
@@ -8,10 +12,12 @@ use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
 use tracing::error;
 
+use std::path::PathBuf;
+
 use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
-use stakpak_shared::task_manager::TaskManager;
+use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
 pub mod integrations;
 pub mod local_tools;
@@ -123,7 +129,11 @@ pub struct MCPServerConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
+    /// Certificate chain for ephemeral mTLS (in-memory certificates)
+    /// For persistent certs, use None and set cert_dir instead
     pub certificate_chain: Arc<Option<CertificateChain>>,
+    /// Directory for persistent certificates (overrides certificate_chain if set)
+    pub cert_dir: Option<PathBuf>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -217,23 +227,10 @@ async fn create_shutdown_handler(
     }
 }
 
-/// Internal helper function that contains the common server initialization logic
-async fn start_server_internal(
-    config: MCPServerConfig,
-    tcp_listener: TcpListener,
-    shutdown_rx: Option<Receiver<()>>,
-) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
-
-    // Create and start TaskManager
-    let task_manager = TaskManager::new();
-    let task_manager_handle = task_manager.handle();
-
-    // Spawn the task manager to run in background_manager_handle_for_
-    tokio::spawn(async move {
-        task_manager.run().await;
-    });
-
+fn build_tool_container(
+    config: &MCPServerConfig,
+    task_manager_handle: Arc<TaskManagerHandle>,
+) -> Result<ToolContainer> {
     let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => ToolContainer::new(
             None,
@@ -288,6 +285,28 @@ async fn start_server_internal(
         anyhow::anyhow!("Failed to create tool container: {}", e)
     })?;
 
+    Ok(tool_container)
+}
+
+/// Internal helper function that contains the common server initialization logic
+async fn start_server_internal(
+    config: MCPServerConfig,
+    tcp_listener: TcpListener,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
+
+    // Create and start TaskManager
+    let task_manager = TaskManager::new();
+    let task_manager_handle = task_manager.handle();
+
+    // Spawn the task manager to run in background_manager_handle_for_
+    tokio::spawn(async move {
+        task_manager.run().await;
+    });
+
+    let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
+
     let service = StreamableHttpService::new(
         move || Ok(tool_container.to_owned()),
         LocalSessionManager::default().into(),
@@ -296,30 +315,40 @@ async fn start_server_internal(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    if let Some(cert_chain) = config.certificate_chain.as_ref() {
-        let tls_config = cert_chain.create_server_config()?;
-        let rustls_config =
-            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
-
-        let handle = axum_server::Handle::new();
-        let shutdown_handle = handle.clone();
-        tokio::spawn(async move {
-            create_shutdown_handler(shutdown_rx, Some(task_manager_handle.clone())).await;
-            shutdown_handle.graceful_shutdown(None);
-        });
-
-        axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
-            .handle(handle)
-            .serve(router.into_make_service())
-            .await?;
+    // Determine TLS config: prefer persistent certs from disk, fall back to ephemeral chain
+    let tls_config = if let Some(cert_dir) = &config.cert_dir {
+        // Load persistent certificates from disk
+        CertificateChain::load_server_config(cert_dir)
+            .map_err(|e| anyhow::anyhow!("Failed to load server config from disk: {}", e))?
+    } else if let Some(cert_chain) = config.certificate_chain.as_ref() {
+        // Use ephemeral certificate chain
+        cert_chain
+            .create_server_config()
+            .map_err(|e| anyhow::anyhow!("Failed to create server config: {}", e))?
     } else {
-        axum::serve(tcp_listener, router)
+        // No mTLS - serve plain HTTP
+        return axum::serve(tcp_listener, router)
             .with_graceful_shutdown(create_shutdown_handler(
                 shutdown_rx,
                 Some(task_manager_handle.clone()),
             ))
-            .await?;
-    }
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to serve HTTP: {}", e));
+    };
+
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+    tokio::spawn(async move {
+        create_shutdown_handler(shutdown_rx, Some(task_manager_handle.clone())).await;
+        shutdown_handle.graceful_shutdown(None);
+    });
+
+    axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+        .handle(handle)
+        .serve(router.into_make_service())
+        .await?;
 
     Ok(())
 }
@@ -336,4 +365,52 @@ pub async fn start_server(
         TcpListener::bind(config.bind_address.clone()).await?
     };
     start_server_internal(config, tcp_listener, shutdown_rx).await
+}
+
+/// Start the MCP server over stdio transport.
+pub async fn start_server_stdio(
+    config: MCPServerConfig,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
+
+    // Create and start TaskManager
+    let task_manager = TaskManager::new();
+    let task_manager_handle = task_manager.handle();
+
+    tokio::spawn(async move {
+        task_manager.run().await;
+    });
+
+    let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
+
+    let running_service = tool_container.serve(stdio()).await.map_err(|e| {
+        error!("Failed to start stdio MCP server: {}", e);
+        anyhow::anyhow!("Failed to start stdio MCP server: {}", e)
+    })?;
+
+    let cancellation_token = running_service.cancellation_token();
+    let shutdown_task_manager = task_manager_handle.clone();
+    let wait_handle = tokio::spawn(async move { running_service.waiting().await });
+
+    // Graceful shutdown: on signal or external shutdown, cancel the running service.
+    tokio::spawn(async move {
+        create_shutdown_handler(shutdown_rx, Some(shutdown_task_manager)).await;
+        cancellation_token.cancel();
+    });
+
+    let wait_result = match wait_handle.await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(join_err)) => Err(anyhow::anyhow!(join_err)),
+        Err(join_err) => Err(anyhow::anyhow!(join_err)),
+    };
+
+    if let Err(e) = task_manager_handle.shutdown().await {
+        error!(
+            "Failed to shutdown task manager after stdio server exit: {}",
+            e
+        );
+    }
+
+    wait_result
 }

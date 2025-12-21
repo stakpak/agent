@@ -3,7 +3,7 @@ use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter, tool_result,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter, tool_result,
     user_message,
 };
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -17,9 +17,8 @@ use stakpak_api::{
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::CertificateStrategy;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
 use stakpak_shared::models::subagent::SubagentConfigs;
@@ -63,16 +62,20 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
     // Generate certificates if mTLS is enabled
-    let certificate_chain = Arc::new(if config.enable_mtls {
-        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
+    let certificate_chain = if config.enable_mtls {
+        let strategy = CertificateStrategy::Ephemeral;
+        Some(
+            strategy
+                .get_certificate_chain()
+                .map_err(|e| format!("Failed to generate certificate chain: {}", e))?,
+        )
     } else {
         None
-    });
+    };
 
     let protocol = if config.enable_mtls { "https" } else { "http" };
-    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+    let _local_mcp_server_host = format!("{}://{}", protocol, bind_address);
 
-    let certificate_chain_for_server = certificate_chain.clone();
     let subagent_configs = config.subagent_configs.clone();
 
     // Create AgentProvider instance
@@ -113,7 +116,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 tool_mode: ToolMode::Combined,
                 subagent_configs,
                 bind_address,
-                certificate_chain: certificate_chain_for_server,
+                certificate_chain: Arc::new(certificate_chain),
+                cert_dir: None,
             },
             Some(listener),
             None,
@@ -121,16 +125,14 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         .await;
     });
 
-    // Initialize clients and tools
-    let clients = ClientManager::new(
-        ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        None,
-        certificate_chain,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
+    // Initialize MCP client via stdio proxy
+    let mcp_client = stakpak_mcp_client::connect(None)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
+        .await
+        .map_err(|e| e.to_string())?;
+    let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_for_filter.as_ref());
 
     let client: Box<dyn AgentProvider> = match ctx.provider {
         ProviderType::Remote => {
@@ -309,7 +311,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
                 // Add timeout for tool execution
                 let tool_execution = async {
-                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                    run_tool_call(&mcp_client, &mcp_tools, tool_call, None, current_session_id)
+                        .await
                 };
 
                 let result = match tokio::time::timeout(
