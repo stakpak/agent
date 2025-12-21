@@ -12,6 +12,8 @@ use tokio::{net::TcpListener, sync::broadcast::Receiver};
 pub use tool_container::ToolContainer;
 use tracing::error;
 
+use std::path::PathBuf;
+
 use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
@@ -94,7 +96,11 @@ pub struct MCPServerConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
+    /// Certificate chain for ephemeral mTLS (in-memory certificates)
+    /// For persistent certs, use None and set cert_dir instead
     pub certificate_chain: Arc<Option<CertificateChain>>,
+    /// Directory for persistent certificates (overrides certificate_chain if set)
+    pub cert_dir: Option<PathBuf>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -276,30 +282,40 @@ async fn start_server_internal(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    if let Some(cert_chain) = config.certificate_chain.as_ref() {
-        let tls_config = cert_chain.create_server_config()?;
-        let rustls_config =
-            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
-
-        let handle = axum_server::Handle::new();
-        let shutdown_handle = handle.clone();
-        tokio::spawn(async move {
-            create_shutdown_handler(shutdown_rx, Some(task_manager_handle.clone())).await;
-            shutdown_handle.graceful_shutdown(None);
-        });
-
-        axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
-            .handle(handle)
-            .serve(router.into_make_service())
-            .await?;
+    // Determine TLS config: prefer persistent certs from disk, fall back to ephemeral chain
+    let tls_config = if let Some(cert_dir) = &config.cert_dir {
+        // Load persistent certificates from disk
+        CertificateChain::load_server_config(cert_dir)
+            .map_err(|e| anyhow::anyhow!("Failed to load server config from disk: {}", e))?
+    } else if let Some(cert_chain) = config.certificate_chain.as_ref() {
+        // Use ephemeral certificate chain
+        cert_chain
+            .create_server_config()
+            .map_err(|e| anyhow::anyhow!("Failed to create server config: {}", e))?
     } else {
-        axum::serve(tcp_listener, router)
+        // No mTLS - serve plain HTTP
+        return axum::serve(tcp_listener, router)
             .with_graceful_shutdown(create_shutdown_handler(
                 shutdown_rx,
                 Some(task_manager_handle.clone()),
             ))
-            .await?;
-    }
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to serve HTTP: {}", e));
+    };
+
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+    tokio::spawn(async move {
+        create_shutdown_handler(shutdown_rx, Some(task_manager_handle.clone())).await;
+        shutdown_handle.graceful_shutdown(None);
+    });
+
+    axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+        .handle(handle)
+        .serve(router.into_make_service())
+        .await?;
 
     Ok(())
 }

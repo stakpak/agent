@@ -108,6 +108,7 @@ async fn start_mcp_server(
             tool_mode: ToolMode::Combined,
             subagent_configs: None,
             certificate_chain: cert_chain,
+            cert_dir: None,
         };
 
         // Signal that we're about to start
