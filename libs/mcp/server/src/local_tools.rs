@@ -1150,23 +1150,33 @@ SAFETY NOTES:
         let mut stderr_buf = String::new();
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
-        
+
         // Stall detection: track last output time and whether we've sent stall notification
         let mut last_output_time = std::time::Instant::now();
         let mut stall_notified = false;
         const STALL_TIMEOUT_SECS: u64 = 5;
-        
+
         // Patterns that indicate command is waiting for input
         const INPUT_PROMPT_PATTERNS: &[&str] = &[
-            "password:", "Password:", "[sudo]", "(yes/no)", 
-            "[y/N]", "[Y/n]", "Continue?", "Are you sure",
-            "Enter passphrase", "Confirm:", "passphrase for",
+            "password:",
+            "Password:",
+            "[sudo]",
+            "(yes/no)",
+            "[y/N]",
+            "[Y/n]",
+            "Continue?",
+            "Are you sure",
+            "Enter passphrase",
+            "Confirm:",
+            "passphrase for",
         ];
-        
+
         // Helper to check if output matches input prompt patterns
         fn matches_input_prompt(output: &str) -> bool {
             let lower = output.to_lowercase();
-            INPUT_PROMPT_PATTERNS.iter().any(|p| lower.contains(&p.to_lowercase()))
+            INPUT_PROMPT_PATTERNS
+                .iter()
+                .any(|p| lower.contains(&p.to_lowercase()))
         }
 
         // Helper function to stream output and wait for process completion
@@ -1174,13 +1184,13 @@ SAFETY NOTES:
             // Stall check interval
             let mut stall_check_interval = tokio::time::interval(Duration::from_secs(1));
             stall_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            
+
             // Read from both streams concurrently
             loop {
                 // Use biased selection so interval gets priority
                 tokio::select! {
                     biased;
-                    
+
                     _ = stall_check_interval.tick() => {
                         // Check for stall condition: no output for 5 seconds
                         if !stall_notified && last_output_time.elapsed().as_secs() >= STALL_TIMEOUT_SECS {
@@ -1203,7 +1213,7 @@ SAFETY NOTES:
                             }).await;
                         }
                     }
-                    
+
                     read_result = tokio::time::timeout(Duration::from_millis(100), stderr_reader.read_line(&mut stderr_buf)) => {
                         match read_result {
                             Ok(Ok(0)) => break, // EOF
@@ -1227,7 +1237,7 @@ SAFETY NOTES:
                             Err(_) => {} // Timeout - continue loop
                         }
                     }
-                    
+
                     read_result = tokio::time::timeout(Duration::from_millis(100), stdout_reader.read_line(&mut stdout_buf)) => {
                         match read_result {
                             Ok(Ok(0)) => break, // EOF
@@ -1254,7 +1264,7 @@ SAFETY NOTES:
                         }
                     }
                 }
-                
+
                 // Check if process has exited
                 if let Ok(Some(_)) = child.try_wait() {
                     break;

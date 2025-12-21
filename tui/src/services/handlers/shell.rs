@@ -248,14 +248,14 @@ pub fn handle_run_shell_with_command(
     state.shell_pending_command_executed = true;
     state.shell_pending_command_output = Some(String::new());
     state.shell_pending_command_output_count = 0;
-    
+
     // Run the command directly via $SHELL -c 'command'
     // This will exit when the command completes, giving us ShellCompleted
     let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
     // Escape single quotes in the command by replacing ' with '\''
     let escaped_command = command.replace('\'', "'\\''");
     let shell_command = format!("{} -c '{}'", shell, escaped_command);
-    
+
     handle_run_shell_command(state, shell_command, input_tx);
 }
 
@@ -430,7 +430,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // First output received - hide loading indicator
     state.shell_loading = false;
-    
+
     // If we're tracking a pending command (from interactive stall), capture all output
     if state.shell_pending_command_executed {
         state.shell_pending_command_output_count += 1;
@@ -455,7 +455,13 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
         .as_ref()
         .map(|c| {
             // Extract just the shell name from the path
-            c.command.split('/').last().unwrap_or(&c.command).split_whitespace().next().unwrap_or("sh")
+            c.command
+                .split('/')
+                .last()
+                .unwrap_or(&c.command)
+                .split_whitespace()
+                .next()
+                .unwrap_or("sh")
         })
         .unwrap_or("sh")
         .to_string();
@@ -487,7 +493,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // 4. Capture styled screen content at scroll=0 (safe)
     let screen_lines = capture_styled_screen(&mut state.shell_screen);
-    
+
     // Note: Command completion is now detected via ShellCompleted event
     // which is triggered when the command process exits (using $SHELL -c approach)
 
@@ -559,7 +565,12 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     let mut display_lines = screen_lines.clone();
     if let Some(cmd) = state.shell_pending_command_value.clone() {
         let command_line = Line::from(vec![
-            Span::styled("$ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "$ ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
         ]);
         display_lines.insert(0, command_line);
@@ -631,13 +642,14 @@ pub fn handle_shell_completed(
 ) {
     // Command completed, reset active command state
     state.waiting_for_shell_input = false;
-    
+
     // If this was from an interactive stall command, capture and log the result
     if state.shell_pending_command_executed {
         // Update the shell message to show completed state
         if let Some(shell_msg_id) = state.interactive_shell_message_id {
             if let Some(msg) = state.messages.iter_mut().find(|m| m.id == shell_msg_id) {
-                if let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content {
+                if let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content
+                {
                     let completed_colors = BubbleColors {
                         border_color: Color::Green,
                         title_color: Color::Green,
@@ -653,7 +665,7 @@ pub fn handle_shell_completed(
                 }
             }
         }
-        
+
         if let Some(cmd_value) = state.shell_pending_command_value.take() {
             if let Some(output) = state.shell_pending_command_output.take() {
                 // Debug: print the tool call result
@@ -663,19 +675,19 @@ pub fn handle_shell_completed(
                 eprintln!("===========================================\n");
             }
         }
-        
+
         // Reset the tracking state
         state.shell_pending_command_executed = false;
         state.shell_pending_command_output_count = 0;
-        
+
         // Tab out of shell mode
         state.show_shell_mode = false;
         state.text_area.set_shell_mode(false);
-        
+
         // Invalidate cache to show the updated message
         invalidate_message_lines_cache(state);
     }
-    
+
     if let Some(dialog_command) = &state.dialog_command {
         let dialog_command_id = dialog_command.id.clone();
         let result = shell_command_to_tool_call_result(state);

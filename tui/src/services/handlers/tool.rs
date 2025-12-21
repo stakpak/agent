@@ -15,20 +15,23 @@ use super::shell::extract_command_from_tool_call;
 
 /// Handle stream tool result event
 /// Returns Some(command) if an interactive stall was detected and shell mode should be triggered
-pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress) -> Option<String> {
+pub fn handle_stream_tool_result(
+    state: &mut AppState,
+    progress: ToolCallResultProgress,
+) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
         return None;
     }
-    
+
     // Check for interactive stall notification
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
         // Stop the loader
         state.loading = false;
         state.is_streaming = false;
-        
+
         // Extract command from the latest tool call
         if let Some(tool_call) = &state.latest_tool_call {
             if let Ok(command) = extract_command_from_tool_call(tool_call) {
@@ -44,12 +47,12 @@ pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultP
                         }
                     }
                 }
-                
+
                 invalidate_message_lines_cache(state);
                 return Some(command);
             }
         }
-        
+
         invalidate_message_lines_cache(state);
         return None; // Don't add this marker to the streaming buffer
     }
@@ -92,7 +95,7 @@ pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultP
     if !state.stay_at_bottom {
         state.content_changed_while_scrolled_up = true;
     }
-    
+
     None
 }
 
@@ -184,17 +187,17 @@ pub fn handle_interactive_stall_detected(
 ) {
     // Close any confirmation dialog
     state.is_dialog_open = false;
-    
+
     // Set up shell mode state
     if let Some(tool_call) = &state.latest_tool_call {
         state.dialog_command = Some(tool_call.clone());
     }
     state.ondemand_shell_mode = false;
-    
+
     if state.shell_tool_calls.is_none() {
         state.shell_tool_calls = Some(Vec::new());
     }
-    
+
     // Trigger running the shell with the command - this spawns the user's shell and then executes the command
     let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
 }

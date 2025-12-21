@@ -135,8 +135,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
             let shell_content_lines = content.len();
 
             if shell_content_lines > 0 {
-                let processed_lines =
-                    get_wrapped_message_lines_cached(state, message_area_width);
+                let processed_lines = get_wrapped_message_lines_cached(state, message_area_width);
                 let total_lines = processed_lines.len();
                 let visible_height = padded_message_area.height as usize;
 
@@ -152,19 +151,23 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
                 // We need to add:
                 // - 1 for the top border of the shell block
                 // - 1 for the command line (if prepended for display)
-                let command_line_offset: usize = if state.shell_pending_command_value.is_some() { 1 } else { 0 };
-                let cursor_line_in_content = shell_start_in_content + 1 + command_line_offset + cursor_row as usize;
+                let command_line_offset: usize = if state.shell_pending_command_value.is_some() {
+                    1
+                } else {
+                    0
+                };
+                let cursor_line_in_content =
+                    shell_start_in_content + 1 + command_line_offset + cursor_row as usize;
 
-                let visible_start = if state.stay_at_bottom || total_lines <= visible_height
-                {
+                let visible_start = if state.stay_at_bottom || total_lines <= visible_height {
                     total_lines.saturating_sub(visible_height)
                 } else {
                     state.scroll.max(0)
                 };
 
                 if cursor_line_in_content >= visible_start {
-                    let cursor_y = padded_message_area.y
-                        + (cursor_line_in_content - visible_start) as u16;
+                    let cursor_y =
+                        padded_message_area.y + (cursor_line_in_content - visible_start) as u16;
 
                     let cursor_x = padded_message_area.x + 2 + cursor_col;
 
