@@ -72,16 +72,18 @@ const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_gener
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
-        let default_store_path = std::env::home_dir()
-            .unwrap_or_default()
-            .join(DEFAULT_STORE_PATH);
+        let store_path = config.store_path.map(std::path::PathBuf::from).unwrap_or_else(|| {
+            std::env::home_dir()
+                .unwrap_or_default()
+                .join(DEFAULT_STORE_PATH)
+        });
 
-        if let Some(parent) = default_store_path.parent() {
+        if let Some(parent) = store_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create database directory: {}", e))?;
         }
 
-        let db = Builder::new_local(default_store_path.display().to_string())
+        let db = Builder::new_local(store_path.display().to_string())
             .build()
             .await
             .map_err(|e| e.to_string())?;
