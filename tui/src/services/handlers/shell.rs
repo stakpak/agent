@@ -292,7 +292,20 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 .extend(current_screen.iter().cloned());
         }
 
-        let fresh_lines = state.shell_history_lines.clone();
+        let mut fresh_lines = state.shell_history_lines.clone();
+
+        if let Some(cmd) = state.shell_pending_command_value.clone() {
+            let command_line = Line::from(vec![
+                Span::styled(
+                    "$ ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+            ]);
+            fresh_lines.insert(0, command_line);
+        }
         if let Some(id) = state.interactive_shell_message_id {
             for msg in &mut state.messages {
                 if msg.id == id {
@@ -350,7 +363,20 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 .unwrap_or_else(|| "sh".to_string());
 
             // Capture current screen for live view
-            let current_screen = capture_styled_screen(&mut state.shell_screen);
+            let mut current_screen = capture_styled_screen(&mut state.shell_screen);
+
+            if let Some(cmd) = state.shell_pending_command_value.clone() {
+                let command_line = Line::from(vec![
+                    Span::styled(
+                        "$ ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+                ]);
+                current_screen.insert(0, command_line);
+            }
 
             let focused_colors = BubbleColors {
                 border_color: Color::Cyan,

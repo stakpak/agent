@@ -123,59 +123,92 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     {
         let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
 
-        if let Some(shell_msg_id) = state.interactive_shell_message_id
-            && let Some(msg) = state.messages.iter().find(|m| m.id == shell_msg_id)
-            && let crate::services::message::MessageContent::RenderRefreshedTerminal(
-                _,
-                content,
-                _,
-                _,
-            ) = &msg.content
-        {
-            let shell_content_lines = content.len();
+        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+            // Check content length first without holding a borrow needed for the mutable call
+            let shell_content_len = state
+                .messages
+                .iter()
+                .find(|m| m.id == shell_msg_id)
+                .and_then(|msg| {
+                    if let crate::services::message::MessageContent::RenderRefreshedTerminal(
+                        _,
+                        content,
+                        _,
+                        _,
+                    ) = &msg.content
+                    {
+                        Some(content.len())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
 
-            if shell_content_lines > 0 {
+            if shell_content_len > 0 {
                 let processed_lines = get_wrapped_message_lines_cached(state, message_area_width);
                 let total_lines = processed_lines.len();
                 let visible_height = padded_message_area.height as usize;
 
-                let trailing_offset = if total_lines > visible_height { 4 } else { 1 };
-                let content_end = total_lines.saturating_sub(trailing_offset);
+                // Find the start line of this message in the processed lines
+                let mut message_start_index = 0;
+                let mut found = false;
 
-                let shell_block_height = shell_content_lines + 2; // +2 for top/bottom borders
+                for msg in &state.messages {
+                    if msg.id == shell_msg_id {
+                        found = true;
+                        break;
+                    }
 
-                let shell_start_in_content = content_end.saturating_sub(shell_block_height);
+                    let lines = crate::services::message::get_processed_message_lines(
+                        &[msg.clone()],
+                        message_area_width,
+                    );
 
-                // Use the cursor row from vt100 to calculate position within the shell content
-                // The cursor_row is 0-indexed from the top of the visible terminal
-                // We need to add:
-                // - 1 for the top border of the shell block
-                // - 1 for the command line (if prepended for display)
-                let command_line_offset: usize = if state.shell_pending_command_value.is_some() {
-                    1
-                } else {
-                    0
-                };
-                let cursor_line_in_content =
-                    shell_start_in_content + 1 + command_line_offset + cursor_row as usize;
+                    if !lines.is_empty() {
+                        message_start_index += lines.len().saturating_sub(2);
+                    }
+                }
 
-                let visible_start = if state.stay_at_bottom || total_lines <= visible_height {
-                    total_lines.saturating_sub(visible_height)
-                } else {
-                    state.scroll.max(0)
-                };
+                if found {
+                    let command_offset = if state.shell_pending_command_value.is_some() {
+                        1
+                    } else {
+                        0
+                    };
 
-                if cursor_line_in_content >= visible_start {
-                    let cursor_y =
-                        padded_message_area.y + (cursor_line_in_content - visible_start) as u16;
+                    let term_rows = state.shell_screen.screen().size().0 as usize;
+                    let history_lines_count = shell_content_len.saturating_sub(command_offset);
+                    let viewport_offset_in_history = history_lines_count.saturating_sub(term_rows);
+                    let total_content_offset = command_offset + viewport_offset_in_history;
 
-                    let cursor_x = padded_message_area.x + 2 + cursor_col;
+                    let cursor_row_index =
+                        message_start_index + 1 + total_content_offset + cursor_row as usize;
 
-                    if cursor_y >= padded_message_area.y
-                        && cursor_y < padded_message_area.y + padded_message_area.height
-                        && cursor_x < padded_message_area.x + padded_message_area.width
-                    {
-                        f.set_cursor_position(Position::new(cursor_x, cursor_y));
+                    // Now calculate screen position
+                    let scroll = if state.stay_at_bottom {
+                        total_lines
+                            .saturating_sub(visible_height.saturating_sub(SCROLL_BUFFER_LINES))
+                    } else {
+                        state.scroll.min(
+                            total_lines
+                                .saturating_sub(visible_height.saturating_sub(SCROLL_BUFFER_LINES)),
+                        )
+                    };
+
+                    // Only draw if within visible range
+                    if cursor_row_index >= scroll && cursor_row_index < scroll + visible_height {
+                        let screen_rel_y = cursor_row_index - scroll;
+                        let screen_y = padded_message_area.y + screen_rel_y as u16;
+
+                        // X position: +2 is for left border "│ "
+                        let screen_x = padded_message_area.x + 2 + cursor_col;
+
+                        // Final safety check
+                        if screen_y < padded_message_area.y + padded_message_area.height
+                            && screen_x < padded_message_area.x + padded_message_area.width
+                        {
+                            f.set_cursor_position(Position::new(screen_x, screen_y));
+                        }
                     }
                 }
             }

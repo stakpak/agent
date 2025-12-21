@@ -1185,6 +1185,38 @@ SAFETY NOTES:
             let mut stall_check_interval = tokio::time::interval(Duration::from_secs(1));
             stall_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+            macro_rules! handle_output {
+                ($read_result:expr, $buf:expr) => {
+                    match $read_result {
+                        Ok(Ok(0)) => break, // EOF
+                        Ok(Ok(_)) => {
+                            last_output_time = std::time::Instant::now();
+                            stall_notified = false;
+                            let line = $buf.trim_end_matches('\n').to_string();
+                            $buf.clear();
+                            result.push_str(&format!("{}\n", line));
+                            let _ = ctx
+                                .peer
+                                .notify_progress(ProgressNotificationParam {
+                                    progress_token: ProgressToken(NumberOrString::Number(0)),
+                                    progress: 50.0,
+                                    total: Some(100.0),
+                                    message: Some(
+                                        serde_json::to_string(&ToolCallResultProgress {
+                                            id: progress_id,
+                                            message: format!("{}\n", line),
+                                        })
+                                        .unwrap_or_default(),
+                                    ),
+                                })
+                                .await;
+                        }
+                        Ok(Err(_)) => break, // Read error
+                        Err(_) => {}         // Timeout - continue loop
+                    }
+                };
+            }
+
             // Read from both streams concurrently
             loop {
                 // Use biased selection so interval gets priority
@@ -1215,53 +1247,11 @@ SAFETY NOTES:
                     }
 
                     read_result = tokio::time::timeout(Duration::from_millis(100), stderr_reader.read_line(&mut stderr_buf)) => {
-                        match read_result {
-                            Ok(Ok(0)) => break, // EOF
-                            Ok(Ok(_)) => {
-                                last_output_time = std::time::Instant::now();
-                                stall_notified = false;
-                                let line = stderr_buf.trim_end_matches('\n').to_string();
-                                stderr_buf.clear();
-                                result.push_str(&format!("{}\n", line));
-                                let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                                    progress_token: ProgressToken(NumberOrString::Number(0)),
-                                    progress: 50.0,
-                                    total: Some(100.0),
-                                    message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                        id: progress_id,
-                                        message: line,
-                                    }).unwrap_or_default()),
-                                }).await;
-                            }
-                            Ok(Err(_)) => break, // Read error
-                            Err(_) => {} // Timeout - continue loop
-                        }
+                        handle_output!(read_result, stderr_buf);
                     }
 
                     read_result = tokio::time::timeout(Duration::from_millis(100), stdout_reader.read_line(&mut stdout_buf)) => {
-                        match read_result {
-                            Ok(Ok(0)) => break, // EOF
-                            Ok(Ok(_)) => {
-                                last_output_time = std::time::Instant::now();
-                                stall_notified = false;
-                                let line = stdout_buf.trim_end_matches('\n').to_string();
-                                stdout_buf.clear();
-                                result.push_str(&format!("{}\n", line));
-                                if !line.is_empty() {
-                                    let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                                        progress_token: ProgressToken(NumberOrString::Number(0)),
-                                        progress: 50.0,
-                                        total: Some(100.0),
-                                        message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                            id: progress_id,
-                                            message: format!("{}\n", line),
-                                        }).unwrap_or_default()),
-                                    }).await;
-                                }
-                            }
-                            Ok(Err(_)) => break, // Read error
-                            Err(_) => {} // Timeout - continue loop
-                        }
+                        handle_output!(read_result, stdout_buf);
                     }
                 }
 
