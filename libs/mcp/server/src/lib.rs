@@ -23,6 +23,39 @@ pub mod remote_tools;
 pub mod subagent_tools;
 pub mod tool_container;
 
+pub mod tool_names {
+    pub const VIEW: &str = "view";
+    pub const CREATE: &str = "create";
+    pub const STR_REPLACE: &str = "str_replace";
+    pub const CREATE_FILE: &str = "create_file";
+    pub const EDIT_FILE: &str = "edit_file";
+    pub const RUN_COMMAND: &str = "run_command";
+    pub const SEARCH_DOCS: &str = "search_docs";
+    pub const READ_RULEBOOK: &str = "read_rulebook";
+    pub const LOCAL_CODE_SEARCH: &str = "local_code_search";
+    pub const DELETE_FILE: &str = "delete_file";
+
+    const FS_FILE_READ: &[&str] = &[VIEW];
+    const FS_FILE_WRITE: &[&str] = &[CREATE, CREATE_FILE, STR_REPLACE, EDIT_FILE];
+    pub const AUTO_APPROVED: &[&str] = &[VIEW, SEARCH_DOCS, READ_RULEBOOK, LOCAL_CODE_SEARCH];
+
+    pub fn is_fs_file_read(name: &str) -> bool {
+        FS_FILE_READ.contains(&name)
+    }
+
+    pub fn is_fs_file_write(name: &str) -> bool {
+        FS_FILE_WRITE.contains(&name)
+    }
+
+    pub fn is_fs_tool(name: &str) -> bool {
+        is_fs_file_read(name) || is_fs_file_write(name)
+    }
+
+    pub fn is_auto_approved(name: &str) -> bool {
+        AUTO_APPROVED.contains(&name)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct EnabledToolsConfig {
     pub slack: bool,

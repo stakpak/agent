@@ -54,6 +54,8 @@ pub struct StakpakAcpAgent {
     streaming_buffer: Arc<tokio::sync::Mutex<String>>,
     // Channel for native ACP filesystem operations
     fs_operation_tx: Option<mpsc::UnboundedSender<crate::commands::acp::fs_handler::FsOperation>>,
+    // Capabilities advertised by the client during initialization
+    client_capabilities: Arc<tokio::sync::Mutex<acp::ClientCapabilities>>,
 }
 
 impl StakpakAcpAgent {
@@ -140,7 +142,15 @@ impl StakpakAcpAgent {
             current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
             streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
             fs_operation_tx: None,
+            client_capabilities: Arc::new(tokio::sync::Mutex::new(
+                acp::ClientCapabilities::default(),
+            )),
         })
+    }
+
+    async fn client_fs_capabilities(&self) -> (bool, bool) {
+        let caps = self.client_capabilities.lock().await;
+        (caps.fs.read_text_file, caps.fs.write_text_file)
     }
 
     // Helper method to send proper ACP tool call notifications
@@ -293,8 +303,9 @@ impl StakpakAcpAgent {
 
     // Helper method to generate appropriate tool title based on tool type and arguments
     fn generate_tool_title(&self, tool_name: &str, raw_input: &serde_json::Value) -> String {
+        use super::tool_names;
         match tool_name {
-            "view" => {
+            tool_names::VIEW => {
                 // Extract path from arguments for view tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Read {}", path)
@@ -302,7 +313,7 @@ impl StakpakAcpAgent {
                     "Read".to_string()
                 }
             }
-            "run_command" => {
+            tool_names::RUN_COMMAND => {
                 // Extract command from arguments for run_command tool
                 if let Some(command) = raw_input.get("command").and_then(|c| c.as_str()) {
                     format!("Run command {}", command)
@@ -310,7 +321,7 @@ impl StakpakAcpAgent {
                     "Run command".to_string()
                 }
             }
-            "create" | "create_file" => {
+            tool_names::CREATE | tool_names::CREATE_FILE => {
                 // Extract path from arguments for create tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Creating {}", path)
@@ -318,7 +329,7 @@ impl StakpakAcpAgent {
                     "Creating".to_string()
                 }
             }
-            "str_replace" | "edit_file" => {
+            tool_names::STR_REPLACE | tool_names::EDIT_FILE => {
                 // Extract path from arguments for edit tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Editing {}", path)
@@ -326,7 +337,7 @@ impl StakpakAcpAgent {
                     "Editing".to_string()
                 }
             }
-            "delete_file" => {
+            tool_names::DELETE_FILE => {
                 // Extract path from arguments for delete tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Deleting {}", path)
@@ -334,7 +345,7 @@ impl StakpakAcpAgent {
                     "Deleting".to_string()
                 }
             }
-            "search_docs" => {
+            tool_names::SEARCH_DOCS => {
                 // Extract query from arguments for search tool
                 if let Some(query) = raw_input.get("query").and_then(|q| q.as_str()) {
                     format!("Search docs: {}", query)
@@ -342,7 +353,7 @@ impl StakpakAcpAgent {
                     "Search docs".to_string()
                 }
             }
-            "local_code_search" => {
+            tool_names::LOCAL_CODE_SEARCH => {
                 // Extract query from arguments for search tool
                 if let Some(query) = raw_input.get("query").and_then(|q| q.as_str()) {
                     format!("Search local context: {}", query)
@@ -350,7 +361,7 @@ impl StakpakAcpAgent {
                     "Search local context".to_string()
                 }
             }
-            "read_rulebook" => "Read rulebook".to_string(),
+            tool_names::READ_RULEBOOK => "Read rulebook".to_string(),
             _ => {
                 // Default case: format tool name nicely and add path if available
                 let formatted_name = self.format_tool_name(tool_name);
@@ -382,35 +393,36 @@ impl StakpakAcpAgent {
 
     // Helper method to get appropriate ToolKind based on tool name
     fn get_tool_kind(&self, tool_name: &str) -> acp::ToolKind {
-        match tool_name {
-            "view" | "read_rulebook" => acp::ToolKind::Read,
-            "run_command" => acp::ToolKind::Execute,
-            "create" | "create_file" | "str_replace" | "edit_file" => acp::ToolKind::Edit,
-            "delete_file" => acp::ToolKind::Delete,
-            "search_docs" | "local_code_search" => acp::ToolKind::Search,
-            _ => acp::ToolKind::Other,
+        use super::tool_names;
+        if tool_names::is_fs_file_read(tool_name) || tool_name == tool_names::READ_RULEBOOK {
+            acp::ToolKind::Read
+        } else if tool_names::is_fs_file_write(tool_name) {
+            acp::ToolKind::Edit
+        } else if tool_name == tool_names::RUN_COMMAND {
+            acp::ToolKind::Execute
+        } else if tool_name == tool_names::DELETE_FILE {
+            acp::ToolKind::Delete
+        } else if tool_name == tool_names::SEARCH_DOCS || tool_name == tool_names::LOCAL_CODE_SEARCH
+        {
+            acp::ToolKind::Search
+        } else {
+            acp::ToolKind::Other
         }
     }
 
     // Helper method to determine if a tool should use Diff content type
     fn should_use_diff_content(&self, tool_name: &str) -> bool {
-        matches!(
-            tool_name,
-            "create" | "create_file" | "str_replace" | "edit_file"
-        )
+        super::tool_names::is_fs_file_write(tool_name)
     }
 
     // Helper method to determine if a tool is a file creation tool
     fn is_file_creation_tool(&self, tool_name: &str) -> bool {
-        matches!(tool_name, "create" | "create_file")
+        tool_name == super::tool_names::CREATE || tool_name == super::tool_names::CREATE_FILE
     }
 
     // Helper method to determine if a tool should be auto-approved
     fn is_auto_approved_tool(&self, tool_name: &str) -> bool {
-        matches!(
-            tool_name,
-            "view" | "search_docs" | "read_rulebook" | "local_code_search"
-        )
+        super::tool_names::is_auto_approved(tool_name)
     }
 
     // Helper method to create proper rawInput for tool calls
@@ -849,18 +861,24 @@ impl StakpakAcpAgent {
 
             // Check if this is a filesystem tool that should use native ACP
             // Decide if this should be handled by native ACP FS. Avoid read_text_file for directories.
-            let is_view_directory = if tool_call.function.name == "view" {
+            let is_view_directory = if tool_call.function.name == super::tool_names::VIEW {
                 Path::new(&abs_path).is_dir()
             } else {
                 false
             };
 
-            let is_fs_tool = matches!(
-                tool_call.function.name.as_str(),
-                "view" | "create" | "str_replace"
-            ) && !is_view_directory;
+            let tool_name = tool_call.function.name.as_str();
+            let is_read_tool = super::tool_names::is_fs_file_read(tool_name) && !is_view_directory;
+            let is_write_tool = super::tool_names::is_fs_file_write(tool_name);
 
-            let result = if is_fs_tool && self.fs_operation_tx.is_some() {
+            // Delegate fs operations to the client so it can access unsaved editor
+            // state and track modifications. Per ACP spec, both read and write
+            // require the client to advertise the corresponding capability.
+            let (client_reads, client_writes) = self.client_fs_capabilities().await;
+            let should_delegate = self.fs_operation_tx.is_some()
+                && ((is_read_tool && client_reads) || (is_write_tool && client_writes));
+
+            let result = if should_delegate {
                 log::info!(
                     "🔧 DEBUG: Executing filesystem tool via native ACP: {}",
                     tool_call.function.name
@@ -1381,6 +1399,7 @@ impl StakpakAcpAgent {
                     current_streaming_message: self.current_streaming_message.clone(),
                     streaming_buffer: self.streaming_buffer.clone(),
                     fs_operation_tx: Some(fs_operation_tx),
+                    client_capabilities: self.client_capabilities.clone(),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -1500,6 +1519,7 @@ impl Clone for StakpakAcpAgent {
             current_streaming_message: self.current_streaming_message.clone(),
             streaming_buffer: self.streaming_buffer.clone(),
             fs_operation_tx: self.fs_operation_tx.clone(),
+            client_capabilities: self.client_capabilities.clone(),
         }
     }
 }
@@ -1511,6 +1531,12 @@ impl acp::Agent for StakpakAcpAgent {
         args: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse, acp::Error> {
         log::info!("Received initialize request {args:?}");
+
+        // Store client capabilities for later use
+        {
+            let mut caps = self.client_capabilities.lock().await;
+            *caps = args.client_capabilities.clone();
+        }
 
         // If no API key, provide an auth method that links to GitHub
         let auth_methods = if self.config.api_key.is_none() {
@@ -1997,5 +2023,41 @@ impl acp::Agent for StakpakAcpAgent {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::commands::acp::tool_names;
+    use test_case::test_case;
+
+    // Per ACP spec, agents MUST check client capabilities before delegating fs operations.
+    // Both readTextFile and writeTextFile default to false - delegation requires explicit opt-in.
+    //
+    // Columns: tool_name, client_reads, client_writes, expected_delegate
+    #[test_case("view",   true,  true,  true;  "read tool, client reads: delegate")]
+    #[test_case("view",   true,  false, true;  "read tool, client reads (no writes): delegate")]
+    #[test_case("view",   false, true,  false; "read tool, client no reads: fallback")]
+    #[test_case("view",   false, false, false; "read tool, client no fs: fallback")]
+    #[test_case("create", true,  true,  true;  "write tool, client writes: delegate")]
+    #[test_case("create", false, true,  true;  "write tool, client writes (no reads): delegate")]
+    #[test_case("create", true,  false, false; "write tool, client no writes: fallback")]
+    #[test_case("create", false, false, false; "write tool, client no fs: fallback")]
+    fn test_fs_delegation_respects_client_capabilities(
+        tool_name: &str,
+        client_reads: bool,
+        client_writes: bool,
+        expected: bool,
+    ) {
+        let is_read_tool = tool_names::is_fs_file_read(tool_name);
+        let is_write_tool = tool_names::is_fs_file_write(tool_name);
+
+        let should_delegate = (is_read_tool && client_reads) || (is_write_tool && client_writes);
+
+        assert_eq!(
+            should_delegate, expected,
+            "tool={} (read={}, write={}), caps(r={}, w={}) => delegate={}",
+            tool_name, is_read_tool, is_write_tool, client_reads, client_writes, should_delegate
+        );
     }
 }
