@@ -117,6 +117,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     if state.show_shell_mode
         && state.active_shell_command.is_some()
+        && state.waiting_for_shell_input  // Only show cursor when waiting for input
         && !state.shell_loading
         && !state.is_dialog_open
         && !state.approval_popup.is_visible()

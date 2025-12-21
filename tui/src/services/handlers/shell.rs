@@ -340,7 +340,40 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
             {
                 state.is_dialog_open = true;
             }
-            state.ondemand_shell_mode = false;
+        } else {
+            // On-demand shell mode (no dialog_command): capture output for tool call result
+            // Get the command from active_shell_command
+            let command = state
+                .active_shell_command
+                .as_ref()
+                .map(|c| c.command.clone());
+
+            // Get the output from shell history (convert styled lines to plain text)
+            let output = if !state.shell_history_lines.is_empty() {
+                let plain_output: String = state
+                    .shell_history_lines
+                    .iter()
+                    .map(|line| {
+                        line.spans
+                            .iter()
+                            .map(|span| span.content.as_ref())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(plain_output)
+            } else {
+                None
+            };
+
+            // Create and store the tool call result
+            let result = shell_command_to_tool_call_result(state, command, output);
+            if state.shell_tool_calls.is_none() {
+                state.shell_tool_calls = Some(Vec::new());
+            }
+            if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                tool_calls.push(result);
+            }
         }
 
         // Invalidate cache so the gray border is rendered

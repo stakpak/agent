@@ -140,16 +140,16 @@ pub fn update(
                 return;
             }
             InputEvent::HandleEsc => {
-                shell::send_shell_input(state, "\x1b");
-                return;
+                // Don't send ESC to shell - let it fall through to handle_esc_event
+                // which will terminate the shell and cancel the tool call
             }
             InputEvent::Tab => {
                 shell::send_shell_input(state, "\t");
                 return;
             }
             InputEvent::AttemptQuit => {
-                // Ctrl+C backgrounds the shell instead of sending SIGINT
-                shell::handle_shell_mode(state, input_tx);
+                // Ctrl+C sends SIGINT to cancel running commands in shell
+                shell::send_shell_input(state, "\x03");
                 return;
             }
             InputEvent::InputDelete => {

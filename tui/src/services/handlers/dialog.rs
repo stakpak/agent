@@ -121,14 +121,40 @@ pub fn handle_esc(
         state.dialog_focused = false; // Reset focus when dialog closes
         state.text_area.set_text("");
     } else if state.show_shell_mode {
-        if state.active_shell_command.is_some() {
-            let _ = channels.shell_tx.try_send(InputEvent::ShellKill);
-        }
-        state.show_shell_mode = false;
-        state.text_area.set_shell_mode(false);
-        state.text_area.set_text("");
         if state.dialog_command.is_some() {
+            // Interactive stall shell: reject the tool call and remove the shell box
+            if let Some(tool_call) = &state.dialog_command {
+                let _ = channels
+                    .output_tx
+                    .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
+            }
+
+            if state.active_shell_command.is_some() {
+                let _ = channels.shell_tx.try_send(InputEvent::ShellKill);
+            }
+
+            // Remove the shell message box
+            if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                state.messages.retain(|m| m.id != shell_msg_id);
+            }
+            state.interactive_shell_message_id = None;
+
+            state.show_shell_mode = false;
+            state.text_area.set_shell_mode(false);
+            state.text_area.set_text("");
             state.dialog_command = None;
+
+            // Reset interactive stall tracking state
+            state.shell_pending_command_executed = false;
+            state.shell_pending_command_value = None;
+            state.shell_pending_command_output = None;
+            state.shell_pending_command_output_count = 0;
+
+            // Invalidate cache to update the display
+            crate::services::message::invalidate_message_lines_cache(state);
+        } else {
+            // On-demand shell: just tab out/background (don't remove the box)
+            let _ = channels.input_tx.try_send(InputEvent::ShellMode);
         }
     } else {
         state.text_area.set_text("");

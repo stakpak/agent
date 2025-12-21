@@ -346,34 +346,77 @@ fn render_shell_bubble_with_unicode_border(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let border_width = width.max(20); // Minimum width for the bubble
+    let inner_width = border_width.saturating_sub(4); // Account for "│ " and " │"
     let horizontal = "─".repeat(border_width - 2);
+
     // Top border
     lines.push(Line::from(vec![Span::styled(
         format!("╭{}╮", horizontal),
         Style::default().fg(Color::Magenta),
     )]));
-    // Command line
+
+    // Command line - truncate if too long
     let cmd_line = format!("{}{}", SHELL_PROMPT_PREFIX, &command[1..].trim());
-    let cmd_content_width = cmd_line.len();
-    let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
+    let cmd_display_width = unicode_width::UnicodeWidthStr::width(cmd_line.as_str());
+    let truncated_cmd = if cmd_display_width > inner_width {
+        // Truncate command
+        let mut truncated = String::new();
+        let mut char_width = 0;
+        for ch in cmd_line.chars() {
+            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+            if char_width + ch_width <= inner_width {
+                truncated.push(ch);
+                char_width += ch_width;
+            } else {
+                break;
+            }
+        }
+        truncated
+    } else {
+        cmd_line.clone()
+    };
+    let cmd_content_width = unicode_width::UnicodeWidthStr::width(truncated_cmd.as_str());
+    let cmd_padding = inner_width.saturating_sub(cmd_content_width);
     lines.push(Line::from(vec![
         Span::styled("│ ", Style::default().fg(Color::Magenta)),
         Span::styled(
-            cmd_line,
+            truncated_cmd,
             Style::default().fg(term_color(Color::LightYellow)),
         ),
         Span::from(" ".repeat(cmd_padding)),
         Span::styled(" │", Style::default().fg(Color::Magenta)),
     ]));
-    // Output lines
+
+    // Output lines - truncate if too long
     for out in output_lines {
-        let padded = format!("{:<width$}", out, width = border_width - 4);
+        let out_display_width = unicode_width::UnicodeWidthStr::width(out.as_str());
+        let truncated_out = if out_display_width > inner_width {
+            // Truncate output line
+            let mut truncated = String::new();
+            let mut char_width = 0;
+            for ch in out.chars() {
+                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if char_width + ch_width <= inner_width {
+                    truncated.push(ch);
+                    char_width += ch_width;
+                } else {
+                    break;
+                }
+            }
+            truncated
+        } else {
+            out.clone()
+        };
+        let content_width = unicode_width::UnicodeWidthStr::width(truncated_out.as_str());
+        let padding = inner_width.saturating_sub(content_width);
         lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(Color::Magenta)),
-            Span::styled(padded, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(truncated_out, Style::default().fg(AdaptiveColors::text())),
+            Span::from(" ".repeat(padding)),
             Span::styled(" │", Style::default().fg(Color::Magenta)),
         ]));
     }
+
     // Bottom border
     lines.push(Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal),
