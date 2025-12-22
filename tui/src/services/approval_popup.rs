@@ -390,10 +390,9 @@ impl PopupService {
 
         // height_percent is already clamped in calculate_dynamic_popup_size
 
-        // Determine if we have any diff tabs that need fixed headers
         let has_diff_tabs = tool_call_infos.iter().any(|info| {
-            info.tool_call.function.name == "str_replace"
-                || info.tool_call.function.name == "create"
+            let name = crate::utils::strip_tool_name(&info.tool_call.function.name);
+            name == "str_replace" || name == "create"
         });
 
         // Create popup configuration with tabs using responsive positioning
@@ -472,7 +471,8 @@ impl PopupService {
 
         // lines.push((Line::from(""), Style::default()));
         let output = extract_full_command_arguments(tool_call);
-        let output = if tool_call.function.name == "run_command" {
+        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        let output = if tool_name == "run_command" {
             output.replace("command = ", "$ ")
         } else {
             output
@@ -480,21 +480,20 @@ impl PopupService {
 
         // Use the popup's inner width for text formatting
         let inner_width = self.inner_width() - 2;
-        let rendered_lines =
-            if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
-                let (_diff_lines, full_diff_lines) = render_file_diff_block(tool_call, inner_width);
-                if !full_diff_lines.is_empty() {
-                    full_diff_lines
-                } else {
-                    format_text_content(&output, inner_width)
-                }
-            } else if tool_call.function.name == "run_command" {
-                let processed_result = preprocess_terminal_output(&output);
-                let bash_text = format!("```bash\n{processed_result}\n```");
-                render_markdown_to_lines(&bash_text).unwrap_or_default()
+        let rendered_lines = if tool_name == "str_replace" || tool_name == "create" {
+            let (_diff_lines, full_diff_lines) = render_file_diff_block(tool_call, inner_width);
+            if !full_diff_lines.is_empty() {
+                full_diff_lines
             } else {
                 format_text_content(&output, inner_width)
-            };
+            }
+        } else if tool_name == "run_command" {
+            let processed_result = preprocess_terminal_output(&output);
+            let bash_text = format!("```bash\n{processed_result}\n```");
+            render_markdown_to_lines(&bash_text).unwrap_or_default()
+        } else {
+            format_text_content(&output, inner_width)
+        };
 
         lines.extend(rendered_lines.into_iter().map(|line| {
             let line_text = spans_to_string(&line);
@@ -737,7 +736,8 @@ impl PopupService {
             let tool_call = &tool_call_info.tool_call;
 
             // Only apply smart scrolling for str_replace and create tool calls
-            if (tool_call.function.name == "str_replace" || tool_call.function.name == "create")
+            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            if (tool_name == "str_replace" || tool_name == "create")
                 && let Some(target_scroll) = self.calculate_smart_scroll_position(tool_call)
             {
                 self.popup.state_mut().scroll = target_scroll;
@@ -754,7 +754,7 @@ impl PopupService {
         let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).ok()?;
 
         let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-        let new_str = if tool_call.function.name == "create" {
+        let new_str = if crate::utils::strip_tool_name(&tool_call.function.name) == "create" {
             args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
         } else {
             args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")
@@ -772,7 +772,7 @@ impl PopupService {
             new_str,
             replace_all,
             self.inner_width(),
-            &tool_call.function.name,
+            crate::utils::strip_tool_name(&tool_call.function.name),
         )
         .ok()?;
 

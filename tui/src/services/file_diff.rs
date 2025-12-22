@@ -462,7 +462,7 @@ pub fn render_file_diff_block(
         .unwrap_or_else(|_| serde_json::json!({}));
 
     let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-    let new_str = if tool_call.function.name == "create" {
+    let new_str = if crate::utils::strip_tool_name(&tool_call.function.name) == "create" {
         args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
     } else {
         args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")
@@ -480,7 +480,7 @@ pub fn render_file_diff_block(
         new_str,
         replace_all,
         terminal_width,
-        &tool_call.function.name,
+        crate::utils::strip_tool_name(&tool_call.function.name),
     )
     .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
 
