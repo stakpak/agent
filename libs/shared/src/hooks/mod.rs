@@ -100,14 +100,21 @@ pub enum HookAction {
     /// Skip remaining hooks for this event
     Skip,
     /// Abort the current operation
-    Abort { reason: String },
+    Abort {
+        name: Option<String>,
+        reason: String,
+    },
 }
 
 impl HookAction {
     /// Convert hook action to Err on Abort
     pub fn ok(self) -> Result<(), String> {
         match self {
-            HookAction::Abort { reason } => Err(reason),
+            HookAction::Abort { name, reason } => Err(format!(
+                "[{}:hook_abort] {}",
+                name.unwrap_or_default(),
+                reason
+            )),
             _ => Ok(()),
         }
     }
@@ -166,8 +173,11 @@ impl<State: Clone + Serialize> HookRegistry<State> {
             match hook.execute(ctx, event).await? {
                 HookAction::Continue => continue,
                 HookAction::Skip => return Ok(HookAction::Skip),
-                HookAction::Abort { reason } => {
-                    return Ok(HookAction::Abort { reason });
+                HookAction::Abort { name, reason } => {
+                    return Ok(HookAction::Abort {
+                        name: Some(name.unwrap_or(hook.name().to_string())),
+                        reason,
+                    });
                 }
             }
         }
