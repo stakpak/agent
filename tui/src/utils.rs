@@ -23,7 +23,7 @@ mod tests {
         // "other__server__tool" -> "server__tool". This seems correct assuming hierarchical naming isn't deeper or we only care about top level.
         // Actually, if it's `server_name__tool_name`, the first match is correct.
 
-        assert_eq!(strip_tool_name("prefix__"), ""); // Edge case
+        assert_eq!(strip_tool_name("prefix__"), "prefix__"); // Edge case: nothing after __, return original
         assert_eq!(strip_tool_name("__tool"), "tool");
     }
 }
