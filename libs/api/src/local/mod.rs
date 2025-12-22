@@ -180,7 +180,7 @@ impl LocalClient {
             anthropic_config: config.anthropic_config,
             gemini_config: config.gemini_config,
             openai_config: config.openai_config,
-            model_options: model_options,
+            model_options,
             hook_registry: Some(Arc::new(hook_registry)),
         })
     }
@@ -715,16 +715,14 @@ impl LocalClient {
 
         let llm_model = if let Some(eco_model) = &self.model_options.eco_model {
             eco_model.clone()
+        } else if llm_config.openai_config.is_some() {
+            LLMModel::OpenAI(OpenAIModel::GPT5Mini)
+        } else if llm_config.anthropic_config.is_some() {
+            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+        } else if llm_config.gemini_config.is_some() {
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
         } else {
-            if llm_config.openai_config.is_some() {
-                LLMModel::OpenAI(OpenAIModel::GPT5Mini)
-            } else if llm_config.anthropic_config.is_some() {
-                LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-            } else if llm_config.gemini_config.is_some() {
-                LLMModel::Gemini(GeminiModel::Gemini25Flash)
-            } else {
-                return Err("No LLM config found".to_string());
-            }
+            return Err("No LLM config found".to_string());
         };
 
         let messages = vec![

@@ -3,7 +3,11 @@ use stakpak_shared::models::{
     integrations::openai::{ChatMessage, Role},
     llm::{LLMMessage, LLMMessageContent},
 };
-use std::{fmt::Display, fs, path::PathBuf};
+use std::{
+    fmt::Display,
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// A context manager where the agent edits scratchpad/todo files directly using file tools.
 ///
@@ -273,8 +277,8 @@ fn drop_older_action_messages(
 /// Keeps the most recent scratchpad/todo actions so the agent knows what it just did.
 fn drop_scratchpad_actions(
     history_items: &mut Vec<HistoryItem>,
-    scratchpad_path: &PathBuf,
-    todo_path: &PathBuf,
+    scratchpad_path: &Path,
+    todo_path: &Path,
 ) {
     let scratchpad_str = scratchpad_path.to_string_lossy();
     let todo_str = todo_path.to_string_lossy();
@@ -289,10 +293,10 @@ fn drop_scratchpad_actions(
                 return false;
             }
 
-            if let Some(path) = arguments.get("path").and_then(|p| p.as_str()) {
-                if path.contains(scratchpad_str.as_ref()) || path.contains(todo_str.as_ref()) {
-                    return true;
-                }
+            if let Some(path) = arguments.get("path").and_then(|p| p.as_str())
+                && (path.contains(scratchpad_str.as_ref()) || path.contains(todo_str.as_ref()))
+            {
+                return true;
             }
         }
         false
