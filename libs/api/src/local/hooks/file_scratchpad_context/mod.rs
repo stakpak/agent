@@ -26,6 +26,7 @@ pub struct FileScratchpadContextHookOptions {
     pub history_action_message_size_limit: Option<usize>,
     pub history_action_message_keep_last_n: Option<usize>,
     pub history_action_result_keep_last_n: Option<usize>,
+    pub overwrite_if_different: Option<bool>,
 }
 
 impl FileScratchpadContextHook {
@@ -47,6 +48,7 @@ impl FileScratchpadContextHook {
                 history_action_result_keep_last_n: options
                     .history_action_result_keep_last_n
                     .unwrap_or(50),
+                overwrite_if_different: options.overwrite_if_different.unwrap_or(true),
             });
 
         Self {
