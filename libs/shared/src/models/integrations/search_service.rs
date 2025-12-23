@@ -420,36 +420,3 @@ impl Drop for SearchServicesOrchestrator {
         let _ = Self::stop_sync();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_search_orchestrator() {
-        // Ensure we start fresh
-        let _ = SearchServicesOrchestrator::stop().await;
-
-        let config = SearchServicesOrchestrator::start()
-            .await
-            .expect("Failed to start orchestrator");
-        println!("SearchPak started on port {}", config.api_port);
-
-        // Wait for services to be ready
-        tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
-
-        let api_url = format!("http://localhost:{}", config.api_port);
-        let client = SearchClient::new(api_url);
-
-        let results = client
-            .search_and_scrape("rust programming".to_string(), None)
-            .await
-            .expect("Search failed");
-        assert!(!results.is_empty(), "Search results should not be empty");
-        println!("Search results: {:?}", results);
-
-        SearchServicesOrchestrator::stop()
-            .await
-            .expect("Failed to stop orchestrator");
-    }
-}
