@@ -480,7 +480,7 @@ impl AgentProvider for LocalClient {
             previous_queries.push(current_query.clone());
 
             let search_results = search_client
-                .search_and_scrape(current_query.clone())
+                .search_and_scrape(current_query.clone(), None)
                 .await
                 .map_err(|e| e.to_string())?;
 

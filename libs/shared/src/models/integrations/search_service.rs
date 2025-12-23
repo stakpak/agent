@@ -15,10 +15,9 @@ const MIN_LIMIT: u32 = 1;
 const MAX_LIMIT: u32 = 100;
 const CONFIG_FILE: &str = "search_config.json";
 
-const DEFAULT_SEARXNG_IMAGE: &str = "ghcr.io/stakpak/local_search_service/searxng-service:latest";
-const DEFAULT_API_IMAGE: &str = "ghcr.io/stakpak/local_search_service/search-api-service:latest";
+const DEFAULT_API_IMAGE: &str = "ghcr.io/stakpak/local_search:0.2";
 
-// Results
+const STATIC_WHITELIST_URLS: &[&str] = &[];
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ScrapedContent {
@@ -37,8 +36,6 @@ pub struct SearchResult {
     pub engine: Option<String>,
     pub score: Option<f32>,
 }
-
-// Requests
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SearchRequest {
@@ -110,13 +107,12 @@ pub struct SearchAndScrapeRequest {
     #[serde(flatten)]
     pub search: SearchRequest,
     pub scrape_limit: u32,
+    pub whitelist: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchConfig {
-    pub searxng_port: u16,
     pub api_port: u16,
-    pub searxng_container_id: String,
     pub api_container_id: String,
 }
 
@@ -152,7 +148,18 @@ impl SearchClient {
     pub async fn search_and_scrape(
         &self,
         query: String,
+        whitelist: Option<Vec<String>>,
     ) -> Result<Vec<ScrapedContent>, AgentError> {
+        let whitelist = match whitelist {
+            Some(w) if !w.is_empty() => Some(w),
+            _ => Some(
+                STATIC_WHITELIST_URLS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
+        };
+
         let request = SearchAndScrapeRequest {
             search: SearchRequest {
                 query,
@@ -161,6 +168,7 @@ impl SearchClient {
                 engines: None,
             },
             scrape_limit: DEFAULT_SCRAPE_LIMIT,
+            whitelist,
         };
 
         request.search.validate()?;
@@ -227,15 +235,11 @@ impl SearchServicesOrchestrator {
     pub async fn start() -> Result<SearchConfig, AgentError> {
         if let Some(config) = Self::load_config() {
             let api_url = format!("http://localhost:{}", config.api_port);
-            let searxng_url = format!("http://localhost:{}", config.searxng_port);
 
-            if Self::health_check_api(&api_url).await.is_ok()
-                && Self::health_check_searxng(&searxng_url).await.is_ok()
-            {
+            if Self::health_check_api(&api_url).await.is_ok() {
                 return Ok(config);
             }
 
-            let _ = crate::container::stop_container(&config.searxng_container_id);
             let _ = crate::container::stop_container(&config.api_container_id);
         }
 
@@ -245,54 +249,45 @@ impl SearchServicesOrchestrator {
             )));
         }
 
-        let searxng_image =
-            env::var("SEARXNG_IMAGE").unwrap_or_else(|_| DEFAULT_SEARXNG_IMAGE.to_string());
         let api_image = env::var("API_IMAGE").unwrap_or_else(|_| DEFAULT_API_IMAGE.to_string());
 
-        Self::ensure_image_exists(&searxng_image)?;
         Self::ensure_image_exists(&api_image)?;
 
-        let (searxng_port, api_port) = Self::find_two_available_ports()?;
+        let mut api_port = None;
+        for _ in 0..5 {
+            api_port = crate::container::find_available_port();
+            if api_port.is_some() {
+                break;
+            }
+        }
 
-        let searxng_env = HashMap::from([
-            (
-                "BASE_URL".to_string(),
-                format!("http://localhost:{}", searxng_port),
-            ),
-            ("INSTANCE_NAME".to_string(), "SearchPak".to_string()),
-            ("BIND_ADDRESS".to_string(), "0.0.0.0:8080".to_string()),
-            ("SEARXNG_LIMITER".to_string(), "false".to_string()),
-            ("SEARXNG_SEARCH_FORMATS".to_string(), "json".to_string()),
-            ("SEARXNG_IMAGE_PROXY".to_string(), "true".to_string()),
-        ]);
-
-        let searxng_config = ContainerConfig {
-            image: searxng_image,
-            env_vars: searxng_env,
-            ports: vec![format!("{}:8080", searxng_port)],
-            extra_hosts: vec!["host.docker.internal:host-gateway".to_string()],
-            volumes: vec![],
+        let api_port = match api_port {
+            Some(port) => port,
+            None => {
+                return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
+                    "Failed to find available port for API container".to_string(),
+                )));
+            }
         };
 
-        let searxng_container_id = crate::container::run_container_detached(searxng_config)
-            .map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "Failed to start SearXNG container: {}",
-                    e
-                )))
-            })?;
-
-        let api_env = HashMap::from([
+        let env = HashMap::from([
+            ("INSTANCE_NAME".to_string(), "SearchPak".to_string()),
+            (
+                "SEARXNG_SECRET".to_string(),
+                "stakpak-secret-key".to_string(),
+            ),
+            ("SEARXNG_PORT".to_string(), "8080".to_string()),
+            ("SEARXNG_BIND_ADDRESS".to_string(), "0.0.0.0".to_string()),
             (
                 "SEARXNG_BASE_URL".to_string(),
-                format!("http://host.docker.internal:{}", searxng_port),
+                "http://localhost:8080".to_string(),
             ),
             ("PORT".to_string(), "8000".to_string()),
         ]);
 
         let api_config = ContainerConfig {
             image: api_image,
-            env_vars: api_env,
+            env_vars: env,
             ports: vec![format!("{}:8000", api_port)],
             extra_hosts: vec!["host.docker.internal:host-gateway".to_string()],
             volumes: vec![],
@@ -307,9 +302,7 @@ impl SearchServicesOrchestrator {
             })?;
 
         let config = SearchConfig {
-            searxng_port,
             api_port,
-            searxng_container_id,
             api_container_id,
         };
 
@@ -320,13 +313,6 @@ impl SearchServicesOrchestrator {
 
     pub async fn stop() -> Result<(), AgentError> {
         if let Some(config) = Self::load_config() {
-            crate::container::stop_container(&config.searxng_container_id).map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "Failed to stop SearXNG container: {}",
-                    e
-                )))
-            })?;
-
             crate::container::stop_container(&config.api_container_id).map_err(|e| {
                 AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
                     "Failed to stop API container: {}",
@@ -342,13 +328,6 @@ impl SearchServicesOrchestrator {
 
     pub fn stop_sync() -> Result<(), AgentError> {
         if let Some(config) = Self::load_config() {
-            crate::container::stop_container(&config.searxng_container_id).map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "Failed to stop SearXNG container: {}",
-                    e
-                )))
-            })?;
-
             crate::container::stop_container(&config.api_container_id).map_err(|e| {
                 AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
                     "Failed to stop API container: {}",
@@ -365,11 +344,8 @@ impl SearchServicesOrchestrator {
     pub async fn check() -> Result<bool, AgentError> {
         if let Some(config) = Self::load_config() {
             let api_url = format!("http://localhost:{}", config.api_port);
-            let searxng_url = format!("http://localhost:{}", config.searxng_port);
 
-            if Self::health_check_api(&api_url).await.is_ok()
-                && Self::health_check_searxng(&searxng_url).await.is_ok()
-            {
+            if Self::health_check_api(&api_url).await.is_ok() {
                 return Ok(true);
             }
         }
@@ -421,48 +397,6 @@ impl SearchServicesOrchestrator {
         Ok(())
     }
 
-    async fn health_check_searxng(searxng_url: &str) -> Result<(), AgentError> {
-        let response = reqwest::get(format!("{}/healthz", searxng_url))
-            .await
-            .map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "SearXNG health check failed: {}",
-                    e
-                )))
-            })?;
-
-        if !response.status().is_success() {
-            return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "SearXNG health check returned status: {}",
-                    response.status()
-                ),
-            )));
-        }
-
-        Ok(())
-    }
-
-    fn find_two_available_ports() -> Result<(u16, u16), AgentError> {
-        let port1 = crate::container::find_available_port().ok_or_else(|| {
-            AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                "Failed to find first available port".to_string(),
-            ))
-        })?;
-
-        for _ in 0..5 {
-            if let Some(port2) = crate::container::find_available_port()
-                && port2 != port1
-            {
-                return Ok((port1, port2));
-            }
-        }
-
-        Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-            "Failed to find two different available ports".to_string(),
-        )))
-    }
-
     fn ensure_image_exists(image: &str) -> Result<(), AgentError> {
         if !crate::container::image_exists_locally(image).map_err(|e| {
             AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
@@ -484,5 +418,38 @@ impl SearchServicesOrchestrator {
 impl Drop for SearchServicesOrchestrator {
     fn drop(&mut self) {
         let _ = Self::stop_sync();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_search_orchestrator() {
+        // Ensure we start fresh
+        let _ = SearchServicesOrchestrator::stop().await;
+
+        let config = SearchServicesOrchestrator::start()
+            .await
+            .expect("Failed to start orchestrator");
+        println!("SearchPak started on port {}", config.api_port);
+
+        // Wait for services to be ready
+        tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+
+        let api_url = format!("http://localhost:{}", config.api_port);
+        let client = SearchClient::new(api_url);
+
+        let results = client
+            .search_and_scrape("rust programming".to_string(), None)
+            .await
+            .expect("Search failed");
+        assert!(!results.is_empty(), "Search results should not be empty");
+        println!("Search results: {:?}", results);
+
+        SearchServicesOrchestrator::stop()
+            .await
+            .expect("Failed to stop orchestrator");
     }
 }
