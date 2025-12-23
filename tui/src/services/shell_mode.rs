@@ -251,7 +251,7 @@ pub fn run_background_shell_command(
 #[cfg(unix)]
 pub fn run_pty_command(
     command: String,
-    command_to_execute: Option<String>,  // If Some, this command is typed after prompt appears
+    command_to_execute: Option<String>, // If Some, this command is typed after prompt appears
     output_tx: mpsc::Sender<ShellEvent>,
     rows: u16,
     cols: u16,
@@ -329,10 +329,10 @@ pub fn run_pty_command(
 
         // Clone command for typing later (only if provided)
         let command_to_type = command_to_execute;
-        
+
         // Channel to signal when prompt is ready (first output received)
         let (prompt_ready_tx, prompt_ready_rx) = std::sync::mpsc::channel::<()>();
-        
+
         // Read output - buffer for partial reads
         let mut reader = match pair.master.try_clone_reader() {
             Ok(r) => r,
@@ -350,7 +350,7 @@ pub fn run_pty_command(
         std::thread::spawn(move || {
             let mut buffer = vec![0u8; 4096];
             let mut first_output = true;
-            
+
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break, // EOF
@@ -360,7 +360,7 @@ pub fn run_pty_command(
                             let _ = prompt_ready_tx.send(());
                             first_output = false;
                         }
-                        
+
                         // Process data
                         if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
                             let _ = output_tx_clone.blocking_send(ShellEvent::Output(text));
@@ -382,7 +382,7 @@ pub fn run_pty_command(
                 }
             }
         });
-        
+
         // Handle stdin in a separate thread - waits for prompt before typing command
         std::thread::spawn(move || {
             // Only wait for prompt and type command if we have one
@@ -392,10 +392,10 @@ pub fn run_pty_command(
                 if prompt_ready_rx.recv_timeout(timeout).is_err() {
                     eprintln!("Timeout waiting for shell prompt");
                 }
-                
+
                 // Give a bit more time for prompt to fully render
                 std::thread::sleep(std::time::Duration::from_millis(300));
-                
+
                 // Type the command followed by Enter
                 if let Err(e) = writeln!(writer, "{}", cmd) {
                     eprintln!("Failed to type command to PTY: {}", e);
@@ -404,7 +404,7 @@ pub fn run_pty_command(
                     eprintln!("Failed to flush PTY: {}", e);
                 }
             }
-            
+
             // Now handle user input from the channel
             while let Some(input) = stdin_rx.blocking_recv() {
                 // Don't add newline for password input

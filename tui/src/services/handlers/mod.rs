@@ -23,7 +23,6 @@ use tokio::sync::mpsc::Sender;
 pub struct EventChannels<'a> {
     pub output_tx: &'a Sender<OutputEvent>,
     pub input_tx: &'a Sender<InputEvent>,
-    pub shell_tx: &'a Sender<InputEvent>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -129,20 +128,23 @@ pub fn update(
             InputEvent::PageUp => {
                 if state.shell_popup_visible && state.shell_popup_expanded {
                     let page_size = state.terminal_size.height / 4;
-                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_add(page_size as usize);
+                    state.shell_popup_scroll =
+                        state.shell_popup_scroll.saturating_add(page_size as usize);
                 } else {
                     let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
                     let total_lines = state.shell_history_lines.len();
                     let max_scroll = total_lines.saturating_sub(visible_height) as u16;
                     let page_size = state.terminal_size.height / 2;
-                    state.shell_scroll = state.shell_scroll.saturating_add(page_size).min(max_scroll);
+                    state.shell_scroll =
+                        state.shell_scroll.saturating_add(page_size).min(max_scroll);
                 }
                 return;
             }
             InputEvent::PageDown => {
                 if state.shell_popup_visible && state.shell_popup_expanded {
                     let page_size = state.terminal_size.height / 4;
-                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_sub(page_size as usize);
+                    state.shell_popup_scroll =
+                        state.shell_popup_scroll.saturating_sub(page_size as usize);
                 } else {
                     let page_size = state.terminal_size.height / 2;
                     state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
@@ -195,6 +197,7 @@ pub fn update(
                 output_tx,
                 input_tx,
                 shell_tx,
+                cancel_tx,
             );
         }
         InputEvent::InputSubmittedWith(s) => {
@@ -266,7 +269,6 @@ pub fn update(
             let channels = EventChannels {
                 output_tx,
                 input_tx,
-                shell_tx,
             };
             dialog::handle_esc(state, &channels, cancel_tx, message, should_stop, color);
         }
@@ -325,7 +327,12 @@ pub fn update(
             shell::handle_shell_mode(state, input_tx);
         }
         InputEvent::ShellOutput(line) => {
-            shell::handle_shell_output(state, line);
+            let should_auto_complete = shell::handle_shell_output(state, line);
+            if should_auto_complete {
+                // Auto-detected command completion - trigger Esc flow
+                // This reuses existing logic that captures history and sends tool result
+                dialog::handle_esc_event(state, input_tx, output_tx, shell_tx, cancel_tx.clone());
+            }
         }
         InputEvent::ShellError(line) => {
             shell::handle_shell_error(state, line);

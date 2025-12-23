@@ -63,7 +63,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     // Hide input when shell popup is expanded (takes over input)
     let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
-        0  // Hide input when popup is expanded
+        0 // Hide input when popup is expanded
     } else {
         input_height
     };
@@ -119,7 +119,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     if !state.show_sessions_dialog {
         shell_popup_area = chunks[4]; // Shell popup between dialog and input
-        input_area = chunks[5];       // Input after shell popup
+        input_area = chunks[5]; // Input after shell popup
         dropdown_area = chunks.get(6).copied().unwrap_or(input_area);
     }
 

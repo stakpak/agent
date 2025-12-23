@@ -166,13 +166,11 @@ pub fn handle_retry_tool_call(
             state.shell_tool_calls = Some(Vec::new());
         }
 
-
-
         // Clear any existing shell state
         state.active_shell_command = None;
         state.active_shell_command_output = None;
-        state.shell_history_lines.clear();  // Clear history for fresh retry
-        
+        state.shell_history_lines.clear(); // Clear history for fresh retry
+
         // Reset the screen parser with safe dimensions matching PTY (shell.rs)
         let rows = state.terminal_size.height.saturating_sub(2).max(1);
         let cols = state.terminal_size.width.saturating_sub(4).max(1);

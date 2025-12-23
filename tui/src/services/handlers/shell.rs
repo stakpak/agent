@@ -35,6 +35,26 @@ fn convert_vt100_color(c: vt100::Color) -> Color {
     }
 }
 
+/// Check if a line appears to be a shell prompt (ends with common prompt characters)
+/// This is used to detect when a command has completed and the shell is ready for more input
+fn looks_like_prompt(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Common prompt ending characters
+    let prompt_endings = ['$', '%', '>', '#', '✗', '❯', '➜', '»'];
+
+    // Check if line ends with a prompt character (possibly followed by a space)
+    let last_char = trimmed.chars().last();
+    if let Some(c) = last_char {
+        return prompt_endings.contains(&c);
+    }
+
+    false
+}
+
 /// Capture styled screen content at scroll position 0 (which is safe).
 /// Returns styled Lines for the current visible screen.
 pub fn capture_styled_screen(parser: &mut vt100::Parser) -> Vec<Line<'static>> {
@@ -120,8 +140,11 @@ fn row_to_line(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'static> {
 
 pub fn send_shell_input(state: &mut AppState, data: &str) {
     // Clone the tx first to avoid borrow conflict with cursor reset
-    let some_tx = state.active_shell_command.as_ref().map(|cmd| cmd.stdin_tx.clone());
-    
+    let some_tx = state
+        .active_shell_command
+        .as_ref()
+        .map(|cmd| cmd.stdin_tx.clone());
+
     if let Some(tx) = some_tx {
         // Mark that user has interacted with the shell
         if !data.is_empty() {
@@ -177,7 +200,8 @@ pub fn handle_run_shell_command(
     };
 
     #[cfg(unix)]
-    let shell_cmd = match run_pty_command(command.clone(), command_to_execute, shell_tx, rows, cols) {
+    let shell_cmd = match run_pty_command(command.clone(), command_to_execute, shell_tx, rows, cols)
+    {
         Ok(cmd) => cmd,
         Err(e) => {
             push_error_message(state, &format!("Failed to run command: {}", e), None);
@@ -251,7 +275,7 @@ pub fn handle_run_shell_command(
     // Set new popup state fields
     state.shell_popup_visible = true;
     state.shell_popup_expanded = true;
-    state.shell_popup_scroll = 0;  // Reset scroll to show bottom
+    state.shell_popup_scroll = 0; // Reset scroll to show bottom
     // Invalidate cache so old bordered message is hidden
     invalidate_message_lines_cache(state);
     // Also set legacy alias for backward compatibility
@@ -270,16 +294,17 @@ pub fn handle_run_shell_with_command(
     state.is_tool_call_shell_command = true;
     // Store the command value for later tool call result
     state.shell_pending_command_value = Some(command.clone());
-    // Initially false - will become true when command starts executing 
+    // Initially false - will become true when command starts executing
     state.shell_pending_command_executed = false;
     state.shell_pending_command_output = Some(String::new());
     state.shell_pending_command_output_count = 0;
+    // Reset prompt detection state for auto-completion
+    state.shell_initial_prompt_shown = false;
+    state.shell_command_typed = false;
 
     // Run the command via interactive shell - PTY will show prompt then type the command
     handle_run_shell_command(state, command, input_tx);
 }
-
-
 
 /// Helper to background the active shell session (minimize popup)
 pub fn background_shell_session(state: &mut AppState) {
@@ -327,10 +352,7 @@ pub fn background_shell_session(state: &mut AppState) {
                     tool_type: "Interactive Bash".to_string(),
                 };
                 msg.content = MessageContent::RenderRefreshedTerminal(
-                    format!(
-                        "Shell Command {} (Background - Esc to exit)",
-                        command_name
-                    ),
+                    format!("Shell Command {} (Background - Esc to exit)", command_name),
                     fresh_lines.clone(),
                     Some(new_colors),
                     state.terminal_size.width as usize,
@@ -342,7 +364,7 @@ pub fn background_shell_session(state: &mut AppState) {
 
     // Clear text area but persist shell
     state.text_area.set_text("");
-    
+
     // Invalidate cache
     invalidate_message_lines_cache(state);
 }
@@ -350,7 +372,7 @@ pub fn background_shell_session(state: &mut AppState) {
 pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
     // '$' only EXPANDS the shell popup - it does NOT toggle/shrink
     // Only Esc can exit shell mode (handled elsewhere)
-    
+
     // If already expanded, '$' IS TYPED INTO SHELL
     if state.show_shell_mode && state.shell_popup_expanded {
         if let Some(shell_cmd) = &state.active_shell_command {
@@ -361,13 +383,13 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
         }
         return;
     }
-    
+
     // If popup is visible but shrunk (backgrounded), expand it back
     if state.shell_popup_visible && !state.shell_popup_expanded {
         state.shell_popup_expanded = true;
         state.show_shell_mode = true;
         state.text_area.set_shell_mode(true);
-        
+
         // Update message to show focused state
         if let Some(id) = state.interactive_shell_message_id {
             let command_name = state
@@ -414,10 +436,10 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
 
     // Start a new on-demand shell (no command - just interactive)
     state.ondemand_shell_mode = true;
-    state.shell_pending_command_value = None;  // No command to type
+    state.shell_pending_command_value = None; // No command to type
     state.shell_pending_command_executed = false;
     state.is_tool_call_shell_command = false;
-    
+
     let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
     let _ = input_tx.try_send(InputEvent::RunShellCommand(shell));
 }
@@ -440,12 +462,16 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
             // Build the tool call result with captured output
             let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
 
-            // Add to shell_tool_calls so it gets sent with user message
-            if state.shell_tool_calls.is_none() {
-                state.shell_tool_calls = Some(Vec::new());
-            }
-            if let Some(ref mut tool_calls) = state.shell_tool_calls {
-                tool_calls.push(result);
+            // If this is NOT a tool call (but a TUI interactive stall),
+            // add to shell_tool_calls so it gets sent with the NEXT user message.
+            // For real tool calls, the result is sent immediately by the handler.
+            if !state.is_tool_call_shell_command {
+                if state.shell_tool_calls.is_none() {
+                    state.shell_tool_calls = Some(Vec::new());
+                }
+                if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                    tool_calls.push(result);
+                }
             }
 
             // Reset the tracking state
@@ -461,15 +487,22 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
                     if let MessageContent::RenderRefreshedTerminal(_, lines, _, width) =
                         &msg.content
                     {
-                        let new_colors = BubbleColors {
-                            border_color: Color::DarkGray,
-                            title_color: Color::DarkGray,
-                            content_color: AdaptiveColors::text(),
-                            tool_type: "Interactive Bash (Terminated)".to_string(),
+                        let (new_color, status_suffix) = if state.is_tool_call_shell_command {
+                            (Color::Green, "Completed")
+                        } else {
+                            (Color::DarkGray, "Terminated")
                         };
+
+                        let new_colors = BubbleColors {
+                            border_color: new_color,
+                            title_color: new_color,
+                            content_color: AdaptiveColors::text(),
+                            tool_type: format!("Interactive Bash ({})", status_suffix),
+                        };
+                        let trimmed_lines = trim_shell_lines(lines.clone());
                         msg.content = MessageContent::RenderRefreshedTerminal(
-                            format!("Shell Command {} (Terminated)", command_name),
-                            lines.clone(),
+                            format!("Shell Command {} ({})", command_name, status_suffix),
+                            trimmed_lines,
                             Some(new_colors),
                             *width,
                         );
@@ -485,10 +518,11 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
 }
 
 /// Handle shell output event
-pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
+/// Returns true if auto-completion was triggered
+pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
     // Guard: If shell was terminated, ignore any pending output
     if state.active_shell_command.is_none() {
-        return;
+        return false;
     }
 
     // First output received - hide loading indicator
@@ -630,7 +664,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // 5. Update UI
     // Prepended lines (like command injection) that are NOT part of terminal history
-    let mut display_lines = screen_lines.clone();
+    let mut display_lines = trim_shell_lines(screen_lines.clone());
     if let Some(cmd) = state.shell_pending_command_value.clone() {
         let command_line = Line::from(vec![
             Span::styled(
@@ -671,7 +705,7 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
     {
         msg.content = MessageContent::RenderRefreshedTerminal(
             title,
-            display_lines,
+            display_lines.clone(),
             Some(colors),
             state.terminal_size.width as usize,
         );
@@ -679,6 +713,66 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // Invalidate message cache so the updated content is rendered
     invalidate_message_lines_cache(state);
+
+    // === Auto-completion detection for tool call shell commands ===
+    // Only for tool call shells (not on-demand shells)
+    if !state.is_tool_call_shell_command {
+        return false;
+    }
+
+    // Get the last non-empty line from display_lines to check for prompt
+    let last_line_text = display_lines
+        .iter()
+        .rev()
+        .find(|line| {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            !text.trim().is_empty()
+        })
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+
+    let current_is_prompt = looks_like_prompt(&last_line_text);
+
+    // State machine for prompt detection:
+    // 1. Initial state: shell_initial_prompt_shown = false, shell_command_typed = false
+    // 2. First prompt seen: shell_initial_prompt_shown = true
+    // 3. Command typed (output count increases after prompt): shell_command_typed = true
+    // 4. New prompt after command + user interaction: AUTO-COMPLETE!
+
+    if !state.shell_initial_prompt_shown {
+        // This is the first output - if it's a prompt, mark initial prompt as shown
+        if current_is_prompt {
+            state.shell_initial_prompt_shown = true;
+        }
+        return false;
+    }
+
+    if !state.shell_command_typed {
+        // We saw the initial prompt, now we're waiting for the command to be typed
+        // Once output count increases (command starts producing output), command was typed
+        if state.shell_pending_command_output_count > 2 {
+            state.shell_command_typed = true;
+        }
+        return false;
+    }
+
+    // Command was typed. Now check if we've returned to prompt AND user has interacted
+    // shell_interaction_occurred is set when user types something (like password)
+    if current_is_prompt
+        && state.shell_interaction_occurred
+        && state.shell_pending_command_output_count > 3
+    {
+        // We're back at a prompt after the command ran and user interacted
+        // This means the command is complete - trigger auto-completion!
+        return true;
+    }
+
+    false
 }
 
 /// Handle shell error event
@@ -714,20 +808,14 @@ pub fn handle_shell_completed(
 
     // If this was from an interactive stall command OR a tool call shell, capture and log the result
     if state.shell_pending_command_executed || state.is_tool_call_shell_command {
-        // Remove the shell message bubble entirely
-        if let Some(shell_msg_id) = state.interactive_shell_message_id {
-            state.messages.retain(|m| m.id != shell_msg_id);
-            state.interactive_shell_message_id = None;
-        }
+        // CRITICAL: Capture values BEFORE calling terminate_active_shell_session
+        // because it clears them!
+        let cmd_value = state.shell_pending_command_value.clone();
+        let shell_output = state.shell_pending_command_output.clone();
+        let saved_dialog_command = state.dialog_command.clone();
 
-        // Get the command and output for tool call result
-        let cmd_value = state.shell_pending_command_value.take();
-        let shell_output = state.shell_pending_command_output.take();
-
-        // Reset the tracking state
-        state.shell_pending_command_executed = false;
-        state.shell_pending_command_output_count = 0;
-        state.is_tool_call_shell_command = false; // Reset tool call flag
+        // Auto-terminate and finalize the shell session
+        terminate_active_shell_session(state);
 
         // Hide shell popup on completion
         state.shell_popup_visible = false;
@@ -738,7 +826,8 @@ pub fn handle_shell_completed(
         state.text_area.set_shell_mode(false);
 
         // Build and send the tool call result if we have a dialog_command
-        if let Some(dialog_command) = &state.dialog_command {
+        // Use saved value since terminate_active_shell_session clears state.dialog_command
+        if let Some(dialog_command) = saved_dialog_command {
             let dialog_command_id = dialog_command.id.clone();
             let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
 

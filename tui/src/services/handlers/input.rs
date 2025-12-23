@@ -65,6 +65,7 @@ pub fn handle_input_submitted_event(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     if state.show_profile_switcher {
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
@@ -146,7 +147,14 @@ pub fn handle_input_submitted_event(
         return;
     }
     if !state.is_pasting {
-        handle_input_submitted(state, message_area_height, output_tx, input_tx, shell_tx);
+        handle_input_submitted(
+            state,
+            message_area_height,
+            output_tx,
+            input_tx,
+            shell_tx,
+            cancel_tx,
+        );
     }
 }
 
@@ -248,6 +256,7 @@ fn handle_input_submitted(
     output_tx: &Sender<OutputEvent>,
     input_tx: &Sender<InputEvent>,
     shell_tx: &Sender<InputEvent>,
+    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     if state.show_shell_mode {
         if state.active_shell_command.is_some() {
@@ -411,10 +420,51 @@ fn handle_input_submitted(
 
         let mut final_input = state.input().to_string();
 
+        // Check for tool-initiated shell resolution
+        if state.is_tool_call_shell_command
+            && state.active_shell_command.is_some()
+            && !state.show_shell_mode
+        {
+            // 1. Signal cancellation to unblock the MCP task
+            if let Some(cancel_tx) = &cancel_tx {
+                let _ = cancel_tx.send(());
+            }
+
+            // 2. Capture history and resolve as success result
+            let history_lines = crate::services::handlers::shell::trim_shell_lines(
+                state.shell_history_lines.clone(),
+            );
+            if !history_lines.is_empty() {
+                let history_text = history_lines
+                    .iter()
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Form a successful tool call result with history
+                let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
+                    state,
+                    state.shell_pending_command_value.clone(),
+                    Some(history_text),
+                );
+
+                // Send the result via OutputEvent so the LLM gets it
+                let _ = output_tx.try_send(OutputEvent::SendToolResult(result, false, Vec::new()));
+            }
+
+            // 3. Clean up the shell
+            crate::services::handlers::shell::terminate_active_shell_session(state);
+            state.is_tool_call_shell_command = false;
+        }
+
         // Check for on-demand shell termination and history attachment
-        if state.ondemand_shell_mode && state.active_shell_command.is_some() && !state.show_shell_mode {
-            let history_lines =
-                crate::services::handlers::shell::trim_shell_lines(state.shell_history_lines.clone());
+        if state.ondemand_shell_mode
+            && state.active_shell_command.is_some()
+            && !state.show_shell_mode
+        {
+            let history_lines = crate::services::handlers::shell::trim_shell_lines(
+                state.shell_history_lines.clone(),
+            );
 
             if !history_lines.is_empty() {
                 // Add history message for UI
@@ -424,7 +474,7 @@ fn handle_input_submitted(
                         "Shell history".to_string(),
                         history_lines.clone(),
                         Some(BubbleColors {
-                            border_color: Color::Magenta, 
+                            border_color: Color::Magenta,
                             title_color: Color::Magenta,
                             content_color: Color::Reset,
                             tool_type: "Shell".to_string(),
@@ -435,30 +485,34 @@ fn handle_input_submitted(
                 });
 
                 // Construct ToolCallResult for LLM context (instead of appending text)
-                let history_text = history_lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
-                
+                let history_text = history_lines
+                    .iter()
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
                 if state.shell_tool_calls.is_none() {
                     state.shell_tool_calls = Some(Vec::new());
                 }
-                
+
                 let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
                     state,
                     Some("/bin/bash (Interactive Session)".to_string()),
                     Some(history_text),
                 );
-                
+
                 if let Some(ref mut tool_calls) = state.shell_tool_calls {
                     tool_calls.push(result);
                 }
             }
-            
+
             // "after I said hi the shell should be terminated not Background also it should be removed totally"
             // Remove the active shell message bubble
             if let Some(shell_msg_id) = state.interactive_shell_message_id {
                 state.messages.retain(|m| m.id != shell_msg_id);
             }
             state.interactive_shell_message_id = None;
-            
+
             // Full clear of shell variables
             state.active_shell_command = None;
             state.active_shell_command_output = None;
@@ -467,7 +521,7 @@ fn handle_input_submitted(
             state.shell_popup_visible = false;
             state.shell_popup_expanded = false;
             state.ondemand_shell_mode = false; // Reset on-demand mode
-            
+
             // Note: We don't call terminate_active_shell_session here because we manually cleaned up
             // and we don't want the "Terminated" message update logic from that function.
             // But we DO need to ensure the actual process is killed.

@@ -11,7 +11,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 
 /// Minimum height when shrinked (2 lines of content + 2 for borders)
@@ -33,11 +33,11 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
     // Count actual non-empty lines from the screen for dynamic sizing
     let screen = state.shell_screen.screen();
     let (rows, cols) = screen.size();
-    
+
     // Count non-empty rows from the end
     let mut content_lines: u16 = 0;
     let mut found_content = false;
-    
+
     for row in (0..rows).rev() {
         let mut row_empty = true;
         for col in 0..cols {
@@ -56,18 +56,21 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
             break;
         }
     }
-    
+
     // Minimum of 2 content lines
     content_lines = content_lines.max(2);
-    
+
     // Add 2 for borders
     let desired_height = content_lines.saturating_add(2);
-    
+
     // Calculate max height (60% of terminal)
     let max_height = (terminal_height as f32 * SHELL_POPUP_MAX_HEIGHT_PERCENT) as u16;
-    
+
     // Clamp between min and max
-    desired_height.clamp(SHELL_POPUP_MIN_HEIGHT, max_height.max(SHELL_POPUP_MIN_HEIGHT))
+    desired_height.clamp(
+        SHELL_POPUP_MIN_HEIGHT,
+        max_height.max(SHELL_POPUP_MIN_HEIGHT),
+    )
 }
 
 /// Render the shell popup above the input area
@@ -120,7 +123,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Get content area inside borders
     let inner_area = block.inner(area);
-    
+
     // Render the block first
     f.render_widget(block, area);
 
@@ -130,7 +133,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Get styled screen content - the PTY already shows the prompt and command naturally
     let screen_lines = capture_styled_screen(&mut state.shell_screen);
-    
+
     // Build display lines directly from screen content
     // We trim trailing empty lines for display so we don't "scroll to bottom" of empty lines
     let display_lines: Vec<Line<'static>> = trim_shell_lines(screen_lines);
@@ -143,7 +146,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     let max_scroll = total_lines.saturating_sub(inner_height);
     let scroll_from_bottom = state.shell_popup_scroll.min(max_scroll);
     let skip = max_scroll.saturating_sub(scroll_from_bottom);
-    
+
     let visible_lines: Vec<Line<'static>> = display_lines
         .clone()
         .into_iter()
@@ -155,25 +158,25 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(content, inner_area);
 
     // Render cursor when shell is active and expanded (only if at bottom - scroll = 0)
-    if state.shell_popup_expanded 
-        && state.active_shell_command.is_some() 
-        && state.shell_popup_scroll == 0 
+    if state.shell_popup_expanded
+        && state.active_shell_command.is_some()
+        && state.shell_popup_scroll == 0
     {
         // Only show cursor if it should be visible (blink state)
         if state.shell_cursor_visible {
             let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
-            
+
             // Calculate screen position for cursor (directly from PTY cursor position)
             let cursor_line_in_content = cursor_row as usize;
-            
+
             // Since we're at bottom (scroll=0), calculate where cursor appears
             if cursor_line_in_content >= skip && cursor_line_in_content < skip + inner_height {
                 let screen_row = (cursor_line_in_content - skip) as u16;
                 let screen_x = inner_area.x + cursor_col;
                 let screen_y = inner_area.y + screen_row;
-                
-                if screen_x < inner_area.x + inner_area.width 
-                    && screen_y < inner_area.y + inner_area.height 
+
+                if screen_x < inner_area.x + inner_area.width
+                    && screen_y < inner_area.y + inner_area.height
                 {
                     f.set_cursor_position(ratatui::layout::Position::new(screen_x, screen_y));
                 }
@@ -182,11 +185,10 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-
 /// Update cursor blink state (call this from event loop tick)
 pub fn update_cursor_blink(state: &mut AppState) {
     state.shell_cursor_blink_timer = state.shell_cursor_blink_timer.wrapping_add(1);
-    
+
     // Toggle every 5 frames (~500ms at 10fps / 100ms interval)
     if state.shell_cursor_blink_timer % 5 == 0 {
         state.shell_cursor_visible = !state.shell_cursor_visible;

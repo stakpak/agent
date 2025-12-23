@@ -19,7 +19,7 @@ pub fn handle_esc_event(
     state: &mut AppState,
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
-    shell_tx: &Sender<InputEvent>,
+    _shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
     if state.show_context_popup {
@@ -70,7 +70,6 @@ pub fn handle_esc_event(
         let channels = EventChannels {
             output_tx,
             input_tx,
-            shell_tx,
         };
         handle_esc(state, &channels, cancel_tx, None, true, None);
     }
@@ -122,22 +121,36 @@ pub fn handle_esc(
         state.text_area.set_text("");
     } else if state.show_shell_mode {
         if state.dialog_command.is_some() {
-            // Interactive stall shell: reject the tool call and remove the shell box
-            if let Some(tool_call) = &state.dialog_command {
-                let _ = channels
-                    .output_tx
-                    .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
+            // Interactive stall shell: resolve it correctly with captured history
+            // instead of just rejecting it.
+            if let Some(_tool_call) = &state.dialog_command {
+                // Capture history for context
+                let history_lines =
+                    super::shell::trim_shell_lines(state.shell_history_lines.clone());
+                let history_text = history_lines
+                    .iter()
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let result = super::shell::shell_command_to_tool_call_result(
+                    state,
+                    state.shell_pending_command_value.clone(),
+                    Some(history_text),
+                );
+
+                // Send as a successful result so LLM gets the context
+                let _ = channels.output_tx.try_send(OutputEvent::SendToolResult(
+                    result,
+                    false,
+                    Vec::new(),
+                ));
             }
 
             if state.active_shell_command.is_some() {
-                let _ = channels.shell_tx.try_send(InputEvent::ShellKill);
+                super::shell::terminate_active_shell_session(state);
             }
-
-            // Remove the shell message box
-            if let Some(shell_msg_id) = state.interactive_shell_message_id {
-                state.messages.retain(|m| m.id != shell_msg_id);
-            }
-            state.interactive_shell_message_id = None;
+            state.is_tool_call_shell_command = false;
 
             state.show_shell_mode = false;
             state.shell_popup_visible = false;
