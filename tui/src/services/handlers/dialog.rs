@@ -140,6 +140,8 @@ pub fn handle_esc(
             state.interactive_shell_message_id = None;
 
             state.show_shell_mode = false;
+            state.shell_popup_visible = false;
+            state.shell_popup_expanded = false;
             state.text_area.set_shell_mode(false);
             state.text_area.set_text("");
             state.dialog_command = None;
@@ -154,7 +156,7 @@ pub fn handle_esc(
             crate::services::message::invalidate_message_lines_cache(state);
         } else {
             // On-demand shell: just tab out/background (don't remove the box)
-            let _ = channels.input_tx.try_send(InputEvent::ShellMode);
+            super::shell::background_shell_session(state);
         }
     } else {
         state.text_area.set_text("");

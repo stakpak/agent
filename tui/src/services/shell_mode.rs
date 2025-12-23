@@ -251,6 +251,7 @@ pub fn run_background_shell_command(
 #[cfg(unix)]
 pub fn run_pty_command(
     command: String,
+    command_to_execute: Option<String>,  // If Some, this command is typed after prompt appears
     output_tx: mpsc::Sender<ShellEvent>,
     rows: u16,
     cols: u16,
@@ -293,7 +294,8 @@ pub fn run_pty_command(
 
         let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
         let mut cmd = CommandBuilder::new(&shell);
-        cmd.args(["-i", "-c", &command]);
+        // Start interactive login shell to get full prompt configuration (git branch, etc)
+        cmd.args(["-il"]);
         cmd.cwd(&current_dir);
 
         let mut child = match pair.slave.spawn_command(cmd) {
@@ -325,8 +327,85 @@ pub fn run_pty_command(
             }
         };
 
-        // Handle stdin in a separate thread
+        // Clone command for typing later (only if provided)
+        let command_to_type = command_to_execute;
+        
+        // Channel to signal when prompt is ready (first output received)
+        let (prompt_ready_tx, prompt_ready_rx) = std::sync::mpsc::channel::<()>();
+        
+        // Read output - buffer for partial reads
+        let mut reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = output_tx.blocking_send(ShellEvent::Error(format!(
+                    "Failed to clone PTY reader: {}",
+                    e
+                )));
+                return;
+            }
+        };
+
+        // Start the reader thread - sends signal when first output received
+        let output_tx_clone = output_tx.clone();
         std::thread::spawn(move || {
+            let mut buffer = vec![0u8; 4096];
+            let mut first_output = true;
+            
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        // Signal that prompt is ready on first output
+                        if first_output {
+                            let _ = prompt_ready_tx.send(());
+                            first_output = false;
+                        }
+                        
+                        // Process data
+                        if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
+                            let _ = output_tx_clone.blocking_send(ShellEvent::Output(text));
+                        } else {
+                            // Lossy conversion for non-utf8
+                            let text = String::from_utf8_lossy(&buffer[..n]).to_string();
+                            let _ = output_tx_clone.blocking_send(ShellEvent::Output(text));
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // No data available, sleep briefly
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => {
+                        let _ = output_tx_clone
+                            .blocking_send(ShellEvent::Error(format!("Read error: {}", e)));
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Handle stdin in a separate thread - waits for prompt before typing command
+        std::thread::spawn(move || {
+            // Only wait for prompt and type command if we have one
+            if let Some(cmd) = command_to_type {
+                // Wait for shell to output prompt (with timeout)
+                let timeout = std::time::Duration::from_secs(5);
+                if prompt_ready_rx.recv_timeout(timeout).is_err() {
+                    eprintln!("Timeout waiting for shell prompt");
+                }
+                
+                // Give a bit more time for prompt to fully render
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                
+                // Type the command followed by Enter
+                if let Err(e) = writeln!(writer, "{}", cmd) {
+                    eprintln!("Failed to type command to PTY: {}", e);
+                }
+                if let Err(e) = writer.flush() {
+                    eprintln!("Failed to flush PTY: {}", e);
+                }
+            }
+            
+            // Now handle user input from the channel
             while let Some(input) = stdin_rx.blocking_recv() {
                 // Don't add newline for password input
                 if let Err(e) = write!(writer, "{}", input) {
@@ -340,48 +419,6 @@ pub fn run_pty_command(
                 }
             }
         });
-
-        // Read output - buffer for partial reads
-        let mut reader = match pair.master.try_clone_reader() {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = output_tx.blocking_send(ShellEvent::Error(format!(
-                    "Failed to clone PTY reader: {}",
-                    e
-                )));
-                return;
-            }
-        };
-
-        let mut buffer = vec![0u8; 4096];
-        let mut accumulated = Vec::new();
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break, // EOF
-                Ok(n) => {
-                    accumulated.extend_from_slice(&buffer[..n]);
-
-                    // Process data
-                    if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
-                        let _ = output_tx.blocking_send(ShellEvent::Output(text));
-                    } else {
-                        // Lossy conversion for non-utf8
-                        let text = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        let _ = output_tx.blocking_send(ShellEvent::Output(text));
-                    }
-                    accumulated.clear();
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No data available, sleep briefly
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(e) => {
-                    let _ =
-                        output_tx.blocking_send(ShellEvent::Error(format!("Read error: {}", e)));
-                    break;
-                }
-            }
-        }
 
         // Wait for completion
         match child.wait() {

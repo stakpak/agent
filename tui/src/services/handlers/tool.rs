@@ -12,6 +12,7 @@ use stakpak_shared::models::integrations::openai::{
 use tokio::sync::mpsc::Sender;
 
 use super::shell::extract_command_from_tool_call;
+use vt100;
 
 /// Handle stream tool result event
 /// Returns Some(command) if an interactive stall was detected and shell mode should be triggered
@@ -154,8 +155,10 @@ pub fn handle_retry_tool_call(
                 return;
             }
         };
-        // Enable shell mode
+        // Enable shell mode and popup
         state.show_shell_mode = true;
+        state.shell_popup_visible = true;
+        state.shell_popup_expanded = true;
         state.is_dialog_open = false;
         state.ondemand_shell_mode = false;
         state.dialog_command = Some(tool_call.clone());
@@ -163,16 +166,23 @@ pub fn handle_retry_tool_call(
             state.shell_tool_calls = Some(Vec::new());
         }
 
-        // Set the command in the input but don't execute it yet
-        state.text_area.set_text(&command);
-        state.text_area.set_cursor(command.len());
+
 
         // Clear any existing shell state
         state.active_shell_command = None;
         state.active_shell_command_output = None;
-        state.waiting_for_shell_input = false;
+        state.shell_history_lines.clear();  // Clear history for fresh retry
+        
+        // Reset the screen parser with safe dimensions matching PTY (shell.rs)
+        let rows = state.terminal_size.height.saturating_sub(2).max(1);
+        let cols = state.terminal_size.width.saturating_sub(4).max(1);
+        state.shell_screen = vt100::Parser::new(rows, cols, 0);
+
         // Set textarea shell mode to match app state
         state.text_area.set_shell_mode(true);
+
+        // Automatically execute the command
+        let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
     }
 }
 

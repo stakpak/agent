@@ -70,21 +70,28 @@ pub struct AppState {
     pub spinner_frame: usize,
     pub loading_manager: LoadingStateManager,
 
-    // ========== Shell Mode State ==========
-    pub show_shell_mode: bool,
+    // ========== Shell Popup State ==========
+    pub shell_popup_visible: bool,
+    pub shell_popup_expanded: bool,
+    pub shell_popup_scroll: usize,
+    pub shell_cursor_visible: bool,
+    pub shell_cursor_blink_timer: u8,
     pub active_shell_command: Option<ShellCommand>,
     pub active_shell_command_output: Option<String>,
-    pub shell_mode_input: String,
     pub waiting_for_shell_input: bool,
+    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub shell_loading: bool,
+    pub shell_pending_command_value: Option<String>,
+    pub shell_pending_command_executed: bool,
+    pub shell_pending_command_output: Option<String>,
+    // Backward compatibility aliases (to be removed after full migration)
+    pub show_shell_mode: bool,          // alias for shell_popup_visible && shell_popup_expanded
+    pub shell_mode_input: String,       // unused, kept for compatibility
     pub is_tool_call_shell_command: bool,
     pub ondemand_shell_mode: bool,
-    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
-    pub shell_loading: bool, // True while shell PTY is initializing
-    pub shell_pending_command: Option<String>, // Command to execute after shell is ready
-    pub shell_pending_command_value: Option<String>, // The command value that was executed
-    pub shell_pending_command_executed: bool, // True after the pending command has been sent to shell
-    pub shell_pending_command_output: Option<String>, // Captured output since the command was executed
-    pub shell_pending_command_output_count: usize, // Number of output events since command was sent
+    pub shell_pending_command: Option<String>,
+    pub shell_pending_command_output_count: usize,
+
 
     // ========== Tool Call State ==========
     pub pending_bash_message_id: Option<Uuid>,
@@ -261,20 +268,26 @@ impl AppState {
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
             completed_tool_calls: std::collections::HashSet::new(),
-            show_shell_mode: false,
+            shell_popup_visible: false,
+            shell_popup_expanded: false,
+            shell_popup_scroll: 0,
+            shell_cursor_visible: true,
+            shell_cursor_blink_timer: 0,
             active_shell_command: None,
             active_shell_command_output: None,
-            shell_mode_input: String::new(),
             waiting_for_shell_input: false,
-            is_tool_call_shell_command: false,
             is_pasting: false,
-            ondemand_shell_mode: false,
             shell_tool_calls: None,
             shell_loading: false,
-            shell_pending_command: None,
             shell_pending_command_value: None,
             shell_pending_command_executed: false,
             shell_pending_command_output: None,
+            // Backward compatibility aliases
+            show_shell_mode: false,
+            shell_mode_input: String::new(),
+            is_tool_call_shell_command: false,
+            ondemand_shell_mode: false,
+            shell_pending_command: None,
             shell_pending_command_output_count: 0,
             attached_images: Vec::new(),
             pending_path_start: None,
@@ -439,7 +452,7 @@ impl AppState {
         };
 
         #[cfg(unix)]
-        let shell_cmd = match run_pty_command(command.clone(), shell_tx, rows, cols) {
+        let shell_cmd = match run_pty_command(command.clone(), None, shell_tx, rows, cols) {
             Ok(cmd) => cmd,
             Err(e) => {
                 push_error_message(self, &format!("Failed to run command: {}", e), None);

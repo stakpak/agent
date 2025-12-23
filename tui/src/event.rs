@@ -98,6 +98,8 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                         Some(InputEvent::InputChanged('h'))
                     }
                 }
+                // Shift+$ (just '$') toggles shell mode like Ctrl+Y
+                KeyCode::Char('$') => Some(InputEvent::ShellMode),
                 KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
                 KeyCode::Backspace => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {

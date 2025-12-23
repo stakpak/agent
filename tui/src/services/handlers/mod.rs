@@ -106,37 +106,47 @@ pub fn update(
             }
 
             InputEvent::ScrollUp => {
-                let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
-                let total_lines = state.shell_history_lines.len();
-                let max_scroll = total_lines.saturating_sub(visible_height) as u16;
-                state.shell_scroll = state.shell_scroll.saturating_add(1).min(max_scroll);
-                eprintln!(
-                    "ScrollUp: shell_scroll={}, max={}",
-                    state.shell_scroll, max_scroll
-                );
+                // Scroll popup up (show older content)
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_add(1);
+                } else {
+                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_history_lines.len();
+                    let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                    state.shell_scroll = state.shell_scroll.saturating_add(1).min(max_scroll);
+                }
                 return;
             }
             InputEvent::ScrollDown => {
-                state.shell_scroll = state.shell_scroll.saturating_sub(1);
-                eprintln!("ScrollDown: shell_scroll={}", state.shell_scroll);
+                // Scroll popup down (show newer content)
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_sub(1);
+                } else {
+                    state.shell_scroll = state.shell_scroll.saturating_sub(1);
+                }
                 return;
             }
             InputEvent::PageUp => {
-                let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
-                let total_lines = state.shell_history_lines.len();
-                let max_scroll = total_lines.saturating_sub(visible_height) as u16;
-                let page_size = state.terminal_size.height / 2;
-                state.shell_scroll = state.shell_scroll.saturating_add(page_size).min(max_scroll);
-                eprintln!(
-                    "PageUp: shell_scroll={}, max={}",
-                    state.shell_scroll, max_scroll
-                );
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    let page_size = state.terminal_size.height / 4;
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_add(page_size as usize);
+                } else {
+                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_history_lines.len();
+                    let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                    let page_size = state.terminal_size.height / 2;
+                    state.shell_scroll = state.shell_scroll.saturating_add(page_size).min(max_scroll);
+                }
                 return;
             }
             InputEvent::PageDown => {
-                let page_size = state.terminal_size.height / 2;
-                state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
-                eprintln!("PageDown: shell_scroll={}", state.shell_scroll);
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    let page_size = state.terminal_size.height / 4;
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_sub(page_size as usize);
+                } else {
+                    let page_size = state.terminal_size.height / 2;
+                    state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
+                }
                 return;
             }
             InputEvent::HandleEsc => {

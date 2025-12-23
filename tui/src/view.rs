@@ -8,9 +8,10 @@ use crate::services::message::{
 };
 use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
+use crate::services::shell_popup;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Position, Rect},
+    layout::{Constraint, Direction, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -57,7 +58,17 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
     let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
-    // Layout: [messages][loading_line][dialog_margin][dialog][input][dropdown][hint]
+    // Calculate shell popup height (goes above input)
+    let shell_popup_height = shell_popup::calculate_popup_height(state, f.area().height);
+
+    // Hide input when shell popup is expanded (takes over input)
+    let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
+        0  // Hide input when popup is expanded
+    } else {
+        input_height
+    };
+
+    // Layout: [messages][loading_line][dialog_margin][dialog][shell_popup][input][dropdown][hint]
     let mut constraints = vec![
         Constraint::Min(1),    // messages
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
@@ -65,7 +76,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         Constraint::Length(dialog_height),
     ];
     if !state.show_sessions_dialog {
-        constraints.push(Constraint::Length(input_height));
+        constraints.push(Constraint::Length(shell_popup_height)); // shell popup (0 if hidden)
+        constraints.push(Constraint::Length(effective_input_height));
         constraints.push(Constraint::Length(dropdown_height));
     }
     constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
@@ -97,11 +109,18 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         width: 0,
         height: 0,
     };
+    let mut shell_popup_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
     let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
-        input_area = chunks[4]; // Updated index due to loading line
-        dropdown_area = chunks.get(5).copied().unwrap_or(input_area);
+        shell_popup_area = chunks[4]; // Shell popup between dialog and input
+        input_area = chunks[5];       // Input after shell popup
+        dropdown_area = chunks.get(6).copied().unwrap_or(input_area);
     }
 
     let message_area_width = padded_message_area.width as usize;
@@ -115,105 +134,15 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
-    if state.show_shell_mode
-        && state.active_shell_command.is_some()
-        && state.waiting_for_shell_input  // Only show cursor when waiting for input
-        && !state.shell_loading
-        && !state.is_dialog_open
-        && !state.approval_popup.is_visible()
-    {
-        let (cursor_row, cursor_col) = state.shell_screen.screen().cursor_position();
-
-        if let Some(shell_msg_id) = state.interactive_shell_message_id {
-            // Check content length first without holding a borrow needed for the mutable call
-            let shell_content_len = state
-                .messages
-                .iter()
-                .find(|m| m.id == shell_msg_id)
-                .and_then(|msg| {
-                    if let crate::services::message::MessageContent::RenderRefreshedTerminal(
-                        _,
-                        content,
-                        _,
-                        _,
-                    ) = &msg.content
-                    {
-                        Some(content.len())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(0);
-
-            if shell_content_len > 0 {
-                let processed_lines = get_wrapped_message_lines_cached(state, message_area_width);
-                let total_lines = processed_lines.len();
-                let visible_height = padded_message_area.height as usize;
-
-                // Find the start line of this message in the processed lines
-                let mut message_start_index = 0;
-                let mut found = false;
-
-                for msg in &state.messages {
-                    if msg.id == shell_msg_id {
-                        found = true;
-                        break;
-                    }
-
-                    let lines = crate::services::message::get_processed_message_lines(
-                        std::slice::from_ref(msg),
-                        message_area_width,
-                    );
-
-                    if !lines.is_empty() {
-                        message_start_index += lines.len().saturating_sub(2);
-                    }
-                }
-
-                if found {
-                    let command_offset = if state.shell_pending_command_value.is_some() {
-                        1
-                    } else {
-                        0
-                    };
-
-                    let term_rows = state.shell_screen.screen().size().0 as usize;
-                    let history_lines_count = shell_content_len.saturating_sub(command_offset);
-                    let viewport_offset_in_history = history_lines_count.saturating_sub(term_rows);
-                    let total_content_offset = command_offset + viewport_offset_in_history;
-
-                    let cursor_row_index =
-                        message_start_index + 1 + total_content_offset + cursor_row as usize;
-
-                    // Now calculate screen position
-                    let scroll = if state.stay_at_bottom {
-                        total_lines
-                            .saturating_sub(visible_height.saturating_sub(SCROLL_BUFFER_LINES))
-                    } else {
-                        state.scroll.min(
-                            total_lines
-                                .saturating_sub(visible_height.saturating_sub(SCROLL_BUFFER_LINES)),
-                        )
-                    };
-
-                    // Only draw if within visible range
-                    if cursor_row_index >= scroll && cursor_row_index < scroll + visible_height {
-                        let screen_rel_y = cursor_row_index - scroll;
-                        let screen_y = padded_message_area.y + screen_rel_y as u16;
-
-                        // X position: +2 is for left border "│ "
-                        let screen_x = padded_message_area.x + 2 + cursor_col;
-
-                        // Final safety check
-                        if screen_y < padded_message_area.y + padded_message_area.height
-                            && screen_x < padded_message_area.x + padded_message_area.width
-                        {
-                            f.set_cursor_position(Position::new(screen_x, screen_y));
-                        }
-                    }
-                }
-            }
-        }
+    // Render shell popup above input area (if visible)
+    if state.shell_popup_visible && !state.show_sessions_dialog {
+        let padded_shell_popup_area = Rect {
+            x: shell_popup_area.x + 1,
+            y: shell_popup_area.y,
+            width: shell_popup_area.width.saturating_sub(2),
+            height: shell_popup_area.height,
+        };
+        shell_popup::render_shell_popup(f, state, padded_shell_popup_area);
     }
 
     let padded_loading_area = Rect {
@@ -229,6 +158,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
+    } else if state.shell_popup_visible && state.shell_popup_expanded {
+        // Don't render input when popup is expanded - popup takes over input
     } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);

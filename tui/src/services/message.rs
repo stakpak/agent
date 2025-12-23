@@ -450,7 +450,17 @@ pub fn get_wrapped_message_lines(
 }
 
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
-    let messages = state.messages.clone();
+    // Filter out RenderRefreshedTerminal messages when shell popup is visible
+    // This hides the old bordered box when using the new popup
+    let messages: Vec<Message> = if state.shell_popup_visible {
+        state.messages.iter()
+            .filter(|m| !matches!(&m.content, MessageContent::RenderRefreshedTerminal(..)))
+            .cloned()
+            .collect()
+    } else {
+        state.messages.clone()
+    };
+    
     // Check if cache is valid
     let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
         cached_messages.len() == messages.len()

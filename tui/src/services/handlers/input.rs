@@ -12,11 +12,12 @@ use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
 use crate::services::helper_block::render_system_message;
 use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
-use crate::services::message::Message;
+use crate::services::message::{BubbleColors, Message, MessageContent};
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
@@ -410,8 +411,73 @@ fn handle_input_submitted(
 
         let mut final_input = state.input().to_string();
 
-        // If there is an active shell session, terminate it before submitting new message
-        crate::services::handlers::shell::terminate_active_shell_session(state);
+        // Check for on-demand shell termination and history attachment
+        if state.ondemand_shell_mode && state.active_shell_command.is_some() && !state.show_shell_mode {
+            let history_lines =
+                crate::services::handlers::shell::trim_shell_lines(state.shell_history_lines.clone());
+
+            if !history_lines.is_empty() {
+                // Add history message for UI
+                state.messages.push(Message {
+                    id: Uuid::new_v4(),
+                    content: MessageContent::RenderRefreshedTerminal(
+                        "Shell history".to_string(),
+                        history_lines.clone(),
+                        Some(BubbleColors {
+                            border_color: Color::Magenta, 
+                            title_color: Color::Magenta,
+                            content_color: Color::Reset,
+                            tool_type: "Shell".to_string(),
+                        }),
+                        state.terminal_size.width as usize,
+                    ),
+                    is_collapsed: None,
+                });
+
+                // Construct ToolCallResult for LLM context (instead of appending text)
+                let history_text = history_lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+                
+                if state.shell_tool_calls.is_none() {
+                    state.shell_tool_calls = Some(Vec::new());
+                }
+                
+                let result = crate::services::handlers::shell::shell_command_to_tool_call_result(
+                    state,
+                    Some("/bin/bash (Interactive Session)".to_string()),
+                    Some(history_text),
+                );
+                
+                if let Some(ref mut tool_calls) = state.shell_tool_calls {
+                    tool_calls.push(result);
+                }
+            }
+            
+            // "after I said hi the shell should be terminated not Background also it should be removed totally"
+            // Remove the active shell message bubble
+            if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                state.messages.retain(|m| m.id != shell_msg_id);
+            }
+            state.interactive_shell_message_id = None;
+            
+            // Full clear of shell variables
+            state.active_shell_command = None;
+            state.active_shell_command_output = None;
+            state.shell_history_lines.clear();
+            state.show_shell_mode = false;
+            state.shell_popup_visible = false;
+            state.shell_popup_expanded = false;
+            state.ondemand_shell_mode = false; // Reset on-demand mode
+            
+            // Note: We don't call terminate_active_shell_session here because we manually cleaned up
+            // and we don't want the "Terminated" message update logic from that function.
+            // But we DO need to ensure the actual process is killed.
+            // terminate_active_shell_session calls handle_shell_kill(state).
+            // We should call handle_shell_kill directly or similar.
+            crate::services::handlers::shell::handle_shell_kill(state);
+        } else {
+            // Standard cleanup for other cases (like interactive stall termination if not on-demand flow)
+            crate::services::handlers::shell::terminate_active_shell_session(state);
+        }
 
         // Process any pending pastes first
         for (placeholder, long_text) in state.pending_pastes.drain(..) {

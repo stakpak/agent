@@ -48,7 +48,11 @@ pub fn capture_styled_screen(parser: &mut vt100::Parser) -> Vec<Line<'static>> {
         lines.push(row_to_line(parser.screen(), row, cols));
     }
 
-    // Trim trailing empty lines
+    lines
+}
+
+/// Trim trailing empty lines from shell output for display
+pub fn trim_shell_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
     while let Some(last_line) = lines.last() {
         let is_empty = last_line.spans.iter().all(|s| s.content.trim().is_empty());
         if is_empty {
@@ -57,7 +61,6 @@ pub fn capture_styled_screen(parser: &mut vt100::Parser) -> Vec<Line<'static>> {
             break;
         }
     }
-
     lines
 }
 
@@ -116,13 +119,17 @@ fn row_to_line(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'static> {
 }
 
 pub fn send_shell_input(state: &mut AppState, data: &str) {
-    if let Some(cmd) = &state.active_shell_command {
+    // Clone the tx first to avoid borrow conflict with cursor reset
+    let some_tx = state.active_shell_command.as_ref().map(|cmd| cmd.stdin_tx.clone());
+    
+    if let Some(tx) = some_tx {
         // Mark that user has interacted with the shell
         if !data.is_empty() {
             state.shell_interaction_occurred = true;
+            // Reset cursor blink to visible when typing
+            crate::services::shell_popup::reset_cursor_blink(state);
         }
 
-        let tx = cmd.stdin_tx.clone();
         let data = data.to_string();
         tokio::spawn(async move {
             let _ = tx.send(data).await;
@@ -160,8 +167,17 @@ pub fn handle_run_shell_command(
     let rows = term_rows.saturating_sub(2).max(1);
     let cols = term_cols.saturating_sub(4).max(1);
 
+    // Determine if we should type a command after shell starts
+    // For tool call shell mode (is_tool_call_shell_command), we type the pending command
+    // For on-demand shell mode, we don't type anything
+    let command_to_execute = if state.is_tool_call_shell_command {
+        state.shell_pending_command_value.clone()
+    } else {
+        None
+    };
+
     #[cfg(unix)]
-    let shell_cmd = match run_pty_command(command.clone(), shell_tx, rows, cols) {
+    let shell_cmd = match run_pty_command(command.clone(), command_to_execute, shell_tx, rows, cols) {
         Ok(cmd) => cmd,
         Err(e) => {
             push_error_message(state, &format!("Failed to run command: {}", e), None);
@@ -232,162 +248,127 @@ pub fn handle_run_shell_command(
         }
     });
 
+    // Set new popup state fields
+    state.shell_popup_visible = true;
+    state.shell_popup_expanded = true;
+    state.shell_popup_scroll = 0;  // Reset scroll to show bottom
+    // Invalidate cache so old bordered message is hidden
+    invalidate_message_lines_cache(state);
+    // Also set legacy alias for backward compatibility
     state.show_shell_mode = true;
     state.text_area.set_shell_mode(true);
 }
 
-/// Handle run shell with command event - runs the command directly using $SHELL -c
-/// This gives us a proper ShellCompleted signal when the command finishes
+/// Handle run shell with command event - runs the command in an interactive shell
+/// This spawns the user's shell, shows the prompt, then types and executes the command
 pub fn handle_run_shell_with_command(
     state: &mut AppState,
     command: String,
     input_tx: &Sender<InputEvent>,
 ) {
+    // Mark this as a tool call shell command for proper UI state
+    state.is_tool_call_shell_command = true;
     // Store the command value for later tool call result
     state.shell_pending_command_value = Some(command.clone());
-    state.shell_pending_command_executed = true;
+    // Initially false - will become true when command starts executing 
+    state.shell_pending_command_executed = false;
     state.shell_pending_command_output = Some(String::new());
     state.shell_pending_command_output_count = 0;
 
-    // Run the command directly via $SHELL -c 'command'
-    // This will exit when the command completes, giving us ShellCompleted
-    let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
-    // Escape single quotes in the command by replacing ' with '\''
-    let escaped_command = command.replace('\'', "'\\''");
-    let shell_command = format!("{} -c '{}'", shell, escaped_command);
-
-    handle_run_shell_command(state, shell_command, input_tx);
+    // Run the command via interactive shell - PTY will show prompt then type the command
+    handle_run_shell_command(state, command, input_tx);
 }
 
-// In handle_shell_mode (shell.rs):
 
-pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
-    // If we are currently showing shell mode, we are toggling it OFF.
-    // Requirement: Background the session when leaving, unless terminated.
-    if state.show_shell_mode {
-        state.show_shell_mode = false;
-        // Update textarea shell mode
-        state.text_area.set_shell_mode(false);
 
-        let command_name = state
-            .active_shell_command
-            .as_ref()
-            .map(|c| c.command.clone())
-            .unwrap_or_else(|| "sh".to_string());
-
-        // Update the message in chat to reflect background status
-        // First, update history with current screen state to ensure it's complete
-        // This captures the live screen and syncs with history
-        let current_screen = capture_styled_screen(&mut state.shell_screen);
-        let (term_rows, _) = state.shell_screen.screen().size();
-
-        // Merge current screen into history: replace the tail with current visible content
-        // This ensures the background view has all accumulated + current content
-        if !current_screen.is_empty() {
-            let history_len = state.shell_history_lines.len();
-            let replace_start = history_len.saturating_sub(term_rows as usize);
-            state.shell_history_lines.truncate(replace_start);
-            state
-                .shell_history_lines
-                .extend(current_screen.iter().cloned());
-        }
-
-        let mut fresh_lines = state.shell_history_lines.clone();
-
-        if let Some(cmd) = state.shell_pending_command_value.clone() {
-            let command_line = Line::from(vec![
-                Span::styled(
-                    "$ ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
-            ]);
-            fresh_lines.insert(0, command_line);
-        }
-        if let Some(id) = state.interactive_shell_message_id {
-            for msg in &mut state.messages {
-                if msg.id == id {
-                    let new_colors = BubbleColors {
-                        border_color: Color::DarkGray,
-                        title_color: Color::DarkGray,
-                        content_color: AdaptiveColors::text(),
-                        tool_type: "Interactive Bash".to_string(),
-                    };
-                    msg.content = MessageContent::RenderRefreshedTerminal(
-                        format!(
-                            "Shell Command {} (Background - Ctrl+Y to resume)",
-                            command_name
-                        ),
-                        fresh_lines.clone(),
-                        Some(new_colors),
-                        state.terminal_size.width as usize,
-                    );
-                    break;
-                }
-            }
-        }
-
-        // Clear the text area but DO NOT kill the shell (Persistence)
-        state.text_area.set_text("");
-
-        // Handle dialog logic if needed (restore dialog state)
-        if state.dialog_command.is_some() {
-            if let Some(latest_tool_call) = &state.latest_tool_call
-                && let Some(dialog_command) = &state.dialog_command
-                && latest_tool_call.id != dialog_command.id
-            {
-                state.is_dialog_open = true;
-            }
-        } else {
-            // On-demand shell mode (no dialog_command): capture output for tool call result
-            // Get the command from active_shell_command
-            let command = state
-                .active_shell_command
-                .as_ref()
-                .map(|c| c.command.clone());
-
-            // Get the output from shell history (convert styled lines to plain text)
-            let output = if !state.shell_history_lines.is_empty() {
-                let plain_output: String = state
-                    .shell_history_lines
-                    .iter()
-                    .map(|line| {
-                        line.spans
-                            .iter()
-                            .map(|span| span.content.as_ref())
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Some(plain_output)
-            } else {
-                None
-            };
-
-            // Create and store the tool call result
-            let result = shell_command_to_tool_call_result(state, command, output);
-            if state.shell_tool_calls.is_none() {
-                state.shell_tool_calls = Some(Vec::new());
-            }
-            if let Some(ref mut tool_calls) = state.shell_tool_calls {
-                tool_calls.push(result);
-            }
-        }
-
-        // Invalidate cache so the gray border is rendered
-        invalidate_message_lines_cache(state);
+/// Helper to background the active shell session (minimize popup)
+pub fn background_shell_session(state: &mut AppState) {
+    if !state.show_shell_mode {
         return;
     }
 
-    // If we are currently NOT showing shell mode, we are toggling it ON.
-    // Check if we have an active session to resume
-    if state.active_shell_command.is_some() {
+    // Collapse popup (shrink, not hide)
+    state.shell_popup_expanded = false;
+    state.show_shell_mode = false;
+    // Update textarea shell mode
+    state.text_area.set_shell_mode(false);
+
+    let command_name = state
+        .active_shell_command
+        .as_ref()
+        .map(|c| c.command.clone())
+        .unwrap_or_else(|| "sh".to_string());
+
+    // state.shell_history_lines already contains the full history including active view
+    // We trim it for the message bubble preview
+    let mut fresh_lines = trim_shell_lines(state.shell_history_lines.clone());
+
+    if let Some(cmd) = state.shell_pending_command_value.clone() {
+        let command_line = Line::from(vec![
+            Span::styled(
+                "$ ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
+        ]);
+        fresh_lines.insert(0, command_line);
+    }
+
+    // Update the message bubble to gray (background)
+    if let Some(id) = state.interactive_shell_message_id {
+        for msg in &mut state.messages {
+            if msg.id == id {
+                let new_colors = BubbleColors {
+                    border_color: Color::DarkGray,
+                    title_color: Color::DarkGray,
+                    content_color: AdaptiveColors::text(),
+                    tool_type: "Interactive Bash".to_string(),
+                };
+                msg.content = MessageContent::RenderRefreshedTerminal(
+                    format!(
+                        "Shell Command {} (Background - Esc to exit)",
+                        command_name
+                    ),
+                    fresh_lines.clone(),
+                    Some(new_colors),
+                    state.terminal_size.width as usize,
+                );
+                break;
+            }
+        }
+    }
+
+    // Clear text area but persist shell
+    state.text_area.set_text("");
+    
+    // Invalidate cache
+    invalidate_message_lines_cache(state);
+}
+
+pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
+    // '$' only EXPANDS the shell popup - it does NOT toggle/shrink
+    // Only Esc can exit shell mode (handled elsewhere)
+    
+    // If already expanded, '$' IS TYPED INTO SHELL
+    if state.show_shell_mode && state.shell_popup_expanded {
+        if let Some(shell_cmd) = &state.active_shell_command {
+            let stdin_tx = shell_cmd.stdin_tx.clone();
+            tokio::spawn(async move {
+                let _ = stdin_tx.send("$".to_string()).await;
+            });
+        }
+        return;
+    }
+    
+    // If popup is visible but shrunk (backgrounded), expand it back
+    if state.shell_popup_visible && !state.shell_popup_expanded {
+        state.shell_popup_expanded = true;
         state.show_shell_mode = true;
         state.text_area.set_shell_mode(true);
-
-        // Update message to show focused state with cyan border
+        
+        // Update message to show focused state
         if let Some(id) = state.interactive_shell_message_id {
             let command_name = state
                 .active_shell_command
@@ -395,21 +376,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 .map(|c| c.command.clone())
                 .unwrap_or_else(|| "sh".to_string());
 
-            // Capture current screen for live view
-            let mut current_screen = capture_styled_screen(&mut state.shell_screen);
-
-            if let Some(cmd) = state.shell_pending_command_value.clone() {
-                let command_line = Line::from(vec![
-                    Span::styled(
-                        "$ ",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(cmd, Style::default().fg(AdaptiveColors::text())),
-                ]);
-                current_screen.insert(0, command_line);
-            }
+            let current_screen = capture_styled_screen(&mut state.shell_screen);
 
             let focused_colors = BubbleColors {
                 border_color: Color::Cyan,
@@ -430,13 +397,27 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 }
             }
 
-            // Invalidate cache so the cyan border is rendered
             invalidate_message_lines_cache(state);
         }
         return;
     }
 
-    // Start a new shell if none exists
+    // If we have an existing session, resume it
+    if state.active_shell_command.is_some() {
+        state.shell_popup_visible = true;
+        state.shell_popup_expanded = true;
+        state.show_shell_mode = true;
+        state.text_area.set_shell_mode(true);
+        invalidate_message_lines_cache(state);
+        return;
+    }
+
+    // Start a new on-demand shell (no command - just interactive)
+    state.ondemand_shell_mode = true;
+    state.shell_pending_command_value = None;  // No command to type
+    state.shell_pending_command_executed = false;
+    state.is_tool_call_shell_command = false;
+    
     let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
     let _ = input_tx.try_send(InputEvent::RunShellCommand(shell));
 }
@@ -512,6 +493,11 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) {
 
     // First output received - hide loading indicator
     state.shell_loading = false;
+
+    // For tool call shell mode: first output means initialization is complete
+    if state.is_tool_call_shell_command && !state.shell_pending_command_executed {
+        state.shell_pending_command_executed = true;
+    }
 
     // If we're tracking a pending command (from interactive stall), capture all output
     if state.shell_pending_command_executed {
@@ -726,25 +712,12 @@ pub fn handle_shell_completed(
     // Command completed, reset active command state
     state.waiting_for_shell_input = false;
 
-    // If this was from an interactive stall command, capture and log the result
-    if state.shell_pending_command_executed {
-        // Update the shell message to show completed state
-        if let Some(shell_msg_id) = state.interactive_shell_message_id
-            && let Some(msg) = state.messages.iter_mut().find(|m| m.id == shell_msg_id)
-            && let MessageContent::RenderRefreshedTerminal(_, content, _, width) = &msg.content
-        {
-            let completed_colors = BubbleColors {
-                border_color: Color::Green,
-                title_color: Color::Green,
-                content_color: AdaptiveColors::text(),
-                tool_type: "Interactive Bash".to_string(),
-            };
-            msg.content = MessageContent::RenderRefreshedTerminal(
-                "Shell Command [Completed]".to_string(),
-                content.clone(),
-                Some(completed_colors),
-                *width,
-            );
+    // If this was from an interactive stall command OR a tool call shell, capture and log the result
+    if state.shell_pending_command_executed || state.is_tool_call_shell_command {
+        // Remove the shell message bubble entirely
+        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+            state.messages.retain(|m| m.id != shell_msg_id);
+            state.interactive_shell_message_id = None;
         }
 
         // Get the command and output for tool call result
@@ -754,8 +727,13 @@ pub fn handle_shell_completed(
         // Reset the tracking state
         state.shell_pending_command_executed = false;
         state.shell_pending_command_output_count = 0;
+        state.is_tool_call_shell_command = false; // Reset tool call flag
 
-        // Tab out of shell mode
+        // Hide shell popup on completion
+        state.shell_popup_visible = false;
+        state.shell_popup_expanded = false;
+        // Invalidate cache to restore normal message display
+        invalidate_message_lines_cache(state);
         state.show_shell_mode = false;
         state.text_area.set_shell_mode(false);
 
@@ -874,6 +852,10 @@ pub fn handle_shell_completed(
             state.latest_tool_call = None;
         }
         state.show_shell_mode = false;
+        state.shell_popup_visible = false;
+        state.shell_popup_expanded = false;
+        // Invalidate cache to restore normal message display
+        invalidate_message_lines_cache(state);
         state.dialog_command = None;
         state.toggle_approved_message = true;
         state.text_area.set_shell_mode(false);
