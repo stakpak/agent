@@ -373,21 +373,16 @@ impl ToolContainer {
     //     }
 
     #[tool(
-        description = "Web search for technical documentation. This includes documentation for tools, cloud providers, development frameworks, release notes, and other technical resources. searches against the url, title, description, and content of documentation chunks.
-KEYWORD FORMAT REQUIREMENTS:
-- Keywords should be provided as space-separated strings
-- Use hyphens for compound terms (e.g., 'cloud-native', 'service-mesh')
-- keywords must include version numbers if specified by the user , if not specified, use the  keyword *latest*
+        description = "Search technical documentation for tools, cloud providers, frameworks, and release notes.
 
-CORRECT EXAMPLES:
-✅ keywords: 'kubernetes ingress nginx ssl'
-✅ keywords: 'docker multi-stage build'
+KEYWORD FORMAT:
+- Space-separated strings, e.g., 'kubernetes ingress nginx ssl' or 'docker multi-stage build'
+- Use hyphens for compound terms ('cloud-native', 'service-mesh')
+- Include version numbers if specified, otherwise use 'latest'
 
-QUERY STRATEGY GUIDANCE:
-- For more fine-grained queries: Use many keywords in a single call to get highly targeted results (e.g., 'kubernetes ingress nginx ssl tls' for a specific SSL setup question)
-- For broader knowledge gathering: Break down your query into multiple parallel calls with fewer keywords each to cover more ground (e.g., separate calls for 'kubernetes networking', 'kubernetes storage', 'kubernetes security' instead of cramming all topics into one call)
-
-If your goal requires understanding multiple distinct topics or technologies, make separate search calls rather than combining all keywords into one overly-specific search that may miss relevant documentation."
+QUERY STRATEGY:
+- Fine-grained queries: Use many keywords for targeted results
+- Broad knowledge: Make separate calls with fewer keywords each to cover more topics"
     )]
     pub async fn search_docs(
         &self,
