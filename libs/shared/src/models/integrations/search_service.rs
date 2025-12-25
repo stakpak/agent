@@ -1,4 +1,4 @@
-use crate::container::ContainerConfig;
+use crate::container::{self, ContainerConfig};
 use crate::local_store::LocalStore;
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -240,7 +240,7 @@ impl SearchServicesOrchestrator {
                 return Ok(config);
             }
 
-            let _ = crate::container::stop_container(&config.api_container_id);
+            let _ = crate::container::remove_container(&config.api_container_id, true, true);
         }
 
         if !crate::container::is_docker_available() {
@@ -253,42 +253,29 @@ impl SearchServicesOrchestrator {
 
         Self::ensure_image_exists(&api_image)?;
 
-        let mut api_port = None;
-        for _ in 0..5 {
-            api_port = crate::container::find_available_port();
-            if api_port.is_some() {
-                break;
-            }
-        }
-
-        let api_port = match api_port {
-            Some(port) => port,
-            None => {
-                return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                    "Failed to find available port for API container".to_string(),
-                )));
-            }
-        };
+        let searxng_docker_port = 8080;
+        let api_docker_port = 8000;
 
         let env = HashMap::from([
             ("INSTANCE_NAME".to_string(), "SearchPak".to_string()),
             (
                 "SEARXNG_SECRET".to_string(),
+                //SECURITY TODO: auto generate secret key
                 "stakpak-secret-key".to_string(),
             ),
-            ("SEARXNG_PORT".to_string(), "8080".to_string()),
+            ("SEARXNG_PORT".to_string(), searxng_docker_port.to_string()),
             ("SEARXNG_BIND_ADDRESS".to_string(), "0.0.0.0".to_string()),
             (
                 "SEARXNG_BASE_URL".to_string(),
-                "http://localhost:8080".to_string(),
+                format!("http://localhost:{}", searxng_docker_port),
             ),
-            ("PORT".to_string(), "8000".to_string()),
+            ("PORT".to_string(), api_docker_port.to_string()),
         ]);
 
         let api_config = ContainerConfig {
             image: api_image,
             env_vars: env,
-            ports: vec![format!("{}:8000", api_port)],
+            ports: vec![format!("{}:{}", 0, api_docker_port)],
             extra_hosts: vec!["host.docker.internal:host-gateway".to_string()],
             volumes: vec![],
         };
@@ -297,6 +284,14 @@ impl SearchServicesOrchestrator {
             crate::container::run_container_detached(api_config).map_err(|e| {
                 AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
                     "Failed to start API container: {}",
+                    e
+                )))
+            })?;
+
+        let api_port = container::get_container_host_port(&api_container_id, api_docker_port)
+            .map_err(|e| {
+                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                    "Failed to get API port: {}",
                     e
                 )))
             })?;
@@ -313,12 +308,14 @@ impl SearchServicesOrchestrator {
 
     pub async fn stop() -> Result<(), AgentError> {
         if let Some(config) = Self::load_config() {
-            crate::container::stop_container(&config.api_container_id).map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "Failed to stop API container: {}",
-                    e
-                )))
-            })?;
+            crate::container::remove_container(&config.api_container_id, true, true).map_err(
+                |e| {
+                    AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                        "Failed to stop API container: {}",
+                        e
+                    )))
+                },
+            )?;
 
             Ok(())
         } else {
@@ -328,12 +325,14 @@ impl SearchServicesOrchestrator {
 
     pub fn stop_sync() -> Result<(), AgentError> {
         if let Some(config) = Self::load_config() {
-            crate::container::stop_container(&config.api_container_id).map_err(|e| {
-                AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
-                    "Failed to stop API container: {}",
-                    e
-                )))
-            })?;
+            crate::container::remove_container(&config.api_container_id, true, true).map_err(
+                |e| {
+                    AgentError::BadRequest(BadRequestErrorMessage::ApiError(format!(
+                        "Failed to stop API container: {}",
+                        e
+                    )))
+                },
+            )?;
 
             Ok(())
         } else {
@@ -343,6 +342,13 @@ impl SearchServicesOrchestrator {
 
     pub async fn check() -> Result<bool, AgentError> {
         if let Some(config) = Self::load_config() {
+            // SECURITY TODO:
+            // This uses plain-text, unauthenticated HTTP over localhost.
+            // While acceptable for local development, this is an injection
+            //
+            // Mitigations to consider:
+            // - Add mutual authentication (e.g., token)
+            // - Validate the expected service identity
             let api_url = format!("http://localhost:{}", config.api_port);
 
             if Self::health_check_api(&api_url).await.is_ok() {

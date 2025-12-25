@@ -102,3 +102,56 @@ pub fn stop_container(container_id: &str) -> Result<(), String> {
         }
     }
 }
+
+pub fn remove_container(
+    container_id: &str,
+    force: bool,
+    remove_volumes: bool,
+) -> Result<(), String> {
+    let mut cmd = Command::new("docker");
+
+    cmd.arg("rm");
+
+    if force {
+        cmd.arg("-f");
+    }
+
+    if remove_volumes {
+        cmd.arg("-v");
+    }
+
+    cmd.arg(container_id);
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute docker rm: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("No such container") {
+            Ok(())
+        } else {
+            Err(format!("Failed to remove container: {}", stderr))
+        }
+    }
+}
+
+pub fn get_container_host_port(container_id: &str, container_port: u16) -> Result<u16, String> {
+    let output = Command::new("docker")
+        .arg("port")
+        .arg(container_id)
+        .arg(container_port.to_string())
+        .output()
+        .map_err(|e| format!("Failed to get container port: {}", e))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let port = stdout.split(':').next_back().unwrap_or("");
+        Ok(port.parse().unwrap())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("Failed to get container port: {}", stderr))
+    }
+}
