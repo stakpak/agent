@@ -96,7 +96,13 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                         Some(InputEvent::InputBackspace)
                     }
                 }
-                KeyCode::Enter => Some(InputEvent::InputSubmitted),
+                KeyCode::Enter => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        Some(InputEvent::InputChangedNewline)
+                    } else {
+                        Some(InputEvent::InputSubmitted)
+                    }
+                }
                 KeyCode::Esc => Some(InputEvent::HandleEsc),
                 KeyCode::Up => Some(InputEvent::Up),
                 KeyCode::Down => Some(InputEvent::Down),

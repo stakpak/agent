@@ -185,8 +185,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         // detect if terminal is vscode
         let terminal_info = detect_terminal();
         let terminal_name = terminal_info.emulator;
-        let is_iterm2 = terminal_name == "iTerm2";
-        let new_line_hint = if !is_iterm2 { "ctrl+j" } else { "shift+enter" };
+        let is_terminal_app_or_vscode =
+            terminal_name == "VS Code Terminal" || terminal_name == "Terminal.app";
+        let new_line_hint = if is_terminal_app_or_vscode {
+            "ctrl+j"
+        } else {
+            "shift+enter"
+        };
         let hint = Paragraph::new(Span::styled(
             format!(
                 "{} new line | {} | ctrl+o toggle auto-approve",

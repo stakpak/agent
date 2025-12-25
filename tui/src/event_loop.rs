@@ -12,6 +12,7 @@ use crate::services::message::Message;
 use crate::view::view;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -61,7 +62,11 @@ pub async fn run_tui(
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        )
     )?;
 
     #[cfg(unix)]
@@ -276,7 +281,8 @@ pub async fn run_tui(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
         DisableBracketedPaste,
-        DisableMouseCapture
+        DisableMouseCapture,
+        PopKeyboardEnhancementFlags
     )?;
     Ok(())
 }
