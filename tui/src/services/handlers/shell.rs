@@ -586,22 +586,13 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
                 content_color: AdaptiveColors::text(),
                 tool_type: "Interactive Bash".to_string(),
             },
-            format!(
-                "Shell Command {} (Background - Ctrl+Y to focus)",
-                shell_name
-            ),
+            format!("Shell Command {} (Background - '$' to focus)", shell_name),
         )
     };
 
     // 4. Capture styled screen content at scroll=0 (safe)
     let screen_lines = capture_styled_screen(&mut state.shell_screen);
 
-    // Note: Command completion is now detected via ShellCompleted event
-    // which is triggered when the command process exits (using $SHELL -c approach)
-
-    // Smart history accumulation:
-    // vt100 tracks scrollback count - that tells us how many lines have scrolled off
-    // We can use this to know when to preserve older content
     let (term_rows, _) = state.shell_screen.screen().size();
 
     // Probe actual scrollback size

@@ -87,10 +87,13 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
-                "Fn/Option/Shift + drag to select"
+                "'$' Shell mode . Fn/Option/Shift + drag to select"
             } else {
-                ""
+                "'$' Shell mode"
             };
+
+            #[cfg(not(unix))]
+            let select_hint = "'$' Shell mode";
 
             // Create spans for left and right alignment on first line
             let left_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
@@ -154,7 +157,6 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let mut lines = vec![Line::from(spans)];
 
             // Add second line with select hint if available (Unix only)
-            #[cfg(unix)]
             if !select_hint.is_empty() {
                 lines.push(Line::from(Span::styled(
                     select_hint,

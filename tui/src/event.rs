@@ -66,7 +66,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::InputCursorStart)
                 }
                 KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ShellMode)
+                    Some(InputEvent::AutoApproveCurrentTool)
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputCursorEnd)
@@ -98,7 +98,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                         Some(InputEvent::InputChanged('h'))
                     }
                 }
-                // Shift+$ (just '$') toggles shell mode like Ctrl+Y
+                // Shift+$ (just '$') toggles shell mode
                 KeyCode::Char('$') => Some(InputEvent::ShellMode),
                 KeyCode::Char(c) => Some(InputEvent::InputChanged(c)),
                 KeyCode::Backspace => {

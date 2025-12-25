@@ -314,6 +314,9 @@ pub fn execute_command_palette_selection(
             CommandAction::OpenShortcuts => {
                 let _ = input_tx.try_send(InputEvent::ShowShortcuts);
             }
+            CommandAction::OpenShellMode => {
+                let _ = input_tx.try_send(InputEvent::ShellMode);
+            }
             _ => {
                 // Should not happen - all slash commands should be handled above
             }

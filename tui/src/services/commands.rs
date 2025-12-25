@@ -49,6 +49,7 @@ pub enum CommandAction {
     OpenRulebookSwitcher,
     OpenSessions,
     OpenShortcuts,
+    OpenShellMode,
     ResumeSession,
     ShowStatus,
     MemorizeConversation,
@@ -75,7 +76,8 @@ impl CommandAction {
             // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
-            | CommandAction::OpenShortcuts => None,
+            | CommandAction::OpenShortcuts
+            | CommandAction::OpenShellMode => None,
         }
     }
 }
@@ -126,6 +128,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Show all keyboard shortcuts",
             "Ctrl+S",
             CommandAction::OpenShortcuts,
+        ),
+        Command::new(
+            "Shell Mode",
+            "Open interactive shell",
+            "$",
+            CommandAction::OpenShellMode,
         ),
         Command::new(
             "New Session",
