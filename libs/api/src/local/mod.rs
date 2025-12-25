@@ -466,7 +466,11 @@ impl AgentProvider for LocalClient {
         };
 
         let llm_config = self.get_llm_config();
-        let search_model = get_search_model(self.eco_model.clone());
+        let search_model = get_search_model(
+            &llm_config,
+            self.eco_model.clone(),
+            self.smart_model.clone(),
+        );
         let analysis = analyze_search_query(&llm_config, &search_model, &initial_query).await?;
         let required_documentation = analysis.required_documentation;
         let mut current_query = analysis.reformulated_query;
@@ -531,7 +535,7 @@ impl AgentProvider for LocalClient {
         }
 
         if final_valid_docs.is_empty() {
-            return Ok(Vec::new());
+            return Ok(vec![Content::text("No results found".to_string())]);
         }
 
         let contents: Vec<Content> = final_valid_docs
@@ -1120,11 +1124,21 @@ fn parse_validation_xml(xml: &str, docs: &[ScrapedContent]) -> Result<Validation
     })
 }
 
-fn get_search_model(model: LLMModel) -> LLMModel {
-    match model {
-        LLMModel::Anthropic(_) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
+fn get_search_model(
+    llm_config: &LLMProviderConfig,
+    eco_model: LLMModel,
+    smart_model: LLMModel,
+) -> LLMModel {
+    match eco_model {
         LLMModel::OpenAI(_) => LLMModel::OpenAI(OpenAIModel::O4Mini),
+        LLMModel::Custom(_) => eco_model,
         LLMModel::Gemini(_) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
-        _ => model,
+        LLMModel::Anthropic(_) => {
+            if llm_config.anthropic_config.is_some() {
+                LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+            } else {
+                smart_model
+            }
+        }
     }
 }

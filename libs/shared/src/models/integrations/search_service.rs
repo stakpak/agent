@@ -15,7 +15,7 @@ const MIN_LIMIT: u32 = 1;
 const MAX_LIMIT: u32 = 100;
 const CONFIG_FILE: &str = "search_config.json";
 
-const DEFAULT_API_IMAGE: &str = "ghcr.io/stakpak/local_search:0.2";
+const DEFAULT_API_IMAGE: &str = "ghcr.io/stakpak/local_search:0.3";
 
 const STATIC_WHITELIST_URLS: &[&str] = &[];
 
