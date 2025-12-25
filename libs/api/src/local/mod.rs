@@ -801,14 +801,50 @@ async fn analyze_search_query(
     model: &LLMModel,
     query: &str,
 ) -> Result<AnalysisResult, String> {
-    let system_prompt = r#"You are a query analyzer. Analyze the user's search query and output JSON only:
-{
-  "required_documentation": ["list of document types/topics needed"],
-  "reformulated_query": "optimized search query"
-}"#;
+    let system_prompt = r#"You are an expert search query analyzer specializing in technical documentation retrieval.
+
+## Your Task
+
+Analyze the user's search query to:
+1. Identify the specific types of documentation needed
+2. Reformulate the query for optimal search engine results
+
+## Guidelines for Required Documentation
+
+Identify specific documentation types such as:
+- API references and specifications
+- Installation/setup guides
+- Configuration documentation
+- Tutorials and getting started guides
+- Troubleshooting guides
+- Architecture/design documents
+- CLI/command references
+- SDK/library documentation
+
+## Guidelines for Query Reformulation
+
+Create an optimized search query that:
+- Uses specific technical terminology
+- Includes relevant keywords (e.g., "documentation", "guide", "API")
+- Removes ambiguous or filler words
+- Targets authoritative sources when possible
+- Is concise but comprehensive (5-10 words ideal)
+
+## Response Format
+
+Respond ONLY with valid XML in this exact structure:
+
+<analysis>
+  <required_documentation>
+    <item>specific documentation type needed</item>
+  </required_documentation>
+  <reformulated_query>optimized search query string</reformulated_query>
+</analysis>"#;
 
     let user_prompt = format!(
-        "Analyze this search query and determine what documentation is needed: '{}'",
+        r#"<user_query>{}</user_query>
+
+Analyze this query and provide the required documentation types and an optimized search query."#,
         query
     );
 
@@ -835,8 +871,47 @@ async fn analyze_search_query(
 
     let content = response.choices[0].message.content.to_string();
 
-    serde_json::from_str::<AnalysisResult>(&content)
-        .map_err(|e| format!("Failed to parse analysis: {}", e))
+    parse_analysis_xml(&content)
+}
+
+fn parse_analysis_xml(xml: &str) -> Result<AnalysisResult, String> {
+    let extract_tag = |tag: &str| -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        xml.find(&start_tag).and_then(|start| {
+            let content_start = start + start_tag.len();
+            xml[content_start..]
+                .find(&end_tag)
+                .map(|end| xml[content_start..content_start + end].trim().to_string())
+        })
+    };
+
+    let extract_all_tags = |tag: &str| -> Vec<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        let mut results = Vec::new();
+        let mut search_start = 0;
+
+        while let Some(start) = xml[search_start..].find(&start_tag) {
+            let abs_start = search_start + start + start_tag.len();
+            if let Some(end) = xml[abs_start..].find(&end_tag) {
+                results.push(xml[abs_start..abs_start + end].trim().to_string());
+                search_start = abs_start + end + end_tag.len();
+            } else {
+                break;
+            }
+        }
+        results
+    };
+
+    let required_documentation = extract_all_tags("item");
+    let reformulated_query =
+        extract_tag("reformulated_query").ok_or("Failed to extract reformulated_query from XML")?;
+
+    Ok(AnalysisResult {
+        required_documentation,
+        reformulated_query,
+    })
 }
 
 async fn validate_search_docs(
@@ -850,23 +925,112 @@ async fn validate_search_docs(
 ) -> Result<ValidationResult, String> {
     let docs_preview = docs
         .iter()
-        .take(5)
-        .map(|r| format!("- {} ({})", r.title.clone().unwrap_or_default(), r.url))
+        .enumerate()
+        .take(10)
+        .map(|(i, r)| {
+            format!(
+                "<doc index=\"{}\">\n  <title>{}</title>\n  <url>{}</url>\n</doc>",
+                i + 1,
+                r.title.clone().unwrap_or_else(|| "Untitled".to_string()),
+                r.url
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
-    let system_prompt = r#"You are a search result validator. Output JSON only:
-{
-  "is_satisfied": bool,
-  "valid_docs": [{"url": "..."}],
-  "needed_urls": ["urls still needed"],
-  "new_query": "refined query if not satisfied",
-  "reason": "explanation"
-}"#;
+    let required_docs_formatted = required_documentation
+        .iter()
+        .map(|d| format!("  <item>{}</item>", d))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let previous_queries_formatted = previous_queries
+        .iter()
+        .map(|q| format!("  <query>{}</query>", q))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let accumulated_urls_formatted = accumulated_needed_urls
+        .iter()
+        .map(|u| format!("  <url>{}</url>", u))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system_prompt = r#"You are an expert search result validator. Your task is to evaluate whether search results adequately satisfy a documentation query.
+
+## Evaluation Criteria
+
+For each search result, assess:
+1. **Relevance**: Does the document directly address the required documentation topics?
+2. **Authority**: Is this an official source, documentation site, or authoritative reference?
+3. **Completeness**: Does it provide comprehensive information, not just passing mentions?
+4. **Freshness**: For technical docs, prefer current/maintained sources over outdated ones.
+
+## Decision Guidelines
+
+Mark results as SATISFIED when:
+- All required documentation topics have at least one authoritative source
+- The sources provide actionable, detailed information
+- No critical gaps remain in coverage
+
+Suggest a NEW QUERY when:
+- Key topics are missing from results
+- Results are too general or tangential
+- A more specific query would yield better results
+- Previous queries haven't addressed certain requirements
+
+## Response Format
+
+Respond ONLY with valid XML in this exact structure:
+
+<validation>
+  <is_satisfied>true or false</is_satisfied>
+  <valid_docs>
+    <doc><url>exact URL from results</url></doc>
+  </valid_docs>
+  <needed_urls>
+    <url>specific URL pattern or domain still needed</url>
+  </needed_urls>
+  <new_query>refined search query if not satisfied, omit if satisfied</new_query>
+  <reasoning>brief explanation of your assessment</reasoning>
+</validation>"#;
 
     let user_prompt = format!(
-        "Original Query: '{}'\nRequired Documentation: {:?}\nPrevious Queries: {:?}\nAccumulated Needed URLs: {:?}\nCurrent Results:\n{}\n\nAre these results sufficient? Which are valid? What's still needed?",
-        query, required_documentation, previous_queries, accumulated_needed_urls, docs_preview
+        r#"<search_context>
+  <original_query>{}</original_query>
+  <required_documentation>
+{}
+  </required_documentation>
+  <previous_queries>
+{}
+  </previous_queries>
+  <accumulated_needed_urls>
+{}
+  </accumulated_needed_urls>
+</search_context>
+
+<current_results>
+{}
+</current_results>
+
+Evaluate these search results against the requirements. Which documents are valid and relevant? Is the documentation requirement satisfied? If not, what specific query would help find missing information?"#,
+        query,
+        if required_docs_formatted.is_empty() {
+            "    <item>None specified</item>".to_string()
+        } else {
+            required_docs_formatted
+        },
+        if previous_queries_formatted.is_empty() {
+            "    <query>None</query>".to_string()
+        } else {
+            previous_queries_formatted
+        },
+        if accumulated_urls_formatted.is_empty() {
+            "    <url>None</url>".to_string()
+        } else {
+            accumulated_urls_formatted
+        },
+        docs_preview
     );
 
     let response = chat(
@@ -892,21 +1056,68 @@ async fn validate_search_docs(
 
     let content = response.choices[0].message.content.to_string();
 
-    let mut validation: ValidationResult =
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse validation: {}", e))?;
-
-    // Enrich valid_docs with full content from search results
-    validation.valid_docs = validation
-        .valid_docs
-        .into_iter()
-        .filter_map(|valid_doc| {
-            docs.iter()
-                .find(|result| result.url == valid_doc.url)
-                .cloned()
-        })
-        .collect();
+    let validation = parse_validation_xml(&content, docs)?;
 
     Ok(validation)
+}
+
+fn parse_validation_xml(xml: &str, docs: &[ScrapedContent]) -> Result<ValidationResult, String> {
+    let extract_tag = |tag: &str| -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        xml.find(&start_tag).and_then(|start| {
+            let content_start = start + start_tag.len();
+            xml[content_start..]
+                .find(&end_tag)
+                .map(|end| xml[content_start..content_start + end].trim().to_string())
+        })
+    };
+
+    let extract_all_tags = |tag: &str| -> Vec<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        let mut results = Vec::new();
+        let mut search_start = 0;
+
+        while let Some(start) = xml[search_start..].find(&start_tag) {
+            let abs_start = search_start + start + start_tag.len();
+            if let Some(end) = xml[abs_start..].find(&end_tag) {
+                results.push(xml[abs_start..abs_start + end].trim().to_string());
+                search_start = abs_start + end + end_tag.len();
+            } else {
+                break;
+            }
+        }
+        results
+    };
+
+    let is_satisfied = extract_tag("is_satisfied")
+        .map(|s| s.to_lowercase() == "true")
+        .unwrap_or(false);
+
+    let valid_urls: Vec<String> = extract_all_tags("url")
+        .into_iter()
+        .filter(|url| docs.iter().any(|d| d.url == *url))
+        .collect();
+
+    let valid_docs: Vec<ScrapedContent> = valid_urls
+        .iter()
+        .filter_map(|url| docs.iter().find(|d| d.url == *url).cloned())
+        .collect();
+
+    let needed_urls: Vec<String> = extract_all_tags("url")
+        .into_iter()
+        .filter(|url| !docs.iter().any(|d| d.url == *url))
+        .collect();
+
+    let new_query = extract_tag("new_query").filter(|q| !q.is_empty() && q != "omit if satisfied");
+
+    Ok(ValidationResult {
+        is_satisfied,
+        valid_docs,
+        needed_urls,
+        new_query,
+    })
 }
 
 fn get_search_model(model: LLMModel) -> LLMModel {
