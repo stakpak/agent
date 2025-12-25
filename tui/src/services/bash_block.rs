@@ -628,18 +628,44 @@ pub fn render_styled_header_and_borders(
         bordered_line.push(Span::styled("│", Style::default().fg(border_color)));
         bordered_line.push(Span::from(" "));
 
-        // Calculate content width BEFORE moving spans
-        let content_width: usize = line
-            .spans
-            .iter()
-            .map(|span| calculate_display_width(&span.content))
-            .sum();
+        // Calculate content width and truncate if needed
+        let mut total_width: usize = 0;
+        let mut truncated_spans = Vec::new();
 
-        // Add the content spans
-        bordered_line.extend(line.spans);
+        for span in line.spans.iter() {
+            let span_width = calculate_display_width(&span.content);
+            if total_width + span_width <= inner_width {
+                // Span fits completely
+                truncated_spans.push(span.clone());
+                total_width += span_width;
+            } else if total_width < inner_width {
+                // Need to truncate this span
+                let remaining_width = inner_width - total_width;
+                let mut truncated_content = String::new();
+                let mut char_width = 0;
+                for ch in span.content.chars() {
+                    let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                    if char_width + ch_width <= remaining_width {
+                        truncated_content.push(ch);
+                        char_width += ch_width;
+                    } else {
+                        break;
+                    }
+                }
+                if !truncated_content.is_empty() {
+                    truncated_spans.push(Span::styled(truncated_content, span.style));
+                }
+                total_width = inner_width;
+                break; // No more content can fit
+            }
+            // else: already at or past inner_width, skip this span
+        }
+
+        // Add the truncated content spans
+        bordered_line.extend(truncated_spans);
 
         // Add padding to fill the width
-        let padding_needed = inner_width.saturating_sub(content_width);
+        let padding_needed = inner_width.saturating_sub(total_width);
         if padding_needed > 0 {
             bordered_line.push(Span::from(" ".repeat(padding_needed)));
         }
@@ -1315,6 +1341,15 @@ pub fn render_styled_lines(
         .collect();
 
     owned_lines
+}
+
+pub fn render_refreshed_terminal_bubble(
+    title: &str,
+    content: &[Line<'static>],
+    colors: Option<BubbleColors>,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    render_styled_header_and_borders(title, content.to_vec(), colors, terminal_width)
 }
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {

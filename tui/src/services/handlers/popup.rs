@@ -145,6 +145,8 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
 
     // Clear shell mode state
     state.show_shell_mode = false;
+    state.shell_popup_visible = false;
+    state.shell_popup_expanded = false;
     state.shell_mode_input.clear();
     state.waiting_for_shell_input = false;
     state.active_shell_command_output = None;

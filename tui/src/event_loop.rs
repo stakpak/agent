@@ -258,6 +258,8 @@ pub async fn run_tui(
                                state.ctrl_c_timer = None;
                            }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
+                   // Update shell cursor blink (toggles every ~5 ticks = 500ms)
+                   crate::services::shell_popup::update_cursor_blink(&mut state);
                    state.poll_file_search_results();
                    terminal.draw(|f| view(f, &mut state))?;
                }
