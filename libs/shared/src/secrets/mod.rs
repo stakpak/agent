@@ -1465,14 +1465,19 @@ export PORT=3000
     fn test_redact_secrets_skip_nested_redaction() {
         // Simulate what happens when local_tools redacts and proxy tries to redact again
         let original_password = "MySecureP@ssw0rd!";
-        
+
         // First redaction (simulating local_tools)
         let first_result = redact_password(original_password, original_password, &HashMap::new());
-        assert!(first_result.redacted_string.contains("[REDACTED_SECRET:password:"));
-        
+        assert!(
+            first_result
+                .redacted_string
+                .contains("[REDACTED_SECRET:password:")
+        );
+
         // Second redaction attempt (simulating proxy) - should be skipped
-        let second_result = redact_secrets(&first_result.redacted_string, None, &HashMap::new(), false);
-        
+        let second_result =
+            redact_secrets(&first_result.redacted_string, None, &HashMap::new(), false);
+
         // Should return the already-redacted content unchanged
         assert_eq!(second_result.redacted_string, first_result.redacted_string);
         assert!(second_result.redaction_map.is_empty());
