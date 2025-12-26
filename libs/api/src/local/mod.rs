@@ -1,6 +1,6 @@
-// use crate::local::hooks::file_scratchpad_context::{
-//     FileScratchpadContextHook, FileScratchpadContextHookOptions,
-// };
+use crate::local::hooks::file_scratchpad_context::{
+    FileScratchpadContextHook, FileScratchpadContextHookOptions,
+};
 use crate::local::hooks::inline_scratchpad_context::{
     InlineScratchpadContextHook, InlineScratchpadContextHookOptions,
 };
@@ -145,34 +145,31 @@ impl LocalClient {
 
         // Add hooks
         let mut hook_registry = config.hook_registry.unwrap_or_default();
-        hook_registry.register(
-            LifecycleEvent::BeforeInference,
-            Box::new(InlineScratchpadContextHook::new(
-                InlineScratchpadContextHookOptions {
-                    model_options: model_options.clone(),
-                    history_action_message_size_limit: Some(100),
-                    history_action_message_keep_last_n: Some(1),
-                    history_action_result_keep_last_n: Some(50),
-                },
-            )),
-        );
         // hook_registry.register(
         //     LifecycleEvent::BeforeInference,
-        //     Box::new(FileScratchpadContextHook::new(
-        //         FileScratchpadContextHookOptions {
-        //             models: ModelOptions {
-        //                 smart_model: smart_model.clone(),
-        //                 eco_model: eco_model.clone(),
-        //                 recovery_model: recovery_model.clone(),
-        //             },
+        //     Box::new(InlineScratchpadContextHook::new(
+        //         InlineScratchpadContextHookOptions {
+        //             model_options: model_options.clone(),
         //             history_action_message_size_limit: Some(100),
         //             history_action_message_keep_last_n: Some(1),
         //             history_action_result_keep_last_n: Some(50),
-        //             scratchpad_path: None,
-        //             todo_path: None,
         //         },
         //     )),
         // );
+        hook_registry.register(
+            LifecycleEvent::BeforeInference,
+            Box::new(FileScratchpadContextHook::new(
+                FileScratchpadContextHookOptions {
+                    history_action_message_size_limit: Some(100),
+                    history_action_message_keep_last_n: Some(1),
+                    history_action_result_keep_last_n: Some(50),
+                    scratchpad_path: None,
+                    todo_path: None,
+                    model_options: model_options.clone(),
+                    overwrite_if_different: Some(true),
+                },
+            )),
+        );
 
         Ok(Self {
             db: conn,

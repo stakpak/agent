@@ -97,34 +97,96 @@ impl FileScratchpadContextManager {
         self.recover_single_file(messages, "todo", &self.todo_file_path);
     }
 
-    fn recover_single_file(&self, messages: &[ChatMessage], tag: &str, path: &Path) {
-        for message in messages.iter().rev() {
-            let content = message.content.clone().unwrap_or_default().to_string();
-            if let Some(content) = extract_xml_tag(tag, &content) {
-                let exists = path.exists();
-                let current_content = if exists {
-                    fs::read_to_string(path).unwrap_or_default()
-                } else {
-                    String::new()
-                };
+    fn recover_single_file(&self, messages: &[ChatMessage], _tag: &str, path: &Path) {
+        // Try to reconstruct from tool calls
+        let reconstructed_content = self.reconstruct_file_from_history(messages, path);
 
-                let should_write = if !exists || current_content.trim().is_empty() {
-                    // File missing or empty -> recover
-                    true
-                } else if self.overwrite_if_different {
-                    // File exists, check if content differs
-                    current_content.trim() != content.trim()
-                } else {
-                    false
-                };
+        if let Some(content) = reconstructed_content {
+            let exists = path.exists();
+            let current_content = if exists {
+                fs::read_to_string(path).unwrap_or_default()
+            } else {
+                String::new()
+            };
 
-                if should_write {
-                    if let Some(parent) = path.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    let _ = fs::write(path, content);
+            let should_write = if !exists || current_content.trim().is_empty() {
+                // File missing or empty -> recover
+                true
+            } else if self.overwrite_if_different {
+                // File exists, check if content differs
+                current_content.trim() != content.trim()
+            } else {
+                false
+            };
+
+            if should_write {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
                 }
+                let _ = fs::write(path, content);
+            }
+        }
+    }
+
+    fn reconstruct_file_from_history(
+        &self,
+        messages: &[ChatMessage],
+        path: &Path,
+    ) -> Option<String> {
+        let mut current_content: Option<String> = None;
+        let path_str = path.to_string_lossy();
+
+        for message in messages {
+            if let Some(tool_calls) = &message.tool_calls {
+                for tool_call in tool_calls {
+                    self.apply_tool_call(tool_call, &path_str, &mut current_content);
+                }
+            }
+        }
+
+        current_content
+    }
+
+    fn apply_tool_call(
+        &self,
+        tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
+        target_path: &str,
+        current_content: &mut Option<String>,
+    ) {
+        let args: serde_json::Value =
+            serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+        let tool_name = tool_call.function.name.as_str();
+
+        if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
+            if !path.contains(target_path) {
                 return;
+            }
+
+            match tool_name {
+                "create" => {
+                    if let Some(file_text) = args.get("file_text").and_then(|t| t.as_str()) {
+                        *current_content = Some(file_text.to_string());
+                    }
+                }
+                "str_replace" => {
+                    if let (Some(old_str), Some(new_str)) = (
+                        args.get("old_str").and_then(|s| s.as_str()),
+                        args.get("new_str").and_then(|s| s.as_str()),
+                    ) {
+                        if let Some(content) = current_content {
+                            let replace_all = args
+                                .get("replace_all")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false);
+                            if replace_all {
+                                *content = content.replace(old_str, new_str);
+                            } else {
+                                *content = content.replacen(old_str, new_str, 1);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -273,15 +335,6 @@ fn remove_xml_tag(tag_name: &str, content: &str) -> String {
     let xml_tag_regex =
         Regex::new(format!("<{}>(?s)(.*?)</{}>", tag_name, tag_name).as_str()).unwrap();
     xml_tag_regex.replace_all(content, "").trim().to_string()
-}
-
-fn extract_xml_tag(tag_name: &str, content: &str) -> Option<String> {
-    #[allow(clippy::unwrap_used)]
-    let xml_tag_regex =
-        Regex::new(format!("<{}>(?s)(.*?)</{}>", tag_name, tag_name).as_str()).unwrap();
-    xml_tag_regex
-        .captures(content)
-        .map(|c| c.get(1).map_or("", |m| m.as_str()).trim().to_string())
 }
 
 fn get_threshold_idx(history_items: &[HistoryItem], keep_last_n: usize) -> Option<usize> {
@@ -482,7 +535,7 @@ impl std::fmt::Display for HistoryItemActionStatus {
 mod tests {
     use super::*;
     use crate::local::context_managers::ContextManager;
-    use stakpak_shared::models::integrations::openai::MessageContent;
+    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
     use tempfile::TempDir;
 
     fn create_test_manager() -> (FileScratchpadContextManager, TempDir) {
@@ -581,27 +634,66 @@ mod tests {
         assert_eq!(&manager.todo_file_path, &temp_dir.path().join("todo.md"));
     }
 
+    fn create_tool_call_history(
+        scratchpad_path: &str,
+        todo_path: &str,
+        scratchpad_content: &str,
+        todo_content: &str,
+    ) -> Vec<ChatMessage> {
+        vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "file_text": scratchpad_content
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_2".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": todo_path,
+                            "file_text": todo_content
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+        ]
+    }
+
     #[test]
     fn test_recover_from_history() {
         let (manager, _temp_dir) = create_test_manager();
-        let history = vec![ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::String(
-                r#"
-<scratchpad>
-Recovered Content
-</scratchpad>
-<todo>
-- [ ] Recovered Task
-</todo>
-"#
-                .to_string(),
-            )),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            usage: None,
-        }];
+        let scratchpad_path = manager.get_scratchpad_path().to_string_lossy().to_string();
+        let todo_path = manager.get_todo_path().to_string_lossy().to_string();
+
+        let history = create_tool_call_history(
+            &scratchpad_path,
+            &todo_path,
+            "Recovered Content",
+            "- [ ] Recovered Task",
+        );
 
         // Initially empty
         assert!(manager.load_scratchpad().is_empty());
@@ -621,29 +713,15 @@ Recovered Content
     #[test]
     fn test_recover_no_overwrite_existing() {
         let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager.get_scratchpad_path().to_string_lossy().to_string();
+        let todo_path = manager.get_todo_path().to_string_lossy().to_string();
 
         // Create existing files
         fs::write(&manager.scratchpad_file_path, "Existing Scratchpad").unwrap();
         fs::write(&manager.todo_file_path, "Existing Todo").unwrap();
 
-        let history = vec![ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::String(
-                r#"
-<scratchpad>
-New Scratchpad
-</scratchpad>
-<todo>
-New Todo
-</todo>
-"#
-                .to_string(),
-            )),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            usage: None,
-        }];
+        let history =
+            create_tool_call_history(&scratchpad_path, &todo_path, "New Scratchpad", "New Todo");
 
         // Trigger recovery
         manager.reduce_context(history);
@@ -676,24 +754,12 @@ New Todo
         fs::write(&scratchpad_path, "Existing Scratchpad").unwrap();
         fs::write(&todo_path, "Existing Todo").unwrap();
 
-        let history = vec![ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::String(
-                r#"
-<scratchpad>
-New Scratchpad
-</scratchpad>
-<todo>
-New Todo
-</todo>
-"#
-                .to_string(),
-            )),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            usage: None,
-        }];
+        let history = create_tool_call_history(
+            &scratchpad_path.to_string_lossy(),
+            &todo_path.to_string_lossy(),
+            "New Scratchpad",
+            "New Todo",
+        );
 
         // Trigger recovery
         manager.reduce_context(history);
@@ -704,5 +770,59 @@ New Todo
 
         assert_eq!(scratchpad.trim(), "New Scratchpad");
         assert_eq!(todo.trim(), "New Todo");
+    }
+    #[test]
+    fn test_recover_from_tool_calls() {
+        let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager.get_scratchpad_path().to_string_lossy().to_string();
+
+        let history = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "file_text": "Initial Content"
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_2".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "str_replace".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "old_str": "Initial",
+                            "new_str": "Updated"
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+        ];
+
+        // Trigger recovery
+        manager.reduce_context(history);
+
+        // Verify recovered content
+        let scratchpad = manager.load_scratchpad();
+        assert_eq!(scratchpad, "Updated Content");
     }
 }
