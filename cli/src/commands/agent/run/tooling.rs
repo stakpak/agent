@@ -107,7 +107,6 @@ pub async fn run_tool_call(
                 result = handle.await_response() => {
                     match result {
                         Ok(server_result) => {
-                            eprintln!("{:?}", server_result);
                             match server_result {
                                 ServerResult::CallToolResult(result) => {
                                     return Ok(Some(result));
