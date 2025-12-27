@@ -20,8 +20,9 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
-    LLMStreamInput, chat, chat_stream,
+    LLMStreamInput,
 };
+use stakpak_shared::models::stakai_adapter::StakAIClient;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -523,6 +524,8 @@ impl LocalClient {
         };
 
         let llm_config = self.get_llm_config();
+        let stakai_client = StakAIClient::new(&llm_config)
+            .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
@@ -535,7 +538,8 @@ impl LocalClient {
             };
 
             let chat_future = async move {
-                chat_stream(&llm_config, input)
+                stakai_client
+                    .chat_stream(input)
                     .await
                     .map_err(|e| e.to_string())
             };
@@ -552,7 +556,7 @@ impl LocalClient {
             let response = chat_result?;
             (response.choices[0].message.clone(), response.usage)
         } else {
-            let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
+            let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
             (response.choices[0].message.clone(), response.usage)
         };
 
@@ -697,7 +701,9 @@ impl LocalClient {
             tools: None,
         };
 
-        let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
+        let stakai_client = StakAIClient::new(&llm_config)
+            .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+        let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
     }
