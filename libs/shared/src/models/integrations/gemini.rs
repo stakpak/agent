@@ -24,6 +24,8 @@ pub enum GeminiModel {
     #[default]
     #[serde(rename = "gemini-3-pro-preview")]
     Gemini3Pro,
+    #[serde(rename = "gemini-3-flash-preview")]
+    Gemini3Flash,
     #[serde(rename = "gemini-2.5-pro")]
     Gemini25Pro,
     #[serde(rename = "gemini-2.5-flash")]
@@ -36,6 +38,7 @@ impl std::fmt::Display for GeminiModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GeminiModel::Gemini3Pro => write!(f, "gemini-3-pro-preview"),
+            GeminiModel::Gemini3Flash => write!(f, "gemini-3-flash-preview"),
             GeminiModel::Gemini25Pro => write!(f, "gemini-2.5-pro"),
             GeminiModel::Gemini25Flash => write!(f, "gemini-2.5-flash"),
             GeminiModel::Gemini25FlashLite => write!(f, "gemini-2.5-flash-lite"),
@@ -53,10 +56,10 @@ impl GeminiModel {
     pub const DEFAULT_SMART_MODEL: GeminiModel = GeminiModel::Gemini3Pro;
 
     /// Default eco model for Gemini
-    pub const DEFAULT_ECO_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+    pub const DEFAULT_ECO_MODEL: GeminiModel = GeminiModel::Gemini3Flash;
 
     /// Default recovery model for Gemini
-    pub const DEFAULT_RECOVERY_MODEL: GeminiModel = GeminiModel::Gemini25Flash;
+    pub const DEFAULT_RECOVERY_MODEL: GeminiModel = GeminiModel::Gemini3Flash;
 
     /// Get default smart model as string
     pub fn default_smart_model() -> String {
@@ -123,6 +126,16 @@ impl ContextAware for GeminiModel {
                 }],
                 approach_warning_threshold: 0.8,
             },
+            GeminiModel::Gemini3Flash => ModelContextInfo {
+                max_tokens: 1_000_000,
+                pricing_tiers: vec![ContextPricingTier {
+                    label: "Standard".to_string(),
+                    input_cost_per_million: 0.50,
+                    output_cost_per_million: 3.0,
+                    upper_bound: None,
+                }],
+                approach_warning_threshold: 0.8,
+            },
             GeminiModel::Gemini25FlashLite => ModelContextInfo {
                 max_tokens: 1_000_000,
                 pricing_tiers: vec![ContextPricingTier {
@@ -139,6 +152,7 @@ impl ContextAware for GeminiModel {
     fn model_name(&self) -> String {
         match self {
             GeminiModel::Gemini3Pro => "Gemini 3 Pro".to_string(),
+            GeminiModel::Gemini3Flash => "Gemini 3 Flash".to_string(),
             GeminiModel::Gemini25Pro => "Gemini 2.5 Pro".to_string(),
             GeminiModel::Gemini25Flash => "Gemini 2.5 Flash".to_string(),
             GeminiModel::Gemini25FlashLite => "Gemini 2.5 Flash Lite".to_string(),
