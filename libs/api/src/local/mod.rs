@@ -456,6 +456,14 @@ impl AgentProvider for LocalClient {
             .await
             .map_err(|e| e.to_string())?;
 
+        // SECURITY TODO:
+        // This uses plain-text, unauthenticated HTTP over localhost.
+        // While acceptable for local development, this is an injection
+        //
+        // Mitigations to consider:
+        // - Add mutual authentication (e.g., token)
+        // - Validate the expected service identity
+
         let api_url = format!("http://localhost:{}", config.api_port);
         let search_client = SearchClient::new(api_url);
 

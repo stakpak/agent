@@ -342,13 +342,6 @@ impl SearchServicesOrchestrator {
 
     pub async fn check() -> Result<bool, AgentError> {
         if let Some(config) = Self::load_config() {
-            // SECURITY TODO:
-            // This uses plain-text, unauthenticated HTTP over localhost.
-            // While acceptable for local development, this is an injection
-            //
-            // Mitigations to consider:
-            // - Add mutual authentication (e.g., token)
-            // - Validate the expected service identity
             let api_url = format!("http://localhost:{}", config.api_port);
 
             if Self::health_check_api(&api_url).await.is_ok() {
