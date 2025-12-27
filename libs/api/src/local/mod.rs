@@ -16,7 +16,7 @@ use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
-    OpenAIModel, Tool,
+    OpenAIModel, Role, Tool,
 };
 use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
@@ -858,11 +858,11 @@ Analyze this query and provide the required documentation types and an optimized
             model: model.clone(),
             messages: vec![
                 LLMMessage {
-                    role: "system".into(),
+                    role: Role::System.to_string(),
                     content: LLMMessageContent::String(system_prompt.to_string()),
                 },
                 LLMMessage {
-                    role: "user".into(),
+                    role: Role::User.to_string(),
                     content: LLMMessageContent::String(user_prompt.to_string()),
                 },
             ],
@@ -1043,11 +1043,11 @@ Evaluate these search results against the requirements. Which documents are vali
             model: model.clone(),
             messages: vec![
                 LLMMessage {
-                    role: "system".into(),
+                    role: Role::System.to_string(),
                     content: LLMMessageContent::String(system_prompt.to_string()),
                 },
                 LLMMessage {
-                    role: "user".into(),
+                    role: Role::User.to_string(),
                     content: LLMMessageContent::String(user_prompt.to_string()),
                 },
             ],
