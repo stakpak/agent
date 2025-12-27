@@ -29,6 +29,7 @@ dirs = "5.0"
 async-trait = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+stakai = { workspace = true }
 reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.8.0"
 itertools = "0.14.0"
