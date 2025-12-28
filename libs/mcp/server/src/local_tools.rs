@@ -222,18 +222,14 @@ Output exceeding 300 lines is truncated and saved to a file.")]
                     return Ok(CallToolResult::success(vec![Content::text("No output")]));
                 }
 
-                let redacted_output = self
-                    .get_secret_manager()
-                    .redact_and_store_secrets(&command_result.output, None);
-
                 if command_result.exit_code != 0 {
                     return Ok(CallToolResult::error(vec![
                         Content::text("COMMAND_FAILED"),
-                        Content::text(redacted_output),
+                        Content::text(&command_result.output),
                     ]));
                 }
                 Ok(CallToolResult::success(vec![Content::text(
-                    &redacted_output,
+                    &command_result.output,
                 )]))
             }
             Err(error_result) => Ok(error_result),
@@ -320,7 +316,7 @@ Use get_all_tasks to monitor progress, cancel_task to cancel."
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
   - Task ID: Full unique identifier (required for cancel_task)
-  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
+  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)
   - Start Time: When the task was started
   - Duration: How long the task has been running or took to complete
   - Output: Command output preview (truncated to 80 chars, redacted for security)
@@ -341,19 +337,6 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                     )]));
                 }
 
-                let redacted_tasks: Vec<TaskInfo> = tasks
-                    .into_iter()
-                    .map(|mut task| {
-                        if let Some(ref output) = task.output {
-                            task.output = Some(
-                                self.get_secret_manager()
-                                    .redact_and_store_secrets(output, None),
-                            );
-                        }
-                        task
-                    })
-                    .collect();
-
                 // Create markdown table format
                 let mut table = String::new();
                 table.push_str("# Background Tasks\n\n");
@@ -363,7 +346,7 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                 table.push_str("|---------|--------|------------|----------|--------|--------|\n");
 
                 // Markdown table rows
-                for task in &redacted_tasks {
+                for task in &tasks {
                     let task_id = task.id.clone();
                     let status = format!("{:?}", task.status);
                     let start_time = task.start_time.to_rfc3339();
@@ -373,23 +356,20 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         "N/A".to_string()
                     };
 
-                    let redacted_command = self
-                        .get_secret_manager()
-                        .redact_and_store_secrets(&task.command, None);
-                    let redacted_output = if let Some(ref out) = task.output {
-                        self.get_secret_manager()
-                            .redact_and_store_secrets(out, None)
+                    let output_str = if let Some(ref out) = task.output {
+                        out.clone()
                     } else {
                         "No output yet".to_string()
                     };
 
-                    let escaped_command = redacted_command
+                    let escaped_command = task
+                        .command
                         .chars()
                         .take(100)
                         .collect::<String>()
                         .replace('|', "\\|")
                         .replace('\n', " ");
-                    let escaped_output = redacted_output
+                    let escaped_output = output_str
                         .chars()
                         .take(100)
                         .collect::<String>()
@@ -402,7 +382,7 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                     ));
                 }
 
-                table.push_str(&format!("\n**Total: {} task(s)**", redacted_tasks.len()));
+                table.push_str(&format!("\n**Total: {} task(s)**", tasks.len()));
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -496,20 +476,7 @@ This tool enables proper task synchronization and coordination in complex workfl
             .await
         {
             Ok(tasks) => {
-                let redacted_tasks: Vec<TaskInfo> = tasks
-                    .into_iter()
-                    .map(|mut task| {
-                        if let Some(ref output) = task.output {
-                            task.output = Some(
-                                self.get_secret_manager()
-                                    .redact_and_store_secrets(output, None),
-                            );
-                        }
-                        task
-                    })
-                    .collect();
-
-                let table = self.format_tasks_table(&redacted_tasks, &task_ids);
+                let table = self.format_tasks_table(&tasks, &task_ids);
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -555,17 +522,8 @@ Use this tool to check the progress and results of long-running background tasks
                     "N/A".to_string()
                 };
 
-                let redacted_command = self
-                    .get_secret_manager()
-                    .redact_and_store_secrets(&task_info.command, None);
-
-                let redacted_output = if let Some(ref output) = task_info.output {
-                    match handle_large_output(
-                        &self
-                            .get_secret_manager()
-                            .redact_and_store_secrets(output, None),
-                        "task.output",
-                    ) {
+                let output_str = if let Some(ref output) = task_info.output {
+                    match handle_large_output(output, "task.output") {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -585,8 +543,8 @@ Use this tool to check the progress and results of long-running background tasks
                     task_info.id,
                     task_info.start_time.format("%Y-%m-%d %H:%M:%S UTC"),
                     duration_str,
-                    redacted_command,
-                    redacted_output
+                    task_info.command,
+                    output_str
                 );
 
                 Ok(CallToolResult::success(vec![Content::text(output)]))
@@ -750,7 +708,7 @@ PARAMETERS:
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
-- Numbers: 0-9 (always included)  
+- Numbers: 0-9 (always included)
 - Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
 
 SECURITY FEATURES:
@@ -1246,12 +1204,7 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
                         }
                     };
 
-                    let redacted_result = self
-                        .get_secret_manager()
-                        .redact_and_store_secrets(&result, Some(path));
-                    Ok(CallToolResult::success(vec![Content::text(
-                        &redacted_result,
-                    )]))
+                    Ok(CallToolResult::success(vec![Content::text(&result)]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1323,12 +1276,7 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
                         }
                     };
 
-                    let redacted_result = self
-                        .get_secret_manager()
-                        .redact_and_store_secrets(&result, Some(original_path));
-                    Ok(CallToolResult::success(vec![Content::text(
-                        &redacted_result,
-                    )]))
+                    Ok(CallToolResult::success(vec![Content::text(&result)]))
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1520,13 +1468,7 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
             replaced_count, unified_diff
         );
 
-        let redacted_output = self
-            .get_secret_manager()
-            .redact_and_store_secrets(&output, Some(original_path));
-
-        Ok(CallToolResult::success(vec![Content::text(
-            redacted_output,
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(&output)]))
     }
 
     /// Replace a specific string in a local file
@@ -1596,13 +1538,7 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
             replaced_count, unified_diff
         );
 
-        let redacted_output = self
-            .get_secret_manager()
-            .redact_and_store_secrets(&output, Some(path));
-
-        Ok(CallToolResult::success(vec![Content::text(
-            redacted_output,
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(&output)]))
     }
 
     /// Create a remote file with the specified content
@@ -1668,7 +1604,7 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
         ))]))
     }
 
-    /// Create a local file with the specified content  
+    /// Create a local file with the specified content
     fn create_local(&self, path: &str, file_text: &str) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(&path);
 
@@ -1946,11 +1882,8 @@ SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/
                 "running".to_string()
             };
 
-            let redacted_command = self
-                .get_secret_manager()
-                .redact_and_store_secrets(&task.command, None);
-
-            let truncated_command = redacted_command
+            let truncated_command = task
+                .command
                 .chars()
                 .take(30)
                 .collect::<String>()

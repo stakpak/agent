@@ -1,7 +1,6 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
 use crate::config::ProviderType;
-use crate::utils::network;
-use crate::{commands::agent::run::helpers::convert_tools_map_with_filter, config::AppConfig};
+use crate::{commands::agent::run::helpers::convert_tools_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
@@ -10,9 +9,7 @@ use stakpak_api::{
     local::{LocalClient, LocalClientConfig},
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
@@ -21,7 +18,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -33,8 +29,8 @@ pub struct StakpakAcpAgent {
     client: Arc<dyn AgentProvider>,
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     next_session_id: Cell<u64>,
-    mcp_server_host: Option<String>,
-    clients: Option<Arc<ClientManager>>,
+    mcp_client: Option<Arc<McpClient>>,
+    mcp_tools: Vec<rmcp::model::Tool>,
     tools: Option<Vec<Tool>>,
     current_session_id: Cell<Option<Uuid>>,
     progress_tx: Option<mpsc::Sender<ToolCallResultProgress>>,
@@ -58,6 +54,8 @@ pub struct StakpakAcpAgent {
     streaming_buffer: Arc<tokio::sync::Mutex<String>>,
     // Channel for native ACP filesystem operations
     fs_operation_tx: Option<mpsc::UnboundedSender<crate::commands::acp::fs_handler::FsOperation>>,
+    // Capabilities advertised by the client during initialization
+    client_capabilities: Arc<tokio::sync::Mutex<acp::ClientCapabilities>>,
 }
 
 impl StakpakAcpAgent {
@@ -101,26 +99,21 @@ impl StakpakAcpAgent {
             }
         };
 
-        // Initialize MCP server and tools (optional for ACP)
-        let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(
-            &config,
-            client.clone(),
-            session_update_tx.clone(),
-        )
-        .await
-        {
-            Ok((host, client_manager, tool_list)) => {
-                log::info!("MCP server initialized successfully");
-                (host, Some(client_manager), tool_list)
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to initialize MCP server: {}, continuing without tools",
-                    e
-                );
-                (String::new(), None, Vec::new())
-            }
-        };
+        // Initialize MCP client and tools (optional for ACP)
+        let (mcp_client, mcp_tools, tools) =
+            match Self::initialize_mcp_server_and_tools(&config).await {
+                Ok((client, mcp_tools, tool_list)) => {
+                    log::info!("MCP client initialized successfully");
+                    (Some(client), mcp_tools, tool_list)
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to initialize MCP client: {}, continuing without tools",
+                        e
+                    );
+                    (None, Vec::new(), Vec::new())
+                }
+            };
 
         // Create cancellation channels
         let (stream_cancel_tx, _) = tokio::sync::broadcast::channel(1);
@@ -136,12 +129,8 @@ impl StakpakAcpAgent {
             client,
             session_update_tx,
             next_session_id: Cell::new(0),
-            mcp_server_host: if mcp_server_host.is_empty() {
-                None
-            } else {
-                Some(mcp_server_host)
-            },
-            clients,
+            mcp_client,
+            mcp_tools,
             tools: if tools.is_empty() { None } else { Some(tools) },
             current_session_id: Cell::new(None),
             progress_tx: None,
@@ -153,7 +142,15 @@ impl StakpakAcpAgent {
             current_streaming_message: Arc::new(tokio::sync::Mutex::new(String::new())),
             streaming_buffer: Arc::new(tokio::sync::Mutex::new(String::new())),
             fs_operation_tx: None,
+            client_capabilities: Arc::new(tokio::sync::Mutex::new(
+                acp::ClientCapabilities::default(),
+            )),
         })
+    }
+
+    async fn client_fs_capabilities(&self) -> (bool, bool) {
+        let caps = self.client_capabilities.lock().await;
+        (caps.fs.read_text_file, caps.fs.write_text_file)
     }
 
     // Helper method to send proper ACP tool call notifications
@@ -171,21 +168,17 @@ impl StakpakAcpAgent {
         let (tx, rx) = oneshot::channel();
         self.session_update_tx
             .send((
-                SessionNotification {
-                    meta: None,
-                    session_id: session_id.clone(),
-                    update: acp::SessionUpdate::ToolCall(acp::ToolCall {
-                        meta: None,
-                        id: acp::ToolCallId(tool_call_id.into()),
-                        title,
-                        kind: *kind,
-                        status: acp::ToolCallStatus::Pending,
-                        content: content.unwrap_or_default(),
-                        locations: locations.unwrap_or_default(),
-                        raw_input: Some(raw_input),
-                        raw_output: None,
-                    }),
-                },
+                SessionNotification::new(
+                    session_id.clone(),
+                    acp::SessionUpdate::ToolCall(
+                        acp::ToolCall::new(acp::ToolCallId::new(tool_call_id), title)
+                            .kind(*kind)
+                            .status(acp::ToolCallStatus::Pending)
+                            .content(content.unwrap_or_default())
+                            .locations(locations.unwrap_or_default())
+                            .raw_input(raw_input),
+                    ),
+                ),
                 tx,
             ))
             .map_err(|_| acp::Error::internal_error())?;
@@ -205,20 +198,16 @@ impl StakpakAcpAgent {
         let (tx, rx) = oneshot::channel();
         self.session_update_tx
             .send((
-                SessionNotification {
-                    meta: None,
-                    session_id: session_id.clone(),
-                    update: acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate {
-                        meta: None,
-                        id: acp::ToolCallId(tool_call_id.into()),
-                        fields: acp::ToolCallUpdateFields {
-                            status: Some(status),
-                            content,
-                            raw_output,
-                            ..Default::default()
-                        },
-                    }),
-                },
+                SessionNotification::new(
+                    session_id.clone(),
+                    acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
+                        acp::ToolCallId::new(tool_call_id),
+                        acp::ToolCallUpdateFields::new()
+                            .status(status)
+                            .content(content)
+                            .raw_output(raw_output),
+                    )),
+                ),
                 tx,
             ))
             .map_err(|_| acp::Error::internal_error())?;
@@ -243,38 +232,32 @@ impl StakpakAcpAgent {
 
         // Create permission options as shown in the image
         let options = vec![
-            acp::PermissionOption {
-                meta: None,
-                id: acp::PermissionOptionId("allow".into()),
-                name: "Allow".to_string(),
-                kind: acp::PermissionOptionKind::AllowOnce,
-            },
-            acp::PermissionOption {
-                meta: None,
-                id: acp::PermissionOptionId("reject".into()),
-                name: "Reject".to_string(),
-                kind: acp::PermissionOptionKind::RejectOnce,
-            },
+            acp::PermissionOption::new(
+                acp::PermissionOptionId::new("allow"),
+                "Allow",
+                acp::PermissionOptionKind::AllowOnce,
+            ),
+            acp::PermissionOption::new(
+                acp::PermissionOptionId::new("reject"),
+                "Reject",
+                acp::PermissionOptionKind::RejectOnce,
+            ),
         ];
 
         // Create the permission request
-        let permission_request = acp::RequestPermissionRequest {
-            meta: None,
-            session_id: session_id.clone(),
-            tool_call: acp::ToolCallUpdate {
-                meta: None,
-                id: acp::ToolCallId(tool_call_id.clone().into()),
-                fields: acp::ToolCallUpdateFields {
-                    title: Some(tool_title.to_string()),
-                    raw_input: Some(
+        let permission_request = acp::RequestPermissionRequest::new(
+            session_id.clone(),
+            acp::ToolCallUpdate::new(
+                acp::ToolCallId::new(tool_call_id.clone()),
+                acp::ToolCallUpdateFields::new()
+                    .title(tool_title.to_string())
+                    .raw_input(
                         serde_json::from_str(&tool_call.function.arguments)
                             .unwrap_or(serde_json::Value::Null),
                     ),
-                    ..Default::default()
-                },
-            },
+            ),
             options,
-        };
+        );
 
         // Send the actual permission request if channel is available
         if let Some(ref permission_tx) = self.permission_request_tx {
@@ -292,13 +275,17 @@ impl StakpakAcpAgent {
             // Wait for the response
             match response_rx.await {
                 Ok(response) => match response.outcome {
-                    acp::RequestPermissionOutcome::Selected { option_id } => {
-                        log::info!("User selected permission option: {}", option_id.0);
-                        Ok(option_id.0.as_ref() == "allow"
-                            || option_id.0.as_ref() == "allow_always")
+                    acp::RequestPermissionOutcome::Selected(outcome) => {
+                        log::info!("User selected permission option: {}", outcome.option_id.0);
+                        Ok(outcome.option_id.0.as_ref() == "allow"
+                            || outcome.option_id.0.as_ref() == "allow_always")
                     }
                     acp::RequestPermissionOutcome::Cancelled => {
                         log::info!("Permission request was cancelled");
+                        Ok(false)
+                    }
+                    _ => {
+                        log::warn!("Unknown permission outcome");
                         Ok(false)
                     }
                 },
@@ -316,8 +303,9 @@ impl StakpakAcpAgent {
 
     // Helper method to generate appropriate tool title based on tool type and arguments
     fn generate_tool_title(&self, tool_name: &str, raw_input: &serde_json::Value) -> String {
+        use super::tool_names;
         match tool_name {
-            "view" => {
+            tool_names::VIEW => {
                 // Extract path from arguments for view tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Read {}", path)
@@ -325,7 +313,7 @@ impl StakpakAcpAgent {
                     "Read".to_string()
                 }
             }
-            "run_command" => {
+            tool_names::RUN_COMMAND => {
                 // Extract command from arguments for run_command tool
                 if let Some(command) = raw_input.get("command").and_then(|c| c.as_str()) {
                     format!("Run command {}", command)
@@ -333,7 +321,7 @@ impl StakpakAcpAgent {
                     "Run command".to_string()
                 }
             }
-            "create" | "create_file" => {
+            tool_names::CREATE | tool_names::CREATE_FILE => {
                 // Extract path from arguments for create tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Creating {}", path)
@@ -341,7 +329,7 @@ impl StakpakAcpAgent {
                     "Creating".to_string()
                 }
             }
-            "str_replace" | "edit_file" => {
+            tool_names::STR_REPLACE | tool_names::EDIT_FILE => {
                 // Extract path from arguments for edit tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Editing {}", path)
@@ -349,7 +337,7 @@ impl StakpakAcpAgent {
                     "Editing".to_string()
                 }
             }
-            "delete_file" => {
+            tool_names::DELETE_FILE => {
                 // Extract path from arguments for delete tool
                 if let Some(path) = raw_input.get("path").and_then(|p| p.as_str()) {
                     format!("Deleting {}", path)
@@ -357,7 +345,7 @@ impl StakpakAcpAgent {
                     "Deleting".to_string()
                 }
             }
-            "search_docs" => {
+            tool_names::SEARCH_DOCS => {
                 // Extract query from arguments for search tool
                 if let Some(query) = raw_input.get("query").and_then(|q| q.as_str()) {
                     format!("Search docs: {}", query)
@@ -365,7 +353,7 @@ impl StakpakAcpAgent {
                     "Search docs".to_string()
                 }
             }
-            "local_code_search" => {
+            tool_names::LOCAL_CODE_SEARCH => {
                 // Extract query from arguments for search tool
                 if let Some(query) = raw_input.get("query").and_then(|q| q.as_str()) {
                     format!("Search local context: {}", query)
@@ -373,7 +361,7 @@ impl StakpakAcpAgent {
                     "Search local context".to_string()
                 }
             }
-            "read_rulebook" => "Read rulebook".to_string(),
+            tool_names::READ_RULEBOOK => "Read rulebook".to_string(),
             _ => {
                 // Default case: format tool name nicely and add path if available
                 let formatted_name = self.format_tool_name(tool_name);
@@ -405,35 +393,36 @@ impl StakpakAcpAgent {
 
     // Helper method to get appropriate ToolKind based on tool name
     fn get_tool_kind(&self, tool_name: &str) -> acp::ToolKind {
-        match tool_name {
-            "view" | "read_rulebook" => acp::ToolKind::Read,
-            "run_command" => acp::ToolKind::Execute,
-            "create" | "create_file" | "str_replace" | "edit_file" => acp::ToolKind::Edit,
-            "delete_file" => acp::ToolKind::Delete,
-            "search_docs" | "local_code_search" => acp::ToolKind::Search,
-            _ => acp::ToolKind::Other,
+        use super::tool_names;
+        if tool_names::is_fs_file_read(tool_name) || tool_name == tool_names::READ_RULEBOOK {
+            acp::ToolKind::Read
+        } else if tool_names::is_fs_file_write(tool_name) {
+            acp::ToolKind::Edit
+        } else if tool_name == tool_names::RUN_COMMAND {
+            acp::ToolKind::Execute
+        } else if tool_name == tool_names::DELETE_FILE {
+            acp::ToolKind::Delete
+        } else if tool_name == tool_names::SEARCH_DOCS || tool_name == tool_names::LOCAL_CODE_SEARCH
+        {
+            acp::ToolKind::Search
+        } else {
+            acp::ToolKind::Other
         }
     }
 
     // Helper method to determine if a tool should use Diff content type
     fn should_use_diff_content(&self, tool_name: &str) -> bool {
-        matches!(
-            tool_name,
-            "create" | "create_file" | "str_replace" | "edit_file"
-        )
+        super::tool_names::is_fs_file_write(tool_name)
     }
 
     // Helper method to determine if a tool is a file creation tool
     fn is_file_creation_tool(&self, tool_name: &str) -> bool {
-        matches!(tool_name, "create" | "create_file")
+        tool_name == super::tool_names::CREATE || tool_name == super::tool_names::CREATE_FILE
     }
 
     // Helper method to determine if a tool should be auto-approved
     fn is_auto_approved_tool(&self, tool_name: &str) -> bool {
-        matches!(
-            tool_name,
-            "view" | "search_docs" | "read_rulebook" | "local_code_search"
-        )
+        super::tool_names::is_auto_approved(tool_name)
     }
 
     // Helper method to create proper rawInput for tool calls
@@ -551,22 +540,20 @@ impl StakpakAcpAgent {
                 if line.starts_with("- [ ]") {
                     let todo_text = line.strip_prefix("- [ ]").unwrap_or("").trim().to_string();
                     if !todo_text.is_empty() {
-                        plan_entries.push(acp::PlanEntry {
-                            meta: None,
-                            content: todo_text,
-                            priority: acp::PlanEntryPriority::Medium,
-                            status: acp::PlanEntryStatus::Pending,
-                        });
+                        plan_entries.push(acp::PlanEntry::new(
+                            todo_text,
+                            acp::PlanEntryPriority::Medium,
+                            acp::PlanEntryStatus::Pending,
+                        ));
                     }
                 } else if line.starts_with("- [x]") {
                     let todo_text = line.strip_prefix("- [x]").unwrap_or("").trim().to_string();
                     if !todo_text.is_empty() {
-                        plan_entries.push(acp::PlanEntry {
-                            meta: None,
-                            content: todo_text,
-                            priority: acp::PlanEntryPriority::Medium,
-                            status: acp::PlanEntryStatus::Completed,
-                        });
+                        plan_entries.push(acp::PlanEntry::new(
+                            todo_text,
+                            acp::PlanEntryPriority::Medium,
+                            acp::PlanEntryStatus::Completed,
+                        ));
                     }
                 }
             }
@@ -589,14 +576,10 @@ impl StakpakAcpAgent {
         let (tx, rx) = oneshot::channel();
         self.session_update_tx
             .send((
-                SessionNotification {
-                    meta: None,
-                    session_id: session_id.clone(),
-                    update: acp::SessionUpdate::Plan(acp::Plan {
-                        meta: None,
-                        entries: plan_entries,
-                    }),
-                },
+                SessionNotification::new(
+                    session_id.clone(),
+                    acp::SessionUpdate::Plan(acp::Plan::new(plan_entries)),
+                ),
                 tx,
             ))
             .map_err(|_| acp::Error::internal_error())?;
@@ -710,7 +693,6 @@ impl StakpakAcpAgent {
         &self,
         tool_calls: Vec<ToolCall>,
         session_id: &acp::SessionId,
-        tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
     ) -> Result<Vec<ChatMessage>, acp::Error> {
         log::info!(
             "🔧 DEBUG: Starting tool call processing with {} tool calls",
@@ -795,35 +777,21 @@ impl StakpakAcpAgent {
             let (content, locations) = if self.should_use_diff_content(&tool_call.function.name) {
                 if self.is_file_creation_tool(&tool_call.function.name) {
                     // For file creation: old_text = None, new_text = result_content
-                    let diff_content = vec![acp::ToolCallContent::Diff {
-                        diff: acp::Diff {
-                            meta: None,
-                            path: file_path.clone(),
-                            old_text: None,
-                            new_text: "".to_string(), // Will be updated after execution
-                        },
-                    }];
-                    let tool_locations = vec![acp::ToolCallLocation {
-                        meta: None,
-                        path: file_path.clone(),
-                        line: Some(0),
-                    }];
+                    let diff_content = vec![acp::ToolCallContent::Diff(acp::Diff::new(
+                        file_path.clone(),
+                        "",
+                    ))];
+                    let tool_locations =
+                        vec![acp::ToolCallLocation::new(file_path.clone()).line(0u32)];
                     (Some(diff_content), Some(tool_locations))
                 } else {
                     // For file editing: use extracted old_string and new_string
-                    let diff_content = vec![acp::ToolCallContent::Diff {
-                        diff: acp::Diff {
-                            meta: None,
-                            path: file_path.clone(),
-                            old_text: old_string,
-                            new_text: new_string.unwrap_or_default(),
-                        },
-                    }];
-                    let tool_locations = vec![acp::ToolCallLocation {
-                        meta: None,
-                        path: file_path.clone(),
-                        line: Some(0),
-                    }];
+                    let diff_content = vec![acp::ToolCallContent::Diff(
+                        acp::Diff::new(file_path.clone(), new_string.unwrap_or_default())
+                            .old_text(old_string),
+                    )];
+                    let tool_locations =
+                        vec![acp::ToolCallLocation::new(file_path.clone()).line(0u32)];
                     (Some(diff_content), Some(tool_locations))
                 }
             } else {
@@ -862,13 +830,11 @@ impl StakpakAcpAgent {
                     session_id,
                     tool_call_id.clone(),
                     acp::ToolCallStatus::Failed,
-                    Some(vec![acp::ToolCallContent::Content {
-                        content: acp::ContentBlock::Text(acp::TextContent {
-                            meta: None,
-                            text: "Tool execution rejected by user".to_string(),
-                            annotations: None,
-                        }),
-                    }]),
+                    Some(vec![acp::ToolCallContent::Content(acp::Content::new(
+                        acp::ContentBlock::Text(acp::TextContent::new(
+                            "Tool execution rejected by user",
+                        )),
+                    ))]),
                     None,
                 )
                 .await?;
@@ -895,18 +861,24 @@ impl StakpakAcpAgent {
 
             // Check if this is a filesystem tool that should use native ACP
             // Decide if this should be handled by native ACP FS. Avoid read_text_file for directories.
-            let is_view_directory = if tool_call.function.name == "view" {
+            let is_view_directory = if tool_call.function.name == super::tool_names::VIEW {
                 Path::new(&abs_path).is_dir()
             } else {
                 false
             };
 
-            let is_fs_tool = matches!(
-                tool_call.function.name.as_str(),
-                "view" | "create" | "str_replace"
-            ) && !is_view_directory;
+            let tool_name = tool_call.function.name.as_str();
+            let is_read_tool = super::tool_names::is_fs_file_read(tool_name) && !is_view_directory;
+            let is_write_tool = super::tool_names::is_fs_file_write(tool_name);
 
-            let result = if is_fs_tool && self.fs_operation_tx.is_some() {
+            // Delegate fs operations to the client so it can access unsaved editor
+            // state and track modifications. Per ACP spec, both read and write
+            // require the client to advertise the corresponding capability.
+            let (client_reads, client_writes) = self.client_fs_capabilities().await;
+            let should_delegate = self.fs_operation_tx.is_some()
+                && ((is_read_tool && client_reads) || (is_write_tool && client_writes));
+
+            let result = if should_delegate {
                 log::info!(
                     "🔧 DEBUG: Executing filesystem tool via native ACP: {}",
                     tool_call.function.name
@@ -920,16 +892,12 @@ impl StakpakAcpAgent {
                 crate::commands::acp::fs_handler::execute_acp_fs_tool(fs_tx, &tool_call, session_id)
                     .await
                     .map_err(|e| {
-                        log::error!("ACP filesystem tool execution failed: {}", e);
-                        // Return a more descriptive error instead of generic internal error
-                        acp::Error::internal_error().with_data(serde_json::Value::String(format!(
-                            "Tool execution failed: {}",
-                            e
-                        )))
+                        log::error!("ACP filesystem tool execution failed: {e}");
+                        acp::Error::internal_error().data(format!("Tool execution failed: {e}"))
                     })?
-            } else if let Some(ref clients) = self.clients {
+            } else if let Some(ref mcp_client) = self.mcp_client {
                 log::info!(
-                    "🔧 DEBUG: Executing tool call: {} with MCP clients",
+                    "🔧 DEBUG: Executing tool call: {} with MCP client",
                     tool_call.function.name
                 );
 
@@ -937,29 +905,24 @@ impl StakpakAcpAgent {
                 let tool_cancel_rx = self.tool_cancel_tx.as_ref().map(|tx| tx.subscribe());
 
                 crate::commands::agent::run::tooling::run_tool_call(
-                    clients,
-                    tools_map,
+                    mcp_client,
+                    &self.mcp_tools,
                     &tool_call,
                     tool_cancel_rx,
                     self.current_session_id.get(),
                 )
                 .await
                 .map_err(|e| {
-                    log::error!("MCP tool execution failed: {}", e);
-                    acp::Error::internal_error().with_data(serde_json::Value::String(format!(
-                        "MCP tool execution failed: {}",
-                        e
-                    )))
+                    log::error!("MCP tool execution failed: {e}");
+                    acp::Error::internal_error().data(format!("MCP tool execution failed: {e}"))
                 })?
             } else {
                 let error_msg = format!(
                     "No execution method available for tool: {}",
                     tool_call.function.name
                 );
-                log::error!("{}", error_msg);
-                return Err(
-                    acp::Error::internal_error().with_data(serde_json::Value::String(error_msg))
-                );
+                log::error!("{error_msg}");
+                return Err(acp::Error::internal_error().data(error_msg));
             };
 
             log::info!(
@@ -975,13 +938,11 @@ impl StakpakAcpAgent {
                         session_id,
                         tool_call_id.clone(),
                         acp::ToolCallStatus::Failed,
-                        Some(vec![acp::ToolCallContent::Content {
-                            content: acp::ContentBlock::Text(acp::TextContent {
-                                meta: None,
-                                text: "Tool call cancelled by user".to_string(),
-                                annotations: None,
-                            }),
-                        }]),
+                        Some(vec![acp::ToolCallContent::Content(acp::Content::new(
+                            acp::ContentBlock::Text(acp::TextContent::new(
+                                "Tool call cancelled by user",
+                            )),
+                        ))]),
                         Some(serde_json::json!({
                             "success": false,
                             "cancelled": true
@@ -1023,13 +984,9 @@ impl StakpakAcpAgent {
                     None
                 } else {
                     // For non-diff tools, send the result content
-                    Some(vec![acp::ToolCallContent::Content {
-                        content: acp::ContentBlock::Text(acp::TextContent {
-                            meta: None,
-                            text: result_content.clone(),
-                            annotations: None,
-                        }),
-                    }])
+                    Some(vec![acp::ToolCallContent::Content(acp::Content::new(
+                        acp::ContentBlock::Text(acp::TextContent::new(result_content.clone())),
+                    ))])
                 };
 
                 self.send_tool_call_update(
@@ -1077,13 +1034,11 @@ impl StakpakAcpAgent {
                     session_id,
                     tool_call_id.clone(),
                     acp::ToolCallStatus::Failed,
-                    Some(vec![acp::ToolCallContent::Content {
-                        content: acp::ContentBlock::Text(acp::TextContent {
-                            meta: None,
-                            text: "Tool execution failed - no result returned".to_string(),
-                            annotations: None,
-                        }),
-                    }]),
+                    Some(vec![acp::ToolCallContent::Content(acp::Content::new(
+                        acp::ContentBlock::Text(acp::TextContent::new(
+                            "Tool execution failed - no result returned",
+                        )),
+                    ))]),
                     Some(serde_json::json!({
                         "success": false,
                         "error": "No result returned"
@@ -1110,67 +1065,22 @@ impl StakpakAcpAgent {
 
     pub async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
-        client: Arc<dyn AgentProvider>,
-        _session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
-    ) -> Result<(String, Arc<ClientManager>, Vec<Tool>), String> {
-        // Find available bind address
-        let (bind_address, listener) = network::find_available_bind_address_with_listener()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Generate certificates for mTLS
-        let certificate_chain = Arc::new(Some(
-            CertificateChain::generate().map_err(|e| e.to_string())?,
-        ));
-
-        let protocol = "https";
-        let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
-
-        // Start MCP server in background
-        let certificate_chain_for_server = certificate_chain.clone();
-        let client_for_server = client.clone();
-
-        tokio::spawn(async move {
-            let _ = start_server(
-                MCPServerConfig {
-                    client: Some(client_for_server),
-                    redact_secrets: true,
-                    privacy_mode: false,
-                    enabled_tools: EnabledToolsConfig { slack: false },
-                    tool_mode: ToolMode::Combined,
-                    bind_address,
-                    certificate_chain: certificate_chain_for_server,
-                    subagent_configs: None,
-                },
-                Some(listener),
-                None,
-            )
-            .await;
-        });
-
-        // Initialize MCP clients
-        let clients = Arc::new(
-            ClientManager::new(
-                config
-                    .mcp_server_host
-                    .clone()
-                    .unwrap_or(local_mcp_server_host.clone()),
-                None, // progress_tx will be set later in run_stdio
-                certificate_chain,
-            )
-            .await
-            .map_err(|e| format!("Failed to create MCP clients: {}", e))?,
+    ) -> Result<(Arc<McpClient>, Vec<rmcp::model::Tool>, Vec<Tool>), String> {
+        // Initialize MCP client via stdio proxy
+        let mcp_client = Arc::new(
+            stakpak_mcp_client::connect(None) // progress_tx will be set later in run_stdio
+                .await
+                .map_err(|e| format!("Failed to connect to MCP proxy: {}", e))?,
         );
 
-        // Get tools from MCP clients
-        let tools_map: HashMap<String, Vec<rmcp::model::Tool>> = clients
-            .get_tools()
+        // Get tools from MCP client
+        let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
             .await
             .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-        let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
+        let tools = convert_tools_with_filter(&mcp_tools, config.allowed_tools.as_ref());
 
-        Ok((local_mcp_server_host, clients, tools))
+        Ok((mcp_client, mcp_tools, tools))
     }
 
     async fn process_acp_streaming_response_with_cancellation(
@@ -1300,17 +1210,14 @@ impl StakpakAcpAgent {
                             let (tx, rx) = oneshot::channel();
                             self.session_update_tx
                                 .send((
-                                    SessionNotification {
-                                        meta: None,
-                                        session_id: session_id.clone(),
-                                        update: acp::SessionUpdate::AgentMessageChunk {
-                                            content: acp::ContentBlock::Text(acp::TextContent {
-                                                meta: None,
-                                                text: filtered_content,
-                                                annotations: None,
-                                            }),
-                                        },
-                                    },
+                                    SessionNotification::new(
+                                        session_id.clone(),
+                                        acp::SessionUpdate::AgentMessageChunk(
+                                            acp::ContentChunk::new(acp::ContentBlock::Text(
+                                                acp::TextContent::new(filtered_content),
+                                            )),
+                                        ),
+                                    ),
                                     tx,
                                 ))
                                 .map_err(|_| "Failed to send streaming chunk")?;
@@ -1392,17 +1299,12 @@ impl StakpakAcpAgent {
             let (tx, rx) = oneshot::channel();
             self.session_update_tx
                 .send((
-                    SessionNotification {
-                        meta: None,
-                        session_id: session_id.clone(),
-                        update: acp::SessionUpdate::AgentMessageChunk {
-                            content: acp::ContentBlock::Text(acp::TextContent {
-                                meta: None,
-                                text: flushed_content,
-                                annotations: None,
-                            }),
-                        },
-                    },
+                    SessionNotification::new(
+                        session_id.clone(),
+                        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                            acp::ContentBlock::Text(acp::TextContent::new(flushed_content)),
+                        )),
+                    ),
                     tx,
                 ))
                 .map_err(|_| "Failed to send flushed content")?;
@@ -1460,15 +1362,15 @@ impl StakpakAcpAgent {
                 // Set up progress channel for streaming tool results
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<ToolCallResultProgress>(100);
 
-                // Reinitialize MCP clients with progress channel
-                let (mcp_server_host, clients, tools) = match Self::initialize_mcp_server_and_tools(&self.config, self.client.clone(), tx.clone()).await {
-                    Ok((host, client_manager, tool_list)) => {
-                        log::info!("MCP server reinitialized with progress channel");
-                        (host, Some(client_manager), tool_list)
+                // Reinitialize MCP client with progress channel
+                let (mcp_client, mcp_tools, tools) = match Self::initialize_mcp_server_and_tools(&self.config).await {
+                    Ok((client, mcp_tools, tool_list)) => {
+                        log::info!("MCP client reinitialized with progress channel");
+                        (Some(client), mcp_tools, tool_list)
                     }
                     Err(e) => {
-                        log::warn!("Failed to reinitialize MCP server with progress channel: {}, continuing without tools", e);
-                        (String::new(), None, Vec::new())
+                        log::warn!("Failed to reinitialize MCP client with progress channel: {}, continuing without tools", e);
+                        (None, Vec::new(), Vec::new())
                     }
                 };
 
@@ -1484,8 +1386,8 @@ impl StakpakAcpAgent {
                     client: self.client.clone(),
                     session_update_tx: tx.clone(),
                     next_session_id: self.next_session_id.clone(),
-                    mcp_server_host: if mcp_server_host.is_empty() { None } else { Some(mcp_server_host) },
-                    clients,
+                    mcp_client,
+                    mcp_tools,
                     tools: if tools.is_empty() { None } else { Some(tools) },
                     current_session_id: self.current_session_id.clone(),
                     progress_tx: Some(progress_tx),
@@ -1497,6 +1399,7 @@ impl StakpakAcpAgent {
                     current_streaming_message: self.current_streaming_message.clone(),
                     streaming_buffer: self.streaming_buffer.clone(),
                     fs_operation_tx: Some(fs_operation_tx),
+                    client_capabilities: self.client_capabilities.clone(),
                 };
 
                 // Start up the StakpakAcpAgent connected to stdio.
@@ -1540,10 +1443,11 @@ impl StakpakAcpAgent {
                             Err(e) => {
                                 log::error!("Permission request failed: {}", e);
                                 // Send a default rejection response
-                                let _ = response_tx.send(acp::RequestPermissionResponse {
-                                    meta: None,
-                                    outcome: acp::RequestPermissionOutcome::Cancelled,
-                                });
+                                let _ = response_tx.send(
+                                    acp::RequestPermissionResponse::new(
+                                        acp::RequestPermissionOutcome::Cancelled,
+                                    ),
+                                );
                             }
                         }
                     }
@@ -1556,20 +1460,20 @@ impl StakpakAcpAgent {
                         log::info!("Received tool progress: {}", progress.message);
                         // Send progress as AgentMessageChunk
                         let (tx, rx) = oneshot::channel();
-                        if session_update_tx_clone.send((
-                            SessionNotification {
-                                meta: None,
-                                session_id: acp::SessionId("".to_string().into()), // TODO: Get actual session ID
-                                update: acp::SessionUpdate::AgentMessageChunk {
-                                    content: acp::ContentBlock::Text(acp::TextContent {
-                                        meta: None,
-                                        text: progress.message,
-                                        annotations: None,
-                                    }),
-                                },
-                            },
-                            tx,
-                        )).is_err() {
+                        if session_update_tx_clone
+                            .send((
+                                SessionNotification::new(
+                                    acp::SessionId::new(""), // TODO: Get actual session ID
+                                    acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                                        acp::ContentBlock::Text(acp::TextContent::new(
+                                            progress.message,
+                                        )),
+                                    )),
+                                ),
+                                tx,
+                            ))
+                            .is_err()
+                        {
                             break;
                         }
                         let _ = rx.await;
@@ -1602,8 +1506,8 @@ impl Clone for StakpakAcpAgent {
             client: self.client.clone(),
             session_update_tx: self.session_update_tx.clone(),
             next_session_id: Cell::new(self.next_session_id.get()),
-            mcp_server_host: self.mcp_server_host.clone(),
-            clients: self.clients.clone(),
+            mcp_client: self.mcp_client.clone(),
+            mcp_tools: self.mcp_tools.clone(),
             tools: self.tools.clone(),
             current_session_id: Cell::new(self.current_session_id.get()),
             progress_tx: self.progress_tx.clone(),
@@ -1615,6 +1519,7 @@ impl Clone for StakpakAcpAgent {
             current_streaming_message: self.current_streaming_message.clone(),
             streaming_buffer: self.streaming_buffer.clone(),
             fs_operation_tx: self.fs_operation_tx.clone(),
+            client_capabilities: self.client_capabilities.clone(),
         }
     }
 }
@@ -1627,43 +1532,36 @@ impl acp::Agent for StakpakAcpAgent {
     ) -> Result<acp::InitializeResponse, acp::Error> {
         log::info!("Received initialize request {args:?}");
 
+        // Store client capabilities for later use
+        {
+            let mut caps = self.client_capabilities.lock().await;
+            *caps = args.client_capabilities.clone();
+        }
+
         // If no API key, provide an auth method that links to GitHub
         let auth_methods = if self.config.api_key.is_none() {
-            vec![acp::AuthMethod {
-                id: acp::AuthMethodId("github".into()),
-                name: "Use STAKPAK_API_KEY".to_string(),
-                description: Some("Required setting `STAKPAK_API_KEY` in your environment. Get your API key from https://stakpak.dev".to_string()),
-                meta: None,
-            }]
+            vec![acp::AuthMethod::new(
+                acp::AuthMethodId::new("github"),
+                "Use STAKPAK_API_KEY",
+            )
+            .description("Required setting `STAKPAK_API_KEY` in your environment. Get your API key from https://stakpak.dev")]
         } else {
             Vec::new()
         };
 
-        Ok(acp::InitializeResponse {
-            meta: None,
-            protocol_version: acp::V1,
-            agent_capabilities: acp::AgentCapabilities {
-                meta: None,
-                mcp_capabilities: acp::McpCapabilities {
-                    meta: None,
-                    http: true,
-                    sse: true,
-                },
-                // Enable session management
-                load_session: true,
-                // Enable prompt capabilities
-                prompt_capabilities: acp::PromptCapabilities {
-                    meta: None,
-                    // Enable image support
-                    image: true,
-                    // Enable audio support
-                    audio: false,
-                    // Enable embedded context support
-                    embedded_context: true,
-                },
-            },
-            auth_methods,
-        })
+        Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1)
+            .agent_capabilities(
+                acp::AgentCapabilities::new()
+                    .mcp_capabilities(acp::McpCapabilities::new().http(true).sse(true))
+                    .load_session(true)
+                    .prompt_capabilities(
+                        acp::PromptCapabilities::new()
+                            .image(true)
+                            .audio(false)
+                            .embedded_context(true),
+                    ),
+            )
+            .auth_methods(auth_methods))
     }
 
     async fn authenticate(
@@ -1688,9 +1586,7 @@ impl acp::Agent for StakpakAcpAgent {
                 Err(_) => {
                     log::error!("STAKPAK_API_KEY environment variable is not set");
                     return Err(
-                        acp::Error::internal_error().with_data(serde_json::Value::String(
-                            "STAKPAK_API_KEY is not set".to_string(),
-                        )),
+                        acp::Error::internal_error().data("STAKPAK_API_KEY is not set".to_string())
                     );
                 }
             }
@@ -1699,12 +1595,12 @@ impl acp::Agent for StakpakAcpAgent {
         // Check if we have a valid API key
         if self.config.api_key.is_none() {
             log::error!("API key is missing - authentication required");
-            return Err(acp::Error::auth_required().with_data(serde_json::Value::String(
+            return Err(acp::Error::auth_required().data(
                 "Authentication required. Please visit https://github.com/stakpak/zed-stakpak-agent-server for more information.".to_string()
-            )));
+            ));
         }
 
-        Ok(acp::AuthenticateResponse { meta: None })
+        Ok(acp::AuthenticateResponse::new())
     }
 
     async fn new_session(
@@ -1716,13 +1612,13 @@ impl acp::Agent for StakpakAcpAgent {
         // Check if we have a valid API key
         if self.config.api_key.is_none() {
             log::error!("API key is missing - authentication required");
-            return Err(acp::Error::auth_required().with_data(serde_json::Value::String(
+            return Err(acp::Error::auth_required().data(
                 "Authentication required. Please visit https://github.com/stakpak/agent for more information.".to_string()
-            )));
+            ));
         }
 
         let temp_session_id = Uuid::new_v4();
-        let session_id = acp::SessionId(temp_session_id.to_string().into());
+        let session_id = acp::SessionId::new(temp_session_id.to_string());
 
         // Track the current session ID
         self.current_session_id.set(Some(temp_session_id));
@@ -1741,11 +1637,7 @@ impl acp::Agent for StakpakAcpAgent {
             }
         }
 
-        Ok(acp::NewSessionResponse {
-            session_id,
-            modes: None,
-            meta: None,
-        })
+        Ok(acp::NewSessionResponse::new(session_id))
     }
 
     async fn load_session(
@@ -1765,10 +1657,7 @@ impl acp::Agent for StakpakAcpAgent {
         self.current_session_id.set(Some(session_uuid));
 
         log::info!("Loaded session: {}", session_id_str);
-        Ok(acp::LoadSessionResponse {
-            meta: None,
-            modes: None,
-        })
+        Ok(acp::LoadSessionResponse::new())
     }
 
     async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {
@@ -1797,16 +1686,6 @@ impl acp::Agent for StakpakAcpAgent {
         let tools = self.tools.clone().unwrap_or_default();
         log::info!("Available tools: {}", tools.len());
 
-        // Get tools map for tool execution
-        let tools_map = if let Some(ref clients) = self.clients {
-            clients
-                .get_tools()
-                .await
-                .map_err(|_e| acp::Error::internal_error())?
-        } else {
-            std::collections::HashMap::new()
-        };
-
         // Get current conversation history
         let messages = {
             let messages = self.messages.lock().await;
@@ -1830,11 +1709,8 @@ impl acp::Agent for StakpakAcpAgent {
             .chat_completion_stream(AgentModel::Smart, messages, tools_option.clone(), None)
             .await
             .map_err(|e| {
-                log::error!("Chat completion stream failed: {}", e);
-                acp::Error::internal_error().with_data(serde_json::Value::String(format!(
-                    "Chat completion failed: {}",
-                    e
-                )))
+                log::error!("Chat completion stream failed: {e}");
+                acp::Error::internal_error().data(format!("Chat completion failed: {e}"))
             })?;
 
         let response = match self
@@ -1845,17 +1721,11 @@ impl acp::Agent for StakpakAcpAgent {
             Err(e) => {
                 if e == "STREAM_CANCELLED" {
                     log::info!("Stream was cancelled by user");
-                    return Ok(acp::PromptResponse {
-                        meta: None,
-                        stop_reason: acp::StopReason::Cancelled,
-                    });
+                    return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
                 }
-                log::error!("Stream processing failed: {}", e);
+                log::error!("Stream processing failed: {e}");
                 return Err(
-                    acp::Error::internal_error().with_data(serde_json::Value::String(format!(
-                        "Stream processing failed: {}",
-                        e
-                    ))),
+                    acp::Error::internal_error().data(format!("Stream processing failed: {e}"))
                 );
             }
         };
@@ -1968,10 +1838,7 @@ impl acp::Agent for StakpakAcpAgent {
                     }
                 }
 
-                return Ok(acp::PromptResponse {
-                    meta: None,
-                    stop_reason: acp::StopReason::Cancelled,
-                });
+                return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
             }
             // Get the latest message from the conversation
             let latest_message = match current_messages.last() {
@@ -1991,11 +1858,7 @@ impl acp::Agent for StakpakAcpAgent {
 
                 // Process tool calls with cancellation support
                 let tool_results = self
-                    .process_tool_calls_with_cancellation(
-                        tool_calls.clone(),
-                        &args.session_id,
-                        &tools_map,
-                    )
+                    .process_tool_calls_with_cancellation(tool_calls.clone(), &args.session_id)
                     .await
                     .map_err(|e| {
                         log::error!("Tool call processing failed: {}", e);
@@ -2022,18 +1885,12 @@ impl acp::Agent for StakpakAcpAgent {
                     && cancel_rx.try_recv().is_ok()
                 {
                     log::info!("Tool call processing cancelled after tool execution");
-                    return Ok(acp::PromptResponse {
-                        meta: None,
-                        stop_reason: acp::StopReason::Cancelled,
-                    });
+                    return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
                 }
 
                 if has_cancelled_tool_calls {
                     log::info!("Tool calls were cancelled, stopping turn");
-                    return Ok(acp::PromptResponse {
-                        meta: None,
-                        stop_reason: acp::StopReason::Cancelled,
-                    });
+                    return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
                 }
 
                 // Make follow-up chat completion request after tool calls
@@ -2042,21 +1899,20 @@ impl acp::Agent for StakpakAcpAgent {
                     messages.clone()
                 };
 
-                let (follow_up_stream, _request_id) =
-                    self.client
-                        .chat_completion_stream(
-                            AgentModel::Smart,
-                            current_messages.clone(),
-                            tools_option.clone(),
-                            None,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Follow-up chat completion stream failed: {}", e);
-                            acp::Error::internal_error().with_data(serde_json::Value::String(
-                                format!("Follow-up chat completion failed: {}", e),
-                            ))
-                        })?;
+                let (follow_up_stream, _request_id) = self
+                    .client
+                    .chat_completion_stream(
+                        AgentModel::Smart,
+                        current_messages.clone(),
+                        tools_option.clone(),
+                        None,
+                    )
+                    .await
+                    .map_err(|e| {
+                        log::error!("Follow-up chat completion stream failed: {e}");
+                        acp::Error::internal_error()
+                            .data(format!("Follow-up chat completion failed: {e}"))
+                    })?;
 
                 let follow_up_response = match self
                     .process_acp_streaming_response_with_cancellation(
@@ -2069,18 +1925,11 @@ impl acp::Agent for StakpakAcpAgent {
                     Err(e) => {
                         if e == "STREAM_CANCELLED" {
                             log::info!("Follow-up stream was cancelled by user");
-                            return Ok(acp::PromptResponse {
-                                meta: None,
-                                stop_reason: acp::StopReason::Cancelled,
-                            });
+                            return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
                         }
-                        log::error!("Follow-up stream processing failed: {}", e);
-                        return Err(acp::Error::internal_error().with_data(
-                            serde_json::Value::String(format!(
-                                "Follow-up stream processing failed: {}",
-                                e
-                            )),
-                        ));
+                        log::error!("Follow-up stream processing failed: {e}");
+                        return Err(acp::Error::internal_error()
+                            .data(format!("Follow-up stream processing failed: {e}")));
                     }
                 };
 
@@ -2121,10 +1970,7 @@ impl acp::Agent for StakpakAcpAgent {
             );
         }
 
-        Ok(acp::PromptResponse {
-            meta: None,
-            stop_reason: acp::StopReason::EndTurn,
-        })
+        Ok(acp::PromptResponse::new(acp::StopReason::EndTurn))
     }
 
     async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
@@ -2177,5 +2023,41 @@ impl acp::Agent for StakpakAcpAgent {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::commands::acp::tool_names;
+    use test_case::test_case;
+
+    // Per ACP spec, agents MUST check client capabilities before delegating fs operations.
+    // Both readTextFile and writeTextFile default to false - delegation requires explicit opt-in.
+    //
+    // Columns: tool_name, client_reads, client_writes, expected_delegate
+    #[test_case("view",   true,  true,  true;  "read tool, client reads: delegate")]
+    #[test_case("view",   true,  false, true;  "read tool, client reads (no writes): delegate")]
+    #[test_case("view",   false, true,  false; "read tool, client no reads: fallback")]
+    #[test_case("view",   false, false, false; "read tool, client no fs: fallback")]
+    #[test_case("create", true,  true,  true;  "write tool, client writes: delegate")]
+    #[test_case("create", false, true,  true;  "write tool, client writes (no reads): delegate")]
+    #[test_case("create", true,  false, false; "write tool, client no writes: fallback")]
+    #[test_case("create", false, false, false; "write tool, client no fs: fallback")]
+    fn test_fs_delegation_respects_client_capabilities(
+        tool_name: &str,
+        client_reads: bool,
+        client_writes: bool,
+        expected: bool,
+    ) {
+        let is_read_tool = tool_names::is_fs_file_read(tool_name);
+        let is_write_tool = tool_names::is_fs_file_write(tool_name);
+
+        let should_delegate = (is_read_tool && client_reads) || (is_write_tool && client_writes);
+
+        assert_eq!(
+            should_delegate, expected,
+            "tool={} (read={}, write={}), caps(r={}, w={}) => delegate={}",
+            tool_name, is_read_tool, is_write_tool, client_reads, client_writes, should_delegate
+        );
     }
 }

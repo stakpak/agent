@@ -248,10 +248,13 @@ pub fn handle_shell_kill(state: &mut AppState) {
 
 /// Convert shell command to tool call result
 pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult {
-    let id = if let Some(cmd) = &state.dialog_command {
-        cmd.id.clone()
+    let (id, name) = if let Some(cmd) = &state.dialog_command {
+        (cmd.id.clone(), cmd.function.name.clone())
     } else {
-        format!("tool_{}", Uuid::new_v4())
+        (
+            format!("tool_{}", Uuid::new_v4()),
+            "run_command".to_string(),
+        )
     };
 
     let command = state
@@ -266,7 +269,7 @@ pub fn shell_command_to_tool_call_result(state: &mut AppState) -> ToolCallResult
         id,
         r#type: "function".to_string(),
         function: FunctionCall {
-            name: "run_command".to_string(),
+            name,
             arguments: args,
         },
     };
