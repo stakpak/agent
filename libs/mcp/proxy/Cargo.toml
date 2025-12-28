@@ -13,3 +13,5 @@ rmcp = { workspace = true }
 tracing = { workspace = true }
 toml = { workspace = true }
 reqwest = { workspace = true }
+axum = { workspace = true }
+axum-server = { workspace = true }

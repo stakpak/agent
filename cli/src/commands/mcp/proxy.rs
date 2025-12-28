@@ -1,6 +1,8 @@
 use rmcp::{ServiceExt, transport::stdio};
 use stakpak_mcp_proxy::{client::ClientPoolConfig, server::ProxyServer};
 
+/// Start the proxy server that reads config from file and connects to external MCP servers.
+/// This is a standalone proxy - no local tools.
 pub async fn run_proxy(
     config_path: String,
     disable_secret_redaction: bool,

@@ -51,30 +51,13 @@ fn find_mcp_proxy_config_file() -> Result<String, String> {
         1. ~/.stakpak/mcp.toml or ~/.stakpak/mcp.json\n  \
         2. .stakpak/mcp.toml or .stakpak/mcp.json\n  \
         3. mcp.toml or mcp.json\n\n\
-        Create a config file with your MCP servers. Example TOML format:\n\n\
-        [mcpServers.filesystem]\n\
-        command = \"npx\"\n\
-        args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path/to/allowed/files\"]\n\n\
-        [mcpServers.github]\n\
-        command = \"npx\"\n\
-        args = [\"-y\", \"@modelcontextprotocol/server-github\"]\n\n\
-        [mcpServers.github.env]\n\
-        GITHUB_PERSONAL_ACCESS_TOKEN = \"your-token-here\"\n\n\
-        Or JSON format (Claude Desktop compatible):\n\n\
-        {\n  \
-          \"mcpServers\": {\n    \
-            \"filesystem\": {\n      \
-              \"command\": \"npx\",\n      \
-              \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path/to/allowed/files\"]\n    \
-            }\n  \
-          }\n\
-        }\n\n\
-        For more details, visit: https://stakpak.gitbook.io/docs".to_string())
+        Create a config file with your MCP servers."
+        .to_string())
 }
 
 #[derive(Subcommand, PartialEq)]
 pub enum McpCommands {
-    /// Start the MCP server
+    /// Start the MCP server (standalone HTTP/HTTPS server with tools)
     Start {
         /// Disable secret redaction (WARNING: this will print secrets to the console)
         #[arg(long = "disable-secret-redaction", default_value_t = false)]
@@ -96,11 +79,11 @@ pub enum McpCommands {
         #[arg(long = "index-big-project", default_value_t = false)]
         index_big_project: bool,
 
-        /// Disable mTLS (WARNING: this will use unencrypted HTTP communication)
+        /// Disable mTLS (use plain HTTP instead of HTTPS)
         #[arg(long = "disable-mcp-mtls", default_value_t = false)]
         disable_mcp_mtls: bool,
     },
-    /// Start the MCP proxy server
+    /// Start the MCP proxy server (reads config from file, connects to external MCP servers)
     Proxy {
         /// Config file path
         #[arg(long = "config-file")]
@@ -143,12 +126,10 @@ impl McpCommands {
                 disable_secret_redaction,
                 privacy_mode,
             } => {
-                let config_path = if let Some(path) = config_file {
-                    path
-                } else {
-                    find_mcp_proxy_config_file()?
+                let config_path = match config_file {
+                    Some(path) => path,
+                    None => find_mcp_proxy_config_file()?,
                 };
-
                 proxy::run_proxy(config_path, disable_secret_redaction, privacy_mode).await
             }
         }

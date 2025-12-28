@@ -508,7 +508,7 @@ pub fn extract_bash_block_info(
     };
     let outside_title = get_command_type_name(tool_call);
     let bubble_title = extract_command_purpose(&command, &outside_title);
-    let colors = match tool_call.function.name.as_str() {
+    let colors = match crate::utils::strip_tool_name(&tool_call.function.name) {
         "create_file" => BubbleColors {
             border_color: Color::Green,
             title_color: term_color(Color::Gray),
@@ -714,7 +714,8 @@ pub fn render_file_diff_full(
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "str_replace" || tool_name == "create" {
         let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
@@ -768,7 +769,7 @@ pub fn render_bash_block(
         &bubble_title,
         Some(colors.clone()),
         terminal_width,
-        &tool_call.function.name,
+        crate::utils::strip_tool_name(&tool_call.function.name),
         None,
     )
 }
@@ -1353,7 +1354,7 @@ pub fn render_refreshed_terminal_bubble(
 }
 
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
-    let tool_call_name = tool_call.function.name.clone();
+    let tool_call_name = crate::utils::strip_tool_name(&tool_call.function.name);
     let tool_calls = [
         "view",
         "search_memory",
@@ -1361,7 +1362,7 @@ pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
         "read_rulebook",
         "local_code_search",
     ];
-    if tool_calls.contains(&tool_call_name.as_str()) {
+    if tool_calls.contains(&tool_call_name) {
         return true;
     }
     false

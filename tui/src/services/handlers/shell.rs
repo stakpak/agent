@@ -1025,10 +1025,13 @@ pub fn shell_command_to_tool_call_result(
     command_value: Option<String>,
     shell_output: Option<String>,
 ) -> ToolCallResult {
-    let id = if let Some(cmd) = &state.dialog_command {
-        cmd.id.clone()
+    let (id, name) = if let Some(cmd) = &state.dialog_command {
+        (cmd.id.clone(), cmd.function.name.clone())
     } else {
-        format!("tool_{}", Uuid::new_v4())
+        (
+            format!("tool_{}", Uuid::new_v4()),
+            "run_command".to_string(),
+        )
     };
 
     // Use the original command value if provided, otherwise fall back to active_shell_command
@@ -1064,7 +1067,7 @@ pub fn shell_command_to_tool_call_result(
         id,
         r#type: "function".to_string(),
         function: FunctionCall {
-            name: "run_command".to_string(),
+            name,
             arguments: args,
         },
     };
