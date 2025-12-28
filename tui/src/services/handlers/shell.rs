@@ -11,9 +11,6 @@ use crate::services::helper_block::push_error_message;
 use crate::services::message::{
     BubbleColors, Message, MessageContent, invalidate_message_lines_cache,
 };
-#[cfg(not(unix))]
-use crate::services::shell_mode::run_background_shell_command;
-#[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellEvent};
 use ratatui::style::{Color, Modifier, Style};
@@ -199,7 +196,7 @@ pub fn handle_run_shell_command(
         None
     };
 
-    #[cfg(unix)]
+    // Use PTY for cross-platform interactive shell support (Unix + Windows 10 1809+)
     let shell_cmd = match run_pty_command(command.clone(), command_to_execute, shell_tx, rows, cols)
     {
         Ok(cmd) => cmd,
@@ -208,9 +205,6 @@ pub fn handle_run_shell_command(
             return;
         }
     };
-
-    #[cfg(not(unix))]
-    let shell_cmd = run_background_shell_command(command.clone(), shell_tx);
 
     state.active_shell_command = Some(shell_cmd.clone());
     state.active_shell_command_output = Some(String::new());

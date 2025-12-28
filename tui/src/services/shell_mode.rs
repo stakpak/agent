@@ -248,7 +248,8 @@ pub fn run_background_shell_command(
     shell_cmd
 }
 
-#[cfg(unix)]
+/// Run a command in a PTY (pseudo-terminal) for full interactive shell support.
+/// This works on Unix (via native PTY) and Windows 10 1809+ (via ConPTY).
 pub fn run_pty_command(
     command: String,
     command_to_execute: Option<String>, // If Some, this command is typed after prompt appears
@@ -292,11 +293,27 @@ pub fn run_pty_command(
                 .unwrap_or_else(|_| std::path::PathBuf::from("/"))
         });
 
-        let shell = std::env::var("SHELL").unwrap_or("sh".to_string());
+        // Platform-specific shell detection
+        let shell = if cfg!(windows) {
+            // On Windows, use COMSPEC (typically cmd.exe) or PowerShell
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        } else {
+            // On Unix, use SHELL environment variable
+            std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string())
+        };
+
         let mut cmd = CommandBuilder::new(&shell);
-        // Start interactive login shell to get full prompt configuration (git branch, etc)
-        cmd.args(["-il"]);
         cmd.cwd(&current_dir);
+
+        // Platform-specific shell arguments
+        if cfg!(windows) {
+            // /K keeps the shell open after running commands
+            // Don't add args if we're just starting an interactive shell
+            // cmd.exe will be interactive by default
+        } else {
+            // Start interactive login shell to get full prompt configuration (git branch, etc)
+            cmd.args(["-il"]);
+        }
 
         let mut child = match pair.slave.spawn_command(cmd) {
             Ok(c) => c,
