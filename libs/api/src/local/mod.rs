@@ -160,16 +160,13 @@ impl LocalClient {
         //     LifecycleEvent::BeforeInference,
         //     Box::new(FileScratchpadContextHook::new(
         //         FileScratchpadContextHookOptions {
-        //             models: ModelOptions {
-        //                 smart_model: smart_model.clone(),
-        //                 eco_model: eco_model.clone(),
-        //                 recovery_model: recovery_model.clone(),
-        //             },
         //             history_action_message_size_limit: Some(100),
         //             history_action_message_keep_last_n: Some(1),
         //             history_action_result_keep_last_n: Some(50),
         //             scratchpad_path: None,
         //             todo_path: None,
+        //             model_options: model_options.clone(),
+        //             overwrite_if_different: Some(true),
         //         },
         //     )),
         // );

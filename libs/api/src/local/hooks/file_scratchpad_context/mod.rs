@@ -1,14 +1,12 @@
-use stakpak_shared::define_hook;
-use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleEvent};
-use stakpak_shared::models::integrations::openai::Role;
-use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
-
-use crate::local::context_managers::ContextManager;
 use crate::local::context_managers::file_scratchpad_context_manager::{
     FileScratchpadContextManager, FileScratchpadContextManagerOptions,
 };
 use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
+use stakpak_shared::define_hook;
+use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleEvent};
+use stakpak_shared::models::integrations::openai::Role;
+use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
 const SYSTEM_PROMPT: &str = include_str!("./system_prompt.txt");
 const SCRATCHPAD_FILE: &str = ".stakpak/session/scratchpad.md";
@@ -26,6 +24,7 @@ pub struct FileScratchpadContextHookOptions {
     pub history_action_message_size_limit: Option<usize>,
     pub history_action_message_keep_last_n: Option<usize>,
     pub history_action_result_keep_last_n: Option<usize>,
+    pub overwrite_if_different: Option<bool>,
 }
 
 impl FileScratchpadContextHook {
@@ -47,6 +46,7 @@ impl FileScratchpadContextHook {
                 history_action_result_keep_last_n: options
                     .history_action_result_keep_last_n
                     .unwrap_or(50),
+                overwrite_if_different: options.overwrite_if_different.unwrap_or(true),
             });
 
         Self {
@@ -73,8 +73,9 @@ define_hook!(
             .map(|t| t.into_iter().map(Into::into).collect());
 
         let cwd = std::env::current_dir().unwrap_or_default();
-        let scratchpad_file_path = cwd.join(self.context_manager.get_scratchpad_path());
-        let todo_file_path = cwd.join(self.context_manager.get_todo_path());
+        let scratchpad_file_path =
+            cwd.join(self.context_manager.get_scratchpad_path(ctx.session_id));
+        let todo_file_path = cwd.join(self.context_manager.get_todo_path(ctx.session_id));
         let system_prompt = SYSTEM_PROMPT
             .replace(
                 "{{SCRATCHPAD_PATH}}",
@@ -89,7 +90,7 @@ define_hook!(
         });
         messages.extend(
             self.context_manager
-                .reduce_context(ctx.state.messages.clone()),
+                .reduce_context_with_session(ctx.state.messages.clone(), ctx.session_id),
         );
 
         ctx.state.llm_input = Some(LLMInput {

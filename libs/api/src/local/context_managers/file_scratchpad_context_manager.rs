@@ -4,10 +4,13 @@ use stakpak_shared::models::{
     llm::{LLMMessage, LLMMessageContent},
 };
 use std::{
+    collections::HashSet,
     fmt::Display,
     fs,
     path::{Path, PathBuf},
+    sync::RwLock,
 };
+use uuid::Uuid;
 
 /// A context manager where the agent edits scratchpad/todo files directly using file tools.
 ///
@@ -22,6 +25,8 @@ pub struct FileScratchpadContextManager {
     history_action_result_keep_last_n: usize,
     scratchpad_file_path: PathBuf,
     todo_file_path: PathBuf,
+    overwrite_if_different: bool,
+    pub recovered_sessions: RwLock<HashSet<String>>,
 }
 
 pub struct FileScratchpadContextManagerOptions {
@@ -30,20 +35,12 @@ pub struct FileScratchpadContextManagerOptions {
     pub history_action_result_keep_last_n: usize,
     pub scratchpad_file_path: PathBuf,
     pub todo_file_path: PathBuf,
+    pub overwrite_if_different: bool,
 }
 
 impl super::ContextManager for FileScratchpadContextManager {
     fn reduce_context(&self, messages: Vec<ChatMessage>) -> Vec<LLMMessage> {
-        let scratchpad_content = self.load_scratchpad();
-        let todo_content = self.load_todo();
-
-        let history = self.messages_to_history(&messages);
-        let context_content = self.history_to_text(&history, &scratchpad_content, &todo_content);
-
-        vec![LLMMessage {
-            role: Role::User.to_string(),
-            content: LLMMessageContent::String(context_content),
-        }]
+        self.reduce_context_with_session(messages, None)
     }
 }
 
@@ -62,26 +59,168 @@ impl FileScratchpadContextManager {
             history_action_result_keep_last_n: options.history_action_result_keep_last_n,
             scratchpad_file_path: options.scratchpad_file_path,
             todo_file_path: options.todo_file_path,
+            overwrite_if_different: options.overwrite_if_different,
+            recovered_sessions: RwLock::new(HashSet::new()),
         }
     }
 
-    pub fn get_scratchpad_path(&self) -> &PathBuf {
-        &self.scratchpad_file_path
+    pub fn get_scratchpad_path(&self, session_id: Option<Uuid>) -> PathBuf {
+        self.resolve_path(&self.scratchpad_file_path, session_id)
     }
 
-    pub fn get_todo_path(&self) -> &PathBuf {
-        &self.todo_file_path
+    pub fn get_todo_path(&self, session_id: Option<Uuid>) -> PathBuf {
+        self.resolve_path(&self.todo_file_path, session_id)
     }
 
-    fn load_scratchpad(&self) -> String {
-        fs::read_to_string(&self.scratchpad_file_path).unwrap_or_default()
+    fn load_file(&self, path: &Path) -> String {
+        fs::read_to_string(&path).unwrap_or_default()
     }
 
-    fn load_todo(&self) -> String {
-        fs::read_to_string(&self.todo_file_path).unwrap_or_default()
+    fn resolve_path(&self, base_path: &Path, session_id: Option<Uuid>) -> PathBuf {
+        if let Some(session_id) = session_id {
+            if let Some(parent) = base_path.parent() {
+                // If there's a session ID, put files in a subdirectory named after the session ID
+                // e.g. .stakpak/session/scratchpad.md -> .stakpak/session/<uuid>/scratchpad.md
+                let session_dir = parent.join(session_id.to_string());
+                return session_dir.join(base_path.file_name().unwrap_or_default());
+            }
+        }
+        base_path.to_path_buf()
     }
 
-    fn messages_to_history(&self, messages: &[ChatMessage]) -> Vec<HistoryItem> {
+    pub fn reduce_context_with_session(
+        &self,
+        messages: Vec<ChatMessage>,
+        session_id: Option<Uuid>,
+    ) -> Vec<LLMMessage> {
+        let session_key = session_id.map(|u| u.to_string()).unwrap_or_default();
+        let should_recover = {
+            let recovered = self.recovered_sessions.read().unwrap();
+            !recovered.contains(&session_key)
+        };
+
+        if should_recover {
+            self.recover_from_history(&messages, session_id);
+            let mut recovered = self.recovered_sessions.write().unwrap();
+            recovered.insert(session_key);
+        }
+
+        let scratchpad_content = self.load_file(&self.get_scratchpad_path(session_id));
+        let todo_content = self.load_file(&self.get_todo_path(session_id));
+
+        let history = self.messages_to_history(&messages, session_id);
+        let context_content = self.history_to_text(&history, &scratchpad_content, &todo_content);
+
+        vec![LLMMessage {
+            role: Role::User.to_string(),
+            content: LLMMessageContent::String(context_content),
+        }]
+    }
+
+    fn recover_from_history(&self, messages: &[ChatMessage], session_id: Option<Uuid>) {
+        self.recover_file(messages, &self.get_scratchpad_path(session_id));
+        self.recover_file(messages, &self.get_todo_path(session_id));
+    }
+
+    fn recover_file(&self, messages: &[ChatMessage], path: &Path) {
+        // Try to reconstruct from tool calls
+        let reconstructed_content = self.reconstruct_file_from_history(messages, path);
+
+        if let Some(content) = reconstructed_content {
+            let exists = path.exists();
+            let current_content = if exists {
+                fs::read_to_string(path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let should_write = if !exists || current_content.trim().is_empty() {
+                // File missing or empty -> recover
+                true
+            } else if self.overwrite_if_different {
+                // File exists, check if content differs
+                current_content.trim() != content.trim()
+            } else {
+                false
+            };
+
+            if should_write {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::write(path, content);
+            }
+        }
+    }
+
+    fn reconstruct_file_from_history(
+        &self,
+        messages: &[ChatMessage],
+        path: &Path,
+    ) -> Option<String> {
+        let mut current_content: Option<String> = None;
+        let path_str = path.to_string_lossy();
+
+        for message in messages {
+            if let Some(tool_calls) = &message.tool_calls {
+                for tool_call in tool_calls {
+                    self.apply_tool_call(tool_call, &path_str, &mut current_content);
+                }
+            }
+        }
+
+        current_content
+    }
+
+    fn apply_tool_call(
+        &self,
+        tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
+        target_path: &str,
+        current_content: &mut Option<String>,
+    ) {
+        let args: serde_json::Value =
+            serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+        let tool_name = tool_call.function.name.as_str();
+
+        if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
+            if !path.contains(target_path) {
+                return;
+            }
+
+            match tool_name {
+                "create" => {
+                    if let Some(file_text) = args.get("file_text").and_then(|t| t.as_str()) {
+                        *current_content = Some(file_text.to_string());
+                    }
+                }
+                "str_replace" => {
+                    if let (Some(old_str), Some(new_str)) = (
+                        args.get("old_str").and_then(|s| s.as_str()),
+                        args.get("new_str").and_then(|s| s.as_str()),
+                    ) {
+                        if let Some(content) = current_content {
+                            let replace_all = args
+                                .get("replace_all")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false);
+                            if replace_all {
+                                *content = content.replace(old_str, new_str);
+                            } else {
+                                *content = content.replacen(old_str, new_str, 1);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn messages_to_history(
+        &self,
+        messages: &[ChatMessage],
+        session_id: Option<Uuid>,
+    ) -> Vec<HistoryItem> {
         let mut history_items: Vec<HistoryItem> = Vec::new();
         let mut index = 0;
 
@@ -165,8 +304,8 @@ impl FileScratchpadContextManager {
         // Filter out scratchpad/todo file operations from history
         drop_scratchpad_actions(
             &mut history_items,
-            &self.scratchpad_file_path,
-            &self.todo_file_path,
+            &self.get_scratchpad_path(session_id),
+            &self.get_todo_path(session_id),
         );
 
         // keep the full last message of a tool call action to prevent scratchpad update verbosity
@@ -424,6 +563,8 @@ impl std::fmt::Display for HistoryItemActionStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local::context_managers::ContextManager;
+    use stakpak_shared::models::integrations::openai::{FunctionCall, ToolCall};
     use tempfile::TempDir;
 
     fn create_test_manager() -> (FileScratchpadContextManager, TempDir) {
@@ -437,6 +578,7 @@ mod tests {
             history_action_result_keep_last_n: 50,
             scratchpad_file_path: scratchpad_path,
             todo_file_path: todo_path,
+            overwrite_if_different: false,
         });
 
         (manager, temp_dir)
@@ -447,8 +589,8 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager();
 
         // Without creating files, load should return empty strings
-        let scratchpad = manager.load_scratchpad();
-        let todo = manager.load_todo();
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
+        let todo = manager.load_file(&manager.get_todo_path(None));
 
         assert!(scratchpad.is_empty());
         assert!(todo.is_empty());
@@ -467,8 +609,8 @@ mod tests {
         fs::write(&manager.todo_file_path, "- [x] Task 1\n- [ ] Task 2").unwrap();
 
         // Load and verify
-        let scratchpad = manager.load_scratchpad();
-        let todo = manager.load_todo();
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
+        let todo = manager.load_file(&manager.get_todo_path(None));
 
         assert!(scratchpad.contains("My Notes"));
         assert!(scratchpad.contains("important info"));
@@ -519,5 +661,211 @@ mod tests {
             &temp_dir.path().join("scratchpad.md")
         );
         assert_eq!(&manager.todo_file_path, &temp_dir.path().join("todo.md"));
+    }
+
+    fn create_tool_call_history(
+        scratchpad_path: &str,
+        todo_path: &str,
+        scratchpad_content: &str,
+        todo_content: &str,
+    ) -> Vec<ChatMessage> {
+        vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "file_text": scratchpad_content
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_2".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": todo_path,
+                            "file_text": todo_content
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_recover_from_history() {
+        let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager
+            .get_scratchpad_path(None)
+            .to_string_lossy()
+            .to_string();
+        let todo_path = manager.get_todo_path(None).to_string_lossy().to_string();
+
+        let history = create_tool_call_history(
+            &scratchpad_path,
+            &todo_path,
+            "Recovered Content",
+            "- [ ] Recovered Task",
+        );
+
+        // Initially empty
+        assert!(
+            manager
+                .load_file(&manager.get_scratchpad_path(None))
+                .is_empty()
+        );
+        assert!(manager.load_file(&manager.get_todo_path(None)).is_empty());
+
+        // Trigger recovery
+        manager.reduce_context(history);
+
+        // Verify recovered content
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
+        let todo = manager.load_file(&manager.get_todo_path(None));
+
+        assert!(scratchpad.contains("Recovered Content"));
+        assert!(todo.contains("Recovered Task"));
+    }
+
+    #[test]
+    fn test_recover_no_overwrite_existing() {
+        let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager
+            .get_scratchpad_path(None)
+            .to_string_lossy()
+            .to_string();
+        let todo_path = manager.get_todo_path(None).to_string_lossy().to_string();
+
+        // Create existing files
+        fs::write(&manager.scratchpad_file_path, "Existing Scratchpad").unwrap();
+        fs::write(&manager.todo_file_path, "Existing Todo").unwrap();
+
+        let history =
+            create_tool_call_history(&scratchpad_path, &todo_path, "New Scratchpad", "New Todo");
+
+        // Trigger recovery
+        manager.reduce_context(history);
+
+        // Verify content retrieved from disk matches EXISTING, not new
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
+        let todo = manager.load_file(&manager.get_todo_path(None));
+
+        assert_eq!(scratchpad, "Existing Scratchpad");
+        assert_eq!(todo, "Existing Todo");
+    }
+
+    #[test]
+    fn test_recover_overwrite_if_different() {
+        let temp_dir = TempDir::new().unwrap();
+        let scratchpad_path = temp_dir.path().join("scratchpad.md");
+        let todo_path = temp_dir.path().join("todo.md");
+
+        // Enable overwrite_if_different
+        let manager = FileScratchpadContextManager::new(FileScratchpadContextManagerOptions {
+            history_action_message_size_limit: 100,
+            history_action_message_keep_last_n: 1,
+            history_action_result_keep_last_n: 50,
+            scratchpad_file_path: scratchpad_path.clone(),
+            todo_file_path: todo_path.clone(),
+            overwrite_if_different: true,
+        });
+
+        // Create existing files
+        fs::write(&scratchpad_path, "Existing Scratchpad").unwrap();
+        fs::write(&todo_path, "Existing Todo").unwrap();
+
+        let history = create_tool_call_history(
+            &scratchpad_path.to_string_lossy(),
+            &todo_path.to_string_lossy(),
+            "New Scratchpad",
+            "New Todo",
+        );
+
+        // Trigger recovery
+        manager.reduce_context(history);
+
+        // Verify content overwritten
+        let scratchpad = fs::read_to_string(&scratchpad_path).unwrap();
+        let todo = fs::read_to_string(&todo_path).unwrap();
+
+        assert_eq!(scratchpad.trim(), "New Scratchpad");
+        assert_eq!(todo.trim(), "New Todo");
+    }
+    #[test]
+    fn test_recover_from_tool_calls() {
+        let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager
+            .get_scratchpad_path(None)
+            .to_string_lossy()
+            .to_string();
+
+        let history = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "file_text": "Initial Content"
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                // ... (rest of test content clipped, assume context match is enough)
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_2".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "str_replace".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "old_str": "Initial",
+                            "new_str": "Updated"
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+        ];
+
+        // Trigger recovery
+        manager.reduce_context(history);
+
+        // Verify recovered content
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
+        assert_eq!(scratchpad, "Updated Content");
     }
 }
