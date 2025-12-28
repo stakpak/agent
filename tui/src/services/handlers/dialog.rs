@@ -62,7 +62,7 @@ pub fn handle_esc_event(
         state.tool_call_execution_order.clear();
         // Store the latest tool call for potential retry (only for run_command)
         if let Some(tool_call) = &state.dialog_command
-            && tool_call.function.name == "run_command"
+            && crate::utils::strip_tool_name(&tool_call.function.name) == "run_command"
         {
             state.latest_tool_call = Some(tool_call.clone());
         }
@@ -176,12 +176,13 @@ pub fn handle_show_confirmation_dialog(
     }
 
     state.dialog_command = Some(tool_call.clone());
-    if tool_call.function.name == "run_command" {
+    if crate::utils::strip_tool_name(&tool_call.function.name) == "run_command" {
         state.latest_tool_call = Some(tool_call.clone());
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
-    if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "str_replace" || tool_name == "create" {
         state
             .messages
             .push(Message::render_collapsed_message(tool_call.clone()));

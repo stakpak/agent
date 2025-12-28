@@ -1,5 +1,8 @@
 use rmcp::model::ServerCapabilities;
 use rmcp::service::{NotificationContext, Peer, RequestContext};
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpService, session::local::LocalSessionManager,
+};
 use rmcp::{
     RoleServer, ServerHandler, ServiceError,
     model::{
@@ -16,11 +19,14 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast::Receiver;
 
 pub struct ProxyServer {
     pool: Arc<ClientPool>,
@@ -87,7 +93,11 @@ impl ProxyServer {
                     }
                 }
             }
-            crate::client::ServerConfig::Http { url, headers } => {
+            crate::client::ServerConfig::Http {
+                url,
+                headers,
+                certificate_chain,
+            } => {
                 // Validate TLS usage
                 if !url.starts_with("https://") {
                     tracing::warn!(
@@ -100,7 +110,24 @@ impl ProxyServer {
                     );
                 }
 
-                let mut client_builder = reqwest::Client::builder();
+                let mut client_builder = reqwest::Client::builder()
+                    .pool_idle_timeout(std::time::Duration::from_secs(90))
+                    .pool_max_idle_per_host(10)
+                    .tcp_keepalive(std::time::Duration::from_secs(60));
+
+                // Configure mTLS if certificate chain is provided
+                if let Some(cert_chain) = certificate_chain.as_ref() {
+                    match cert_chain.create_client_config() {
+                        Ok(tls_config) => {
+                            client_builder = client_builder.use_preconfigured_tls(tls_config);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create TLS config for {}: {:?}", name, e);
+                            return;
+                        }
+                    }
+                }
+
                 if let Some(headers_map) = headers {
                     let mut header_map = reqwest::header::HeaderMap::new();
                     for (key, value) in headers_map {
@@ -155,24 +182,31 @@ impl ServerHandler for ProxyServer {
             if !*initialized {
                 let config = self.client_config.lock().await.take();
                 if let Some(config) = config {
-                    // Initialize clients asynchronously (don't wait for completion)
                     let pool = self.pool.clone();
                     let peer = Arc::new(Mutex::new(Some(ctx.peer.clone())));
-                    tokio::spawn(async move {
-                        for (name, server_config) in config.servers {
-                            let pool_clone = pool.clone();
-                            let peer_clone = peer.clone();
-                            tokio::spawn(async move {
-                                Self::initialize_single_client(
-                                    pool_clone,
-                                    name,
-                                    server_config,
-                                    peer_clone,
-                                )
-                                .await;
-                            });
-                        }
-                    });
+
+                    // Initialize all clients and wait for them to complete
+                    let mut handles = Vec::new();
+                    for (name, server_config) in config.servers {
+                        let pool_clone = pool.clone();
+                        let peer_clone = peer.clone();
+                        let handle = tokio::spawn(async move {
+                            Self::initialize_single_client(
+                                pool_clone,
+                                name,
+                                server_config,
+                                peer_clone,
+                            )
+                            .await;
+                        });
+                        handles.push(handle);
+                    }
+
+                    // Wait for all clients to initialize
+                    for handle in handles {
+                        let _ = handle.await;
+                    }
+
                     *initialized = true;
                 }
             }
@@ -220,6 +254,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListToolsResult {
             tools: all_tools,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -324,6 +359,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListPromptsResult {
             prompts: all_prompts,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -378,6 +414,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListResourcesResult {
             resources: all_resources,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -408,6 +445,7 @@ impl ServerHandler for ProxyServer {
         Ok(ListResourceTemplatesResult {
             resource_templates: all_templates,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -469,4 +507,51 @@ impl ServerHandler for ProxyServer {
             );
         }
     }
+}
+
+/// Start the proxy server as an HTTPS service with mTLS
+pub async fn start_proxy_server(
+    config: ClientPoolConfig,
+    tcp_listener: TcpListener,
+    certificate_chain: Arc<CertificateChain>,
+    redact_secrets: bool,
+    privacy_mode: bool,
+    shutdown_rx: Option<Receiver<()>>,
+) -> anyhow::Result<()> {
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(ProxyServer::new(
+                config.clone(),
+                redact_secrets,
+                privacy_mode,
+            ))
+        },
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+
+    let router = axum::Router::new().nest_service("/mcp", service);
+
+    let tls_config = certificate_chain.create_server_config()?;
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+
+    tokio::spawn(async move {
+        if let Some(mut shutdown_rx) = shutdown_rx {
+            let _ = shutdown_rx.recv().await;
+        } else {
+            // Wait for ctrl+c
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        shutdown_handle.graceful_shutdown(None);
+    });
+
+    axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+        .handle(handle)
+        .serve(router.into_make_service())
+        .await?;
+
+    Ok(())
 }

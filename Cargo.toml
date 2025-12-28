@@ -13,7 +13,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.3"
+version = "0.3.4-beta.3"
 edition = "2024"
 
 
@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { version = "0.8.3", features = [
+rmcp = { version = "0.11.0", features = [
     "base64",
     "macros",
     "client",
@@ -63,12 +63,13 @@ rcgen = "0.12.1"
 rustls-pemfile = "2.1.2"
 tokio-rustls = "0.26.0"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+axum = "0.8"
 time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
-schemars = { version = "0.8.22", features = ["chrono"] }
+schemars = { version = "1.1.0", features = ["chrono"] }
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
