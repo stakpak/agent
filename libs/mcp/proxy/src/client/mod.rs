@@ -102,7 +102,7 @@ impl Default for ClientPool {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ServerConfig {
     Stdio {
         command: String,
@@ -111,7 +111,7 @@ pub enum ServerConfig {
     },
     Http {
         url: String,
-        headers: Option<HashMap<String, String>>,
+        headers: HashMap<String, String>,
         /// Optional certificate chain for mTLS (used for local server connections)
         certificate_chain: Arc<Option<CertificateChain>>,
     },
@@ -183,7 +183,7 @@ impl ClientPoolConfig {
                 }
                 ServerConfigJson::UrlBased { url, headers } => ServerConfig::Http {
                     url,
-                    headers,
+                    headers: headers.unwrap_or_default(),
                     certificate_chain: Arc::new(None),
                 },
             };

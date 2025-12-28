@@ -128,9 +128,9 @@ impl ProxyServer {
                     }
                 }
 
-                if let Some(headers_map) = headers {
+                if !headers.is_empty() {
                     let mut header_map = reqwest::header::HeaderMap::new();
-                    for (key, value) in headers_map {
+                    for (key, value) in headers {
                         if let (Ok(header_name), Ok(header_value)) = (
                             reqwest::header::HeaderName::from_bytes(key.as_bytes()),
                             reqwest::header::HeaderValue::from_str(&value),

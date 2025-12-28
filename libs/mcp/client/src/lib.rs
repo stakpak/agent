@@ -23,10 +23,11 @@ pub async fn connect(progress_tx: Option<Sender<ToolCallResultProgress>>) -> Res
     local::connect(progress_tx).await
 }
 
-/// Connect to an MCP server via HTTPS with optional mTLS
+/// Connect to an MCP server via HTTPS with optional mTLS and custom headers
 pub async fn connect_https(
     url: &str,
     certificate_chain: Option<Arc<CertificateChain>>,
+    headers: std::collections::HashMap<String, String>,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<McpClient> {
     let mut client_builder = reqwest::Client::builder()
@@ -40,6 +41,20 @@ pub async fn connect_https(
         client_builder = client_builder.use_preconfigured_tls(tls_config);
     }
 
+    // Configure custom headers
+    if !headers.is_empty() {
+        let mut header_map = reqwest::header::HeaderMap::new();
+        for (k, v) in headers {
+            if let (Ok(name), Ok(value)) = (
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                reqwest::header::HeaderValue::from_str(&v),
+            ) {
+                header_map.insert(name, value);
+            }
+        }
+        client_builder = client_builder.default_headers(header_map);
+    }
+
     let http_client = client_builder.build()?;
 
     let config = StreamableHttpClientTransportConfig::with_uri(url);
@@ -48,6 +63,33 @@ pub async fn connect_https(
 
     let client_handler = LocalClientHandler::new(progress_tx);
     let client: McpClient = client_handler.serve(transport).await?;
+
+    Ok(client)
+}
+
+/// Connect to an MCP server via stdio (arbitrary command)
+pub async fn connect_stdio(
+    command: &str,
+    args: Vec<String>,
+    env: Option<std::collections::HashMap<String, String>>,
+    progress_tx: Option<Sender<ToolCallResultProgress>>,
+) -> Result<McpClient> {
+    use rmcp::transport::TokioChildProcess;
+
+    let mut cmd = tokio::process::Command::new(command);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    if let Some(env_vars) = env {
+        cmd.envs(&env_vars);
+    }
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::null());
+
+    let proc = TokioChildProcess::new(cmd)?;
+    let client_handler = LocalClientHandler::new(progress_tx);
+    let client: McpClient = client_handler.serve(proc).await?;
 
     Ok(client)
 }

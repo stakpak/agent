@@ -48,6 +48,8 @@ base64 = "0.22"
 [dev-dependencies]
 tempfile = "3"
 test-case = "3"
+wiremock = "0.6"
+axum = "0.8"
 
 [lints.clippy]
 unwrap_used = "deny"

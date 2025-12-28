@@ -23,6 +23,12 @@ impl std::fmt::Debug for CertificateChain {
     }
 }
 
+impl PartialEq for CertificateChain {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
 impl CertificateChain {
     pub fn generate() -> Result<Self> {
         // Generate CA certificate

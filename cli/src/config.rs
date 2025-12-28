@@ -45,6 +45,8 @@ pub struct ProfileConfig {
     pub api_key: Option<String>,
     /// Provider type (remote or local)
     pub provider: Option<ProviderType>,
+    /// Path to the local SQLite database
+    pub store_path: Option<String>,
     /// Allowed tools (empty = all tools allowed)
     pub allowed_tools: Option<Vec<String>>,
     /// Tools that auto-approve without asking
@@ -91,6 +93,8 @@ pub struct AppConfig {
     pub profile_name: String,
     /// Path to the config file (used for saving)
     pub config_path: String,
+    /// Path to the local SQLite database
+    pub store_path: Option<String>,
     /// Allowed tools (empty = all tools allowed)
     pub allowed_tools: Option<Vec<String>>,
     /// Tools that auto-approve without asking
@@ -182,6 +186,7 @@ impl From<AppConfig> for ProfileConfig {
             rulebooks: config.rulebooks,
             warden: config.warden,
             provider: None,
+            store_path: config.store_path,
             openai: config.openai,
             anthropic: config.anthropic,
             gemini: config.gemini,
@@ -376,6 +381,10 @@ impl ProfileConfig {
                 .provider
                 .clone()
                 .or_else(|| other.and_then(|config| config.provider.clone())),
+            store_path: self
+                .store_path
+                .clone()
+                .or_else(|| other.and_then(|config| config.store_path.clone())),
             openai: self
                 .openai
                 .clone()
@@ -489,6 +498,7 @@ impl AppConfig {
             auto_append_gitignore: settings.auto_append_gitignore,
             profile_name: profile_name.to_string(),
             config_path: path.display().to_string(),
+            store_path: profile_config.store_path,
             allowed_tools: profile_config.allowed_tools,
             auto_approve: profile_config.auto_approve,
             rulebooks: profile_config.rulebooks,
@@ -671,6 +681,7 @@ auto_append_gitignore = true
             auto_append_gitignore: Some(false),
             profile_name: profile_name.into(),
             config_path: "/tmp/stakpak/config.toml".into(),
+            store_path: None,
             allowed_tools: Some(vec!["git".into(), "curl".into()]),
             auto_approve: Some(vec!["git status".into()]),
             rulebooks: Some(RulebookConfig {
@@ -831,6 +842,7 @@ auto_append_gitignore = true
                     volumes: vec!["/tmp:/tmp:ro".into()],
                 }),
                 provider: None,
+                store_path: None,
                 openai: None,
                 anthropic: None,
                 gemini: None,
@@ -850,6 +862,7 @@ auto_append_gitignore = true
                 rulebooks: None,
                 warden: None,
                 provider: None,
+                store_path: None,
                 openai: None,
                 anthropic: None,
                 gemini: None,
@@ -1037,6 +1050,7 @@ auto_append_gitignore = true
             auto_append_gitignore: Some(false),
             profile_name: "dev".into(),
             config_path: path.to_string_lossy().into_owned(),
+            store_path: None,
             allowed_tools: Some(vec!["git".into(), "curl".into()]),
             auto_approve: Some(vec!["git status".into()]),
             rulebooks: Some(RulebookConfig {
