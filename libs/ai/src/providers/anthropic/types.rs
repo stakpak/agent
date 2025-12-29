@@ -21,7 +21,7 @@ impl AnthropicConfig {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            base_url: "https://api.anthropic.com/v1".to_string(),
+            base_url: "https://api.anthropic.com/v1/".to_string(),
             anthropic_version: "2023-06-01".to_string(),
             beta_features: vec![],
         }
