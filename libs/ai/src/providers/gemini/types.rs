@@ -247,15 +247,19 @@ pub enum GeminiHarmBlockThreshold {
 /// Gemini response
 #[derive(Debug, Deserialize)]
 pub struct GeminiResponse {
-    pub candidates: Vec<GeminiCandidate>,
+    pub candidates: Option<Vec<GeminiCandidate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_metadata: Option<GeminiUsageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
 }
 
 /// Gemini candidate
 #[derive(Debug, Deserialize)]
 pub struct GeminiCandidate {
-    pub content: GeminiContent,
+    pub content: Option<GeminiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

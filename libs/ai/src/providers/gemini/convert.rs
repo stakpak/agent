@@ -255,30 +255,38 @@ fn parse_image_data(url: &str) -> Result<GeminiInlineData> {
 pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
     use crate::types::ToolCall;
 
-    let candidate = resp
-        .candidates
-        .first()
-        .ok_or_else(|| Error::invalid_response("No candidates in response"))?;
+    let candidates = resp.candidates.unwrap_or_default();
+    let candidate = candidates.first();
 
     let mut content: Vec<ResponseContent> = Vec::new();
 
-    for part in &candidate.content.parts {
-        if let Some(text) = &part.text {
-            content.push(ResponseContent::Text { text: text.clone() });
-        }
+    if let Some(candidate) = candidate {
+        for part in candidate
+            .content
+            .as_ref()
+            .map(|c| c.parts.as_slice())
+            .unwrap_or_default()
+        {
+            if let Some(text) = &part.text {
+                content.push(ResponseContent::Text { text: text.clone() });
+            }
 
-        if let Some(function_call) = &part.function_call {
-            // Gemini doesn't provide IDs, so we generate one
-            content.push(ResponseContent::ToolCall(ToolCall {
-                id: format!("call_{}", uuid::Uuid::new_v4()),
-                name: function_call.name.clone(),
-                arguments: function_call.args.clone(),
-            }));
+            if let Some(function_call) = &part.function_call {
+                // Gemini doesn't provide IDs, so we generate one
+                content.push(ResponseContent::ToolCall(ToolCall {
+                    id: format!("call_{}", uuid::Uuid::new_v4()),
+                    name: function_call.name.clone(),
+                    arguments: function_call.args.clone(),
+                }));
+            }
         }
     }
 
+    // Allow empty content (Gemini sometimes returns empty response for safety or other reasons)
     if content.is_empty() {
-        return Err(Error::invalid_response("No content in response"));
+        content.push(ResponseContent::Text {
+            text: String::new(),
+        });
     }
 
     let usage = resp
@@ -298,7 +306,9 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
     {
         FinishReason::ToolCalls
     } else {
-        parse_finish_reason(&candidate.finish_reason).unwrap_or(FinishReason::Other)
+        candidate
+            .and_then(|c| parse_finish_reason(&c.finish_reason))
+            .unwrap_or(FinishReason::Other)
     };
 
     Ok(GenerateResponse {

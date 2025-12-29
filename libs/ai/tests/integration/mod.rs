@@ -9,3 +9,6 @@ mod openai;
 
 #[cfg(test)]
 mod anthropic;
+
+#[cfg(test)]
+mod gemini;
