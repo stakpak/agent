@@ -2,9 +2,13 @@
 name = "stakpak-mcp-proxy"
 version.workspace = true
 edition.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
-stakpak-shared = { path = "../../shared" }
+stakpak-shared = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
