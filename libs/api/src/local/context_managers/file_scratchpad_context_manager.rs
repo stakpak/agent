@@ -78,12 +78,13 @@ impl FileScratchpadContextManager {
 
     fn resolve_path(&self, base_path: &Path, session_id: Option<Uuid>) -> PathBuf {
         if let Some(session_id) = session_id
-            && let Some(parent) = base_path.parent() {
-                // If there's a session ID, put files in a subdirectory named after the session ID
-                // e.g. .stakpak/session/scratchpad.md -> .stakpak/session/<uuid>/scratchpad.md
-                let session_dir = parent.join(session_id.to_string());
-                return session_dir.join(base_path.file_name().unwrap_or_default());
-            }
+            && let Some(parent) = base_path.parent()
+        {
+            // If there's a session ID, put files in a subdirectory named after the session ID
+            // e.g. .stakpak/session/scratchpad.md -> .stakpak/session/<uuid>/scratchpad.md
+            let session_dir = parent.join(session_id.to_string());
+            return session_dir.join(base_path.file_name().unwrap_or_default());
+        }
         base_path.to_path_buf()
     }
 
@@ -196,18 +197,18 @@ impl FileScratchpadContextManager {
                     if let (Some(old_str), Some(new_str)) = (
                         args.get("old_str").and_then(|s| s.as_str()),
                         args.get("new_str").and_then(|s| s.as_str()),
-                    )
-                        && let Some(content) = current_content {
-                            let replace_all = args
-                                .get("replace_all")
-                                .and_then(|b| b.as_bool())
-                                .unwrap_or(false);
-                            if replace_all {
-                                *content = content.replace(old_str, new_str);
-                            } else {
-                                *content = content.replacen(old_str, new_str, 1);
-                            }
+                    ) && let Some(content) = current_content
+                    {
+                        let replace_all = args
+                            .get("replace_all")
+                            .and_then(|b| b.as_bool())
+                            .unwrap_or(false);
+                        if replace_all {
+                            *content = content.replace(old_str, new_str);
+                        } else {
+                            *content = content.replacen(old_str, new_str, 1);
                         }
+                    }
                 }
                 _ => {}
             }
