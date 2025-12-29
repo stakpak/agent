@@ -186,10 +186,14 @@ pub struct GeminiPrebuiltVoiceConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GeminiMediaResolution {
-    MediaResolutionUnspecified,
-    MediaResolutionLow,
-    MediaResolutionMedium,
-    MediaResolutionHigh,
+    #[serde(rename = "MEDIA_RESOLUTION_UNSPECIFIED")]
+    Unspecified,
+    #[serde(rename = "MEDIA_RESOLUTION_LOW")]
+    Low,
+    #[serde(rename = "MEDIA_RESOLUTION_MEDIUM")]
+    Medium,
+    #[serde(rename = "MEDIA_RESOLUTION_HIGH")]
+    High,
 }
 
 /// Gemini modality
@@ -214,12 +218,18 @@ pub struct GeminiSafetySetting {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GeminiHarmCategory {
-    HarmCategoryUnspecified,
-    HarmCategoryHarassment,
-    HarmCategoryHateSpeech,
-    HarmCategorySexuallyExplicit,
-    HarmCategoryDangerousContent,
-    HarmCategoryCivicIntegrity,
+    #[serde(rename = "HARM_CATEGORY_UNSPECIFIED")]
+    Unspecified,
+    #[serde(rename = "HARM_CATEGORY_HARASSMENT")]
+    Harassment,
+    #[serde(rename = "HARM_CATEGORY_HATE_SPEECH")]
+    HateSpeech,
+    #[serde(rename = "HARM_CATEGORY_SEXUALLY_EXPLICIT")]
+    SexuallyExplicit,
+    #[serde(rename = "HARM_CATEGORY_DANGEROUS_CONTENT")]
+    DangerousContent,
+    #[serde(rename = "HARM_CATEGORY_CIVIC_INTEGRITY")]
+    CivicIntegrity,
 }
 
 /// Gemini harm block threshold

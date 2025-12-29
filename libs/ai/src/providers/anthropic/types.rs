@@ -1,7 +1,6 @@
 //! Anthropic-specific types
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// Configuration for Anthropic provider
 #[derive(Debug, Clone)]
@@ -57,19 +56,23 @@ impl Default for AnthropicConfig {
 pub struct AnthropicRequest {
     pub model: String,
     pub messages: Vec<AnthropicMessage>,
-    pub max_tokens: u32, // Required by Anthropic
+    pub max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
+    pub system: Option<AnthropicMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<ThinkingConfig>,
+    pub thinking: Option<AnthropicThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,18 +80,18 @@ pub struct AnthropicRequest {
 }
 
 /// Thinking/reasoning configuration
-#[derive(Debug, Serialize)]
-pub struct ThinkingConfig {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnthropicThinkingConfig {
     #[serde(rename = "type")]
-    pub type_: String, // "enabled"
+    pub type_: String,
     pub budget_tokens: u32,
 }
 
 /// Anthropic message
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnthropicMessage {
-    pub role: String, // "user" | "assistant"
-    pub content: Value,
+    pub role: String,
+    pub content: AnthropicMessageContent,
 }
 
 /// Anthropic response
@@ -105,27 +108,62 @@ pub struct AnthropicResponse {
 }
 
 /// Anthropic content block
-#[derive(Debug, Deserialize)]
-pub struct AnthropicContent {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AnthropicContent {
+    Text {
+        text: String,
+    },
+    Image {
+        source: AnthropicSource,
+    },
+    Thinking {
+        thinking: String,
+        signature: String,
+    },
+    RedactedThinking {
+        data: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<AnthropicMessageContent>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+    },
+}
+
+/// Anthropic message content (can be string or array of content blocks)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum AnthropicMessageContent {
+    String(String),
+    Blocks(Vec<AnthropicContent>),
+}
+
+/// Anthropic source (for images/PDFs)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnthropicSource {
     #[serde(rename = "type")]
-    pub type_: String, // "text" | "thinking" | "tool_use"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input: Option<serde_json::Value>,
+    pub type_: String, // "base64"
+    pub media_type: String,
+    pub data: String,
 }
 
 /// Anthropic usage statistics
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AnthropicUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
 }
 
 /// Anthropic streaming event
@@ -143,20 +181,27 @@ pub struct AnthropicStreamEvent {
     pub delta: Option<AnthropicDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<AnthropicUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<AnthropicError>,
 }
 
-/// Anthropic delta content
+/// Anthropic streaming delta
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct AnthropicDelta {
     #[serde(rename = "type")]
-    pub type_: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_: Option<String>,
     pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub _signature: Option<String>,
     pub partial_json: Option<String>,
+    pub _stop_reason: Option<String>,
+    pub _stop_sequence: Option<String>,
+}
+
+/// Anthropic error details
+#[derive(Debug, Deserialize)]
+pub struct AnthropicError {
+    pub message: String,
 }
 
 /// Infer max_tokens based on model name
