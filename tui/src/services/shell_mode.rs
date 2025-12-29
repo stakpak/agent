@@ -414,7 +414,13 @@ pub fn run_pty_command(
                 std::thread::sleep(std::time::Duration::from_millis(300));
 
                 // Type the command followed by Enter
-                if let Err(e) = writeln!(writer, "{}", cmd) {
+                // Windows ConPTY expects carriage return, Unix expects newline
+                #[cfg(windows)]
+                let line_ending = "\r";
+                #[cfg(not(windows))]
+                let line_ending = "\n";
+
+                if let Err(e) = write!(writer, "{}{}", cmd, line_ending) {
                     eprintln!("Failed to type command to PTY: {}", e);
                 }
                 if let Err(e) = writer.flush() {

@@ -80,6 +80,10 @@ pub fn update(
             }
             InputEvent::InputSubmitted => {
                 state.shell_scroll = 0;
+                // Windows ConPTY expects carriage return, Unix expects newline
+                #[cfg(windows)]
+                shell::send_shell_input(state, "\r");
+                #[cfg(not(windows))]
                 shell::send_shell_input(state, "\n");
                 return;
             }
