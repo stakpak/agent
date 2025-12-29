@@ -10,7 +10,7 @@ use crate::types::{
     ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ResponseContent, Role,
     Usage,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// Convert unified request to Anthropic request
 pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<AnthropicRequest> {

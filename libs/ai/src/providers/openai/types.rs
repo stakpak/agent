@@ -120,24 +120,6 @@ pub struct ChatUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
-    #[serde(default)]
-    pub prompt_tokens_details: PromptTokensDetails,
-    #[serde(default)]
-    pub completion_tokens_details: CompletionTokensDetails,
-}
-
-/// OpenAI prompt tokens details
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct PromptTokensDetails {
-    #[serde(default)]
-    pub cached_tokens: u32,
-}
-
-/// OpenAI completion tokens details
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct CompletionTokensDetails {
-    #[serde(default)]
-    pub reasoning_tokens: u32,
 }
 
 /// OpenAI streaming chunk
