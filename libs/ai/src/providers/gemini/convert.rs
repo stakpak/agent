@@ -6,8 +6,8 @@ use super::types::{
 };
 use crate::error::{Error, Result};
 use crate::types::{
-    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ResponseContent, Role,
-    Usage,
+    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ProviderOptions,
+    ResponseContent, Role, Usage,
 };
 
 /// Convert unified request to Gemini request
@@ -17,6 +17,13 @@ pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
     // Gemini doesn't have separate system messages - prepend to first user message
     let contents = convert_messages(&req.messages)?;
 
+    // Extract Google options if present
+    let google_opts = if let Some(ProviderOptions::Google(opts)) = &req.provider_options {
+        Some(opts)
+    } else {
+        None
+    };
+
     let generation_config = Some(GeminiGenerationConfig {
         temperature: req.options.temperature,
         top_p: req.options.top_p,
@@ -24,6 +31,23 @@ pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
         max_output_tokens: req.options.max_tokens,
         stop_sequences: req.options.stop_sequences.clone(),
         response_mime_type: None,
+        candidate_count: None,
+        seed: None,
+        presence_penalty: None,
+        frequency_penalty: None,
+        response_logprobs: None,
+        logprobs: None,
+        enable_enhanced_civic_answers: None,
+        thinking_config: google_opts.and_then(|opts| {
+            opts.thinking_budget
+                .map(|budget| super::types::GeminiThinkingConfig {
+                    include_thoughts: Some(true),
+                    thinking_budget: Some(budget),
+                })
+        }),
+        speech_config: None,
+        media_resolution: None,
+        response_modalities: None,
     });
 
     // Convert tools to Gemini format
