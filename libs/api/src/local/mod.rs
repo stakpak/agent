@@ -1,7 +1,9 @@
-use crate::local::context_managers::scratchpad_context_manager::{
-    ScratchpadContextManager, ScratchpadContextManagerOptions,
+// use crate::local::hooks::file_scratchpad_context::{
+//     FileScratchpadContextHook, FileScratchpadContextHookOptions,
+// };
+use crate::local::hooks::inline_scratchpad_context::{
+    InlineScratchpadContextHook, InlineScratchpadContextHookOptions,
 };
-use crate::local::hooks::scratchpad_context_hook::{ContextHook, ContextHookOptions};
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
 use async_trait::async_trait;
@@ -12,7 +14,7 @@ use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
 use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use stakpak_shared::models::integrations::gemini::GeminiConfig;
+use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
@@ -42,10 +44,50 @@ pub struct LocalClient {
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
     pub gemini_config: Option<GeminiConfig>,
+    pub model_options: ModelOptions,
+    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ModelOptions {
+    pub smart_model: Option<LLMModel>,
+    pub eco_model: Option<LLMModel>,
+    pub recovery_model: Option<LLMModel>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ModelSet {
     pub smart_model: LLMModel,
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
-    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+}
+impl ModelSet {
+    fn get_model(&self, agent_model: &AgentModel) -> LLMModel {
+        match agent_model {
+            AgentModel::Smart => self.smart_model.clone(),
+            AgentModel::Eco => self.eco_model.clone(),
+            AgentModel::Recovery => self.recovery_model.clone(),
+        }
+    }
+}
+impl From<ModelOptions> for ModelSet {
+    fn from(value: ModelOptions) -> Self {
+        let smart_model = value
+            .smart_model
+            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet));
+        let eco_model = value
+            .eco_model
+            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku));
+        let recovery_model = value
+            .recovery_model
+            .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5));
+
+        Self {
+            smart_model,
+            eco_model,
+            recovery_model,
+        }
+    }
 }
 
 pub struct LocalClientConfig {
@@ -67,21 +109,25 @@ enum StreamMessage {
 }
 
 const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
-const SYSTEM_PROMPT: &str = include_str!("./prompts/agent.v1.txt");
 const TITLE_GENERATOR_PROMPT: &str = include_str!("./prompts/session_title_generator.v1.txt");
 
 impl LocalClient {
     pub async fn new(config: LocalClientConfig) -> Result<Self, String> {
-        let default_store_path = std::env::home_dir()
-            .unwrap_or_default()
-            .join(DEFAULT_STORE_PATH);
+        let store_path = config
+            .store_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::home_dir()
+                    .unwrap_or_default()
+                    .join(DEFAULT_STORE_PATH)
+            });
 
-        if let Some(parent) = default_store_path.parent() {
+        if let Some(parent) = store_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create database directory: {}", e))?;
         }
 
-        let db = Builder::new_local(default_store_path.display().to_string())
+        let db = Builder::new_local(store_path.display().to_string())
             .build()
             .await
             .map_err(|e| e.to_string())?;
@@ -91,36 +137,39 @@ impl LocalClient {
         // Initialize database schema
         db::init_schema(&conn).await?;
 
-        let smart_model = config
-            .smart_model
-            .map(LLMModel::from)
-            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Sonnet));
-        let eco_model = config
-            .eco_model
-            .map(LLMModel::from)
-            .unwrap_or(LLMModel::Anthropic(AnthropicModel::Claude45Haiku));
-        let recovery_model = config
-            .recovery_model
-            .map(LLMModel::from)
-            .unwrap_or(LLMModel::OpenAI(OpenAIModel::GPT5));
+        let model_options = ModelOptions {
+            smart_model: config.smart_model.map(LLMModel::from),
+            eco_model: config.eco_model.map(LLMModel::from),
+            recovery_model: config.recovery_model.map(LLMModel::from),
+        };
 
         // Add hooks
         let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
             LifecycleEvent::BeforeInference,
-            Box::new(ContextHook::new(ContextHookOptions {
-                context_manager: Box::new(ScratchpadContextManager::new(
-                    ScratchpadContextManagerOptions {
-                        history_action_message_size_limit: 100,
-                        history_action_message_keep_last_n: 1,
-                        history_action_result_keep_last_n: 50,
-                    },
-                )),
-                smart_model: (smart_model.clone(), SYSTEM_PROMPT.to_string()),
-                eco_model: (eco_model.clone(), SYSTEM_PROMPT.to_string()),
-                recovery_model: (recovery_model.clone(), SYSTEM_PROMPT.to_string()),
-            })),
+            Box::new(InlineScratchpadContextHook::new(
+                InlineScratchpadContextHookOptions {
+                    model_options: model_options.clone(),
+                    history_action_message_size_limit: Some(100),
+                    history_action_message_keep_last_n: Some(1),
+                    history_action_result_keep_last_n: Some(50),
+                },
+            )),
         );
+        // hook_registry.register(
+        //     LifecycleEvent::BeforeInference,
+        //     Box::new(FileScratchpadContextHook::new(
+        //         FileScratchpadContextHookOptions {
+        //             history_action_message_size_limit: Some(100),
+        //             history_action_message_keep_last_n: Some(1),
+        //             history_action_result_keep_last_n: Some(50),
+        //             scratchpad_path: None,
+        //             todo_path: None,
+        //             model_options: model_options.clone(),
+        //             overwrite_if_different: Some(true),
+        //         },
+        //     )),
+        // );
 
         Ok(Self {
             db: conn,
@@ -128,9 +177,7 @@ impl LocalClient {
             anthropic_config: config.anthropic_config,
             gemini_config: config.gemini_config,
             openai_config: config.openai_config,
-            smart_model,
-            eco_model,
-            recovery_model,
+            model_options,
             hook_registry: Some(Arc::new(hook_registry)),
         })
     }
@@ -662,7 +709,18 @@ impl LocalClient {
 
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
         let llm_config = self.get_llm_config();
-        let llm_model = self.eco_model.clone();
+
+        let llm_model = if let Some(eco_model) = &self.model_options.eco_model {
+            eco_model.clone()
+        } else if llm_config.openai_config.is_some() {
+            LLMModel::OpenAI(OpenAIModel::GPT5Mini)
+        } else if llm_config.anthropic_config.is_some() {
+            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+        } else if llm_config.gemini_config.is_some() {
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        } else {
+            return Err("No LLM config found".to_string());
+        };
 
         let messages = vec![
             LLMMessage {
