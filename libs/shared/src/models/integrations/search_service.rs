@@ -404,10 +404,7 @@ impl SearchServicesOrchestrator {
             )))
         })? {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                format!(
-                    "Docker image '{}' not found locally. Please pull it with: docker pull {}",
-                    image, image
-                ),
+                "DOWNLOAD_SEARCH_DOCS_LOCAL_IMAGE".to_string(),
             )));
         }
         Ok(())

@@ -1,8 +1,8 @@
 use crate::tool_container::ToolContainer;
 use chrono::{DateTime, Utc};
 use rmcp::{
-    ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool,
-    tool_router,
+    ErrorData as McpError, RoleServer, handler::server::wrapper::Parameters, model::*, schemars,
+    service::RequestContext, tool, tool_router,
 };
 use serde::Deserialize;
 use stakpak_api::models::{
@@ -391,6 +391,7 @@ If your goal requires understanding multiple distinct topics or technologies, ma
     )]
     pub async fn search_docs(
         &self,
+        ctx: RequestContext<RoleServer>,
         Parameters(mut request): Parameters<SearchDocsRequest>,
     ) -> Result<CallToolResult, McpError> {
         // Cap the limit to a maximum of 5
@@ -409,6 +410,36 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         let response = match client.search_docs(&request.into()).await {
             Ok(response) => response,
             Err(e) => {
+                if e.contains("DOWNLOAD_SEARCH_DOCS_LOCAL_IMAGE") {
+                    let architecture = std::env::consts::ARCH;
+                    let platform = if architecture == "aarch64" {
+                        "linux/arm64"
+                    } else {
+                        "linux/amd64"
+                    };
+
+                    let command = format!(
+                        "docker pull --platform {} ghcr.io/stakpak/local_search:0.3",
+                        platform
+                    );
+
+                    return self
+                        .run_command(
+                            ctx,
+                            Parameters(crate::local_tools::RunCommandRequest {
+                                command,
+                                description: Some(
+                                    "Downloading local search docker image".to_string(),
+                                ),
+                                timeout: None,
+                                remote: None,
+                                password: None,
+                                private_key_path: None,
+                            }),
+                        )
+                        .await;
+                }
+
                 return Ok(CallToolResult::error(vec![
                     Content::text("SEARCH_DOCS_ERROR"),
                     Content::text(format!("Failed to search for docs: {}", e)),
