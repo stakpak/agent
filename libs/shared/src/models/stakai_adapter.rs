@@ -7,13 +7,14 @@ use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMInput,
     LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent, LLMModel,
-    LLMProviderConfig, LLMStreamInput, LLMTokenUsage, LLMTool,
+    LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool,
 };
 use futures::StreamExt;
 use stakai::{
-    ContentPart, FinishReason, GenerateOptions, GenerateRequest, GenerateResponse, Inference,
-    InferenceConfig, Message, MessageContent, Role, StreamEvent, Tool, ToolFunction, Usage,
-    registry::ProviderRegistry,
+    AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
+    GenerateResponse, GoogleOptions, Inference, InferenceConfig, Message, MessageContent,
+    OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions, Tool,
+    ToolFunction, Usage, registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -214,6 +215,95 @@ pub fn finish_reason_to_string(reason: FinishReason) -> String {
     }
 }
 
+/// Convert CLI LLMProviderOptions to StakAI ProviderOptions
+pub fn to_stakai_provider_options(
+    opts: &LLMProviderOptions,
+    model: &LLMModel,
+) -> Option<ProviderOptions> {
+    // Determine provider from model and options
+    match model {
+        LLMModel::Anthropic(_) => {
+            if let Some(anthropic) = &opts.anthropic {
+                let thinking = anthropic
+                    .thinking
+                    .as_ref()
+                    .map(|t| ThinkingOptions::new(t.budget_tokens));
+
+                Some(ProviderOptions::Anthropic(AnthropicOptions {
+                    thinking,
+                    effort: None,
+                }))
+            } else {
+                None
+            }
+        }
+        LLMModel::OpenAI(_) => {
+            if let Some(openai) = &opts.openai {
+                let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
+                    match e.to_lowercase().as_str() {
+                        "low" => Some(ReasoningEffort::Low),
+                        "medium" => Some(ReasoningEffort::Medium),
+                        "high" => Some(ReasoningEffort::High),
+                        _ => None,
+                    }
+                });
+
+                Some(ProviderOptions::OpenAI(OpenAIOptions {
+                    reasoning_effort,
+                    reasoning_summary: None,
+                    store: None,
+                    user: None,
+                }))
+            } else {
+                None
+            }
+        }
+        LLMModel::Gemini(_) => {
+            if let Some(google) = &opts.google {
+                Some(ProviderOptions::Google(GoogleOptions {
+                    thinking_budget: google.thinking_budget,
+                }))
+            } else {
+                None
+            }
+        }
+        LLMModel::Custom(_) => {
+            // For custom models, try to infer from which options are set
+            if let Some(anthropic) = &opts.anthropic {
+                let thinking = anthropic
+                    .thinking
+                    .as_ref()
+                    .map(|t| ThinkingOptions::new(t.budget_tokens));
+                Some(ProviderOptions::Anthropic(AnthropicOptions {
+                    thinking,
+                    effort: None,
+                }))
+            } else if let Some(openai) = &opts.openai {
+                let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
+                    match e.to_lowercase().as_str() {
+                        "low" => Some(ReasoningEffort::Low),
+                        "medium" => Some(ReasoningEffort::Medium),
+                        "high" => Some(ReasoningEffort::High),
+                        _ => None,
+                    }
+                });
+                Some(ProviderOptions::OpenAI(OpenAIOptions {
+                    reasoning_effort,
+                    reasoning_summary: None,
+                    store: None,
+                    user: None,
+                }))
+            } else if let Some(google) = &opts.google {
+                Some(ProviderOptions::Google(GoogleOptions {
+                    thinking_budget: google.thinking_budget,
+                }))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// Convert StakAI GenerateResponse to CLI LLMCompletionResponse
 pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompletionResponse {
     let mut content_parts: Vec<LLMMessageTypedContent> = Vec::new();
@@ -346,11 +436,17 @@ impl StakAIClient {
             }
         }
 
+        // Convert provider options if present
+        let provider_options = input
+            .provider_options
+            .as_ref()
+            .and_then(|opts| to_stakai_provider_options(opts, &input.model));
+
         let request = GenerateRequest {
             model: model_string.clone(),
             messages,
             options,
-            provider_options: None,
+            provider_options,
         };
 
         let response = self.inference.generate(&request).await.map_err(|e| {
@@ -376,11 +472,17 @@ impl StakAIClient {
             }
         }
 
+        // Convert provider options if present
+        let provider_options = input
+            .provider_options
+            .as_ref()
+            .and_then(|opts| to_stakai_provider_options(opts, &input.model));
+
         let request = GenerateRequest {
             model: model_string.clone(),
             messages,
             options,
-            provider_options: None,
+            provider_options,
         };
 
         let mut stream = self.inference.stream(&request).await.map_err(|e| {
@@ -1067,6 +1169,90 @@ mod tests {
         } else {
             panic!("Expected List content");
         }
+    }
+
+    // ==================== Provider Options Conversion Tests ====================
+
+    #[test]
+    fn test_provider_options_anthropic_thinking() {
+        use crate::models::llm::{LLMAnthropicOptions, LLMProviderOptions, LLMThinkingOptions};
+
+        let opts = LLMProviderOptions {
+            anthropic: Some(LLMAnthropicOptions {
+                thinking: Some(LLMThinkingOptions::new(8000)),
+            }),
+            openai: None,
+            google: None,
+        };
+
+        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_some());
+        if let Some(ProviderOptions::Anthropic(anthropic)) = result {
+            assert!(anthropic.thinking.is_some());
+            assert_eq!(anthropic.thinking.unwrap().budget_tokens, 8000);
+        } else {
+            panic!("Expected Anthropic provider options");
+        }
+    }
+
+    #[test]
+    fn test_provider_options_openai_reasoning() {
+        use crate::models::llm::{LLMOpenAIOptions, LLMProviderOptions};
+
+        let opts = LLMProviderOptions {
+            anthropic: None,
+            openai: Some(LLMOpenAIOptions {
+                reasoning_effort: Some("high".to_string()),
+            }),
+            google: None,
+        };
+
+        let model = LLMModel::OpenAI(OpenAIModel::GPT5);
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_some());
+        if let Some(ProviderOptions::OpenAI(openai)) = result {
+            assert_eq!(openai.reasoning_effort, Some(ReasoningEffort::High));
+        } else {
+            panic!("Expected OpenAI provider options");
+        }
+    }
+
+    #[test]
+    fn test_provider_options_google_thinking() {
+        use crate::models::llm::{LLMGoogleOptions, LLMProviderOptions};
+
+        let opts = LLMProviderOptions {
+            anthropic: None,
+            openai: None,
+            google: Some(LLMGoogleOptions {
+                thinking_budget: Some(5000),
+            }),
+        };
+
+        let model = LLMModel::Gemini(GeminiModel::Gemini25Flash);
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_some());
+        if let Some(ProviderOptions::Google(google)) = result {
+            assert_eq!(google.thinking_budget, Some(5000));
+        } else {
+            panic!("Expected Google provider options");
+        }
+    }
+
+    #[test]
+    fn test_provider_options_none_when_empty() {
+        use crate::models::llm::LLMProviderOptions;
+
+        let opts = LLMProviderOptions::default();
+
+        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let result = to_stakai_provider_options(&opts, &model);
+
+        assert!(result.is_none());
     }
 
     // ==================== Config Building Tests ====================

@@ -65,6 +65,7 @@ define_hook!(
             messages,
             max_tokens: 16000,
             tools,
+            provider_options: None, // TODO: Pass provider options from context if needed
         });
 
         Ok(HookAction::Continue)

@@ -82,12 +82,69 @@ impl Display for LLMModel {
     }
 }
 
+/// Provider-specific options for LLM requests
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMProviderOptions {
+    /// Anthropic-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<LLMAnthropicOptions>,
+
+    /// OpenAI-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openai: Option<LLMOpenAIOptions>,
+
+    /// Google/Gemini-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google: Option<LLMGoogleOptions>,
+}
+
+/// Anthropic-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMAnthropicOptions {
+    /// Extended thinking configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<LLMThinkingOptions>,
+}
+
+/// Thinking/reasoning options
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LLMThinkingOptions {
+    /// Budget tokens for thinking (must be >= 1024)
+    pub budget_tokens: u32,
+}
+
+impl LLMThinkingOptions {
+    pub fn new(budget_tokens: u32) -> Self {
+        Self {
+            budget_tokens: budget_tokens.max(1024),
+        }
+    }
+}
+
+/// OpenAI-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMOpenAIOptions {
+    /// Reasoning effort for o1/o3/o4 models ("low", "medium", "high")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
+/// Google/Gemini-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMGoogleOptions {
+    /// Thinking budget in tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LLMInput {
     pub model: LLMModel,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub tools: Option<Vec<LLMTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<LLMProviderOptions>,
 }
 
 #[derive(Debug)]
@@ -97,6 +154,7 @@ pub struct LLMStreamInput {
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
+    pub provider_options: Option<LLMProviderOptions>,
 }
 
 impl From<&LLMStreamInput> for LLMInput {
@@ -106,6 +164,7 @@ impl From<&LLMStreamInput> for LLMInput {
             messages: value.messages.clone(),
             max_tokens: value.max_tokens,
             tools: value.tools.clone(),
+            provider_options: value.provider_options.clone(),
         }
     }
 }

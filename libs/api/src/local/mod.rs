@@ -535,6 +535,7 @@ impl LocalClient {
                 max_tokens: input.max_tokens,
                 tools: input.tools,
                 stream_channel_tx: internal_tx,
+                provider_options: input.provider_options,
             };
 
             let chat_future = async move {
@@ -699,6 +700,7 @@ impl LocalClient {
             messages,
             max_tokens: 100,
             tools: None,
+            provider_options: None,
         };
 
         let stakai_client = StakAIClient::new(&llm_config)
