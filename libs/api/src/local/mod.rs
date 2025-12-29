@@ -47,6 +47,7 @@ pub struct LocalClient {
     pub gemini_config: Option<GeminiConfig>,
     pub model_options: ModelOptions,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+    _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +92,8 @@ impl From<ModelOptions> for ModelSet {
             smart_model,
             eco_model,
             recovery_model,
+            hook_registry: None,
+            _search_services_orchestrator: None,
         }
     }
 }
@@ -141,7 +144,6 @@ impl LocalClient {
 
         // Initialize database schema
         db::init_schema(&conn).await?;
-
 
         let model_options = ModelOptions {
             smart_model: config.smart_model.map(LLMModel::from),
@@ -525,9 +527,10 @@ impl AgentProvider for LocalClient {
         let llm_config = self.get_llm_config();
         let search_model = get_search_model(
             &llm_config,
-            self.eco_model.clone(),
-            self.smart_model.clone(),
+            self.model_options.eco_model.clone(),
+            self.model_options.smart_model.clone(),
         );
+
         let analysis = analyze_search_query(&llm_config, &search_model, &initial_query).await?;
         let required_documentation = analysis.required_documentation;
         let mut current_query = analysis.reformulated_query;
@@ -1194,18 +1197,25 @@ fn parse_validation_xml(xml: &str, docs: &[ScrapedContent]) -> Result<Validation
 
 fn get_search_model(
     llm_config: &LLMProviderConfig,
-    eco_model: LLMModel,
-    smart_model: LLMModel,
+    eco_model: Option<LLMModel>,
+    smart_model: Option<LLMModel>,
 ) -> LLMModel {
-    match eco_model {
-        LLMModel::OpenAI(_) => LLMModel::OpenAI(OpenAIModel::O4Mini),
-        LLMModel::Custom(_) => eco_model,
-        LLMModel::Gemini(_) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
-        LLMModel::Anthropic(_) => {
-            if llm_config.anthropic_config.is_some() {
+    let base_model = eco_model.or(smart_model);
+
+    match base_model {
+        Some(LLMModel::OpenAI(_)) => LLMModel::OpenAI(OpenAIModel::O4Mini),
+        Some(LLMModel::Anthropic(_)) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
+        Some(LLMModel::Gemini(_)) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
+        Some(LLMModel::Custom(model)) => LLMModel::Custom(model),
+        None => {
+            if llm_config.openai_config.is_some() {
+                LLMModel::OpenAI(OpenAIModel::O4Mini)
+            } else if llm_config.anthropic_config.is_some() {
                 LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+            } else if llm_config.gemini_config.is_some() {
+                LLMModel::Gemini(GeminiModel::Gemini3Flash)
             } else {
-                smart_model
+                LLMModel::OpenAI(OpenAIModel::O4Mini)
             }
         }
     }
