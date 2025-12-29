@@ -30,6 +30,24 @@ impl GenerateResponse {
             .join("")
     }
 
+    /// Get the reasoning content from the response (extended thinking for Anthropic, reasoning for OpenAI)
+    pub fn reasoning(&self) -> Option<String> {
+        let reasoning: Vec<String> = self
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ResponseContent::Reasoning { reasoning } => Some(reasoning.clone()),
+                _ => None,
+            })
+            .collect();
+
+        if reasoning.is_empty() {
+            None
+        } else {
+            Some(reasoning.join(""))
+        }
+    }
+
     /// Get all tool calls from the response
     pub fn tool_calls(&self) -> Vec<&ToolCall> {
         self.content
@@ -50,6 +68,11 @@ pub enum ResponseContent {
     Text {
         /// The generated text
         text: String,
+    },
+    /// Reasoning content (extended thinking for Anthropic, reasoning for OpenAI)
+    Reasoning {
+        /// The reasoning text
+        reasoning: String,
     },
     /// Tool/function call
     ToolCall(ToolCall),

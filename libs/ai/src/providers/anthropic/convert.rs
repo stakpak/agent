@@ -1,6 +1,9 @@
 //! Conversion between unified types and Anthropic types
 
-use super::types::{AnthropicMessage, AnthropicRequest, AnthropicResponse, infer_max_tokens};
+use super::types::{
+    AnthropicMessage, AnthropicRequest, AnthropicResponse, ThinkingConfig as AnthropicThinking,
+    infer_max_tokens,
+};
 use crate::error::{Error, Result};
 use crate::types::{
     ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ResponseContent, Role,
@@ -62,6 +65,18 @@ pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<Anthr
         }),
     });
 
+    // Convert thinking config from provider options to Anthropic format
+    let thinking = req.provider_options.as_ref().and_then(|opts| {
+        if let crate::types::ProviderOptions::Anthropic(anthropic) = opts {
+            anthropic.thinking.as_ref().map(|t| AnthropicThinking {
+                type_: "enabled".to_string(),
+                budget_tokens: t.budget_tokens.max(1024),
+            })
+        } else {
+            None
+        }
+    });
+
     Ok(AnthropicRequest {
         model: req.model.clone(),
         messages,
@@ -71,7 +86,7 @@ pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<Anthr
         top_p: req.options.top_p,
         stop_sequences: req.options.stop_sequences.clone(),
         stream: if stream { Some(true) } else { None },
-        thinking: None, // TODO: Add reasoning support via options
+        thinking,
         tools,
         tool_choice,
     })
@@ -214,8 +229,8 @@ pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateRespon
                 .text
                 .as_ref()
                 .map(|t| ResponseContent::Text { text: t.clone() }),
-            "thinking" => c.thinking.as_ref().map(|t| ResponseContent::Text {
-                text: format!("[Thinking: {}]", t),
+            "thinking" => c.thinking.as_ref().map(|t| ResponseContent::Reasoning {
+                reasoning: t.clone(),
             }),
             "tool_use" => {
                 // Anthropic tool call format

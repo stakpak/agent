@@ -155,6 +155,9 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
         StreamEvent::TextDelta { delta, .. } => Some(GenerationDelta::Content {
             content: delta.clone(),
         }),
+        StreamEvent::ReasoningDelta { delta, .. } => Some(GenerationDelta::Thinking {
+            thinking: delta.clone(),
+        }),
         StreamEvent::ToolCallStart { id, name } => Some(GenerationDelta::ToolUse {
             tool_use: GenerationDeltaToolUse {
                 id: Some(id.clone()),
@@ -219,6 +222,13 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
         match content {
             stakai::ResponseContent::Text { text } => {
                 content_parts.push(LLMMessageTypedContent::Text { text: text.clone() });
+            }
+            stakai::ResponseContent::Reasoning { reasoning } => {
+                // Include reasoning as a text block with a prefix for visibility
+                // This matches how Anthropic's thinking is typically displayed
+                content_parts.push(LLMMessageTypedContent::Text {
+                    text: format!("[Reasoning: {}]", reasoning),
+                });
             }
             stakai::ResponseContent::ToolCall(tool_call) => {
                 content_parts.push(LLMMessageTypedContent::ToolCall {
@@ -340,6 +350,7 @@ impl StakAIClient {
             model: model_string.clone(),
             messages,
             options,
+            provider_options: None,
         };
 
         let response = self.inference.generate(&request).await.map_err(|e| {
@@ -369,6 +380,7 @@ impl StakAIClient {
             model: model_string.clone(),
             messages,
             options,
+            provider_options: None,
         };
 
         let mut stream = self.inference.stream(&request).await.map_err(|e| {
@@ -780,6 +792,23 @@ mod tests {
             assert_eq!(content, "Hello ");
         } else {
             panic!("Expected Content delta");
+        }
+    }
+
+    #[test]
+    fn test_stream_event_reasoning_delta() {
+        let event = StreamEvent::ReasoningDelta {
+            id: "gen_123".to_string(),
+            delta: "Let me think about this...".to_string(),
+        };
+
+        let delta = from_stakai_stream_event(&event);
+        assert!(delta.is_some());
+
+        if let Some(GenerationDelta::Thinking { thinking }) = delta {
+            assert_eq!(thinking, "Let me think about this...");
+        } else {
+            panic!("Expected Thinking delta");
         }
     }
 

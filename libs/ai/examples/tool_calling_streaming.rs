@@ -78,6 +78,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 print!("{}", delta);
                 text_content.push_str(&delta);
             }
+            StreamEvent::ReasoningDelta { delta, .. } => {
+                // Display reasoning in a distinct way
+                print!("[Reasoning: {}]", delta);
+            }
             StreamEvent::ToolCallStart { id, name } => {
                 println!("\n\n🔧 Tool call started:");
                 println!("  ID: {}", id);

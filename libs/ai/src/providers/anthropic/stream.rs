@@ -83,11 +83,9 @@ fn process_anthropic_event(
                         }
                     }
                     "thinking_delta" => {
+                        // Use dedicated ReasoningDelta event for proper handling
                         if let Some(thinking) = delta.thinking {
-                            return Some(StreamEvent::text_delta(
-                                "",
-                                format!("[Thinking: {}]", thinking),
-                            ));
+                            return Some(StreamEvent::reasoning_delta("", thinking));
                         }
                     }
                     "input_json_delta" => {

@@ -50,6 +50,14 @@ pub enum StreamEvent {
         delta: String,
     },
 
+    /// Reasoning content delta (extended thinking for Anthropic, reasoning for OpenAI)
+    ReasoningDelta {
+        /// Generation ID
+        id: String,
+        /// Reasoning delta to append
+        delta: String,
+    },
+
     /// Tool call started
     ToolCallStart {
         /// Tool call ID
@@ -100,6 +108,14 @@ impl StreamEvent {
     /// Create a text delta event
     pub fn text_delta(id: impl Into<String>, delta: impl Into<String>) -> Self {
         Self::TextDelta {
+            id: id.into(),
+            delta: delta.into(),
+        }
+    }
+
+    /// Create a reasoning delta event (extended thinking for Anthropic, reasoning for OpenAI)
+    pub fn reasoning_delta(id: impl Into<String>, delta: impl Into<String>) -> Self {
+        Self::ReasoningDelta {
             id: id.into(),
             delta: delta.into(),
         }

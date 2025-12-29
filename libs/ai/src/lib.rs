@@ -44,9 +44,10 @@ pub mod types;
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
 pub use types::{
-    ContentPart, FinishReason, GenerateOptions, GenerateRequest, GenerateResponse, GenerateStream,
-    Headers, Message, MessageContent, ResponseContent, Role, StreamEvent, Tool, ToolCall,
-    ToolChoice, ToolFunction, Usage,
+    AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
+    GenerateResponse, GenerateStream, GoogleOptions, Headers, Message, MessageContent,
+    OpenAIOptions, ProviderOptions, ReasoningEffort, ReasoningSummary, ResponseContent, Role,
+    StreamEvent, ThinkingOptions, Tool, ToolCall, ToolChoice, ToolFunction, Usage,
 };
 
 /// Prelude module for convenient imports

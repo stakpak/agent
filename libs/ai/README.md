@@ -196,6 +196,66 @@ for model in ["gpt-5", "claude-sonnet-4-5-20250929", "gemini-2.5-flash"] {
 }
 ```
 
+### Provider Options (Reasoning/Thinking)
+
+Provider-specific options follow the Vercel AI SDK pattern using an enum:
+
+```rust
+use stakai::{
+    Inference, GenerateRequest, Message,
+    ProviderOptions, AnthropicOptions, ThinkingOptions,
+};
+
+let client = Inference::new();
+
+// Anthropic extended thinking
+let request = GenerateRequest::new(
+    "anthropic:claude-opus-4-5-20250514",
+    vec![Message::user("Solve this complex problem...")]
+)
+.with_provider_options(ProviderOptions::Anthropic(AnthropicOptions {
+    thinking: Some(ThinkingOptions::new(12000)),
+    effort: None,
+}));
+
+let response = client.generate(&request).await?;
+
+// Access reasoning output
+if let Some(reasoning) = response.reasoning() {
+    println!("Reasoning: {}", reasoning);
+}
+println!("Response: {}", response.text());
+```
+
+For OpenAI reasoning models:
+
+```rust
+use stakai::{ProviderOptions, OpenAIOptions, ReasoningEffort};
+
+let request = GenerateRequest::new(
+    "openai:o3",
+    vec![Message::user("Complex reasoning task...")]
+)
+.with_provider_options(ProviderOptions::OpenAI(OpenAIOptions {
+    reasoning_effort: Some(ReasoningEffort::High),
+    ..Default::default()
+}));
+```
+
+For streaming, reasoning is delivered via `ReasoningDelta` events:
+
+```rust
+while let Some(event) = stream.next().await {
+    match event? {
+        StreamEvent::TextDelta { delta, .. } => print!("{}", delta),
+        StreamEvent::ReasoningDelta { delta, .. } => {
+            println!("[Reasoning: {}]", delta);
+        }
+        _ => {}
+    }
+}
+```
+
 ### Run Examples
 
 ```bash
@@ -238,7 +298,8 @@ Client API → Provider Registry → Provider Trait → OpenAI/Anthropic/etc.
 - [x] Streaming support for all providers
 - [x] Tool/function calling for all providers
 - [x] Multi-modal support (vision/images)
-- [x] Extended thinking support (Anthropic)
+- [x] Extended thinking/reasoning support (Anthropic)
+- [x] Provider-specific options (Vercel AI SDK pattern)
 - [x] Custom headers support
 - [x] Auto-registration from environment
 - [x] Unified error handling
@@ -246,6 +307,8 @@ Client API → Provider Registry → Provider Trait → OpenAI/Anthropic/etc.
 
 ### Planned 📋
 
+- [ ] OpenAI reasoning effort support (o1/o3/o4 models)
+- [ ] Gemini thinking config support
 - [ ] Embeddings API
 - [ ] Rate limiting & retries
 - [ ] Response caching
