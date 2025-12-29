@@ -6,3 +6,6 @@
 
 #[cfg(test)]
 mod openai;
+
+#[cfg(test)]
+mod anthropic;

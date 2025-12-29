@@ -16,7 +16,7 @@ impl GeminiConfig {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta/".to_string(),
         }
     }
 
@@ -92,7 +92,7 @@ pub struct GeminiInlineData {
 }
 
 /// Gemini generation configuration
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiGenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,7 +148,7 @@ pub struct GeminiGenerationConfig {
 }
 
 /// Gemini thinking configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiThinkingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,7 +159,7 @@ pub struct GeminiThinkingConfig {
 }
 
 /// Gemini speech configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiSpeechConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -167,7 +167,7 @@ pub struct GeminiSpeechConfig {
 }
 
 /// Gemini voice configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiVoiceConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,7 +175,7 @@ pub struct GeminiVoiceConfig {
 }
 
 /// Gemini prebuilt voice configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiPrebuiltVoiceConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
