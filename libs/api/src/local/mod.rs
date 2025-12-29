@@ -18,8 +18,9 @@ use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
-    OpenAIModel, Tool,
+    OpenAIModel, Role, Tool,
 };
+use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
     LLMStreamInput, chat, chat_stream,
@@ -46,6 +47,7 @@ pub struct LocalClient {
     pub gemini_config: Option<GeminiConfig>,
     pub model_options: ModelOptions,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+    _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,7 +62,10 @@ pub struct ModelSet {
     pub smart_model: LLMModel,
     pub eco_model: LLMModel,
     pub recovery_model: LLMModel,
+    pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
+    pub _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
 }
+
 impl ModelSet {
     fn get_model(&self, agent_model: &AgentModel) -> LLMModel {
         match agent_model {
@@ -70,6 +75,7 @@ impl ModelSet {
         }
     }
 }
+
 impl From<ModelOptions> for ModelSet {
     fn from(value: ModelOptions) -> Self {
         let smart_model = value
@@ -86,6 +92,8 @@ impl From<ModelOptions> for ModelSet {
             smart_model,
             eco_model,
             recovery_model,
+            hook_registry: None,
+            _search_services_orchestrator: None,
         }
     }
 }
@@ -179,6 +187,7 @@ impl LocalClient {
             openai_config: config.openai_config,
             model_options,
             hook_registry: Some(Arc::new(hook_registry)),
+            _search_services_orchestrator: Some(Arc::new(SearchServicesOrchestrator)),
         })
     }
 }
@@ -493,9 +502,115 @@ impl AgentProvider for LocalClient {
         Ok(())
     }
 
-    async fn search_docs(&self, _input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
-        // TODO: Implement search docs
-        Ok(Vec::new())
+    async fn search_docs(&self, input: &SearchDocsRequest) -> Result<Vec<Content>, String> {
+        let config = SearchServicesOrchestrator::start()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // SECURITY TODO:
+        // This uses plain-text, unauthenticated HTTP over localhost.
+        // While acceptable for local development, this is an injection
+        //
+        // Mitigations to consider:
+        // - Add mutual authentication (e.g., token)
+        // - Validate the expected service identity
+
+        let api_url = format!("http://localhost:{}", config.api_port);
+        let search_client = SearchClient::new(api_url);
+
+        let initial_query = if let Some(exclude) = &input.exclude_keywords {
+            format!("{} -{}", input.keywords, exclude)
+        } else {
+            input.keywords.clone()
+        };
+
+        let llm_config = self.get_llm_config();
+        let search_model = get_search_model(
+            &llm_config,
+            self.model_options.eco_model.clone(),
+            self.model_options.smart_model.clone(),
+        );
+
+        let analysis = analyze_search_query(&llm_config, &search_model, &initial_query).await?;
+        let required_documentation = analysis.required_documentation;
+        let mut current_query = analysis.reformulated_query;
+        let mut previous_queries = Vec::new();
+        let mut final_valid_docs = Vec::new();
+        let mut accumulated_needed_urls = Vec::new();
+
+        const MAX_ITERATIONS: usize = 3;
+
+        for _iteration in 0..MAX_ITERATIONS {
+            previous_queries.push(current_query.clone());
+
+            let search_results = search_client
+                .search_and_scrape(current_query.clone(), None)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if search_results.is_empty() {
+                break;
+            }
+
+            let validation_result = validate_search_docs(
+                &llm_config,
+                &search_model,
+                &search_results,
+                &current_query,
+                &required_documentation,
+                &previous_queries,
+                &accumulated_needed_urls,
+            )
+            .await?;
+
+            for url in &validation_result.needed_urls {
+                if !accumulated_needed_urls.contains(url) {
+                    accumulated_needed_urls.push(url.clone());
+                }
+            }
+
+            for doc in validation_result.valid_docs.into_iter() {
+                let is_duplicate = final_valid_docs
+                    .iter()
+                    .any(|existing_doc: &ScrapedContent| existing_doc.url == doc.url);
+
+                if !is_duplicate {
+                    final_valid_docs.push(doc);
+                }
+            }
+
+            if validation_result.is_satisfied {
+                break;
+            }
+
+            if let Some(new_query) = validation_result.new_query {
+                if new_query != current_query && !previous_queries.contains(&new_query) {
+                    current_query = new_query;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if final_valid_docs.is_empty() {
+            return Ok(vec![Content::text("No results found".to_string())]);
+        }
+
+        let contents: Vec<Content> = final_valid_docs
+            .into_iter()
+            .map(|result| {
+                Content::text(format!(
+                    "Title: {}\nURL: {}\nContent: {}",
+                    result.title.unwrap_or_default(),
+                    result.url,
+                    result.content.unwrap_or_default(),
+                ))
+            })
+            .collect();
+
+        Ok(contents)
     }
 
     async fn search_memory(&self, _input: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
@@ -753,5 +868,355 @@ impl LocalClient {
         let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
+    }
+}
+
+async fn analyze_search_query(
+    llm_config: &LLMProviderConfig,
+    model: &LLMModel,
+    query: &str,
+) -> Result<AnalysisResult, String> {
+    let system_prompt = r#"You are an expert search query analyzer specializing in technical documentation retrieval.
+
+## Your Task
+
+Analyze the user's search query to:
+1. Identify the specific types of documentation needed
+2. Reformulate the query for optimal search engine results
+
+## Guidelines for Required Documentation
+
+Identify specific documentation types such as:
+- API references and specifications
+- Installation/setup guides
+- Configuration documentation
+- Tutorials and getting started guides
+- Troubleshooting guides
+- Architecture/design documents
+- CLI/command references
+- SDK/library documentation
+
+## Guidelines for Query Reformulation
+
+Create an optimized search query that:
+- Uses specific technical terminology
+- Includes relevant keywords (e.g., "documentation", "guide", "API")
+- Removes ambiguous or filler words
+- Targets authoritative sources when possible
+- Is concise but comprehensive (5-10 words ideal)
+
+## Response Format
+
+Respond ONLY with valid XML in this exact structure:
+
+<analysis>
+  <required_documentation>
+    <item>specific documentation type needed</item>
+  </required_documentation>
+  <reformulated_query>optimized search query string</reformulated_query>
+</analysis>"#;
+
+    let user_prompt = format!(
+        r#"<user_query>{}</user_query>
+
+Analyze this query and provide the required documentation types and an optimized search query."#,
+        query
+    );
+
+    let response = chat(
+        llm_config,
+        LLMInput {
+            model: model.clone(),
+            messages: vec![
+                LLMMessage {
+                    role: Role::System.to_string(),
+                    content: LLMMessageContent::String(system_prompt.to_string()),
+                },
+                LLMMessage {
+                    role: Role::User.to_string(),
+                    content: LLMMessageContent::String(user_prompt.to_string()),
+                },
+            ],
+            max_tokens: 2000,
+            tools: None,
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let content = response.choices[0].message.content.to_string();
+
+    parse_analysis_xml(&content)
+}
+
+fn parse_analysis_xml(xml: &str) -> Result<AnalysisResult, String> {
+    let extract_tag = |tag: &str| -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        xml.find(&start_tag).and_then(|start| {
+            let content_start = start + start_tag.len();
+            xml[content_start..]
+                .find(&end_tag)
+                .map(|end| xml[content_start..content_start + end].trim().to_string())
+        })
+    };
+
+    let extract_all_tags = |tag: &str| -> Vec<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        let mut results = Vec::new();
+        let mut search_start = 0;
+
+        while let Some(start) = xml[search_start..].find(&start_tag) {
+            let abs_start = search_start + start + start_tag.len();
+            if let Some(end) = xml[abs_start..].find(&end_tag) {
+                results.push(xml[abs_start..abs_start + end].trim().to_string());
+                search_start = abs_start + end + end_tag.len();
+            } else {
+                break;
+            }
+        }
+        results
+    };
+
+    let required_documentation = extract_all_tags("item");
+    let reformulated_query =
+        extract_tag("reformulated_query").ok_or("Failed to extract reformulated_query from XML")?;
+
+    Ok(AnalysisResult {
+        required_documentation,
+        reformulated_query,
+    })
+}
+
+async fn validate_search_docs(
+    llm_config: &LLMProviderConfig,
+    model: &LLMModel,
+    docs: &[ScrapedContent],
+    query: &str,
+    required_documentation: &[String],
+    previous_queries: &[String],
+    accumulated_needed_urls: &[String],
+) -> Result<ValidationResult, String> {
+    let docs_preview = docs
+        .iter()
+        .enumerate()
+        .take(10)
+        .map(|(i, r)| {
+            format!(
+                "<doc index=\"{}\">\n  <title>{}</title>\n  <url>{}</url>\n</doc>",
+                i + 1,
+                r.title.clone().unwrap_or_else(|| "Untitled".to_string()),
+                r.url
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let required_docs_formatted = required_documentation
+        .iter()
+        .map(|d| format!("  <item>{}</item>", d))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let previous_queries_formatted = previous_queries
+        .iter()
+        .map(|q| format!("  <query>{}</query>", q))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let accumulated_urls_formatted = accumulated_needed_urls
+        .iter()
+        .map(|u| format!("  <url>{}</url>", u))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system_prompt = r#"You are an expert search result validator. Your task is to evaluate whether search results adequately satisfy a documentation query.
+
+## Evaluation Criteria
+
+For each search result, assess:
+1. **Relevance**: Does the document directly address the required documentation topics?
+2. **Authority**: Is this an official source, documentation site, or authoritative reference?
+3. **Completeness**: Does it provide comprehensive information, not just passing mentions?
+4. **Freshness**: For technical docs, prefer current/maintained sources over outdated ones.
+
+## Decision Guidelines
+
+Mark results as SATISFIED when:
+- All required documentation topics have at least one authoritative source
+- The sources provide actionable, detailed information
+- No critical gaps remain in coverage
+
+Suggest a NEW QUERY when:
+- Key topics are missing from results
+- Results are too general or tangential
+- A more specific query would yield better results
+- Previous queries haven't addressed certain requirements
+
+## Response Format
+
+Respond ONLY with valid XML in this exact structure:
+
+<validation>
+  <is_satisfied>true or false</is_satisfied>
+  <valid_docs>
+    <doc><url>exact URL from results</url></doc>
+  </valid_docs>
+  <needed_urls>
+    <url>specific URL pattern or domain still needed</url>
+  </needed_urls>
+  <new_query>refined search query if not satisfied, omit if satisfied</new_query>
+  <reasoning>brief explanation of your assessment</reasoning>
+</validation>"#;
+
+    let user_prompt = format!(
+        r#"<search_context>
+  <original_query>{}</original_query>
+  <required_documentation>
+{}
+  </required_documentation>
+  <previous_queries>
+{}
+  </previous_queries>
+  <accumulated_needed_urls>
+{}
+  </accumulated_needed_urls>
+</search_context>
+
+<current_results>
+{}
+</current_results>
+
+Evaluate these search results against the requirements. Which documents are valid and relevant? Is the documentation requirement satisfied? If not, what specific query would help find missing information?"#,
+        query,
+        if required_docs_formatted.is_empty() {
+            "    <item>None specified</item>".to_string()
+        } else {
+            required_docs_formatted
+        },
+        if previous_queries_formatted.is_empty() {
+            "    <query>None</query>".to_string()
+        } else {
+            previous_queries_formatted
+        },
+        if accumulated_urls_formatted.is_empty() {
+            "    <url>None</url>".to_string()
+        } else {
+            accumulated_urls_formatted
+        },
+        docs_preview
+    );
+
+    let response = chat(
+        llm_config,
+        LLMInput {
+            model: model.clone(),
+            messages: vec![
+                LLMMessage {
+                    role: Role::System.to_string(),
+                    content: LLMMessageContent::String(system_prompt.to_string()),
+                },
+                LLMMessage {
+                    role: Role::User.to_string(),
+                    content: LLMMessageContent::String(user_prompt.to_string()),
+                },
+            ],
+            max_tokens: 4000,
+            tools: None,
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let content = response.choices[0].message.content.to_string();
+
+    let validation = parse_validation_xml(&content, docs)?;
+
+    Ok(validation)
+}
+
+fn parse_validation_xml(xml: &str, docs: &[ScrapedContent]) -> Result<ValidationResult, String> {
+    let extract_tag = |tag: &str| -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        xml.find(&start_tag).and_then(|start| {
+            let content_start = start + start_tag.len();
+            xml[content_start..]
+                .find(&end_tag)
+                .map(|end| xml[content_start..content_start + end].trim().to_string())
+        })
+    };
+
+    let extract_all_tags = |tag: &str| -> Vec<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        let mut results = Vec::new();
+        let mut search_start = 0;
+
+        while let Some(start) = xml[search_start..].find(&start_tag) {
+            let abs_start = search_start + start + start_tag.len();
+            if let Some(end) = xml[abs_start..].find(&end_tag) {
+                results.push(xml[abs_start..abs_start + end].trim().to_string());
+                search_start = abs_start + end + end_tag.len();
+            } else {
+                break;
+            }
+        }
+        results
+    };
+
+    let is_satisfied = extract_tag("is_satisfied")
+        .map(|s| s.to_lowercase() == "true")
+        .unwrap_or(false);
+
+    let valid_urls: Vec<String> = extract_all_tags("url")
+        .into_iter()
+        .filter(|url| docs.iter().any(|d| d.url == *url))
+        .collect();
+
+    let valid_docs: Vec<ScrapedContent> = valid_urls
+        .iter()
+        .filter_map(|url| docs.iter().find(|d| d.url == *url).cloned())
+        .collect();
+
+    let needed_urls: Vec<String> = extract_all_tags("url")
+        .into_iter()
+        .filter(|url| !docs.iter().any(|d| d.url == *url))
+        .collect();
+
+    let new_query = extract_tag("new_query").filter(|q| !q.is_empty() && q != "omit if satisfied");
+
+    Ok(ValidationResult {
+        is_satisfied,
+        valid_docs,
+        needed_urls,
+        new_query,
+    })
+}
+
+fn get_search_model(
+    llm_config: &LLMProviderConfig,
+    eco_model: Option<LLMModel>,
+    smart_model: Option<LLMModel>,
+) -> LLMModel {
+    let base_model = eco_model.or(smart_model);
+
+    match base_model {
+        Some(LLMModel::OpenAI(_)) => LLMModel::OpenAI(OpenAIModel::O4Mini),
+        Some(LLMModel::Anthropic(_)) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
+        Some(LLMModel::Gemini(_)) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
+        Some(LLMModel::Custom(model)) => LLMModel::Custom(model),
+        None => {
+            if llm_config.openai_config.is_some() {
+                LLMModel::OpenAI(OpenAIModel::O4Mini)
+            } else if llm_config.anthropic_config.is_some() {
+                LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+            } else if llm_config.gemini_config.is_some() {
+                LLMModel::Gemini(GeminiModel::Gemini3Flash)
+            } else {
+                LLMModel::OpenAI(OpenAIModel::O4Mini)
+            }
+        }
     }
 }
