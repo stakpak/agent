@@ -251,6 +251,7 @@ pub fn to_stakai_provider_options(
                 Some(ProviderOptions::OpenAI(OpenAIOptions {
                     reasoning_effort,
                     reasoning_summary: None,
+                    system_message_mode: None,
                     store: None,
                     user: None,
                 }))
@@ -290,6 +291,7 @@ pub fn to_stakai_provider_options(
                 Some(ProviderOptions::OpenAI(OpenAIOptions {
                     reasoning_effort,
                     reasoning_summary: None,
+                    system_message_mode: None,
                     store: None,
                     user: None,
                 }))

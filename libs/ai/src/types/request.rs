@@ -75,6 +75,13 @@ pub struct OpenAIOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_summary: Option<ReasoningSummary>,
 
+    /// Controls how system messages are handled.
+    /// - `system`: Pass as system-level instruction (default for non-reasoning models)
+    /// - `developer`: Convert to developer message (default for reasoning models like o1/o3/o4)
+    /// - `remove`: Remove system messages from the request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_message_mode: Option<SystemMessageMode>,
+
     /// Whether to store the generation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store: Option<bool>,
@@ -82,6 +89,18 @@ pub struct OpenAIOptions {
     /// User identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+}
+
+/// Controls how system messages are handled in OpenAI requests
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemMessageMode {
+    /// Pass the system message as a system-level instruction
+    System,
+    /// Convert to developer message (for reasoning models)
+    Developer,
+    /// Remove the system message from the request
+    Remove,
 }
 
 /// Reasoning effort level (shared across providers)

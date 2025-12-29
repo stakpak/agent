@@ -5,6 +5,15 @@ use crate::error::{Error, Result};
 use crate::types::*;
 use serde_json::json;
 
+/// Check if a model is a reasoning model (o1, o3, o4, gpt-5)
+fn is_reasoning_model(model: &str) -> bool {
+    let model_lower = model.to_lowercase();
+    model_lower.starts_with("o1")
+        || model_lower.starts_with("o3")
+        || model_lower.starts_with("o4")
+        || model_lower.starts_with("gpt-5")
+}
+
 /// Convert SDK request to OpenAI request
 pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionRequest {
     // Convert tools to OpenAI format
@@ -34,9 +43,36 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
         }),
     });
 
+    // Determine system message mode
+    // Default: for reasoning models, convert system to developer; otherwise keep as system
+    let system_message_mode = req
+        .provider_options
+        .as_ref()
+        .and_then(|opts| {
+            if let ProviderOptions::OpenAI(openai_opts) = opts {
+                openai_opts.system_message_mode
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            if is_reasoning_model(&req.model) {
+                SystemMessageMode::Developer
+            } else {
+                SystemMessageMode::System
+            }
+        });
+
+    // Convert messages with system message mode handling
+    let messages: Vec<ChatMessage> = req
+        .messages
+        .iter()
+        .filter_map(|msg| to_openai_message_with_mode(msg, system_message_mode))
+        .collect();
+
     ChatCompletionRequest {
         model: req.model.clone(),
-        messages: req.messages.iter().map(to_openai_message).collect(),
+        messages,
         temperature: req.options.temperature,
         max_tokens: req.options.max_tokens,
         top_p: req.options.top_p,
@@ -47,10 +83,16 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
     }
 }
 
-/// Convert SDK message to OpenAI message
-fn to_openai_message(msg: &Message) -> ChatMessage {
+/// Convert SDK message to OpenAI message with system message mode handling
+fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option<ChatMessage> {
     let role = match msg.role {
-        Role::System => "system",
+        Role::System => {
+            match mode {
+                SystemMessageMode::System => "system",
+                SystemMessageMode::Developer => "developer",
+                SystemMessageMode::Remove => return None, // Skip system messages
+            }
+        }
         Role::User => "user",
         Role::Assistant => "assistant",
         Role::Tool => "tool",
@@ -137,13 +179,13 @@ fn to_openai_message(msg: &Message) -> ChatMessage {
         ))
     };
 
-    ChatMessage {
+    Some(ChatMessage {
         role: role.to_string(),
         content,
         name: msg.name.clone(),
         tool_calls,
         tool_call_id,
-    }
+    })
 }
 
 /// Convert OpenAI response to SDK response
