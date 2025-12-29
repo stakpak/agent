@@ -63,6 +63,11 @@ pub async fn run_tui(
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste,
+    )?;
+
+    #[cfg(unix)]
+    execute!(
+        std::io::stdout(),
         PushKeyboardEnhancementFlags(
             KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                 | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
@@ -283,8 +288,10 @@ pub async fn run_tui(
         crossterm::terminal::LeaveAlternateScreen,
         DisableBracketedPaste,
         DisableMouseCapture,
-        PopKeyboardEnhancementFlags
     )?;
+
+    #[cfg(unix)]
+    execute!(std::io::stdout(), PopKeyboardEnhancementFlags)?;
     Ok(())
 }
 
