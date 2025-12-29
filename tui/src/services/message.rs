@@ -715,8 +715,8 @@ fn get_wrapped_message_lines_internal(
             }
             MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
                 let full_command = extract_full_command_arguments(tool_call);
-                let rendered_lines = if (tool_call.function.name == "str_replace"
-                    || tool_call.function.name == "create")
+                let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+                let rendered_lines = if (tool_name == "str_replace" || tool_name == "create")
                     && !render_file_diff(tool_call, width).is_empty()
                 {
                     render_file_diff(tool_call, width)
@@ -729,7 +729,7 @@ fn get_wrapped_message_lines_internal(
             }
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
-                if tool_call.function.name == "str_replace" {
+                if crate::utils::strip_tool_name(&tool_call.function.name) == "str_replace" {
                     let rendered_lines = render_file_diff_full(tool_call, width, Some(true));
                     if !rendered_lines.is_empty() {
                         let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
@@ -1063,7 +1063,7 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
 
 // Helper function to get command name for the outside title
 pub fn get_command_type_name(tool_call: &ToolCall) -> String {
-    match tool_call.function.name.as_str() {
+    match crate::utils::strip_tool_name(&tool_call.function.name) {
         "create_file" => "Create file".to_string(),
         "edit_file" => "Edit file".to_string(),
         "run_command" => "Run command".to_string(),
@@ -1073,9 +1073,7 @@ pub fn get_command_type_name(tool_call: &ToolCall) -> String {
         "search_files" => "Search files".to_string(),
         _ => {
             // Convert function name to title case
-            tool_call
-                .function
-                .name
+            crate::utils::strip_tool_name(&tool_call.function.name)
                 .replace("_", " ")
                 .split_whitespace()
                 .map(|word| {

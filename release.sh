@@ -28,7 +28,7 @@ print_error() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [patch|minor|major|<specific_version>]"
+    echo "Usage: $0 [patch|minor|major|<specific_version>] [--beta]"
     echo ""
     echo "Examples:"
     echo "  $0 patch          # Bump patch version (0.1.100 -> 0.1.101)"
@@ -36,6 +36,13 @@ show_usage() {
     echo "  $0 major          # Bump major version (0.1.100 -> 1.0.0)"
     echo "  $0 1.2.3          # Set specific version to 1.2.3"
     echo "  $0                # Interactive mode - will prompt for version type"
+    echo ""
+    echo "Beta releases:"
+    echo "  $0 patch --beta   # Create beta release (0.1.100 -> 0.1.101-beta.1)"
+    echo "  $0 --beta         # Interactive mode with beta suffix"
+    echo ""
+    echo "Note: Beta releases create tags like v0.1.101-beta.1 and push to"
+    echo "      a separate branch in homebrew-stakpak for testing."
 }
 
 # Function to get current version from Cargo.toml
@@ -44,10 +51,11 @@ get_current_version() {
 }
 
 # Function to validate semantic version format
+# Accepts: X.Y.Z or X.Y.Z-beta.N
 validate_version() {
     local version=$1
-    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        print_error "Invalid version format: $version. Expected format: X.Y.Z"
+    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+        print_error "Invalid version format: $version. Expected format: X.Y.Z or X.Y.Z-beta.N"
         return 1
     fi
     return 0
@@ -90,11 +98,18 @@ update_cargo_version() {
     local new_version=$1
     local temp_file=$(mktemp)
     
-    # Update the version line in Cargo.toml
-    sed "s/^version = \".*\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
+    # 1. Update [workspace.package] version
+    # This updates the first occurrence of version = "..." which is workspace.package
+    sed "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
     mv "$temp_file" Cargo.toml
     
-    print_success "Updated Cargo.toml version to $new_version"
+    # 2. Update internal dependencies versions in [workspace.dependencies]
+    # We look for lines starting with 'stakpak-' or 'popup-widget' and update their version field
+    local temp_file2=$(mktemp)
+    sed -E "/^(stakpak-|popup-widget)/s/version = \"[^\"]+\"/version = \"$new_version\"/" Cargo.toml > "$temp_file2"
+    mv "$temp_file2" Cargo.toml
+    
+    print_success "Updated workspace version and internal dependency versions to $new_version"
     
     # Update Cargo.lock to reflect the new version
     print_info "Updating Cargo.lock..."
@@ -157,9 +172,34 @@ create_and_push_tag() {
     print_success "Tag $tag created and pushed"
 }
 
+# Function to get next beta number for a version
+get_next_beta_number() {
+    local base_version=$1
+    local latest_beta=$(git tag -l "v${base_version}-beta.*" | sort -V | tail -1)
+    
+    if [[ -z "$latest_beta" ]]; then
+        echo "1"
+    else
+        local current_beta_num=$(echo "$latest_beta" | sed -E 's/.*-beta\.([0-9]+)/\1/')
+        echo $((current_beta_num + 1))
+    fi
+}
+
 # Main script logic
 main() {
     print_info "Starting release process..."
+    
+    # Parse arguments for --beta flag
+    local is_beta=false
+    local version_input=""
+    
+    for arg in "$@"; do
+        if [[ "$arg" == "--beta" ]]; then
+            is_beta=true
+        elif [[ -z "$version_input" ]]; then
+            version_input="$arg"
+        fi
+    done
     
     # Check if we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -173,35 +213,39 @@ main() {
         exit 1
     fi
     
-    # Get current version
+    # Get current version (strip any existing beta suffix for base version)
     current_version=$(get_current_version)
+    base_version=$(echo "$current_version" | sed -E 's/-beta\.[0-9]+$//')
+    
     if [[ -z "$current_version" ]]; then
         print_error "Could not find version in Cargo.toml"
         exit 1
     fi
     
     print_info "Current version: $current_version"
+    if [[ "$is_beta" == true ]]; then
+        print_info "Beta release mode enabled"
+    fi
     
     # Determine new version
     local new_version
-    local version_input="$1"
     
     if [[ -z "$version_input" ]]; then
         # Interactive mode
         echo ""
         echo "Select version bump type:"
-        echo "1) patch (${current_version} -> $(bump_version "$current_version" "patch"))"
-        echo "2) minor (${current_version} -> $(bump_version "$current_version" "minor"))"
-        echo "3) major (${current_version} -> $(bump_version "$current_version" "major"))"
+        echo "1) patch (${base_version} -> $(bump_version "$base_version" "patch"))"
+        echo "2) minor (${base_version} -> $(bump_version "$base_version" "minor"))"
+        echo "3) major (${base_version} -> $(bump_version "$base_version" "major"))"
         echo "4) custom (specify exact version)"
         echo ""
         read -p "Enter choice (1-4): " -n 1 -r choice
         echo ""
         
         case $choice in
-            1) new_version=$(bump_version "$current_version" "patch") ;;
-            2) new_version=$(bump_version "$current_version" "minor") ;;
-            3) new_version=$(bump_version "$current_version" "major") ;;
+            1) new_version=$(bump_version "$base_version" "patch") ;;
+            2) new_version=$(bump_version "$base_version" "minor") ;;
+            3) new_version=$(bump_version "$base_version" "major") ;;
             4) 
                 read -p "Enter custom version (X.Y.Z format): " custom_version
                 if validate_version "$custom_version"; then
@@ -217,7 +261,7 @@ main() {
         esac
     elif [[ "$version_input" == "patch" || "$version_input" == "minor" || "$version_input" == "major" ]]; then
         # Bump version based on type
-        new_version=$(bump_version "$current_version" "$version_input")
+        new_version=$(bump_version "$base_version" "$version_input")
     elif validate_version "$version_input"; then
         # Specific version provided
         new_version="$version_input"
@@ -226,11 +270,22 @@ main() {
         exit 1
     fi
     
+    # Add beta suffix if --beta flag is set
+    if [[ "$is_beta" == true ]]; then
+        beta_num=$(get_next_beta_number "$new_version")
+        new_version="${new_version}-beta.${beta_num}"
+        print_info "Beta version: $new_version"
+    fi
+    
     print_info "New version will be: $new_version"
     
     # Confirm the release
     echo ""
-    read -p "Proceed with release $current_version -> $new_version? (y/N): " -n 1 -r
+    if [[ "$is_beta" == true ]]; then
+        read -p "Proceed with BETA release $current_version -> $new_version? (y/N): " -n 1 -r
+    else
+        read -p "Proceed with release $current_version -> $new_version? (y/N): " -n 1 -r
+    fi
     echo ""
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         print_info "Release cancelled."
@@ -249,7 +304,14 @@ main() {
     # Create and push tag
     create_and_push_tag "$new_version"
     
-    print_success "Release $new_version completed successfully! 🎉"
+    if [[ "$is_beta" == true ]]; then
+        print_success "Beta release $new_version completed successfully! 🧪"
+        print_info "Install beta from GitHub release:"
+        print_info "  curl -L https://github.com/stakpak/cli/releases/download/v${new_version}/stakpak-darwin-aarch64.tar.gz | tar xz"
+        print_info "  sudo mv stakpak /usr/local/bin/"
+    else
+        print_success "Release $new_version completed successfully! 🎉"
+    fi
     print_info "You can now check your CI/CD pipeline or manually trigger any additional release processes."
 }
 

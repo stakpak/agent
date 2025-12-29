@@ -1,6 +1,10 @@
 use anyhow::Result;
-use rmcp::transport::streamable_http_server::{
-    StreamableHttpService, session::local::LocalSessionManager,
+use rmcp::{
+    ServiceExt,
+    transport::{
+        stdio,
+        streamable_http_server::{StreamableHttpService, session::local::LocalSessionManager},
+    },
 };
 use std::hash::Hash;
 use std::sync::Arc;
@@ -11,13 +15,46 @@ use tracing::error;
 use stakpak_api::AgentProvider;
 use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
-use stakpak_shared::task_manager::TaskManager;
+use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
 pub mod integrations;
 pub mod local_tools;
 pub mod remote_tools;
 pub mod subagent_tools;
 pub mod tool_container;
+
+pub mod tool_names {
+    pub const VIEW: &str = "view";
+    pub const CREATE: &str = "create";
+    pub const STR_REPLACE: &str = "str_replace";
+    pub const CREATE_FILE: &str = "create_file";
+    pub const EDIT_FILE: &str = "edit_file";
+    pub const RUN_COMMAND: &str = "run_command";
+    pub const SEARCH_DOCS: &str = "search_docs";
+    pub const READ_RULEBOOK: &str = "read_rulebook";
+    pub const LOCAL_CODE_SEARCH: &str = "local_code_search";
+    pub const DELETE_FILE: &str = "delete_file";
+
+    const FS_FILE_READ: &[&str] = &[VIEW];
+    const FS_FILE_WRITE: &[&str] = &[CREATE, CREATE_FILE, STR_REPLACE, EDIT_FILE];
+    pub const AUTO_APPROVED: &[&str] = &[VIEW, SEARCH_DOCS, READ_RULEBOOK, LOCAL_CODE_SEARCH];
+
+    pub fn is_fs_file_read(name: &str) -> bool {
+        FS_FILE_READ.contains(&name)
+    }
+
+    pub fn is_fs_file_write(name: &str) -> bool {
+        FS_FILE_WRITE.contains(&name)
+    }
+
+    pub fn is_fs_tool(name: &str) -> bool {
+        is_fs_file_read(name) || is_fs_file_write(name)
+    }
+
+    pub fn is_auto_approved(name: &str) -> bool {
+        AUTO_APPROVED.contains(&name)
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct EnabledToolsConfig {
@@ -184,23 +221,10 @@ async fn create_shutdown_handler(
     }
 }
 
-/// Internal helper function that contains the common server initialization logic
-async fn start_server_internal(
-    config: MCPServerConfig,
-    tcp_listener: TcpListener,
-    shutdown_rx: Option<Receiver<()>>,
-) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
-
-    // Create and start TaskManager
-    let task_manager = TaskManager::new();
-    let task_manager_handle = task_manager.handle();
-
-    // Spawn the task manager to run in background_manager_handle_for_
-    tokio::spawn(async move {
-        task_manager.run().await;
-    });
-
+fn build_tool_container(
+    config: &MCPServerConfig,
+    task_manager_handle: Arc<TaskManagerHandle>,
+) -> Result<ToolContainer> {
     let tool_container = match config.tool_mode {
         ToolMode::LocalOnly => ToolContainer::new(
             None,
@@ -255,6 +279,28 @@ async fn start_server_internal(
         anyhow::anyhow!("Failed to create tool container: {}", e)
     })?;
 
+    Ok(tool_container)
+}
+
+/// Internal helper function that contains the common server initialization logic
+async fn start_server_internal(
+    config: MCPServerConfig,
+    tcp_listener: TcpListener,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
+
+    // Create and start TaskManager
+    let task_manager = TaskManager::new();
+    let task_manager_handle = task_manager.handle();
+
+    // Spawn the task manager to run in background_manager_handle_for_
+    tokio::spawn(async move {
+        task_manager.run().await;
+    });
+
+    let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
+
     let service = StreamableHttpService::new(
         move || Ok(tool_container.to_owned()),
         LocalSessionManager::default().into(),
@@ -303,4 +349,52 @@ pub async fn start_server(
         TcpListener::bind(config.bind_address.clone()).await?
     };
     start_server_internal(config, tcp_listener, shutdown_rx).await
+}
+
+/// Start the MCP server over stdio transport.
+pub async fn start_server_stdio(
+    config: MCPServerConfig,
+    shutdown_rx: Option<Receiver<()>>,
+) -> Result<()> {
+    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
+
+    // Create and start TaskManager
+    let task_manager = TaskManager::new();
+    let task_manager_handle = task_manager.handle();
+
+    tokio::spawn(async move {
+        task_manager.run().await;
+    });
+
+    let tool_container = build_tool_container(&config, task_manager_handle.clone())?;
+
+    let running_service = tool_container.serve(stdio()).await.map_err(|e| {
+        error!("Failed to start stdio MCP server: {}", e);
+        anyhow::anyhow!("Failed to start stdio MCP server: {}", e)
+    })?;
+
+    let cancellation_token = running_service.cancellation_token();
+    let shutdown_task_manager = task_manager_handle.clone();
+    let wait_handle = tokio::spawn(async move { running_service.waiting().await });
+
+    // Graceful shutdown: on signal or external shutdown, cancel the running service.
+    tokio::spawn(async move {
+        create_shutdown_handler(shutdown_rx, Some(shutdown_task_manager)).await;
+        cancellation_token.cancel();
+    });
+
+    let wait_result = match wait_handle.await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(join_err)) => Err(anyhow::anyhow!(join_err)),
+        Err(join_err) => Err(anyhow::anyhow!(join_err)),
+    };
+
+    if let Err(e) = task_manager_handle.shutdown().await {
+        error!(
+            "Failed to shutdown task manager after stdio server exit: {}",
+            e
+        );
+    }
+
+    wait_result
 }

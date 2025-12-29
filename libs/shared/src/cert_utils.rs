@@ -13,6 +13,16 @@ pub struct CertificateChain {
     pub client_cert: rcgen::Certificate,
 }
 
+impl std::fmt::Debug for CertificateChain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertificateChain")
+            .field("ca_cert", &"<certificate>")
+            .field("server_cert", &"<certificate>")
+            .field("client_cert", &"<certificate>")
+            .finish()
+    }
+}
+
 impl CertificateChain {
     pub fn generate() -> Result<Self> {
         // Generate CA certificate

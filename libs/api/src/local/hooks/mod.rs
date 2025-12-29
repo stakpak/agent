@@ -1,1 +1,4 @@
-pub mod scratchpad_context_hook;
+#![allow(dead_code)]
+
+pub mod file_scratchpad_context;
+pub mod inline_scratchpad_context;
