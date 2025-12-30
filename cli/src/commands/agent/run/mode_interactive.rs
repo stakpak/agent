@@ -95,10 +95,10 @@ pub async fn run_interactive(
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
-        let _enabled_tools = config.enabled_tools.clone();
+        let enabled_tools = config.enabled_tools.clone();
         let redact_secrets = config.redact_secrets;
         let privacy_mode = config.privacy_mode;
-        let _enable_mtls = config.enable_mtls;
+        let enable_mtls = config.enable_mtls;
         let is_git_repo = config.is_git_repo;
         let study_mode = config.study_mode;
 
@@ -183,9 +183,16 @@ pub async fn run_interactive(
                 }
             };
 
+            let mcp_init_config = mcp_init::McpInitConfig {
+                redact_secrets,
+                privacy_mode,
+                enabled_tools: enabled_tools.clone(),
+                enable_mtls,
+            };
             let (mcp_client, mcp_tools, _tools, _server_shutdown_tx, _proxy_shutdown_tx) =
                 match mcp_init::initialize_mcp_server_and_tools(
                     &ctx_clone,
+                    mcp_init_config,
                     Some(mcp_progress_tx.clone()),
                 )
                 .await

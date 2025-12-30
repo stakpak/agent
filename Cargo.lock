@@ -5448,7 +5448,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-api"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5519,7 +5519,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-client"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "futures",
@@ -5534,7 +5534,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-proxy"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -5551,7 +5551,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-mcp-server"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "axum 0.8.7",
@@ -5577,7 +5577,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-popup-widget"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "crossterm 0.29.0",
  "ratatui",
@@ -5585,7 +5585,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-shared"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5626,7 +5626,7 @@ dependencies = [
 
 [[package]]
 name = "stakpak-tui"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "ansi-to-tui",
  "arboard",
