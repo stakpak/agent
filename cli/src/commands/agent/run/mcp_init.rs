@@ -23,6 +23,30 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 
+/// Configuration options for MCP initialization
+#[allow(dead_code)]
+pub struct McpInitConfig {
+    /// Whether to redact secrets in tool responses
+    pub redact_secrets: bool,
+    /// Whether to enable privacy mode (redact IPs, account IDs, etc.)
+    pub privacy_mode: bool,
+    /// Configuration for which tools are enabled
+    pub enabled_tools: EnabledToolsConfig,
+    /// Whether to enable mTLS for secure communication
+    pub enable_mtls: bool,
+}
+
+impl Default for McpInitConfig {
+    fn default() -> Self {
+        Self {
+            redact_secrets: true,
+            privacy_mode: false,
+            enabled_tools: EnabledToolsConfig { slack: false },
+            enable_mtls: true,
+        }
+    }
+}
+
 /// Result of MCP initialization containing all necessary handles and tools
 pub struct McpInitResult {
     /// The MCP client connected to the proxy
@@ -89,22 +113,27 @@ impl ServerBinding {
 
 /// Start the local MCP server with tools
 async fn start_mcp_server(
-    config: &AppConfig,
+    app_config: &AppConfig,
+    mcp_config: &McpInitConfig,
     binding: ServerBinding,
     cert_chain: Arc<Option<CertificateChain>>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), String> {
-    let api_client = get_client(config).await?;
+    let api_client = get_client(app_config).await?;
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
     let bind_address = binding.address.clone();
+    let redact_secrets = mcp_config.redact_secrets;
+    let privacy_mode = mcp_config.privacy_mode;
+    let enabled_tools = mcp_config.enabled_tools.clone();
+
     tokio::spawn(async move {
         let server_config = MCPServerConfig {
             client: Some(api_client),
             bind_address,
-            redact_secrets: true,
-            privacy_mode: false,
-            enabled_tools: EnabledToolsConfig { slack: false },
+            redact_secrets,
+            privacy_mode,
+            enabled_tools,
             tool_mode: ToolMode::Combined,
             subagent_configs: None,
             certificate_chain: cert_chain,
@@ -164,11 +193,15 @@ fn build_proxy_config(
 /// Start the proxy server
 async fn start_proxy(
     pool_config: ClientPoolConfig,
+    mcp_config: &McpInitConfig,
     binding: ServerBinding,
     cert_chain: Arc<CertificateChain>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), String> {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+
+    let redact_secrets = mcp_config.redact_secrets;
+    let privacy_mode = mcp_config.privacy_mode;
 
     tokio::spawn(async move {
         // Signal that we're about to start
@@ -178,8 +211,8 @@ async fn start_proxy(
             pool_config,
             binding.listener,
             cert_chain,
-            true,  // redact_secrets
-            false, // privacy_mode
+            redact_secrets,
+            privacy_mode,
             Some(shutdown_rx),
         )
         .await
@@ -243,7 +276,8 @@ async fn connect_to_proxy(
 ///
 /// Returns the client, tools, and shutdown handles for graceful cleanup.
 pub async fn initialize_mcp_server_and_tools(
-    config: &AppConfig,
+    app_config: &AppConfig,
+    mcp_config: McpInitConfig,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<McpInitResult, String> {
     // 1. Generate certificate chains
@@ -262,7 +296,8 @@ pub async fn initialize_mcp_server_and_tools(
 
     // 4. Start local MCP server
     start_mcp_server(
-        config,
+        app_config,
+        &mcp_config,
         server_binding,
         certs.server_chain.clone(),
         server_shutdown_rx,
@@ -273,6 +308,7 @@ pub async fn initialize_mcp_server_and_tools(
     let pool_config = build_proxy_config(local_mcp_server_url, certs.server_chain);
     start_proxy(
         pool_config,
+        &mcp_config,
         proxy_binding,
         certs.proxy_chain.clone(),
         proxy_shutdown_rx,
@@ -287,7 +323,7 @@ pub async fn initialize_mcp_server_and_tools(
         .await
         .map_err(|e| format!("Failed to get tools: {}", e))?;
 
-    let tools = convert_tools_with_filter(&mcp_tools, config.allowed_tools.as_ref());
+    let tools = convert_tools_with_filter(&mcp_tools, app_config.allowed_tools.as_ref());
 
     Ok(McpInitResult {
         client: mcp_client,
