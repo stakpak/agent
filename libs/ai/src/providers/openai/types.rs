@@ -115,7 +115,7 @@ pub struct ChatChoice {
 }
 
 /// OpenAI usage statistics
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct ChatUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,

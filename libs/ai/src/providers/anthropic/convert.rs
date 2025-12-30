@@ -1,7 +1,8 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicMessage, AnthropicRequest, AnthropicResponse, ThinkingConfig as AnthropicThinking,
+    AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
+    AnthropicResponse, AnthropicSource, AnthropicThinkingConfig as AnthropicThinking,
     infer_max_tokens,
 };
 use crate::error::{Error, Result};
@@ -9,7 +10,7 @@ use crate::types::{
     ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ResponseContent, Role,
     Usage,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// Convert unified request to Anthropic request
 pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<AnthropicRequest> {
@@ -24,7 +25,9 @@ pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<Anthr
     let system = if system_messages.is_empty() {
         None
     } else {
-        Some(system_messages.join("\n\n"))
+        Some(AnthropicMessageContent::String(
+            system_messages.join("\n\n"),
+        ))
     };
 
     // Convert non-system messages
@@ -84,6 +87,8 @@ pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<Anthr
         system,
         temperature: req.options.temperature,
         top_p: req.options.top_p,
+        top_k: None,
+        metadata: None,
         stop_sequences: req.options.stop_sequences.clone(),
         stream: if stream { Some(true) } else { None },
         thinking,
@@ -112,76 +117,19 @@ fn to_anthropic_message(msg: &Message) -> Result<AnthropicMessage> {
     // Convert content parts
     let parts = msg.parts();
     let content = if parts.len() == 1 {
-        // Single content - use simple string format
+        // Single content - try to use simple string format if text
         match &parts[0] {
-            ContentPart::Text { text } => Value::String(text.clone()),
-            ContentPart::Image { url, detail: _ } => {
-                // Anthropic uses structured content for images
-                json!([{
-                    "type": "image",
-                    "source": parse_image_source(url)?,
-                }])
-            }
-            ContentPart::ToolCall {
-                id,
-                name,
-                arguments,
-            } => {
-                // Tool call as structured content
-                json!([{
-                    "type": "tool_use",
-                    "id": id,
-                    "name": name,
-                    "input": arguments
-                }])
-            }
-            ContentPart::ToolResult {
-                tool_call_id,
-                content,
-            } => {
-                // Tool result as structured content
-                json!([{
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": content
-                }])
-            }
+            ContentPart::Text { text } => AnthropicMessageContent::String(text.clone()),
+            _ => AnthropicMessageContent::Blocks(vec![to_anthropic_content_part(&parts[0])?]),
         }
     } else {
         // Multiple content parts - use array format
-        let content_parts: Vec<Value> = parts
+        let content_parts = parts
             .iter()
-            .map(|part| match part {
-                ContentPart::Text { text } => Ok(json!({
-                    "type": "text",
-                    "text": text
-                })),
-                ContentPart::Image { url, detail: _ } => Ok(json!({
-                    "type": "image",
-                    "source": parse_image_source(url)?
-                })),
-                ContentPart::ToolCall {
-                    id,
-                    name,
-                    arguments,
-                } => Ok(json!({
-                    "type": "tool_use",
-                    "id": id,
-                    "name": name,
-                    "input": arguments
-                })),
-                ContentPart::ToolResult {
-                    tool_call_id,
-                    content,
-                } => Ok(json!({
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": content
-                })),
-            })
+            .map(to_anthropic_content_part)
             .collect::<Result<Vec<_>>>()?;
 
-        Value::Array(content_parts)
+        AnthropicMessageContent::Blocks(content_parts)
     };
 
     Ok(AnthropicMessage {
@@ -190,8 +138,34 @@ fn to_anthropic_message(msg: &Message) -> Result<AnthropicMessage> {
     })
 }
 
+fn to_anthropic_content_part(part: &ContentPart) -> Result<AnthropicContent> {
+    match part {
+        ContentPart::Text { text } => Ok(AnthropicContent::Text { text: text.clone() }),
+        ContentPart::Image { url, detail: _ } => Ok(AnthropicContent::Image {
+            source: parse_image_source(url)?,
+        }),
+        ContentPart::ToolCall {
+            id,
+            name,
+            arguments,
+        } => Ok(AnthropicContent::ToolUse {
+            id: id.clone(),
+            name: name.clone(),
+            input: arguments.clone(),
+        }),
+        ContentPart::ToolResult {
+            tool_call_id,
+            content,
+        } => Ok(AnthropicContent::ToolResult {
+            tool_use_id: tool_call_id.clone(),
+            content: Some(AnthropicMessageContent::String(content.to_string())),
+            is_error: None,
+        }),
+    }
+}
+
 /// Parse image URL to Anthropic image source format
-fn parse_image_source(url: &str) -> Result<Value> {
+fn parse_image_source(url: &str) -> Result<AnthropicSource> {
     if url.starts_with("data:") {
         // Data URL format: data:image/png;base64,iVBORw0KG...
         let parts: Vec<&str> = url.splitn(2, ',').collect();
@@ -204,11 +178,11 @@ fn parse_image_source(url: &str) -> Result<Value> {
             .and_then(|s| s.strip_suffix(";base64"))
             .ok_or_else(|| Error::invalid_response("Invalid data URL media type"))?;
 
-        Ok(json!({
-            "type": "base64",
-            "media_type": media_type,
-            "data": parts[1]
-        }))
+        Ok(AnthropicSource {
+            type_: "base64".to_string(),
+            media_type: media_type.to_string(),
+            data: parts[1].to_string(),
+        })
     } else {
         // URL format (Anthropic doesn't support direct URLs, would need to fetch)
         Err(Error::invalid_response(
@@ -224,20 +198,16 @@ pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateRespon
     let content: Vec<ResponseContent> = resp
         .content
         .iter()
-        .filter_map(|c| match c.type_.as_str() {
-            "text" => c
-                .text
-                .as_ref()
-                .map(|t| ResponseContent::Text { text: t.clone() }),
-            "thinking" => c.thinking.as_ref().map(|t| ResponseContent::Reasoning {
-                reasoning: t.clone(),
+        .filter_map(|c| match c {
+            AnthropicContent::Text { text } => Some(ResponseContent::Text { text: text.clone() }),
+            AnthropicContent::Thinking { thinking, .. } => Some(ResponseContent::Reasoning {
+                reasoning: thinking.clone(),
             }),
-            "tool_use" => {
-                // Anthropic tool call format
+            AnthropicContent::ToolUse { id, name, input } => {
                 Some(ResponseContent::ToolCall(ToolCall {
-                    id: c.id.clone().unwrap_or_default(),
-                    name: c.name.clone().unwrap_or_default(),
-                    arguments: c.input.clone().unwrap_or(json!({})),
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: input.clone(),
                 }))
             }
             _ => None,
@@ -301,8 +271,8 @@ mod tests {
         let data_url = "data:image/png;base64,iVBORw0KGgoAAAANS";
         let result = parse_image_source(data_url).unwrap();
 
-        assert_eq!(result["type"], "base64");
-        assert_eq!(result["media_type"], "image/png");
-        assert_eq!(result["data"], "iVBORw0KGgoAAAANS");
+        assert_eq!(result.type_, "base64");
+        assert_eq!(result.media_type, "image/png");
+        assert_eq!(result.data, "iVBORw0KGgoAAAANS");
     }
 }

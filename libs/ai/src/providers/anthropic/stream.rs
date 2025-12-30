@@ -1,6 +1,6 @@
 //! Anthropic streaming support
 
-use super::types::AnthropicStreamEvent;
+use super::types::{AnthropicContent, AnthropicStreamEvent};
 use crate::error::{Error, Result};
 use crate::types::{GenerateStream, StreamEvent, Usage};
 use futures::stream::StreamExt;
@@ -63,34 +63,29 @@ fn process_anthropic_event(
         }
         "content_block_start" => {
             // Content block started - check if it's a tool use
-            if let Some(block) = event.content_block
-                && block.type_ == "tool_use"
-            {
-                return Some(StreamEvent::tool_call_start(
-                    block.id.unwrap_or_default(),
-                    block.name.unwrap_or_default(),
-                ));
+            if let Some(AnthropicContent::ToolUse { id, name, .. }) = event.content_block {
+                return Some(StreamEvent::tool_call_start(id, name));
             }
             None
         }
         "content_block_delta" => {
             // Content delta - this is where we get text chunks or tool input
             if let Some(delta) = event.delta {
-                match delta.type_.as_str() {
-                    "text_delta" => {
+                match delta.type_.as_deref() {
+                    Some("text_delta") => {
                         if let Some(text) = delta.text {
                             return Some(StreamEvent::text_delta("", text));
                         }
                     }
-                    "thinking_delta" => {
+                    Some("thinking_delta") => {
                         // Use dedicated ReasoningDelta event for proper handling
                         if let Some(thinking) = delta.thinking {
                             return Some(StreamEvent::reasoning_delta("", thinking));
                         }
                     }
-                    "input_json_delta" => {
+                    Some("input_json_delta") => {
                         // Tool call arguments delta
-                        if let Some(partial_json) = delta.text {
+                        if let Some(partial_json) = delta.partial_json {
                             let index = event.index.unwrap_or(0);
                             return Some(StreamEvent::tool_call_delta(
                                 index.to_string(),
@@ -125,7 +120,11 @@ fn process_anthropic_event(
         }
         "error" => {
             // Error event
-            Some(StreamEvent::error("Anthropic API error"))
+            let message = event
+                .error
+                .map(|e| e.message)
+                .unwrap_or_else(|| "Anthropic API error".to_string());
+            Some(StreamEvent::error(message))
         }
         _ => None,
     }
@@ -146,12 +145,16 @@ mod tests {
             index: Some(0),
             content_block: None,
             delta: Some(AnthropicDelta {
-                type_: "text_delta".to_string(),
+                type_: Some("text_delta".to_string()),
                 text: Some("Hello".to_string()),
                 thinking: None,
+                _signature: None,
                 partial_json: None,
+                _stop_reason: None,
+                _stop_sequence: None,
             }),
             usage: None,
+            error: None,
         };
 
         let result = process_anthropic_event(event, &mut usage);

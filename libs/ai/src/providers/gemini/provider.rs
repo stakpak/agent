@@ -95,7 +95,11 @@ impl Provider for GeminiProvider {
             )));
         }
 
-        let gemini_resp: GeminiResponse = response.json().await?;
+        let response_text = response.text().await?;
+
+        let gemini_resp: GeminiResponse = serde_json::from_str(&response_text).map_err(|e| {
+            Error::provider_error(format!("Failed to parse Gemini response: {}", e))
+        })?;
         from_gemini_response(gemini_resp)
     }
 

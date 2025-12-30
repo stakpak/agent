@@ -259,15 +259,11 @@ pub fn to_stakai_provider_options(
                 None
             }
         }
-        LLMModel::Gemini(_) => {
-            if let Some(google) = &opts.google {
-                Some(ProviderOptions::Google(GoogleOptions {
-                    thinking_budget: google.thinking_budget,
-                }))
-            } else {
-                None
-            }
-        }
+        LLMModel::Gemini(_) => opts.google.as_ref().map(|google| {
+            ProviderOptions::Google(GoogleOptions {
+                thinking_budget: google.thinking_budget,
+            })
+        }),
         LLMModel::Custom(_) => {
             // For custom models, try to infer from which options are set
             if let Some(anthropic) = &opts.anthropic {
@@ -295,12 +291,12 @@ pub fn to_stakai_provider_options(
                     store: None,
                     user: None,
                 }))
-            } else if let Some(google) = &opts.google {
-                Some(ProviderOptions::Google(GoogleOptions {
-                    thinking_budget: google.thinking_budget,
-                }))
             } else {
-                None
+                opts.google.as_ref().map(|google| {
+                    ProviderOptions::Google(GoogleOptions {
+                        thinking_budget: google.thinking_budget,
+                    })
+                })
             }
         }
     }
