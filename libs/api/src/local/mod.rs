@@ -931,26 +931,26 @@ Analyze this query and provide the required documentation types and an optimized
         query
     );
 
-    let response = chat(
-        llm_config,
-        LLMInput {
-            model: model.clone(),
-            messages: vec![
-                LLMMessage {
-                    role: Role::System.to_string(),
-                    content: LLMMessageContent::String(system_prompt.to_string()),
-                },
-                LLMMessage {
-                    role: Role::User.to_string(),
-                    content: LLMMessageContent::String(user_prompt.to_string()),
-                },
-            ],
-            max_tokens: 2000,
-            tools: None,
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let input = LLMInput {
+        model: model.clone(),
+        messages: vec![
+            LLMMessage {
+                role: Role::System.to_string(),
+                content: LLMMessageContent::String(system_prompt.to_string()),
+            },
+            LLMMessage {
+                role: Role::User.to_string(),
+                content: LLMMessageContent::String(user_prompt.to_string()),
+            },
+        ],
+        max_tokens: 2000,
+        tools: None,
+        provider_options: None,
+    };
+
+    let stakai_client = StakAIClient::new(llm_config)
+        .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+    let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
     let content = response.choices[0].message.content.to_string();
 
@@ -1116,26 +1116,26 @@ Evaluate these search results against the requirements. Which documents are vali
         docs_preview
     );
 
-    let response = chat(
-        llm_config,
-        LLMInput {
-            model: model.clone(),
-            messages: vec![
-                LLMMessage {
-                    role: Role::System.to_string(),
-                    content: LLMMessageContent::String(system_prompt.to_string()),
-                },
-                LLMMessage {
-                    role: Role::User.to_string(),
-                    content: LLMMessageContent::String(user_prompt.to_string()),
-                },
-            ],
-            max_tokens: 4000,
-            tools: None,
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let input = LLMInput {
+        model: model.clone(),
+        messages: vec![
+            LLMMessage {
+                role: Role::System.to_string(),
+                content: LLMMessageContent::String(system_prompt.to_string()),
+            },
+            LLMMessage {
+                role: Role::User.to_string(),
+                content: LLMMessageContent::String(user_prompt.to_string()),
+            },
+        ],
+        max_tokens: 4000,
+        tools: None,
+        provider_options: None,
+    };
+
+    let stakai_client = StakAIClient::new(llm_config)
+        .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+    let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
     let content = response.choices[0].message.content.to_string();
 

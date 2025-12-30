@@ -105,30 +105,27 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
         }
 
         let line = line_buffer.trim();
-        if !line.is_empty() {
-            if line.starts_with('{') || line.starts_with('[') {
+        if !line.is_empty()
+            && (line.starts_with('{') || line.starts_with('[')) {
                 let mut json_str = line;
                 if json_str.starts_with('[') { json_str = json_str[1..].trim(); }
                 if json_str.ends_with(']') { json_str = json_str[..json_str.len()-1].trim(); }
                 if json_str.ends_with(',') { json_str = json_str[..json_str.len()-1].trim(); }
 
-                if !json_str.is_empty() {
-                    if let Ok(gemini_resp) = serde_json::from_str::<GeminiResponse>(json_str) {
-                        let events = process_gemini_response(
-                            gemini_resp,
-                            &mut accumulated_usage,
-                            &mut stream_id
-                        );
-                        for event in events {
-                            if matches!(event, StreamEvent::Finish { .. }) {
-                                finished_emitted = true;
-                            }
-                            yield Ok(event);
+                if !json_str.is_empty() && let Ok(gemini_resp) = serde_json::from_str::<GeminiResponse>(json_str) {
+                    let events = process_gemini_response(
+                        gemini_resp,
+                        &mut accumulated_usage,
+                        &mut stream_id
+                    );
+                    for event in events {
+                        if matches!(event, StreamEvent::Finish { .. }) {
+                            finished_emitted = true;
                         }
+                        yield Ok(event);
                     }
                 }
             }
-        }
 
         // Emit final finish event if we haven't yet
         if !finished_emitted {
