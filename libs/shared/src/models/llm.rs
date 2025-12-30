@@ -60,6 +60,8 @@ impl From<String> for LLMModel {
             LLMModel::Gemini(GeminiModel::Gemini25Pro)
         } else if value.starts_with("gemini-3-pro-preview") {
             LLMModel::Gemini(GeminiModel::Gemini3Pro)
+        } else if value.starts_with("gemini-3-flash-preview") {
+            LLMModel::Gemini(GeminiModel::Gemini3Flash)
         } else if value.starts_with("gpt-5-mini") {
             LLMModel::OpenAI(OpenAIModel::GPT5Mini)
         } else if value.starts_with("gpt-5") {
