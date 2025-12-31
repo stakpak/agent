@@ -77,6 +77,7 @@ define_hook!(
             messages,
             max_tokens: 16000,
             tools,
+            provider_options: None,
         });
 
         Ok(HookAction::Continue)

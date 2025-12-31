@@ -5,6 +5,7 @@ members = [
     "tui",
     "libs/shared",
     "libs/api",
+    "libs/ai",
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
@@ -84,6 +85,7 @@ schemars = { version = "1.1.0", features = ["chrono"] }
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
+stakai = { path = "libs/ai" }
 
 # Required nightly
 [workspace.lints.clippy]

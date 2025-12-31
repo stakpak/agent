@@ -23,8 +23,9 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
-    LLMStreamInput, chat, chat_stream,
+    LLMStreamInput,
 };
+use stakpak_shared::models::stakai_adapter::StakAIClient;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -680,6 +681,8 @@ impl LocalClient {
         };
 
         let llm_config = self.get_llm_config();
+        let stakai_client = StakAIClient::new(&llm_config)
+            .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             let (internal_tx, mut internal_rx) = mpsc::channel::<GenerationDelta>(100);
@@ -689,10 +692,12 @@ impl LocalClient {
                 max_tokens: input.max_tokens,
                 tools: input.tools,
                 stream_channel_tx: internal_tx,
+                provider_options: input.provider_options,
             };
 
             let chat_future = async move {
-                chat_stream(&llm_config, input)
+                stakai_client
+                    .chat_stream(input)
                     .await
                     .map_err(|e| e.to_string())
             };
@@ -709,7 +714,7 @@ impl LocalClient {
             let response = chat_result?;
             (response.choices[0].message.clone(), response.usage)
         } else {
-            let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
+            let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
             (response.choices[0].message.clone(), response.usage)
         };
 
@@ -863,9 +868,12 @@ impl LocalClient {
             messages,
             max_tokens: 100,
             tools: None,
+            provider_options: None,
         };
 
-        let response = chat(&llm_config, input).await.map_err(|e| e.to_string())?;
+        let stakai_client = StakAIClient::new(&llm_config)
+            .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+        let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
         Ok(response.choices[0].message.content.to_string())
     }
@@ -923,26 +931,26 @@ Analyze this query and provide the required documentation types and an optimized
         query
     );
 
-    let response = chat(
-        llm_config,
-        LLMInput {
-            model: model.clone(),
-            messages: vec![
-                LLMMessage {
-                    role: Role::System.to_string(),
-                    content: LLMMessageContent::String(system_prompt.to_string()),
-                },
-                LLMMessage {
-                    role: Role::User.to_string(),
-                    content: LLMMessageContent::String(user_prompt.to_string()),
-                },
-            ],
-            max_tokens: 2000,
-            tools: None,
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let input = LLMInput {
+        model: model.clone(),
+        messages: vec![
+            LLMMessage {
+                role: Role::System.to_string(),
+                content: LLMMessageContent::String(system_prompt.to_string()),
+            },
+            LLMMessage {
+                role: Role::User.to_string(),
+                content: LLMMessageContent::String(user_prompt.to_string()),
+            },
+        ],
+        max_tokens: 2000,
+        tools: None,
+        provider_options: None,
+    };
+
+    let stakai_client = StakAIClient::new(llm_config)
+        .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+    let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
     let content = response.choices[0].message.content.to_string();
 
@@ -1108,26 +1116,26 @@ Evaluate these search results against the requirements. Which documents are vali
         docs_preview
     );
 
-    let response = chat(
-        llm_config,
-        LLMInput {
-            model: model.clone(),
-            messages: vec![
-                LLMMessage {
-                    role: Role::System.to_string(),
-                    content: LLMMessageContent::String(system_prompt.to_string()),
-                },
-                LLMMessage {
-                    role: Role::User.to_string(),
-                    content: LLMMessageContent::String(user_prompt.to_string()),
-                },
-            ],
-            max_tokens: 4000,
-            tools: None,
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let input = LLMInput {
+        model: model.clone(),
+        messages: vec![
+            LLMMessage {
+                role: Role::System.to_string(),
+                content: LLMMessageContent::String(system_prompt.to_string()),
+            },
+            LLMMessage {
+                role: Role::User.to_string(),
+                content: LLMMessageContent::String(user_prompt.to_string()),
+            },
+        ],
+        max_tokens: 4000,
+        tools: None,
+        provider_options: None,
+    };
+
+    let stakai_client = StakAIClient::new(llm_config)
+        .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
+    let response = stakai_client.chat(input).await.map_err(|e| e.to_string())?;
 
     let content = response.choices[0].message.content.to_string();
 
