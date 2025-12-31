@@ -118,16 +118,25 @@ impl FileScratchpadContextManager {
     }
 
     fn recover_from_history(&self, messages: &[ChatMessage], session_id: Option<Uuid>) {
-        self.recover_file(messages, &self.get_scratchpad_path(session_id));
-        self.recover_file(messages, &self.get_todo_path(session_id));
+        self.recover_file(
+            messages,
+            &self.get_scratchpad_path(session_id),
+            &self.scratchpad_file_path,
+        );
+        self.recover_file(
+            messages,
+            &self.get_todo_path(session_id),
+            &self.todo_file_path,
+        );
     }
 
-    fn recover_file(&self, messages: &[ChatMessage], path: &Path) {
+    fn recover_file(&self, messages: &[ChatMessage], path: &Path, base_path: &Path) {
         // Try to reconstruct from tool calls
-        let reconstructed_content = self.reconstruct_file_from_history(messages, path);
+        let reconstructed_content = self.reconstruct_file_from_history(messages, path, base_path);
 
         if let Some(content) = reconstructed_content {
             let exists = path.exists();
+
             let current_content = if exists {
                 fs::read_to_string(path).unwrap_or_default()
             } else {
@@ -157,14 +166,22 @@ impl FileScratchpadContextManager {
         &self,
         messages: &[ChatMessage],
         path: &Path,
+        base_path: &Path,
     ) -> Option<String> {
         let mut current_content: Option<String> = None;
         let path_str = path.to_string_lossy();
+        let base_path_str = base_path.to_string_lossy();
+
+        // We accept tool calls that target EITHER the resolved path (with session)
+        // OR the base path (without session). This handles cases where:
+        // 1. Agent decides to use the canonical base path for some reason
+        // 2. We are recovering INTO a session-specific path
+        let valid_paths = [path_str.as_ref(), base_path_str.as_ref()];
 
         for message in messages {
             if let Some(tool_calls) = &message.tool_calls {
                 for tool_call in tool_calls {
-                    self.apply_tool_call(tool_call, &path_str, &mut current_content);
+                    self.apply_tool_call(tool_call, &valid_paths, &mut current_content);
                 }
             }
         }
@@ -175,7 +192,7 @@ impl FileScratchpadContextManager {
     fn apply_tool_call(
         &self,
         tool_call: &stakpak_shared::models::integrations::openai::ToolCall,
-        target_path: &str,
+        target_paths: &[&str],
         current_content: &mut Option<String>,
     ) {
         let args: serde_json::Value =
@@ -183,34 +200,37 @@ impl FileScratchpadContextManager {
         let tool_name = tool_call.function.name.as_str();
 
         if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
-            if !path.contains(target_path) {
+            // Check if the tool call path matches ANY of the valid target paths
+            let is_match = target_paths.iter().any(|target| paths_match(path, target));
+
+            if !is_match {
                 return;
             }
 
-            match tool_name {
-                "create" => {
-                    if let Some(file_text) = args.get("file_text").and_then(|t| t.as_str()) {
-                        *current_content = Some(file_text.to_string());
+            // Handle namespaced tools (e.g. "local_tools_create")
+            let is_create = tool_name == "create" || tool_name.ends_with("_create");
+            let is_replace = tool_name == "str_replace" || tool_name.ends_with("_str_replace");
+
+            if is_create {
+                if let Some(file_text) = args.get("file_text").and_then(|t| t.as_str()) {
+                    *current_content = Some(file_text.to_string());
+                }
+            } else if is_replace {
+                if let (Some(old_str), Some(new_str)) = (
+                    args.get("old_str").and_then(|s| s.as_str()),
+                    args.get("new_str").and_then(|s| s.as_str()),
+                ) && let Some(content) = current_content
+                {
+                    let replace_all = args
+                        .get("replace_all")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false);
+                    if replace_all {
+                        *content = content.replace(old_str, new_str);
+                    } else {
+                        *content = content.replacen(old_str, new_str, 1);
                     }
                 }
-                "str_replace" => {
-                    if let (Some(old_str), Some(new_str)) = (
-                        args.get("old_str").and_then(|s| s.as_str()),
-                        args.get("new_str").and_then(|s| s.as_str()),
-                    ) && let Some(content) = current_content
-                    {
-                        let replace_all = args
-                            .get("replace_all")
-                            .and_then(|b| b.as_bool())
-                            .unwrap_or(false);
-                        if replace_all {
-                            *content = content.replace(old_str, new_str);
-                        } else {
-                            *content = content.replacen(old_str, new_str, 1);
-                        }
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -305,6 +325,8 @@ impl FileScratchpadContextManager {
             &mut history_items,
             &self.get_scratchpad_path(session_id),
             &self.get_todo_path(session_id),
+            &self.scratchpad_file_path,
+            &self.todo_file_path,
         );
 
         // keep the full last message of a tool call action to prevent scratchpad update verbosity
@@ -356,6 +378,16 @@ impl FileScratchpadContextManager {
 
         content.trim().to_string()
     }
+}
+
+fn paths_match(path1: &str, path2: &str) -> bool {
+    let p1 = path1.strip_prefix("./").unwrap_or(path1);
+    let p2 = path2.strip_prefix("./").unwrap_or(path2);
+
+    // check if one contains the other, or if they are the same
+    // We check if p1 ends with p2 OR p2 ends with p1 to handle absolute vs relative paths
+    // e.g. "/abs/path/to/file.md" ends with "file.md"
+    p1.contains(p2) || p2.contains(p1) || p1.ends_with(p2) || p2.ends_with(p1)
 }
 
 fn remove_xml_tag(tag_name: &str, content: &str) -> String {
@@ -417,9 +449,13 @@ fn drop_scratchpad_actions(
     history_items: &mut Vec<HistoryItem>,
     scratchpad_path: &Path,
     todo_path: &Path,
+    base_scratchpad_path: &Path,
+    base_todo_path: &Path,
 ) {
     let scratchpad_str = scratchpad_path.to_string_lossy();
     let todo_str = todo_path.to_string_lossy();
+    let base_scratchpad_str = base_scratchpad_path.to_string_lossy();
+    let base_todo_str = base_todo_path.to_string_lossy();
 
     let is_scratchpad_action = |item: &HistoryItem| -> bool {
         if let HistoryItemContent::Action {
@@ -427,14 +463,28 @@ fn drop_scratchpad_actions(
         } = &item.content
         {
             let file_tools = ["view", "str_replace", "create", "remove"];
-            if !file_tools.contains(&name.as_str()) {
+            let name_str = name.as_str();
+
+            // Allow if it contains the tool name (e.g. "local_tools_create")
+            let is_file_tool = file_tools
+                .iter()
+                .any(|t| name_str == *t || name_str.ends_with(&format!("_{}", t)));
+
+            if !is_file_tool {
                 return false;
             }
 
-            if let Some(path) = arguments.get("path").and_then(|p| p.as_str())
-                && (path.contains(scratchpad_str.as_ref()) || path.contains(todo_str.as_ref()))
-            {
-                return true;
+            // Check against both session-specific path AND the base path
+            // to ensure we catch all relevant scratchpad actions
+            if let Some(path) = arguments.get("path").and_then(|p| p.as_str()) {
+                let is_scratchpad = paths_match(path, &scratchpad_str)
+                    || paths_match(path, base_scratchpad_str.as_ref());
+                let is_todo =
+                    paths_match(path, &todo_str) || paths_match(path, base_todo_str.as_ref());
+
+                if is_scratchpad || is_todo {
+                    return true;
+                }
             }
         }
         false
@@ -866,5 +916,172 @@ mod tests {
         // Verify recovered content
         let scratchpad = manager.load_file(&manager.get_scratchpad_path(None));
         assert_eq!(scratchpad, "Updated Content");
+    }
+
+    #[test]
+    fn test_recover_from_history_with_session_mismatch() {
+        let (manager, _temp_dir) = create_test_manager();
+        // Use the BASE path for the tool call
+        let scratchpad_path = manager.scratchpad_file_path.to_string_lossy().to_string();
+
+        let todo_path = manager.todo_file_path.to_string_lossy().to_string();
+
+        let history = create_tool_call_history(
+            &scratchpad_path,
+            &todo_path,
+            "Recovered Content",
+            "- [ ] Recovered Task",
+        );
+
+        // Trigger recovery WITH SESSION
+        let session_id = Uuid::new_v4();
+        // We need to call reduce_context_with_session because reduce_context passes None
+        manager.reduce_context_with_session(history, Some(session_id));
+
+        // Verify recovered content AT SESSION PATH
+        let scratchpad = manager.load_file(&manager.get_scratchpad_path(Some(session_id)));
+        let todo = manager.load_file(&manager.get_todo_path(Some(session_id)));
+
+        // This is expected to FAIL until fixed
+        assert!(
+            scratchpad.contains("Recovered Content"),
+            "Scratchpad content not recovered"
+        );
+        assert!(
+            todo.contains("Recovered Task"),
+            "Todo content not recovered"
+        );
+    }
+
+    #[test]
+    fn test_recover_absolute_vs_relative_path() {
+        let temp_dir = TempDir::new().unwrap();
+        // Manager uses RELATIVE path
+        let scratchpad_path = PathBuf::from(".stakpak/session/scratchpad.md");
+        let todo_path = PathBuf::from(".stakpak/session/todo.md");
+
+        let manager = FileScratchpadContextManager::new(FileScratchpadContextManagerOptions {
+            history_action_message_size_limit: 100,
+            history_action_message_keep_last_n: 1,
+            history_action_result_keep_last_n: 50,
+            scratchpad_file_path: scratchpad_path.clone(),
+            todo_file_path: todo_path.clone(),
+            overwrite_if_different: true,
+        });
+
+        // Tool call uses ABSOLUTE path
+        let abs_scratchpad_path = temp_dir.path().join(".stakpak/session/scratchpad.md");
+        let abs_todo_path = temp_dir.path().join(".stakpak/session/todo.md");
+
+        // Simpler: use reconstruct_file_from_history directly
+        let history = create_tool_call_history(
+            &abs_scratchpad_path.to_string_lossy(),
+            &abs_todo_path.to_string_lossy(),
+            "Abs Content",
+            "Abs Todo",
+        );
+
+        let reconstructed = manager.reconstruct_file_from_history(
+            &history,
+            &manager.get_scratchpad_path(None),
+            &manager.scratchpad_file_path,
+        );
+
+        assert_eq!(reconstructed, Some("Abs Content".to_string()));
+    }
+
+    #[test]
+    fn test_recover_dot_slash_path() {
+        let temp_dir = TempDir::new().unwrap();
+        // Manager uses DOT SLASH path
+        let scratchpad_path = PathBuf::from("./.stakpak/session/scratchpad.md");
+        let todo_path = PathBuf::from("./.stakpak/session/todo.md");
+
+        let manager = FileScratchpadContextManager::new(FileScratchpadContextManagerOptions {
+            history_action_message_size_limit: 100,
+            history_action_message_keep_last_n: 1,
+            history_action_result_keep_last_n: 50,
+            scratchpad_file_path: scratchpad_path.clone(),
+            todo_file_path: todo_path.clone(),
+            overwrite_if_different: true,
+        });
+
+        // Tool call uses ABSOLUTE path (which does NOT contain ./.stakpak)
+        let abs_scratchpad_path = temp_dir.path().join(".stakpak/session/scratchpad.md");
+        let abs_todo_path = temp_dir.path().join(".stakpak/session/todo.md");
+
+        let history = create_tool_call_history(
+            &abs_scratchpad_path.to_string_lossy(),
+            &abs_todo_path.to_string_lossy(),
+            "Dot Content",
+            "Dot Todo",
+        );
+
+        let reconstructed = manager.reconstruct_file_from_history(
+            &history,
+            &manager.get_scratchpad_path(None),
+            &manager.scratchpad_file_path,
+        );
+
+        // This is expected to FAIL if contains check is too strict
+        assert_eq!(reconstructed, Some("Dot Content".to_string()));
+    }
+
+    #[test]
+    fn test_recover_namespaced_tool() {
+        let (manager, _temp_dir) = create_test_manager();
+        let scratchpad_path = manager.scratchpad_file_path.to_string_lossy().to_string();
+
+        // Simulate tool calls with namespaced names
+        let history = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "stakpak__create".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "file_text": "Namespaced Content"
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_2".to_string(),
+                    r#type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "stakpak__str_replace".to_string(),
+                        arguments: serde_json::json!({
+                            "path": scratchpad_path,
+                            "old_str": "Namespaced",
+                            "new_str": "Updated",
+                            "replace_all": false
+                        })
+                        .to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+                usage: None,
+            },
+        ];
+
+        let reconstructed = manager.reconstruct_file_from_history(
+            &history,
+            &manager.get_scratchpad_path(None),
+            &manager.scratchpad_file_path,
+        );
+
+        assert_eq!(reconstructed, Some("Updated Content".to_string()));
     }
 }
