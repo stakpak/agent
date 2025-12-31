@@ -250,26 +250,27 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
     let mut has_tool_calls = false;
 
     if let Some(candidate) = candidate
-        && let Some(c) = &candidate.content {
-            for part in &c.parts {
-                if let Some(text) = &part.text {
-                    content.push(ResponseContent::Text { text: text.clone() });
-                }
+        && let Some(c) = &candidate.content
+    {
+        for part in &c.parts {
+            if let Some(text) = &part.text {
+                content.push(ResponseContent::Text { text: text.clone() });
+            }
 
-                if let Some(function_call) = &part.function_call {
-                    has_tool_calls = true;
+            if let Some(function_call) = &part.function_call {
+                has_tool_calls = true;
 
-                    content.push(ResponseContent::ToolCall(ToolCall {
-                        id: function_call
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4())),
-                        name: function_call.name.clone(),
-                        arguments: function_call.args.clone(),
-                    }));
-                }
+                content.push(ResponseContent::ToolCall(ToolCall {
+                    id: function_call
+                        .id
+                        .clone()
+                        .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4())),
+                    name: function_call.name.clone(),
+                    arguments: function_call.args.clone(),
+                }));
             }
         }
+    }
 
     // Ensure at least one content item (matches OpenAI/Gemini behavior)
     if content.is_empty() {
