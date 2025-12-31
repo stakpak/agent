@@ -1,11 +1,11 @@
 [package]
 name = "stakai"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 authors = ["Stakpak <engineering@stakpak.dev>"]
 description = "A provider-agnostic Rust SDK for AI completions with streaming support - Built by Stakpak"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/stakpak/stakai"
+license = "Apache-2.0"
+repository = "https://github.com/stakpak/agent"
 homepage = "https://stakpak.dev"
 documentation = "https://docs.rs/stakai"
 keywords = ["ai", "llm", "openai", "anthropic", "sdk"]
