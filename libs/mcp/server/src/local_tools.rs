@@ -1,5 +1,4 @@
 use crate::tool_container::ToolContainer;
-use rand::Rng;
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
@@ -13,12 +12,13 @@ use html2md;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
-use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
-use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
+use stakpak_shared::utils::{
+    LocalFileSystemProvider, generate_directory_tree, handle_large_output, sanitize_text_output,
+};
 use std::fs::{self};
 use std::path::Path;
 use std::sync::Arc;
@@ -215,7 +215,8 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         {
             Ok(mut command_result) => {
                 command_result.output =
-                    match handle_large_output(&command_result.output, "command.output") {
+                    match handle_large_output(&command_result.output, "command.output", 300, false)
+                    {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -548,7 +549,7 @@ Use this tool to check the progress and results of long-running background tasks
                 };
 
                 let output_str = if let Some(ref output) = task_info.output {
-                    match handle_large_output(output, "task.output") {
+                    match handle_large_output(output, "task.output", 300, false) {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -874,7 +875,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
         let markdown_content = html2md::rewrite_html(&html_content, false);
         let sanitized_content = sanitize_text_output(&markdown_content);
 
-        let result = match handle_large_output(&sanitized_content, "webpage") {
+        let result = match handle_large_output(&sanitized_content, "webpage", 300, false) {
             Ok(result) => result,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -2021,64 +2022,5 @@ SAFETY NOTES:
         table.push_str("═══════════════════════════════════════\n\n");
 
         table
-    }
-}
-
-/// Helper method to handle large output by truncating and saving to file
-fn sanitize_text_output(text: &str) -> String {
-    text.chars()
-        .filter(|&c| {
-            // Drop replacement char
-            if c == '\u{FFFD}' {
-                return false;
-            }
-            // Allow essential whitespace even though they're "control"
-            if matches!(c, '\n' | '\t' | '\r' | ' ') {
-                return true;
-            }
-            // Keep everything else that's not a control character
-            !c.is_control()
-        })
-        .collect()
-}
-
-fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
-    const MAX_LINES: usize = 300;
-
-    let output_lines = output.lines().collect::<Vec<_>>();
-
-    if output_lines.len() >= MAX_LINES {
-        // Create a output file to store the full output
-        let output_file = format!(
-            "{}.{:06x}.txt",
-            file_prefix,
-            rand::rng().random_range(0..=0xFFFFFF)
-        );
-        let output_file_path = match LocalStore::write_session_data(&output_file, output) {
-            Ok(path) => path,
-            Err(e) => {
-                error!("Failed to write session data to {}: {}", output_file, e);
-                return Err(McpError::internal_error(
-                    "Failed to write session data",
-                    Some(json!({ "error": e.to_string() })),
-                ));
-            }
-        };
-
-        Ok(format!(
-            "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
-            MAX_LINES,
-            output_lines.len(),
-            output_file_path,
-            output_lines
-                .into_iter()
-                .rev()
-                .take(MAX_LINES)
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
-        ))
-    } else {
-        Ok(output.to_string())
     }
 }
