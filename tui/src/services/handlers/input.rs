@@ -461,9 +461,13 @@ fn handle_input_submitted(
             && state.active_shell_command.is_some()
             && !state.show_shell_mode
         {
-            let history_lines = crate::services::handlers::shell::trim_shell_lines(
+            let mut history_lines = crate::services::handlers::shell::trim_shell_lines(
                 state.shell_history_lines.clone(),
             );
+
+            if !history_lines.is_empty() {
+                history_lines.pop();
+            }
 
             if !history_lines.is_empty() {
                 // Add history message for UI

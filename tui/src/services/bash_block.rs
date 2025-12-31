@@ -40,9 +40,9 @@ pub fn strip_all_ansi(text: &str) -> String {
     static REMAINING: OnceLock<Option<Regex>> = OnceLock::new();
     let maybe_regex = REMAINING.get_or_init(|| {
         Regex::new(concat!(
-            r"\x1b\]0;[^\x07\x1b]*(\x07|\x1b\\)|", // Window titles
-            r"\\u\{[0-9a-fA-F]+\}|",               // Unicode escapes
-            r"\x07"                                // Bell
+            r"\x1b\][0-9;]*[^\x07\x1b]*(\x07|\x1b\\)|", // Window titles and other OSC sequences
+            r"\\u\{[0-9a-fA-F]+\}|",                    // Unicode escapes
+            r"\x07"                                     // Bell
         ))
         .ok()
     });
@@ -58,6 +58,7 @@ pub fn preprocess_terminal_output(text: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut current_line = String::new();
     let text = strip_all_ansi(text);
+    let text = text.replace("\r\n", "\n");
     for ch in text.chars() {
         match ch {
             '\r' => {

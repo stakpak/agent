@@ -359,13 +359,20 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
 
 fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
             Style::default().fg(AdaptiveColors::dark_magenta())
         } else {
             Style::default().fg(Color::DarkGray)
         });
+
+    if !state.show_shell_mode {
+        block = block.title(Span::styled(
+            "Type '$' for Shell mode",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
 
     // Create content area inside the block
     let content_area = Rect {

@@ -115,7 +115,6 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                         .modifiers
                         .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL)
                     {
-                        eprintln!("EVENT: KeyCode::Up with modifier -> ScrollUp");
                         Some(InputEvent::ScrollUp)
                     } else {
                         Some(InputEvent::Up)
@@ -126,7 +125,6 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                         .modifiers
                         .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL)
                     {
-                        eprintln!("EVENT: KeyCode::Down with modifier -> ScrollDown");
                         Some(InputEvent::ScrollDown)
                     } else {
                         Some(InputEvent::Down)
@@ -152,14 +150,8 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 }
                 KeyCode::Home => Some(InputEvent::InputCursorStart),
                 KeyCode::End => Some(InputEvent::InputCursorEnd),
-                KeyCode::PageUp => {
-                    eprintln!("EVENT: KeyCode::PageUp -> PageUp");
-                    Some(InputEvent::PageUp)
-                }
-                KeyCode::PageDown => {
-                    eprintln!("EVENT: KeyCode::PageDown -> PageDown");
-                    Some(InputEvent::PageDown)
-                }
+                KeyCode::PageUp => Some(InputEvent::PageUp),
+                KeyCode::PageDown => Some(InputEvent::PageDown),
                 KeyCode::Tab => Some(InputEvent::Tab),
                 _ => None,
             }

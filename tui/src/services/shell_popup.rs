@@ -26,10 +26,6 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
         return 0;
     }
 
-    if !state.shell_popup_expanded {
-        return SHELL_POPUP_MIN_HEIGHT;
-    }
-
     // Count actual non-empty lines from the screen for dynamic sizing
     let screen = state.shell_screen.screen();
     let (rows, cols) = screen.size();
@@ -57,6 +53,18 @@ pub fn calculate_popup_height(state: &AppState, terminal_height: u16) -> u16 {
         }
     }
 
+    // Collapsed state logic
+    if !state.shell_popup_expanded {
+        if content_lines > 2 {
+            // 3 lines content (header + 2 history) + 2 borders = 5
+            return 5;
+        } else {
+            // Default min height (2 lines content + 2 borders) = 4
+            return SHELL_POPUP_MIN_HEIGHT;
+        }
+    }
+
+    // Expanded state logic
     // Minimum of 2 content lines
     content_lines = content_lines.max(2);
 
@@ -86,7 +94,7 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
             if !state.shell_pending_command_executed && state.is_tool_call_shell_command {
                 (Color::Yellow, "[Initializing...]")
             } else {
-                (Color::Cyan, "[Active]")
+                (Color::Cyan, "[Active] . Option + ↑/↓ to scroll")
             }
         } else {
             (Color::Green, "[Completed]")
@@ -147,12 +155,28 @@ pub fn render_shell_popup(f: &mut Frame, state: &mut AppState, area: Rect) {
     let scroll_from_bottom = state.shell_popup_scroll.min(max_scroll);
     let skip = max_scroll.saturating_sub(scroll_from_bottom);
 
-    let visible_lines: Vec<Line<'static>> = display_lines
-        .clone()
-        .into_iter()
-        .skip(skip)
-        .take(inner_height)
-        .collect();
+    let visible_lines: Vec<Line<'static>> = if !state.shell_popup_expanded && total_lines > 2 {
+        // Collapsed mode with overflow: show indicator + last 2 lines
+        let mut lines = Vec::new();
+        let hidden_count = total_lines.saturating_sub(2);
+        lines.push(Line::from(Span::styled(
+            format!(" + {} hidden lines", hidden_count),
+            Style::default().fg(Color::DarkGray),
+        )));
+        // Add last 2 lines
+        let start = total_lines.saturating_sub(2);
+        for line in display_lines.iter().skip(start) {
+            lines.push(line.clone());
+        }
+        lines
+    } else {
+        // Standard behavior
+        display_lines
+            .into_iter()
+            .skip(skip)
+            .take(inner_height)
+            .collect()
+    };
 
     let content = Paragraph::new(visible_lines);
     f.render_widget(content, inner_area);

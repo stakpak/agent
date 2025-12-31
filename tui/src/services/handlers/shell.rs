@@ -803,9 +803,21 @@ pub fn handle_shell_completed(
             state.active_shell_command_output.clone()
         };
 
+        // remove ansi codes and everhting from shell output
+        let processed_shell_output = shell_output.map(|output| {
+            let output = preprocess_terminal_output(&output);
+            output.replace("\r\n", "\n").replace('\r', "\n")
+        });
+
         let saved_dialog_command = state.dialog_command.clone();
 
-        let result = shell_command_to_tool_call_result(state, cmd_value, shell_output);
+        let processed_terminal_command = cmd_value.map(|s| preprocess_terminal_output(&s));
+
+        let result = shell_command_to_tool_call_result(
+            state,
+            processed_terminal_command,
+            processed_shell_output,
+        );
 
         // Auto-terminate and finalize the shell session
         terminate_active_shell_session(state);
@@ -852,7 +864,6 @@ pub fn handle_shell_completed(
                         .insert(tool_call.id.clone(), ToolCallStatus::Pending);
                 }
             }
-
             let _ = output_tx.try_send(OutputEvent::SendToolResult(
                 result,
                 should_stop,
@@ -872,7 +883,7 @@ pub fn handle_shell_completed(
         invalidate_message_lines_cache(state);
     }
 
-    if state.ondemand_shell_mode {
+    if state.ondemand_shell_mode && state.shell_interaction_occurred {
         let new_tool_call_result = shell_command_to_tool_call_result(state, None, None);
         if let Some(ref mut tool_calls) = state.shell_tool_calls {
             tool_calls.push(new_tool_call_result);
@@ -979,12 +990,12 @@ pub fn shell_command_to_tool_call_result(
 
     // Build the result string with actual output
     let result_text = if let Some(output) = shell_output {
-        // Clean up the output - remove excessive whitespace and truncate if needed
-        let cleaned_output = output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Clean up the output - split into lines, remove the LAST line (prompt), and join
+        let mut lines: Vec<&str> = output.lines().collect();
+        if !lines.is_empty() {
+            lines.pop(); // Remove the last line (prompt)
+        }
+        let cleaned_output = lines.join("\n").trim().to_string();
 
         if cleaned_output.is_empty() {
             "Command completed (no output)".to_string()
