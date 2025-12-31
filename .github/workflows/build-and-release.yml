@@ -199,6 +199,7 @@ jobs:
           
           # Publish dependencies first, then the main crate
           # Order matters: publish dependencies before dependents
+          publish_package stakai
           publish_package stakpak-shared
           publish_package stakpak-api
           publish_package stakpak-popup-widget
