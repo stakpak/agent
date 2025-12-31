@@ -35,7 +35,9 @@ jobs:
         id: check
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "version=$TAG" >> $GITHUB_OUTPUT
+          # Remove 'v' prefix if present
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [[ "$TAG" == *"-beta"* ]]; then
             echo "is_beta=true" >> $GITHUB_OUTPUT
           else
@@ -199,6 +201,7 @@ jobs:
           
           # Publish dependencies first, then the main crate
           # Order matters: publish dependencies before dependents
+          publish_package stakai
           publish_package stakpak-shared
           publish_package stakpak-api
           publish_package stakpak-popup-widget

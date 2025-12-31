@@ -104,9 +104,9 @@ update_cargo_version() {
     mv "$temp_file" Cargo.toml
     
     # 2. Update internal dependencies versions in [workspace.dependencies]
-    # We look for lines starting with 'stakpak-' or 'popup-widget' and update their version field
+    # We look for lines starting with 'stakai', 'stakpak-' or 'popup-widget' and update their version field
     local temp_file2=$(mktemp)
-    sed -E "/^(stakpak-|popup-widget)/s/version = \"[^\"]+\"/version = \"$new_version\"/" Cargo.toml > "$temp_file2"
+    sed -E "/^(stakai|stakpak-|popup-widget)/s/version = \"[^\"]+\"/version = \"$new_version\"/" Cargo.toml > "$temp_file2"
     mv "$temp_file2" Cargo.toml
     
     print_success "Updated workspace version and internal dependency versions to $new_version"
