@@ -162,7 +162,7 @@ pub fn handle_input_submitted_event(
 pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
     state.show_shortcuts = false;
 
-    if c == '$' && (state.input().is_empty() || state.is_dialog_open) && !state.show_sessions_dialog
+    if c == '$' && state.input().is_empty() && !state.show_sessions_dialog
     {
         state.text_area.set_text("");
         // Shell mode toggle will be handled by shell module
@@ -506,7 +506,6 @@ fn handle_input_submitted(
                 }
             }
 
-            // "after I said hi the shell should be terminated not Background also it should be removed totally"
             // Remove the active shell message bubble
             if let Some(shell_msg_id) = state.interactive_shell_message_id {
                 state.messages.retain(|m| m.id != shell_msg_id);

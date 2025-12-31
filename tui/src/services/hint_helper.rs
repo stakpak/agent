@@ -87,16 +87,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
-                "'$' Shell mode . Fn/Option/Shift + drag to select"
+                "'$' Shell mode . ctrl+s shortcuts . Fn/Option/Shift + drag to select"
             } else {
-                "'$' Shell mode"
+                "'$' Shell mode . ctrl+s shortcuts"
             };
 
             #[cfg(not(unix))]
-            let select_hint = "'$' Shell mode";
+            let select_hint = "'$' Shell mode . ctrl+s shortcuts";
 
             // Create spans for left and right alignment on first line
-            let left_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
+            let left_text = "ctrl+p palette . @ files . / commands";
 
             // Calculate spacing to align profile info to the right
             let total_width = area.width as usize;
@@ -157,11 +157,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let mut lines = vec![Line::from(spans)];
 
             // Add second line with select hint if available (Unix only)
+            // Add second line with select hint if available
             if !select_hint.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    select_hint,
-                    Style::default().fg(Color::Cyan),
-                )));
+                 let mut hint_spans = vec![];
+                 if select_hint.starts_with("'$'") {
+                     hint_spans.push(Span::styled("'$'", Style::default().fg(Color::Magenta)));
+                     hint_spans.push(Span::styled(&select_hint[3..], Style::default().fg(Color::Cyan)));
+                 } else {
+                     hint_spans.push(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
+                 }
+                 lines.push(Line::from(hint_spans));
             }
 
             let hint = Paragraph::new(lines);

@@ -316,7 +316,7 @@ pub fn background_shell_session(state: &mut AppState) {
         .active_shell_command
         .as_ref()
         .map(|c| c.command.clone())
-        .unwrap_or_else(|| "sh".to_string());
+        .unwrap_or_else(|| "shell".to_string());
 
     // state.shell_history_lines already contains the full history including active view
     // We trim it for the message bubble preview
@@ -390,7 +390,7 @@ pub fn handle_shell_mode(state: &mut AppState, input_tx: &Sender<InputEvent>) {
                 .active_shell_command
                 .as_ref()
                 .map(|c| c.command.clone())
-                .unwrap_or_else(|| "sh".to_string());
+                .unwrap_or_else(|| "shell".to_string());
 
             let current_screen = capture_styled_screen(&mut state.shell_screen);
 
@@ -445,7 +445,7 @@ pub fn terminate_active_shell_session(state: &mut AppState) {
             .active_shell_command
             .as_ref()
             .map(|c| c.command.clone())
-            .unwrap_or_else(|| "sh".to_string());
+            .unwrap_or_else(|| "shell".to_string());
 
         // If this was from an interactive stall, add the result to shell_tool_calls
         // so it gets sent with the user's message
@@ -557,9 +557,9 @@ pub fn handle_shell_output(state: &mut AppState, raw_data: String) -> bool {
                 .unwrap_or(&c.command)
                 .split_whitespace()
                 .next()
-                .unwrap_or("sh")
+                .unwrap_or("shell")
         })
-        .unwrap_or("sh")
+        .unwrap_or("shell")
         .to_string();
 
     let (colors, title) = if state.show_shell_mode {

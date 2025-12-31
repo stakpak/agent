@@ -1188,9 +1188,9 @@ SAFETY NOTES:
                             // Send stall notification - don't require pattern matching for now
                             // Just notify that command is taking a while with no output
                             let stall_msg = if matches_input_prompt(&result) {
-                                "__INTERACTIVE_STALL__: Command appears to be waiting for user input (password, confirmation, etc.). This command may require interactive mode."
+                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. if you think it's stuck use ctrl+r."
                             } else {
-                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. It may be waiting for input or hung."
+                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds."
                             };
                             let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                                 progress_token: ProgressToken(NumberOrString::Number(0)),
