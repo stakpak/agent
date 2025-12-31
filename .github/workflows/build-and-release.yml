@@ -35,7 +35,9 @@ jobs:
         id: check
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "version=$TAG" >> $GITHUB_OUTPUT
+          # Remove 'v' prefix if present
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [[ "$TAG" == *"-beta"* ]]; then
             echo "is_beta=true" >> $GITHUB_OUTPUT
           else
