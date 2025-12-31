@@ -89,11 +89,7 @@ impl ProxyServer {
 
     /// Aggregate results from all clients using a provided async operation.
     /// Collects successful results and logs failures.
-    async fn aggregate_from_clients<T, F, Fut>(
-        &self,
-        operation_name: &str,
-        operation: F,
-    ) -> Vec<T>
+    async fn aggregate_from_clients<T, F, Fut>(&self, operation_name: &str, operation: F) -> Vec<T>
     where
         F: Fn(String, Peer<RoleClient>) -> Fut,
         Fut: Future<Output = Result<Vec<T>, (String, ServiceError)>>,
@@ -137,7 +133,12 @@ impl ProxyServer {
             match operation(name.clone(), peer).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    tracing::debug!("{} {} not found on server {}", resource_type, resource_name, name);
+                    tracing::debug!(
+                        "{} {} not found on server {}",
+                        resource_type,
+                        resource_name,
+                        name
+                    );
                     last_error = Some(e);
                 }
             }
@@ -146,7 +147,10 @@ impl ProxyServer {
         Err(match last_error {
             Some(ServiceError::McpError(e)) => e,
             _ => ErrorData::resource_not_found(
-                format!("{} {} not found on any server", resource_type, resource_name),
+                format!(
+                    "{} {} not found on any server",
+                    resource_type, resource_name
+                ),
                 None,
             ),
         })
@@ -168,14 +172,20 @@ impl ProxyServer {
     }
 
     /// Prepare tool parameters, restoring any redacted secrets
-    fn prepare_tool_params(&self, params: &CallToolRequestParam, tool_name: &str) -> CallToolRequestParam {
+    fn prepare_tool_params(
+        &self,
+        params: &CallToolRequestParam,
+        tool_name: &str,
+    ) -> CallToolRequestParam {
         let mut tool_params = params.clone();
         tool_params.name = tool_name.to_string().into();
 
         if let Some(arguments) = &tool_params.arguments
             && let Ok(arguments_str) = serde_json::to_string(arguments)
         {
-            let restored = self.secret_manager.restore_secrets_in_string(&arguments_str);
+            let restored = self
+                .secret_manager
+                .restore_secrets_in_string(&arguments_str);
             if let Ok(restored_arguments) = serde_json::from_str(&restored) {
                 tool_params.arguments = Some(restored_arguments);
             }
@@ -451,7 +461,8 @@ impl ServerHandler for ProxyServer {
             })?;
 
         // Track request for cancellation forwarding
-        self.track_request(ctx.id.clone(), client_name.clone()).await;
+        self.track_request(ctx.id.clone(), client_name.clone())
+            .await;
 
         // Prepare and execute the tool call
         let tool_params = self.prepare_tool_params(&params, &tool_name);
@@ -464,7 +475,13 @@ impl ServerHandler for ProxyServer {
 
         // Process result and redact secrets
         let mut result = result.map_err(|e| {
-            service_error_to_error_data(e, &format!("Failed to call tool {} on client {}", tool_name, client_name))
+            service_error_to_error_data(
+                e,
+                &format!(
+                    "Failed to call tool {} on client {}",
+                    tool_name, client_name
+                ),
+            )
         })?;
 
         result.content = self.redact_content(result.content);
