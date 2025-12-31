@@ -1,14 +1,14 @@
 //! Conversion between unified types and Gemini types
 
 use super::types::{
-    GeminiContent, GeminiFunctionCall, GeminiFunctionDeclaration,
-    GeminiFunctionResponse, GeminiGenerationConfig, GeminiInlineData, GeminiPart, GeminiRequest,
-    GeminiResponse, GeminiSystemInstruction, GeminiThinkingConfig, GeminiTool,
+    GeminiContent, GeminiFunctionCall, GeminiFunctionDeclaration, GeminiFunctionResponse,
+    GeminiGenerationConfig, GeminiInlineData, GeminiPart, GeminiRequest, GeminiResponse,
+    GeminiSystemInstruction, GeminiThinkingConfig, GeminiTool,
 };
 use crate::error::{Error, Result};
 use crate::types::{
-    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message,
-    ProviderOptions, ResponseContent, Role, Usage,
+    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ProviderOptions,
+    ResponseContent, Role, Usage,
 };
 
 /// Convert unified request to Gemini request
@@ -242,7 +242,7 @@ fn parse_image_data(url: &str) -> Result<GeminiInlineData> {
 
 /// Convert Gemini response to unified response
 pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
-    use crate::types::ToolCall;   
+    use crate::types::ToolCall;
 
     let candidates = resp.candidates.unwrap_or_default();
     let candidate = candidates.first();
@@ -321,8 +321,8 @@ pub(super) fn parse_finish_reason(reason: &Option<String>) -> Option<FinishReaso
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::GeminiCandidate;
+    use super::*;
 
     #[test]
     fn test_to_gemini_content_tool_result() {
