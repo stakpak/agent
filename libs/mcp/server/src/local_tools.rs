@@ -1114,29 +1114,6 @@ SAFETY NOTES:
         let mut stall_notified = false;
         const STALL_TIMEOUT_SECS: u64 = 5;
 
-        // Patterns that indicate command is waiting for input
-        const INPUT_PROMPT_PATTERNS: &[&str] = &[
-            "password:",
-            "Password:",
-            "[sudo]",
-            "(yes/no)",
-            "[y/N]",
-            "[Y/n]",
-            "Continue?",
-            "Are you sure",
-            "Enter passphrase",
-            "Confirm:",
-            "passphrase for",
-        ];
-
-        // Helper to check if output matches input prompt patterns
-        fn matches_input_prompt(output: &str) -> bool {
-            let lower = output.to_lowercase();
-            INPUT_PROMPT_PATTERNS
-                .iter()
-                .any(|p| lower.contains(&p.to_lowercase()))
-        }
-
         // Helper function to stream output and wait for process completion
         let stream_and_wait = async {
             // Stall check interval
@@ -1187,11 +1164,7 @@ SAFETY NOTES:
                             stall_notified = true;
                             // Send stall notification - don't require pattern matching for now
                             // Just notify that command is taking a while with no output
-                            let stall_msg = if matches_input_prompt(&result) {
-                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. if you think it's stuck use ctrl+r."
-                            } else {
-                                "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds."
-                            };
+                            let stall_msg = "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. if you think it's stuck use ctrl+r";
                             let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                                 progress_token: ProgressToken(NumberOrString::Number(0)),
                                 progress: 50.0,

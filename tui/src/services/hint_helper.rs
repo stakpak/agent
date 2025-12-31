@@ -159,14 +159,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             // Add second line with select hint if available (Unix only)
             // Add second line with select hint if available
             if !select_hint.is_empty() {
-                 let mut hint_spans = vec![];
-                 if select_hint.starts_with("'$'") {
-                     hint_spans.push(Span::styled("'$'", Style::default().fg(Color::Magenta)));
-                     hint_spans.push(Span::styled(&select_hint[3..], Style::default().fg(Color::Cyan)));
-                 } else {
-                     hint_spans.push(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
-                 }
-                 lines.push(Line::from(hint_spans));
+                let mut hint_spans = vec![];
+                if let Some(stripped) = select_hint.strip_prefix("'$'") {
+                    hint_spans.push(Span::styled("'$'", Style::default().fg(Color::Magenta)));
+                    hint_spans.push(Span::styled(stripped, Style::default().fg(Color::Cyan)));
+                } else {
+                    hint_spans.push(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
+                }
+                lines.push(Line::from(hint_spans));
             }
 
             let hint = Paragraph::new(lines);

@@ -32,7 +32,7 @@ pub enum MessageContent {
     Markdown(String),
     PlainText(String),
     RenderPendingBorderBlock(ToolCall, bool),
-    RenderPendingBorderBlockWithStallWarning(ToolCall, bool),
+    RenderPendingBorderBlockWithStallWarning(ToolCall, bool, String),
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
     RenderResultBorderBlock(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
@@ -793,6 +793,7 @@ fn get_wrapped_message_lines_internal(
             MessageContent::RenderPendingBorderBlockWithStallWarning(
                 tool_call,
                 is_auto_approved,
+                stall_message,
             ) => {
                 let full_command = extract_full_command_arguments(tool_call);
                 let mut rendered_lines =
@@ -806,8 +807,9 @@ fn get_wrapped_message_lines_internal(
                     let border_color = Color::Cyan;
 
                     // Add warning line inside the block (use simple ASCII to avoid width issues)
-                    let warning_text = "[!] Command waiting for user input";
-                    let warning_display_width = unicode_width::UnicodeWidthStr::width(warning_text);
+                    let warning_text = stall_message;
+                    let warning_display_width =
+                        unicode_width::UnicodeWidthStr::width(warning_text.as_str());
                     let warning_padding = inner_width.saturating_sub(warning_display_width + 1); // +4 for "  " prefix and " │" suffix spacing
                     let warning_line = Line::from(vec![
                         Span::styled("│", Style::default().fg(border_color)),
@@ -820,20 +822,7 @@ fn get_wrapped_message_lines_internal(
                         Span::styled(" │", Style::default().fg(border_color)),
                     ]);
 
-                    let info_text = "Switching to interactive shell mode...";
-                    let info_display_width = unicode_width::UnicodeWidthStr::width(info_text);
-                    let info_padding = inner_width.saturating_sub(info_display_width + 1);
-                    let info_line = Line::from(vec![
-                        Span::styled("│", Style::default().fg(border_color)),
-                        Span::styled(
-                            format!("  {}{}", info_text, " ".repeat(info_padding)),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::styled(" │", Style::default().fg(border_color)),
-                    ]);
-
                     rendered_lines.insert(insert_pos, warning_line);
-                    rendered_lines.insert(insert_pos + 1, info_line);
                 }
 
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);

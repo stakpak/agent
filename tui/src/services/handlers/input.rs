@@ -162,8 +162,7 @@ pub fn handle_input_submitted_event(
 pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
     state.show_shortcuts = false;
 
-    if c == '$' && state.input().is_empty() && !state.show_sessions_dialog
-    {
+    if c == '$' && state.input().is_empty() && !state.show_sessions_dialog {
         state.text_area.set_text("");
         // Shell mode toggle will be handled by shell module
         use super::shell;

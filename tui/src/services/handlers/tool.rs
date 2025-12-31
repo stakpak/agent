@@ -27,35 +27,39 @@ pub fn handle_stream_tool_result(
     }
 
     // Check for interactive stall notification
+    // Check for interactive stall notification
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
         // Stop the loader
         state.loading = false;
         state.is_streaming = false;
 
-        // Extract command from the latest tool call
-        if let Some(tool_call) = &state.latest_tool_call
-            && let Ok(command) = extract_command_from_tool_call(tool_call)
-        {
-            // Update the pending bash message to show stall warning
-            if let Some(pending_id) = state.pending_bash_message_id {
-                for msg in &mut state.messages {
-                    if msg.id == pending_id {
-                        // Update to the stall warning variant
-                        if let crate::services::message::MessageContent::RenderPendingBorderBlock(
-                            tc,
-                            auto,
-                        ) = &msg.content
-                        {
-                            msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto);
-                        }
-                        break;
+        // Extract the message content (everything after the marker)
+        let stall_message = progress
+            .message
+            .replace(INTERACTIVE_STALL_MARKER, "")
+            .trim_start_matches(':')
+            .trim()
+            .to_string();
+
+        // Update the pending bash message to show stall warning
+        if let Some(pending_id) = state.pending_bash_message_id {
+            for msg in &mut state.messages {
+                if msg.id == pending_id {
+                    // Update to the stall warning variant
+                    if let crate::services::message::MessageContent::RenderPendingBorderBlock(
+                        tc,
+                        auto,
+                    ) = &msg.content
+                    {
+                        msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, stall_message.clone());
                     }
+                    break;
                 }
             }
 
             invalidate_message_lines_cache(state);
-            return Some(command);
+            return None;
         }
 
         invalidate_message_lines_cache(state);

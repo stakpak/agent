@@ -333,9 +333,7 @@ pub fn update(
         InputEvent::ShellOutput(line) => {
             let should_auto_complete = shell::handle_shell_output(state, line);
             if should_auto_complete {
-                // Auto-detected command completion - trigger Esc flow
-                // This reuses existing logic that captures history and sends tool result
-                dialog::handle_esc_event(state, input_tx, output_tx, shell_tx, cancel_tx.clone());
+                let _ = input_tx.try_send(InputEvent::ShellCompleted(0));
             }
         }
         InputEvent::ShellError(line) => {
@@ -348,7 +346,6 @@ pub fn update(
             shell::handle_shell_completed(
                 state,
                 output_tx,
-                cancel_tx,
                 message_area_height,
                 message_area_width,
             );
