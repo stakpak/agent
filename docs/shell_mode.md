@@ -19,7 +19,7 @@ For standard commands (e.g., `ls`, `git status`, `docker ps`), Stakpak runs them
 - **Output:** The output is displayed in the main chat interface as a block.
 
 ### Foreground Shell (Interactive)
-For interactive commands (e.g., `vim`, `htop`, `ssh`, `git commit`), Stakpak launches a full interactive terminal session.
+For interactive commands (e.g., `vim`, `htop`, `ssh`, `git commit`), Stakpak launches a full interactive terminal session when you `ctrl+r`.
 - **Full Control:** You have complete control over the terminal process.
 - **Pty Support:** Uses a pseudo-terminal (pty) to support full-screen applications and complex interactions.
 - **Exit:** When the command exits, you are returned to the Stakpak TUI.
