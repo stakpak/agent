@@ -3,7 +3,9 @@
 //! Run with: ANTHROPIC_API_KEY=your_key cargo test -p stakai --test lib anthropic -- --ignored --nocapture
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, InferenceConfig, Message, Role, StreamEvent, Tool, ToolChoice};
+use stakai::{
+    GenerateRequest, Inference, InferenceConfig, Message, Role, StreamEvent, Tool, ToolChoice,
+};
 
 // =============================================================================
 // Basic Generation Tests
@@ -454,7 +456,7 @@ async fn test_anthropic_missing_api_key_error() {
     let config = InferenceConfig::new();
     let client_result = Inference::with_config(config);
 
-    // If client builds successfully (because other providers might be available), 
+    // If client builds successfully (because other providers might be available),
     // try to make a request that would fail
     if let Ok(client) = client_result {
         let request = GenerateRequest::new(
@@ -472,7 +474,10 @@ async fn test_anthropic_missing_api_key_error() {
         assert!(response.is_err(), "Expected error when API key is missing");
         println!("Expected error: {:?}", response.err());
     } else {
-        println!("Client creation failed as expected: {:?}", client_result.err());
+        println!(
+            "Client creation failed as expected: {:?}",
+            client_result.err()
+        );
     }
 }
 
@@ -535,8 +540,9 @@ async fn test_anthropic_streaming_long_response() {
         "claude-haiku-4-5-20251001",
         vec![Message {
             role: Role::User,
-            content: "Write a short paragraph (about 100 words) about the Rust programming language."
-                .into(),
+            content:
+                "Write a short paragraph (about 100 words) about the Rust programming language."
+                    .into(),
             name: None,
         }],
     );
