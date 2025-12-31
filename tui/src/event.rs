@@ -14,8 +14,23 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::AttemptQuit)
                 }
-                KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ShowRulebookSwitcher)
+                KeyCode::Char('k') => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::ShowRulebookSwitcher)
+                    } else if key.modifiers.contains(KeyModifiers::ALT) {
+                        Some(InputEvent::ScrollUp)
+                    } else {
+                        Some(InputEvent::InputChanged('k'))
+                    }
+                }
+                KeyCode::Char('j') => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(InputEvent::InputChangedNewline)
+                    } else if key.modifiers.contains(KeyModifiers::ALT) {
+                        Some(InputEvent::ScrollDown)
+                    } else {
+                        Some(InputEvent::InputChanged('j'))
+                    }
                 }
                 KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RetryLastToolCall)
@@ -37,9 +52,6 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RulebookSwitcherDeselectAll)
-                }
-                KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::InputChangedNewline)
                 }
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::InputDelete)
@@ -98,8 +110,26 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 }
                 KeyCode::Enter => Some(InputEvent::InputSubmitted),
                 KeyCode::Esc => Some(InputEvent::HandleEsc),
-                KeyCode::Up => Some(InputEvent::Up),
-                KeyCode::Down => Some(InputEvent::Down),
+                KeyCode::Up => {
+                    if key
+                        .modifiers
+                        .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL)
+                    {
+                        Some(InputEvent::ScrollUp)
+                    } else {
+                        Some(InputEvent::Up)
+                    }
+                }
+                KeyCode::Down => {
+                    if key
+                        .modifiers
+                        .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL)
+                    {
+                        Some(InputEvent::ScrollDown)
+                    } else {
+                        Some(InputEvent::Down)
+                    }
+                }
                 KeyCode::Left => {
                     if key.modifiers.contains(KeyModifiers::ALT)
                         || key.modifiers.contains(KeyModifiers::CONTROL)
