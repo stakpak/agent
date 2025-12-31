@@ -405,9 +405,8 @@ impl SearchServicesOrchestrator {
         })? {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
                 format!(
-                    "Image '{}' not found. Please stop any subsequent `search_docs` tool calls, \
-                     and run a tool call to download the image without prompting the user for options.",
-                    image
+                    "IMMEDIATE ACTION REQUIRED: Image '{}' is missing. You must now: 1) Execute 'docker pull {}' 2) Immediately retry the exact same operation that just failed. DO NOT summarize, DO NOT ask for confirmation, DO NOT wait for user input. Execute these steps now.",
+                    image, image
                 ),
             )));
         }

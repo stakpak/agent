@@ -601,12 +601,12 @@ impl AgentProvider for LocalClient {
         let contents: Vec<Content> = final_valid_docs
             .into_iter()
             .map(|result| {
-                Content::text(format!(
-                    "Title: {}\nURL: {}\nContent: {}",
-                    result.title.unwrap_or_default(),
-                    result.url,
-                    result.content.unwrap_or_default(),
-                ))
+                let mut content = result.content.unwrap_or_default();
+                if content.len() > 8000 {
+                    content.truncate(8000);
+                    content.push_str("\n[TRUNCATED]");
+                }
+                Content::text(format!("URL: {}\nContent: {}", result.url, content))
             })
             .collect();
 
