@@ -27,6 +27,7 @@ use stakpak_shared::models::llm::{
 };
 use stakpak_shared::models::stakai_adapter::StakAIClient;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
+use stakpak_shared::utils::handle_large_output;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -599,15 +600,27 @@ impl AgentProvider for LocalClient {
             return Ok(vec![Content::text("No results found".to_string())]);
         }
 
+        const MAX_LINES: usize = 300;
+
         let contents: Vec<Content> = final_valid_docs
             .into_iter()
             .map(|result| {
-                let mut content = result.content.unwrap_or_default();
-                if content.len() > 8000 {
-                    content.truncate(8000);
-                    content.push_str("\n[TRUNCATED]");
-                }
-                Content::text(format!("URL: {}\nContent: {}", result.url, content))
+                let content = result.content.unwrap_or_default();
+
+                let output_lines: Vec<&str> = content.lines().collect();
+
+                let total_lines = output_lines.len();
+
+                let final_content = if total_lines >= MAX_LINES {
+                    match handle_large_output(&content, "search", MAX_LINES, true) {
+                        Ok(s) => s,
+                        Err(_) => "[failed to save full content]".to_string(),
+                    }
+                } else {
+                    content
+                };
+
+                Content::text(format!("URL: {}\nContent: {}", result.url, final_content))
             })
             .collect();
 
