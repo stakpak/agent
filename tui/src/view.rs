@@ -369,7 +369,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     if !state.show_shell_mode {
         block = block.title(Span::styled(
-            "Type '$' for Shell mode",
+            "'$' for Shell mode",
             Style::default().fg(Color::DarkGray),
         ));
     }
