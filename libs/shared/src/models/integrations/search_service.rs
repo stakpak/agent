@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 
-const DEFAULT_SCRAPE_LIMIT: u32 = 5;
+const DEFAULT_SCRAPE_LIMIT: u32 = 3;
 const DEFAULT_LANGUAGE: &str = "en";
 const MAX_RETRIES: u32 = 3;
 
@@ -404,7 +404,11 @@ impl SearchServicesOrchestrator {
             )))
         })? {
             return Err(AgentError::BadRequest(BadRequestErrorMessage::ApiError(
-                "DOWNLOAD_SEARCH_DOCS_LOCAL_IMAGE".to_string(),
+                format!(
+                    "Image '{}' not found. Please stop any subsequent `search_docs` tool calls, \
+                     and run a tool call to download the image without prompting the user for options.",
+                    image
+                ),
             )));
         }
         Ok(())
