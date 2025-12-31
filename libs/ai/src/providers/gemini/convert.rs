@@ -244,35 +244,34 @@ fn parse_image_data(url: &str) -> Result<GeminiInlineData> {
 pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
     use crate::types::ToolCall;
 
-    let candidates = resp.candidates.unwrap_or_default();
-    let candidate = candidates.first();
+    let candidate = resp.candidates.as_ref().and_then(|c| c.first());
 
     let mut content: Vec<ResponseContent> = Vec::new();
+    let mut has_tool_calls = false;
 
-    if let Some(candidate) = candidate {
-        for part in candidate
-            .content
-            .as_ref()
-            .map(|c| c.parts.as_slice())
-            .unwrap_or_default()
-        {
-            if let Some(text) = &part.text {
-                content.push(ResponseContent::Text { text: text.clone() });
-            }
+    if let Some(candidate) = candidate
+        && let Some(c) = &candidate.content {
+            for part in &c.parts {
+                if let Some(text) = &part.text {
+                    content.push(ResponseContent::Text { text: text.clone() });
+                }
 
-            if let Some(function_call) = &part.function_call {
-                content.push(ResponseContent::ToolCall(ToolCall {
-                    id: function_call
-                        .id
-                        .clone()
-                        .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4())),
-                    name: function_call.name.clone(),
-                    arguments: function_call.args.clone(),
-                }));
+                if let Some(function_call) = &part.function_call {
+                    has_tool_calls = true;
+
+                    content.push(ResponseContent::ToolCall(ToolCall {
+                        id: function_call
+                            .id
+                            .clone()
+                            .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4())),
+                        name: function_call.name.clone(),
+                        arguments: function_call.args.clone(),
+                    }));
+                }
             }
         }
-    }
 
+    // Ensure at least one content item (matches OpenAI/Gemini behavior)
     if content.is_empty() {
         content.push(ResponseContent::Text {
             text: String::new(),
@@ -281,7 +280,6 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
 
     let usage = resp
         .usage_metadata
-        .as_ref()
         .map(|u| Usage {
             prompt_tokens: u.prompt_token_count.unwrap_or(0),
             completion_tokens: u.candidates_token_count.unwrap_or(0),
@@ -289,15 +287,12 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
         })
         .unwrap_or_default();
 
-    // Determine finish reason - function_call should be ToolCalls
-    let finish_reason = if content
-        .iter()
-        .any(|c| matches!(c, ResponseContent::ToolCall(_)))
-    {
+    let finish_reason = if has_tool_calls {
         FinishReason::ToolCalls
     } else {
         candidate
-            .and_then(|c| parse_finish_reason(&c.finish_reason))
+            .and_then(|c| c.finish_reason.as_deref())
+            .and_then(parse_finish_reason)
             .unwrap_or(FinishReason::Other)
     };
 
@@ -310,13 +305,13 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
 }
 
 /// Parse Gemini finish reason to unified finish reason
-pub(super) fn parse_finish_reason(reason: &Option<String>) -> Option<FinishReason> {
-    reason.as_ref().and_then(|r| match r.as_str() {
+pub(super) fn parse_finish_reason(reason: &str) -> Option<FinishReason> {
+    match reason {
         "STOP" => Some(FinishReason::Stop),
         "MAX_TOKENS" => Some(FinishReason::Length),
         "SAFETY" => Some(FinishReason::ContentFilter),
         _ => None,
-    })
+    }
 }
 
 #[cfg(test)]
