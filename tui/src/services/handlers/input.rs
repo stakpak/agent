@@ -223,6 +223,13 @@ pub fn handle_input_backspace(state: &mut AppState) {
         state.pasted_placeholder = None;
     }
 
+    // Clean up attached_images when their placeholders are no longer in the input
+    // This prevents orphaned image references when user backspaces over placeholders
+    let current_input = state.input().to_string();
+    state
+        .attached_images
+        .retain(|img| current_input.contains(&img.placeholder));
+
     // Send input to file_search worker (async, non-blocking)
     if let Some(tx) = &state.file_search_tx {
         let _ = tx.try_send((state.input().to_string(), state.cursor_position()));
@@ -390,8 +397,15 @@ fn handle_input_submitted(
             if let Err(e) = execute_command(command_id, ctx) {
                 push_error_message(state, &e, None);
             }
+            return; // Only return after executing a valid command
         }
-    } else if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
+        // IMPORTANT: If no matching helpers and not in file search,
+        // fall through to normal message submission below
+        // This fixes the issue where "/invalid" would not submit
+        state.show_helper_dropdown = false;
+    }
+
+    if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
         // Allow submission if there's text input OR attached images
 
         log::debug!(
@@ -1050,6 +1064,7 @@ fn find_all_image_paths(input: &str) -> Vec<(usize, usize, String)> {
 
     // Pattern 2: Unquoted paths (must not contain spaces)
     // Look for image extensions and work backwards/forwards
+    // IMPORTANT: Must look like an actual file path, not just text ending with an extension
     for ext in IMAGE_EXTS {
         let ext_lower = ext.to_lowercase();
         let mut search_pos = 0;
@@ -1086,7 +1101,13 @@ fn find_all_image_paths(input: &str) -> Vec<(usize, usize, String)> {
                 .iter()
                 .any(|(s, e, _)| *s <= path_start && *e >= ext_end);
 
-            if !is_quoted && !potential_path.is_empty() {
+            let looks_like_path = potential_path.contains('/')
+                || potential_path.contains('\\')
+                || potential_path.starts_with('~')
+                || potential_path.starts_with(".")
+                || potential_path.starts_with("[Image "); // Already a placeholder
+
+            if !is_quoted && !potential_path.is_empty() && looks_like_path {
                 paths.push((path_start, ext_end, potential_path.to_string()));
             }
 
