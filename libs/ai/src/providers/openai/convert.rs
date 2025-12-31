@@ -70,11 +70,16 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
         .filter_map(|msg| to_openai_message_with_mode(msg, system_message_mode))
         .collect();
 
+    let temp = match is_reasoning_model(&req.model) {
+        false => Some(0.0),
+        true => None,
+    };
+
     ChatCompletionRequest {
         model: req.model.clone(),
         messages,
-        temperature: req.options.temperature,
-        max_tokens: req.options.max_tokens,
+        temperature: temp,
+        max_completion_tokens: req.options.max_tokens,
         top_p: req.options.top_p,
         stop: req.options.stop_sequences.clone(),
         stream: Some(stream),

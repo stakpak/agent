@@ -11,7 +11,7 @@ async fn test_openai_generate() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-3.5-turbo",
+        "gpt-5-mini-2025-08-07",
         vec![Message {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
@@ -19,7 +19,7 @@ async fn test_openai_generate() {
         }],
     );
     request.options.temperature = Some(0.0);
-    request.options.max_tokens = Some(10);
+    request.options.max_tokens = Some(500);
 
     let response = client.generate(&request).await;
 
@@ -36,7 +36,7 @@ async fn test_openai_streaming() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-3.5-turbo",
+        "gpt-5-mini-2025-08-07",
         vec![Message {
             role: Role::User,
             content: "Count from 1 to 3".into(),
@@ -44,7 +44,7 @@ async fn test_openai_streaming() {
         }],
     );
     request.options.temperature = Some(0.0);
-    request.options.max_tokens = Some(20);
+    request.options.max_tokens = Some(200);
 
     let stream = client.stream(&request).await;
     assert!(stream.is_ok(), "Stream creation failed: {:?}", stream.err());
@@ -77,7 +77,7 @@ async fn test_openai_with_system_message() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-3.5-turbo",
+        "gpt-5-mini-2025-08-07",
         vec![
             Message {
                 role: Role::System,
@@ -92,7 +92,7 @@ async fn test_openai_with_system_message() {
         ],
     );
     request.options.temperature = Some(0.0);
-    request.options.max_tokens = Some(5);
+    request.options.max_tokens = Some(200);
 
     let response = client.generate(&request).await;
 
@@ -137,7 +137,7 @@ async fn test_openai_temperature_variation() {
         }],
     );
     request.options.temperature = Some(0.0);
-    request.options.max_tokens = Some(5);
+    request.options.max_tokens = Some(200);
 
     let response = client.generate(&request).await;
     assert!(response.is_ok());
