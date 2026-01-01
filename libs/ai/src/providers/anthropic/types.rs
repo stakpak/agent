@@ -27,8 +27,21 @@ impl AnthropicConfig {
     }
 
     /// Set base URL
+    /// Normalizes the URL by stripping `/messages` suffix if present,
+    /// since the provider appends the endpoint path automatically.
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
+        let mut url = base_url.into();
+        // Strip /messages suffix if user provided full endpoint URL
+        if url.ends_with("/messages") {
+            url = url.trim_end_matches("/messages").to_string();
+        } else if url.ends_with("/messages/") {
+            url = url.trim_end_matches("/messages/").to_string();
+        }
+        // Ensure URL ends with /
+        if !url.ends_with('/') {
+            url.push('/');
+        }
+        self.base_url = url;
         self
     }
 

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use stakpak_shared::cert_utils::CertificateChain;
 use std::collections::HashMap;
 use std::fs;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -93,6 +94,31 @@ impl ClientPool {
     ) -> tokio::sync::MutexGuard<'_, HashMap<String, RunningService<RoleClient, ProxyClientHandler>>>
     {
         self.clients.lock().await
+    }
+
+    /// Get a cloned peer for a specific client without holding the lock during async operations.
+    /// This prevents mutex contention during long-running tool calls.
+    pub async fn get_client_peer(&self, name: &str) -> Option<Peer<RoleClient>> {
+        let clients = self.clients.lock().await;
+        clients.get(name).map(|running_service| {
+            // RunningService derefs to Peer<R>, and Peer is Clone
+            running_service.deref().clone()
+        })
+    }
+
+    /// Get all client names currently in the pool
+    pub async fn get_client_names(&self) -> Vec<String> {
+        let clients = self.clients.lock().await;
+        clients.keys().cloned().collect()
+    }
+
+    /// Get cloned peers for all clients without holding the lock during async operations
+    pub async fn get_all_client_peers(&self) -> HashMap<String, Peer<RoleClient>> {
+        let clients = self.clients.lock().await;
+        clients
+            .iter()
+            .map(|(name, running_service)| (name.clone(), running_service.deref().clone()))
+            .collect()
     }
 }
 

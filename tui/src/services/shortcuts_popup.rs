@@ -87,6 +87,7 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
         Shortcut::new("/quit", "Quit application", "Commands"),
         // File Search
         Shortcut::new("@", "Trigger file search", "File Search"),
+        Shortcut::new("$", "Enter interactive shell mode", "File Search"),
         Shortcut::new("Tab", "Select file from search", "File Search"),
         // Mouse
         Shortcut::new("Scroll Up/Down", "Scroll messages", "Mouse"),

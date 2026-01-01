@@ -35,6 +35,22 @@ pub async fn create_stream(mut event_source: EventSource) -> Result<GenerateStre
                         }
                     }
                 }
+                Err(reqwest_eventsource::Error::StreamEnded) => {
+                    // Stream ended normally without message_stop - this is OK
+                    break;
+                }
+                Err(reqwest_eventsource::Error::InvalidStatusCode(status, response)) => {
+                    // HTTP error - try to get error body for better message
+                    let error_body = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unable to read error body".to_string());
+                    yield Err(Error::provider_error(format!(
+                        "Anthropic API error {}: {}",
+                        status, error_body
+                    )));
+                    break;
+                }
                 Err(e) => {
                     yield Err(Error::stream_error(format!("Stream error: {}", e)));
                     break;

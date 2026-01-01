@@ -64,6 +64,12 @@ pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
             .approval_popup
             .recreate_with_terminal_size(state.terminal_size);
     }
+
+    // Resize shell parser
+    // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
+    let shell_rows = height.saturating_sub(2).max(1);
+    let shell_cols = width.saturating_sub(4).max(1);
+    state.shell_screen.set_size(shell_rows, shell_cols);
 }
 
 /// Handle toggle cursor visible event
@@ -227,6 +233,22 @@ pub fn handle_toggle_mouse_capture(state: &mut AppState) {
 
 /// Handle set sessions event
 pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::SessionInfo>) {
+    // Terminate any active shell before showing sessions dialog
+    if let Some(cmd) = &state.active_shell_command {
+        let _ = cmd.kill();
+    }
+    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+        state.messages.retain(|m| m.id != shell_msg_id);
+    }
+    state.active_shell_command = None;
+    state.active_shell_command_output = None;
+    state.interactive_shell_message_id = None;
+    state.show_shell_mode = false;
+    state.shell_popup_visible = false;
+    state.shell_popup_expanded = false;
+    state.waiting_for_shell_input = false;
+    state.text_area.set_shell_mode(false);
+
     state.sessions = sessions;
     state.show_sessions_dialog = true;
 }
