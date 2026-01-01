@@ -43,7 +43,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(unix, windows))'.dependencies]
 portable-pty = "0.8"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
