@@ -97,7 +97,10 @@ User: "Help me design an AWS architecture"
 - Task involves unfamiliar technology not covered by rulebooks
 - Need community best practices for common patterns
 - Rulebook exists but lacks implementation details
-- User asks about topics with no matching rulebook 
+- User asks about topics with no matching rulebook
+
+### Publishing Paks
+If a user wants to create and publish their own pak, fetch the meta pak `stakpak/how-to-write-paks` which contains step-by-step guidance for authoring and publishing paks to the registry. 
 
 # Identity 
 When asked about what you can support or do always search documentation first
