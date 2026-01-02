@@ -316,20 +316,17 @@ pub fn generate_password(
     // Generate password ensuring at least one character from each required category
     let mut password = Vec::with_capacity(length);
 
-    // Ensure at least one character from each category
-    password.push(*lowercase.choose(&mut rng).unwrap());
-    password.push(*uppercase.choose(&mut rng).unwrap());
-    password.push(*digits.choose(&mut rng).unwrap());
-
-    if include_symbols {
-        password.push(*symbols.choose(&mut rng).unwrap());
-    }
-
-    // Fill the rest with random characters from the full charset
-    password.extend((0..(length - password.len())).map(|_| charset.choose(&mut rng).unwrap()));
-
-    // Shuffle the password to randomize the order
-    password.shuffle(&mut rng);
+    populate_password_with_random_chars(
+        length,
+        include_symbols,
+        &mut rng,
+        lowercase,
+        uppercase,
+        digits,
+        symbols,
+        &charset,
+        &mut password,
+    );
 
     for attempt in 0..MAX_RETRIES {
         if redaction_map.values().any(|v| v.as_bytes() == password) {
@@ -340,17 +337,17 @@ pub fn generate_password(
             );
 
             password.clear();
-            password.push(*lowercase.choose(&mut rng).unwrap());
-            password.push(*uppercase.choose(&mut rng).unwrap());
-            password.push(*digits.choose(&mut rng).unwrap());
-
-            if include_symbols {
-                password.push(*symbols.choose(&mut rng).unwrap());
-            }
-
-            password
-                .extend((0..(length - password.len())).map(|_| charset.choose(&mut rng).unwrap()));
-            password.shuffle(&mut rng);
+            populate_password_with_random_chars(
+                length,
+                include_symbols,
+                &mut rng,
+                lowercase,
+                uppercase,
+                digits,
+                symbols,
+                &charset,
+                &mut password,
+            );
 
             continue;
         }
@@ -364,6 +361,33 @@ pub fn generate_password(
     );
 
     Err(PasswordGenerationError::Conflict)
+}
+
+fn populate_password_with_random_chars(
+    length: usize,
+    include_symbols: bool,
+    rng: &mut rand::prelude::ThreadRng,
+    lowercase: &[u8; 26],
+    uppercase: &[u8; 26],
+    digits: &[u8; 10],
+    symbols: &[u8; 26],
+    charset: &Vec<u8>,
+    password: &mut Vec<u8>,
+) {
+    // Ensure at least one character from each category
+    password.push(*lowercase.choose(rng).unwrap());
+    password.push(*uppercase.choose(rng).unwrap());
+    password.push(*digits.choose(rng).unwrap());
+
+    if include_symbols {
+        password.push(*symbols.choose(rng).unwrap());
+    }
+
+    // Fill the rest with random characters from the full charset
+    password.extend((0..(length - password.len())).map(|_| charset.choose(rng).unwrap()));
+
+    // Shuffle the password to randomize the order
+    password.shuffle(rng);
 }
 
 #[cfg(test)]
