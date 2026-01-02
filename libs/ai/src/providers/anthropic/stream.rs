@@ -118,7 +118,8 @@ fn process_anthropic_event(
                     content_blocks.insert(index, ContentBlock::Text);
                     Vec::new()
                 }
-                Some(AnthropicContent::Thinking { .. }) | Some(AnthropicContent::RedactedThinking { .. }) => {
+                Some(AnthropicContent::Thinking { .. })
+                | Some(AnthropicContent::RedactedThinking { .. }) => {
                     content_blocks.insert(index, ContentBlock::Reasoning);
                     Vec::new()
                 }
@@ -168,16 +169,16 @@ fn process_anthropic_event(
             // Content block finished - emit ToolCallEnd for tool calls
             let index = event.index.unwrap_or(0);
 
-            if let Some(block) = content_blocks.remove(&index) {
-                if let ContentBlock::ToolCall { id, name, input } = block {
-                    // Parse the accumulated JSON input
-                    let input_json = if input.is_empty() {
-                        serde_json::json!({})
-                    } else {
-                        serde_json::from_str(&input).unwrap_or(serde_json::json!({}))
-                    };
-                    return vec![StreamEvent::tool_call_end(id, name, input_json)];
-                }
+            if let Some(block) = content_blocks.remove(&index)
+                && let ContentBlock::ToolCall { id, name, input } = block
+            {
+                // Parse the accumulated JSON input
+                let input_json = if input.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(&input).unwrap_or(serde_json::json!({}))
+                };
+                return vec![StreamEvent::tool_call_end(id, name, input_json)];
             }
             Vec::new()
         }
@@ -354,7 +355,12 @@ mod tests {
 
         let results = process_anthropic_event(stop_event, &mut usage, &mut content_blocks);
         assert_eq!(results.len(), 1);
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &results[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &results[0]
+        {
             assert_eq!(id, "toolu_01ABC123");
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["location"], "San Francisco");
@@ -467,7 +473,12 @@ mod tests {
 
         let results = process_anthropic_event(stop1, &mut usage, &mut content_blocks);
         assert_eq!(results.len(), 1);
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &results[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &results[0]
+        {
             assert_eq!(id, "toolu_first");
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["city"], "NYC");
@@ -488,7 +499,12 @@ mod tests {
 
         let results = process_anthropic_event(stop2, &mut usage, &mut content_blocks);
         assert_eq!(results.len(), 1);
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &results[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &results[0]
+        {
             assert_eq!(id, "toolu_second");
             assert_eq!(name, "get_time");
             assert_eq!(arguments["timezone"], "EST");
@@ -532,11 +548,7 @@ mod tests {
 
     #[test]
     fn test_message_stop_emits_finish() {
-        let mut usage = Usage::default();
-        usage.prompt_tokens = 10;
-        usage.completion_tokens = 20;
-        usage.total_tokens = 30;
-
+        let mut usage = Usage::new(10, 20);
         let mut content_blocks = std::collections::HashMap::new();
 
         let event = AnthropicStreamEvent {
@@ -624,7 +636,12 @@ mod tests {
         let results = process_anthropic_event(stop_event, &mut usage, &mut content_blocks);
         assert_eq!(results.len(), 1);
 
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &results[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &results[0]
+        {
             assert_eq!(id, "toolu_empty");
             assert_eq!(name, "no_args_tool");
             assert_eq!(arguments, &serde_json::json!({}));

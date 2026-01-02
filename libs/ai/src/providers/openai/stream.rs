@@ -94,10 +94,10 @@ fn parse_chunk(
             });
 
             // Update ID if present (only on first chunk)
-            if let Some(id) = &tc.id {
-                if !id.is_empty() {
-                    tool_call.id = id.clone();
-                }
+            if let Some(id) = &tc.id
+                && !id.is_empty()
+            {
+                tool_call.id = id.clone();
             }
 
             if let Some(function) = &tc.function {
@@ -175,7 +175,8 @@ fn parse_chunk(
 mod tests {
     use super::*;
     use crate::providers::openai::types::{
-        ChatCompletionChunk, ChatDelta, ChunkChoice, ChatUsage, OpenAIToolCallDelta, OpenAIFunctionCallDelta,
+        ChatCompletionChunk, ChatDelta, ChatUsage, ChunkChoice, OpenAIFunctionCallDelta,
+        OpenAIToolCallDelta,
     };
 
     fn make_chunk(
@@ -299,7 +300,12 @@ mod tests {
         let events = parse_chunk(&chunk3, &mut usage, &mut tool_calls).unwrap();
         assert_eq!(events.len(), 2); // ToolCallEnd + Finish
 
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &events[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &events[0]
+        {
             assert_eq!(id, "call_abc123");
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["location"], "SF");
@@ -359,20 +365,18 @@ mod tests {
         parse_chunk(&chunk2, &mut usage, &mut tool_calls).unwrap();
 
         // Finish
-        let chunk3 = make_chunk(
-            "chatcmpl-123",
-            None,
-            None,
-            None,
-            Some("tool_calls"),
-            None,
-        );
+        let chunk3 = make_chunk("chatcmpl-123", None, None, None, Some("tool_calls"), None);
 
         let events = parse_chunk(&chunk3, &mut usage, &mut tool_calls).unwrap();
         assert_eq!(events.len(), 3); // 2 ToolCallEnd + Finish
 
         // Check first tool call end
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &events[0] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &events[0]
+        {
             assert_eq!(id, "call_first");
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["city"], "NYC");
@@ -381,7 +385,12 @@ mod tests {
         }
 
         // Check second tool call end
-        if let StreamEvent::ToolCallEnd { id, name, arguments } = &events[1] {
+        if let StreamEvent::ToolCallEnd {
+            id,
+            name,
+            arguments,
+        } = &events[1]
+        {
             assert_eq!(id, "call_second");
             assert_eq!(name, "get_time");
             assert_eq!(arguments["tz"], "EST");

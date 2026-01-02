@@ -4,12 +4,102 @@ use stakpak_api::models::ApiStreamError;
 use stakpak_shared::models::{
     integrations::openai::{
         ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
-        FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, ToolCall,
+        FinishReason, FunctionCall, MessageContent, Role, ToolCall, ToolCallDelta,
     },
     llm::{LLMModel, LLMTokenUsage},
 };
 use stakpak_tui::{InputEvent, LoadingOperation};
 use uuid::Uuid;
+
+/// Accumulates streaming tool call deltas into complete tool calls.
+///
+/// Handles two different streaming behaviors:
+/// - **ID-based matching**: When delta has an ID, match by ID only (used by Anthropic/StakAI)
+/// - **Index-based matching**: When delta has no ID, fall back to index (used by OpenAI)
+///
+/// This distinction is important because some providers (like Anthropic via StakAI adapter)
+/// send multiple tool calls with the same index but different IDs.
+struct ToolCallAccumulator {
+    tool_calls: Vec<ToolCall>,
+}
+
+impl ToolCallAccumulator {
+    fn new() -> Self {
+        Self {
+            tool_calls: Vec::new(),
+        }
+    }
+
+    /// Process a tool call delta and accumulate it into the appropriate tool call.
+    fn process_delta(&mut self, delta: &ToolCallDelta) {
+        let delta_id = delta.id.as_deref().filter(|id| !id.is_empty());
+        let delta_func = delta.function.as_ref();
+
+        match self.find_tool_call(delta_id, delta.index) {
+            Some(tool_call) => {
+                // Update existing tool call
+                if let Some(func) = delta_func {
+                    if let Some(name) = func.name.as_deref()
+                        && tool_call.function.name.is_empty()
+                    {
+                        tool_call.function.name = name.to_string();
+                    }
+                    if let Some(args) = &func.arguments {
+                        tool_call.function.arguments.push_str(args);
+                    }
+                }
+            }
+            None => {
+                // Create new tool call
+                self.create_tool_call(delta);
+            }
+        }
+    }
+
+    /// Find an existing tool call by ID or index.
+    /// Returns None if a new tool call should be created.
+    fn find_tool_call(&mut self, id: Option<&str>, index: usize) -> Option<&mut ToolCall> {
+        match id {
+            // Has ID: only match by ID, never fall back to index
+            Some(id) => self.tool_calls.iter_mut().find(|tc| tc.id == id),
+            // No ID: fall back to index-based matching for backwards compatibility
+            None => self.tool_calls.get_mut(index),
+        }
+    }
+
+    /// Create a new tool call from a delta.
+    fn create_tool_call(&mut self, delta: &ToolCallDelta) {
+        // Pad with empty tool calls if needed (for sparse indices)
+        while self.tool_calls.len() < delta.index {
+            self.tool_calls.push(ToolCall {
+                id: String::new(),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: String::new(),
+                    arguments: String::new(),
+                },
+            });
+        }
+
+        let func = delta.function.as_ref();
+        self.tool_calls.push(ToolCall {
+            id: delta.id.clone().unwrap_or_default(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: func.and_then(|f| f.name.clone()).unwrap_or_default(),
+                arguments: func.and_then(|f| f.arguments.clone()).unwrap_or_default(),
+            },
+        });
+    }
+
+    /// Get the accumulated tool calls, filtering out empty placeholders.
+    fn into_tool_calls(self) -> Vec<ToolCall> {
+        self.tool_calls
+            .into_iter()
+            .filter(|tc| !tc.id.is_empty())
+            .collect()
+    }
+}
 
 pub async fn process_responses_stream(
     stream: impl Stream<Item = Result<ChatCompletionStreamResponse, ApiStreamError>>,
@@ -44,6 +134,7 @@ pub async fn process_responses_stream(
         usage: None,
     };
     let message_id = Uuid::new_v4();
+    let mut tool_call_accumulator = ToolCallAccumulator::new();
 
     // Start stream processing loading at the beginning
     send_input_event(
@@ -112,93 +203,7 @@ pub async fn process_responses_stream(
 
                 if let Some(tool_calls) = &delta.tool_calls {
                     for delta_tool_call in tool_calls {
-                        if chat_message.tool_calls.is_none() {
-                            chat_message.tool_calls = Some(vec![]);
-                        }
-
-                        let tool_calls_vec = chat_message.tool_calls.as_mut();
-                        if let Some(tool_calls_vec) = tool_calls_vec {
-                            // Check if this delta has an ID
-                            let has_id = delta_tool_call
-                                .id
-                                .as_ref()
-                                .map(|id| !id.is_empty())
-                                .unwrap_or(false);
-
-                            // Try to find existing tool call by id first
-                            let existing_index = delta_tool_call
-                                .id
-                                .as_ref()
-                                .filter(|id| !id.is_empty())
-                                .and_then(|id| tool_calls_vec.iter().position(|tc| tc.id == *id));
-
-                            // If we have an ID, only match by ID (don't fall back to index)
-                            // If no ID, fall back to index matching for backwards compatibility
-                            let existing_tool_call = match existing_index {
-                                Some(idx) => tool_calls_vec.get_mut(idx),
-                                None if !has_id => tool_calls_vec.get_mut(delta_tool_call.index),
-                                None => None, // Has ID but no match - will create new tool call
-                            };
-
-                            match existing_tool_call {
-                                Some(tool_call) => {
-                                    let delta_func = delta_tool_call.function.as_ref().unwrap_or(
-                                        &FunctionCallDelta {
-                                            name: None,
-                                            arguments: None,
-                                        },
-                                    );
-                                    // Update name if provided and current name is empty
-                                    if let Some(name) = delta_func.name.as_deref() {
-                                        if tool_call.function.name.is_empty() {
-                                            tool_call.function.name = name.to_string();
-                                        }
-                                    }
-                                    // Append arguments
-                                    tool_call.function.arguments =
-                                        tool_call.function.arguments.clone()
-                                            + delta_func.arguments.as_deref().unwrap_or("");
-                                }
-                                None => {
-                                    // push empty tool calls until the index is reached
-                                    tool_calls_vec.extend(
-                                        (tool_calls_vec.len()..delta_tool_call.index).map(|_| {
-                                            ToolCall {
-                                                id: "".to_string(),
-                                                r#type: "function".to_string(),
-                                                function: FunctionCall {
-                                                    name: "".to_string(),
-                                                    arguments: "".to_string(),
-                                                },
-                                            }
-                                        }),
-                                    );
-
-                                    tool_calls_vec.push(ToolCall {
-                                        id: delta_tool_call.id.clone().unwrap_or_default(),
-                                        r#type: "function".to_string(),
-                                        function: FunctionCall {
-                                            name: delta_tool_call
-                                                .function
-                                                .as_ref()
-                                                .unwrap_or(&FunctionCallDelta {
-                                                    name: None,
-                                                    arguments: None,
-                                                })
-                                                .name
-                                                .as_deref()
-                                                .unwrap_or("")
-                                                .to_string(),
-                                            arguments: delta_tool_call
-                                                .function
-                                                .as_ref()
-                                                .and_then(|f| f.arguments.clone())
-                                                .unwrap_or_default(),
-                                        },
-                                    });
-                                }
-                            }
-                        }
+                        tool_call_accumulator.process_delta(delta_tool_call);
                     }
                 }
             }
@@ -214,17 +219,13 @@ pub async fn process_responses_stream(
         }
     }
 
-    // filter out empty tool calls
-    chat_message.tool_calls = Some(
-        chat_message
-            .tool_calls
-            .as_ref()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter(|tool_call| !tool_call.id.is_empty())
-            .cloned()
-            .collect::<Vec<ToolCall>>(),
-    );
+    // Get accumulated tool calls (already filtered for empty IDs)
+    let final_tool_calls = tool_call_accumulator.into_tool_calls();
+    chat_message.tool_calls = if final_tool_calls.is_empty() {
+        None
+    } else {
+        Some(final_tool_calls)
+    };
 
     chat_completion_response.choices.push(ChatCompletionChoice {
         index: 0,
@@ -248,7 +249,8 @@ mod tests {
     use super::*;
     use futures_util::stream;
     use stakpak_shared::models::integrations::openai::{
-        ChatCompletionStreamChoice, ChatCompletionStreamResponse, ChatMessageDelta, ToolCallDelta,
+        ChatCompletionStreamChoice, ChatCompletionStreamResponse, ChatMessageDelta,
+        FunctionCallDelta,
     };
 
     fn create_stream_response_with_tool_call(

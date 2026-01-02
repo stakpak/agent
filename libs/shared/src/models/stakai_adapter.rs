@@ -511,13 +511,17 @@ impl StakAIClient {
                                     });
 
                                     match existing {
-                                        Some(LLMMessageTypedContent::ToolCall { args, name: existing_name, .. }) => {
+                                        Some(LLMMessageTypedContent::ToolCall {
+                                            args,
+                                            name: existing_name,
+                                            ..
+                                        }) => {
                                             // Update existing tool call
                                             // Update name if provided and current is empty
-                                            if let Some(new_name) = &tool_use.name {
-                                                if existing_name.is_empty() {
-                                                    *existing_name = new_name.clone();
-                                                }
+                                            if let Some(new_name) = &tool_use.name
+                                                && existing_name.is_empty()
+                                            {
+                                                *existing_name = new_name.clone();
                                             }
                                             // Append arguments if provided
                                             if let Some(input) = &tool_use.input {
@@ -525,16 +529,21 @@ impl StakAIClient {
                                                 if let serde_json::Value::String(s) = args {
                                                     s.push_str(input);
                                                 } else {
-                                                    *args = serde_json::Value::String(input.clone());
+                                                    *args =
+                                                        serde_json::Value::String(input.clone());
                                                 }
                                             }
                                         }
                                         _ => {
                                             // Create new tool call
                                             let name = tool_use.name.clone().unwrap_or_default();
-                                            let args = tool_use.input.clone()
+                                            let args = tool_use
+                                                .input
+                                                .clone()
                                                 .map(serde_json::Value::String)
-                                                .unwrap_or_else(|| serde_json::Value::String(String::new()));
+                                                .unwrap_or_else(|| {
+                                                    serde_json::Value::String(String::new())
+                                                });
                                             accumulated_tool_calls.push(
                                                 LLMMessageTypedContent::ToolCall {
                                                     id: id.clone(),

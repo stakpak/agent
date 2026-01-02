@@ -212,7 +212,9 @@ fn process_gemini_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::gemini::types::{GeminiCandidate, GeminiContent, GeminiPart, GeminiFunctionCall};
+    use crate::providers::gemini::types::{
+        GeminiCandidate, GeminiContent, GeminiFunctionCall, GeminiPart,
+    };
 
     #[test]
     fn test_process_gemini_response_text() {
@@ -274,12 +276,15 @@ mod tests {
         };
 
         let result = process_gemini_response(resp, &mut usage, &mut stream_id);
-        
+
         // Should have ToolCallEnd and Finish
         assert_eq!(result.len(), 2);
 
         // Gemini sends complete tool calls, so we emit ToolCallEnd directly
-        if let StreamEvent::ToolCallEnd { name, arguments, .. } = &result[0] {
+        if let StreamEvent::ToolCallEnd {
+            name, arguments, ..
+        } = &result[0]
+        {
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["location"], "San Francisco");
         } else {
@@ -332,18 +337,24 @@ mod tests {
         };
 
         let result = process_gemini_response(resp, &mut usage, &mut stream_id);
-        
+
         // Should have 2 ToolCallEnd + Finish
         assert_eq!(result.len(), 3);
 
-        if let StreamEvent::ToolCallEnd { name, arguments, .. } = &result[0] {
+        if let StreamEvent::ToolCallEnd {
+            name, arguments, ..
+        } = &result[0]
+        {
             assert_eq!(name, "get_weather");
             assert_eq!(arguments["location"], "NYC");
         } else {
             panic!("Expected ToolCallEnd for first tool");
         }
 
-        if let StreamEvent::ToolCallEnd { name, arguments, .. } = &result[1] {
+        if let StreamEvent::ToolCallEnd {
+            name, arguments, ..
+        } = &result[1]
+        {
             assert_eq!(name, "get_time");
             assert_eq!(arguments["timezone"], "EST");
         } else {
@@ -383,7 +394,7 @@ mod tests {
         };
 
         let result = process_gemini_response(resp, &mut usage, &mut stream_id);
-        
+
         // Check usage was accumulated
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.completion_tokens, 20);
