@@ -49,13 +49,9 @@ pub fn spawn_fs_handler(
                     response_tx,
                 } => {
                     log::info!("Processing ACP read_text_file: {:?}", path);
-                    let request = acp::ReadTextFileRequest {
-                        meta: None,
-                        session_id,
-                        path,
-                        line,
-                        limit,
-                    };
+                    let request = acp::ReadTextFileRequest::new(session_id, path)
+                        .line(line)
+                        .limit(limit);
                     let result = match conn.read_text_file(request).await {
                         Ok(response) => Ok(response.content),
                         Err(e) => Err(format!("ACP read_text_file failed: {}", e)),
@@ -69,12 +65,7 @@ pub fn spawn_fs_handler(
                     response_tx,
                 } => {
                     log::info!("Processing ACP write_text_file: {:?}", path);
-                    let request = acp::WriteTextFileRequest {
-                        meta: None,
-                        session_id,
-                        path,
-                        content,
-                    };
+                    let request = acp::WriteTextFileRequest::new(session_id, path, content);
                     let result = match conn.write_text_file(request).await {
                         Ok(_) => Ok(()),
                         Err(e) => Err(format!("ACP write_text_file failed: {}", e)),
@@ -95,8 +86,9 @@ pub async fn execute_acp_fs_tool(
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .map_err(|e| format!("Failed to parse tool arguments: {}", e))?;
 
+    use super::tool_names;
     match tool_call.function.name.as_str() {
-        "view" => {
+        tool_names::VIEW => {
             let path = args
                 .get("path")
                 .and_then(|p| p.as_str())
@@ -151,7 +143,7 @@ pub async fn execute_acp_fs_tool(
                 structured_content: None,
             }))
         }
-        "create" => {
+        tool_names::CREATE => {
             let path = args
                 .get("path")
                 .and_then(|p| p.as_str())
@@ -194,7 +186,7 @@ pub async fn execute_acp_fs_tool(
                 structured_content: None,
             }))
         }
-        "str_replace" => {
+        tool_names::STR_REPLACE => {
             let path = args
                 .get("path")
                 .and_then(|p| p.as_str())

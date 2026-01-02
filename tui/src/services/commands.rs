@@ -49,6 +49,7 @@ pub enum CommandAction {
     OpenRulebookSwitcher,
     OpenSessions,
     OpenShortcuts,
+    OpenShellMode,
     ResumeSession,
     ShowStatus,
     MemorizeConversation,
@@ -75,7 +76,8 @@ impl CommandAction {
             // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
-            | CommandAction::OpenShortcuts => None,
+            | CommandAction::OpenShortcuts
+            | CommandAction::OpenShellMode => None,
         }
     }
 }
@@ -126,6 +128,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Show all keyboard shortcuts",
             "Ctrl+S",
             CommandAction::OpenShortcuts,
+        ),
+        Command::new(
+            "Shell Mode",
+            "Open interactive shell",
+            "$",
+            CommandAction::OpenShellMode,
         ),
         Command::new(
             "New Session",
@@ -438,7 +446,38 @@ pub fn switch_model(state: &mut AppState) -> Result<(), String> {
     }
 }
 
+/// Terminate any active shell command before switching sessions
+fn terminate_active_shell(state: &mut AppState) {
+    if let Some(cmd) = &state.active_shell_command {
+        // Kill the running command
+        let _ = cmd.kill();
+    }
+
+    // Remove the shell message box if it exists
+    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+        state.messages.retain(|m| m.id != shell_msg_id);
+    }
+
+    // Reset all shell-related state
+    state.active_shell_command = None;
+    state.active_shell_command_output = None;
+    state.interactive_shell_message_id = None;
+    state.show_shell_mode = false;
+    state.shell_popup_visible = false;
+    state.shell_popup_expanded = false;
+    state.waiting_for_shell_input = false;
+    state.shell_pending_command_executed = false;
+    state.shell_pending_command_value = None;
+    state.shell_pending_command_output = None;
+    state.shell_pending_command_output_count = 0;
+    state.dialog_command = None;
+    state.text_area.set_shell_mode(false);
+}
+
 pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Terminate any active shell before switching sessions
+    terminate_active_shell(state);
+
     state.message_tool_calls = None;
     state.message_approved_tools.clear();
     state.message_rejected_tools.clear();
@@ -467,6 +506,9 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Terminate any active shell before starting new session
+    terminate_active_shell(state);
+
     let _ = output_tx.try_send(OutputEvent::NewSession);
     state.text_area.set_text("");
     state.messages.clear();

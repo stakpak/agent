@@ -1,4 +1,6 @@
+use crate::local_store::LocalStore;
 use async_trait::async_trait;
+use rand::Rng;
 use rand::seq::{IndexedRandom, SliceRandom};
 use std::collections::HashMap;
 use std::fs;
@@ -397,6 +399,73 @@ fn populate_password_with_random_chars(
 
     // Shuffle the password to randomize the order
     password.shuffle(rng);
+}
+
+/// Sanitize text output by removing control characters while preserving essential whitespace
+pub fn sanitize_text_output(text: &str) -> String {
+    text.chars()
+        .filter(|&c| {
+            // Drop replacement char
+            if c == '\u{FFFD}' {
+                return false;
+            }
+            // Allow essential whitespace even though they're "control"
+            if matches!(c, '\n' | '\t' | '\r' | ' ') {
+                return true;
+            }
+            // Keep everything else that's not a control character
+            !c.is_control()
+        })
+        .collect()
+}
+
+/// Handle large output: if the output has >= `max_lines`, save the full content to session
+/// storage and return a string showing only the first or last `max_lines` lines with a pointer
+/// to the saved file. Returns `Ok(final_string)` or `Err(error_string)` on failure.
+pub fn handle_large_output(
+    output: &str,
+    file_prefix: &str,
+    max_lines: usize,
+    show_head: bool,
+) -> Result<String, String> {
+    let output_lines = output.lines().collect::<Vec<_>>();
+    if output_lines.len() >= max_lines {
+        let mut __rng__ = rand::rng();
+        let output_file = format!(
+            "{}.{:06x}.txt",
+            file_prefix,
+            __rng__.random_range(0..=0xFFFFFF)
+        );
+        let output_file_path = match LocalStore::write_session_data(&output_file, output) {
+            Ok(path) => path,
+            Err(e) => {
+                return Err(format!("Failed to write session data: {}", e));
+            }
+        };
+
+        let excerpt = if show_head {
+            let head_lines: Vec<&str> = output_lines.iter().take(max_lines).copied().collect();
+            head_lines.join("\n")
+        } else {
+            let mut tail_lines: Vec<&str> =
+                output_lines.iter().rev().take(max_lines).copied().collect();
+            tail_lines.reverse();
+            tail_lines.join("\n")
+        };
+
+        let position = if show_head { "first" } else { "last" };
+        Ok(format!(
+            "Showing the {} {} / {} output lines. Full output saved to {}\n{}\n{}",
+            position,
+            max_lines,
+            output_lines.len(),
+            output_file_path,
+            if show_head { "" } else { "...\n" },
+            excerpt
+        ))
+    } else {
+        Ok(output.to_string())
+    }
 }
 
 #[cfg(test)]

@@ -205,7 +205,7 @@ pub fn prompt_profile_name(config_path: Option<&str>) -> NavResult<Option<String
     loop {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
-        print!("{}▲ {}Enter profile name: ", Colors::YELLOW, Colors::CYAN);
+        print!("{}◆ {}Enter profile name: ", Colors::YELLOW, Colors::CYAN);
 
         // Show error if any
         if let Some(ref error) = error_message {
@@ -298,7 +298,7 @@ pub fn prompt_text(prompt: &str, required: bool) -> NavResult<Option<String>> {
     loop {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
-        print!("{}▲ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
+        print!("{}◆ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
 
         if show_required && required {
             print!("{}(Required){} ", Colors::YELLOW, Colors::RESET);
@@ -385,7 +385,7 @@ pub fn prompt_password(prompt: &str, required: bool) -> NavResult<Option<String>
             .max(40);
 
         // Calculate what we're about to print
-        let prompt_text = format!("▲ {}: ", prompt);
+        let prompt_text = format!("◆ {}: ", prompt);
         let required_text = if show_required && required {
             " (Required) "
         } else {
@@ -400,18 +400,10 @@ pub fn prompt_password(prompt: &str, required: bool) -> NavResult<Option<String>
         // Cap the number of stars to available width to prevent wrapping issues
         let stars_to_show = display_len.min(available_width.saturating_sub(1));
 
-        // Move up to the start of the prompt if we've printed before
-        // Since we force single line now, we only need to handle the single line case
-        // But to be safe against edge cases where we might have wrapped previously (before this fix running)
-        // or just standard redraw:
-        // Actually, with single line enforcement, `\r` is sufficient to return to start of line,
-        // and `\x1b[K` clears it.
-        // The previous logic tried to handle multi-line. We simplify it.
-
         print!("\r\x1b[K"); // Clear current line
 
         // Render prompt
-        print!("{}▲ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
+        print!("{}◆ {}{}: ", Colors::YELLOW, Colors::CYAN, prompt);
         if show_required && required {
             print!("{}(Required){} ", Colors::YELLOW, Colors::RESET);
         }
@@ -421,12 +413,7 @@ pub fn prompt_password(prompt: &str, required: bool) -> NavResult<Option<String>
         for _ in 0..stars_to_show {
             print!("*");
         }
-        // If truncated, maybe show a hint? No, simpler is better for now to fix the bug.
         print!("{}", Colors::RESET);
-
-        // previous_lines is no longer needed for multi-line tracking,
-        // but we keep the variable or logic compatible if we want.
-        // Actually, I should remove the complex movement logic above this block too.
 
         let _ = io::stdout().flush();
 
@@ -549,7 +536,7 @@ pub fn prompt_yes_no(prompt: &str, default: bool) -> NavResult<Option<bool>> {
         // Clear the line and re-render prompt
         print!("\r\x1b[K"); // Clear current line
         print!(
-            "{}▲ {}{} ({}): ",
+            "{}◆ {}{} ({}): ",
             Colors::YELLOW,
             Colors::CYAN,
             prompt,
@@ -701,12 +688,12 @@ async fn select_profile_with_scrolling(
             let visible_end = (visible_start + MAX_VISIBLE).min(total);
             let visible_items = &filtered[visible_start..visible_end];
 
-            // Show ▲ if there are items above
+            // Show ◆ if there are items above
             if visible_start > 0 {
                 let hidden_above = visible_start;
                 print!(
-                    "  {}▲ {} more above{}\r\n",
-                    Colors::GRAY,
+                    "  {}◆ {} more above{}\r\n",
+                    Colors::YELLOW,
                     hidden_above,
                     Colors::RESET
                 );
@@ -812,10 +799,12 @@ async fn select_profile_with_scrolling(
                 KeyCode::Char(c) => {
                     search_input.push(c);
                     selected = 0;
+                    scroll_offset = 0;
                 }
                 KeyCode::Backspace => {
                     search_input.pop();
                     selected = 0;
+                    scroll_offset = 0;
                 }
                 KeyCode::Esc => {
                     print!("\x1b[{}A", previous_height + 2);

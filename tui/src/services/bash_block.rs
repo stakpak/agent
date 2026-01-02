@@ -40,9 +40,9 @@ pub fn strip_all_ansi(text: &str) -> String {
     static REMAINING: OnceLock<Option<Regex>> = OnceLock::new();
     let maybe_regex = REMAINING.get_or_init(|| {
         Regex::new(concat!(
-            r"\x1b\]0;[^\x07\x1b]*(\x07|\x1b\\)|", // Window titles
-            r"\\u\{[0-9a-fA-F]+\}|",               // Unicode escapes
-            r"\x07"                                // Bell
+            r"\x1b\][0-9;]*[^\x07\x1b]*(\x07|\x1b\\)|", // Window titles and other OSC sequences
+            r"\\u\{[0-9a-fA-F]+\}|",                    // Unicode escapes
+            r"\x07"                                     // Bell
         ))
         .ok()
     });
@@ -58,6 +58,7 @@ pub fn preprocess_terminal_output(text: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut current_line = String::new();
     let text = strip_all_ansi(text);
+    let text = text.replace("\r\n", "\n");
     for ch in text.chars() {
         match ch {
             '\r' => {
@@ -508,7 +509,7 @@ pub fn extract_bash_block_info(
     };
     let outside_title = get_command_type_name(tool_call);
     let bubble_title = extract_command_purpose(&command, &outside_title);
-    let colors = match tool_call.function.name.as_str() {
+    let colors = match crate::utils::strip_tool_name(&tool_call.function.name) {
         "create_file" => BubbleColors {
             border_color: Color::Green,
             title_color: term_color(Color::Gray),
@@ -628,18 +629,44 @@ pub fn render_styled_header_and_borders(
         bordered_line.push(Span::styled("│", Style::default().fg(border_color)));
         bordered_line.push(Span::from(" "));
 
-        // Calculate content width BEFORE moving spans
-        let content_width: usize = line
-            .spans
-            .iter()
-            .map(|span| calculate_display_width(&span.content))
-            .sum();
+        // Calculate content width and truncate if needed
+        let mut total_width: usize = 0;
+        let mut truncated_spans = Vec::new();
 
-        // Add the content spans
-        bordered_line.extend(line.spans);
+        for span in line.spans.iter() {
+            let span_width = calculate_display_width(&span.content);
+            if total_width + span_width <= inner_width {
+                // Span fits completely
+                truncated_spans.push(span.clone());
+                total_width += span_width;
+            } else if total_width < inner_width {
+                // Need to truncate this span
+                let remaining_width = inner_width - total_width;
+                let mut truncated_content = String::new();
+                let mut char_width = 0;
+                for ch in span.content.chars() {
+                    let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                    if char_width + ch_width <= remaining_width {
+                        truncated_content.push(ch);
+                        char_width += ch_width;
+                    } else {
+                        break;
+                    }
+                }
+                if !truncated_content.is_empty() {
+                    truncated_spans.push(Span::styled(truncated_content, span.style));
+                }
+                total_width = inner_width;
+                break; // No more content can fit
+            }
+            // else: already at or past inner_width, skip this span
+        }
+
+        // Add the truncated content spans
+        bordered_line.extend(truncated_spans);
 
         // Add padding to fill the width
-        let padding_needed = inner_width.saturating_sub(content_width);
+        let padding_needed = inner_width.saturating_sub(total_width);
         if padding_needed > 0 {
             bordered_line.push(Span::from(" ".repeat(padding_needed)));
         }
@@ -688,7 +715,8 @@ pub fn render_file_diff_full(
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
-    if tool_call.function.name == "str_replace" || tool_call.function.name == "create" {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "str_replace" || tool_name == "create" {
         let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
@@ -742,7 +770,7 @@ pub fn render_bash_block(
         &bubble_title,
         Some(colors.clone()),
         terminal_width,
-        &tool_call.function.name,
+        crate::utils::strip_tool_name(&tool_call.function.name),
         None,
     )
 }
@@ -1317,8 +1345,17 @@ pub fn render_styled_lines(
     owned_lines
 }
 
+pub fn render_refreshed_terminal_bubble(
+    title: &str,
+    content: &[Line<'static>],
+    colors: Option<BubbleColors>,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    render_styled_header_and_borders(title, content.to_vec(), colors, terminal_width)
+}
+
 pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
-    let tool_call_name = tool_call.function.name.clone();
+    let tool_call_name = crate::utils::strip_tool_name(&tool_call.function.name);
     let tool_calls = [
         "view",
         "search_memory",
@@ -1326,7 +1363,7 @@ pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
         "read_rulebook",
         "local_code_search",
     ];
-    if tool_calls.contains(&tool_call_name.as_str()) {
+    if tool_calls.contains(&tool_call_name) {
         return true;
     }
     false

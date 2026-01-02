@@ -152,7 +152,7 @@ pub async fn run_tui(
                        clear_streaming_tool_results(&mut state);
                        state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
-                       if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_call_result.call.function.name == "run_command" {
+                       if tool_call_result.status == ToolCallResultStatus::Cancelled && crate::utils::strip_tool_name(&tool_call_result.call.function.name) == "run_command" {
 
                             state.latest_tool_call = Some(tool_call_result.call.clone());
 
@@ -258,6 +258,8 @@ pub async fn run_tui(
                                state.ctrl_c_timer = None;
                            }
                    state.spinner_frame = state.spinner_frame.wrapping_add(1);
+                   // Update shell cursor blink (toggles every ~5 ticks = 500ms)
+                   crate::services::shell_popup::update_cursor_blink(&mut state);
                    state.poll_file_search_results();
                    terminal.draw(|f| view(f, &mut state))?;
                }

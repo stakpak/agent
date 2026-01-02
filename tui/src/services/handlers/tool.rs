@@ -12,13 +12,58 @@ use stakpak_shared::models::integrations::openai::{
 use tokio::sync::mpsc::Sender;
 
 use super::shell::extract_command_from_tool_call;
+use vt100;
 
 /// Handle stream tool result event
-pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultProgress) {
+/// Returns Some(command) if an interactive stall was detected and shell mode should be triggered
+pub fn handle_stream_tool_result(
+    state: &mut AppState,
+    progress: ToolCallResultProgress,
+) -> Option<String> {
     let tool_call_id = progress.id;
     // Check if this tool call is already completed - if so, ignore streaming updates
     if state.completed_tool_calls.contains(&tool_call_id) {
-        return;
+        return None;
+    }
+
+    // Check for interactive stall notification
+    // Check for interactive stall notification
+    const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
+    if progress.message.contains(INTERACTIVE_STALL_MARKER) {
+        // Stop the loader
+        state.loading = false;
+        state.is_streaming = false;
+
+        // Extract the message content (everything after the marker)
+        let stall_message = progress
+            .message
+            .replace(INTERACTIVE_STALL_MARKER, "")
+            .trim_start_matches(':')
+            .trim()
+            .to_string();
+
+        // Update the pending bash message to show stall warning
+        if let Some(pending_id) = state.pending_bash_message_id {
+            for msg in &mut state.messages {
+                if msg.id == pending_id {
+                    // Update to the stall warning variant
+                    if let crate::services::message::MessageContent::RenderPendingBorderBlock(
+                        tc,
+                        auto,
+                    ) = &msg.content
+                    {
+                        msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, stall_message.clone());
+                    }
+                    break;
+                }
+            }
+
+            invalidate_message_lines_cache(state);
+            return None;
+        }
+
+        invalidate_message_lines_cache(state);
+        return None; // Don't add this marker to the streaming buffer
     }
 
     // Ensure loading state is true during streaming tool results
@@ -59,6 +104,8 @@ pub fn handle_stream_tool_result(state: &mut AppState, progress: ToolCallResultP
     if !state.stay_at_bottom {
         state.content_changed_while_scrolled_up = true;
     }
+
+    None
 }
 
 /// Handle message tool calls event
@@ -112,8 +159,10 @@ pub fn handle_retry_tool_call(
                 return;
             }
         };
-        // Enable shell mode
+        // Enable shell mode and popup
         state.show_shell_mode = true;
+        state.shell_popup_visible = true;
+        state.shell_popup_expanded = true;
         state.is_dialog_open = false;
         state.ondemand_shell_mode = false;
         state.dialog_command = Some(tool_call.clone());
@@ -121,16 +170,21 @@ pub fn handle_retry_tool_call(
             state.shell_tool_calls = Some(Vec::new());
         }
 
-        // Set the command in the input but don't execute it yet
-        state.text_area.set_text(&command);
-        state.text_area.set_cursor(command.len());
-
         // Clear any existing shell state
         state.active_shell_command = None;
         state.active_shell_command_output = None;
-        state.waiting_for_shell_input = false;
+        state.shell_history_lines.clear(); // Clear history for fresh retry
+
+        // Reset the screen parser with safe dimensions matching PTY (shell.rs)
+        let rows = state.terminal_size.height.saturating_sub(2).max(1);
+        let cols = state.terminal_size.width.saturating_sub(4).max(1);
+        state.shell_screen = vt100::Parser::new(rows, cols, 0);
+
         // Set textarea shell mode to match app state
         state.text_area.set_shell_mode(true);
+
+        // Automatically execute the command
+        let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
     }
 }
 
@@ -139,6 +193,29 @@ pub fn handle_retry_mechanism(state: &mut AppState) {
     if state.messages.len() >= 2 {
         state.messages.pop();
     }
+}
+
+/// Handle interactive stall detection - automatically switch to shell mode and run the command
+pub fn handle_interactive_stall_detected(
+    state: &mut AppState,
+    command: String,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
+    // Close any confirmation dialog
+    state.is_dialog_open = false;
+
+    // Set up shell mode state
+    if let Some(tool_call) = &state.latest_tool_call {
+        state.dialog_command = Some(tool_call.clone());
+    }
+    state.ondemand_shell_mode = false;
+
+    if state.shell_tool_calls.is_none() {
+        state.shell_tool_calls = Some(Vec::new());
+    }
+
+    // Trigger running the shell with the command - this spawns the user's shell and then executes the command
+    let _ = input_tx.try_send(InputEvent::RunShellWithCommand(command));
 }
 
 /// Handle toggle approval status event
@@ -240,6 +317,9 @@ pub fn execute_command_palette_selection(
             }
             CommandAction::OpenShortcuts => {
                 let _ = input_tx.try_send(InputEvent::ShowShortcuts);
+            }
+            CommandAction::OpenShellMode => {
+                let _ = input_tx.try_send(InputEvent::ShellMode);
             }
             _ => {
                 // Should not happen - all slash commands should be handled above

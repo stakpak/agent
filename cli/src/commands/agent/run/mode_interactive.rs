@@ -4,9 +4,10 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter,
+    add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
+use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
@@ -15,7 +16,6 @@ use crate::commands::warden;
 use crate::config::{AppConfig, ProviderType};
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
-use crate::utils::network;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{
@@ -24,17 +24,16 @@ use stakpak_api::{
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+
+use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatMessage, MessageContent, Role, ToolCall, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::{LLMTokenUsage, PromptTokensDetails};
 use stakpak_shared::models::subagent::SubagentConfigs;
+use stakpak_shared::telemetry::{TelemetryEvent, capture_event};
 use stakpak_tui::{InputEvent, LoadingOperation, OutputEvent};
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -96,10 +95,10 @@ pub async fn run_interactive(
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
-        let _enabled_tools = config.enabled_tools.clone();
+        let enabled_tools = config.enabled_tools.clone();
         let redact_secrets = config.redact_secrets;
         let privacy_mode = config.privacy_mode;
-        let _enable_mtls = config.enable_mtls;
+        let enable_mtls = config.enable_mtls;
         let is_git_repo = config.is_git_repo;
         let study_mode = config.study_mode;
 
@@ -184,30 +183,37 @@ pub async fn run_interactive(
                 }
             };
 
-            let (_mcp_server_host, clients, _tools) = match initialize_mcp_server_and_tools(
-                &ctx_clone,
-                client.clone(),
-                Some(mcp_progress_tx.clone()),
+            let mcp_init_config = mcp_init::McpInitConfig {
+                redact_secrets,
                 privacy_mode,
-            )
-            .await
-            {
-                Ok((host, client_manager, tool_list)) => (host, Some(client_manager), tool_list),
-                Err(e) => {
-                    log::warn!(
-                        "Failed to initialize MCP server: {}, continuing without tools",
-                        e
-                    );
-                    (String::new(), None, Vec::new())
-                }
+                enabled_tools: enabled_tools.clone(),
+                enable_mtls,
             };
+            let (mcp_client, mcp_tools, _tools, _server_shutdown_tx, _proxy_shutdown_tx) =
+                match mcp_init::initialize_mcp_server_and_tools(
+                    &ctx_clone,
+                    mcp_init_config,
+                    Some(mcp_progress_tx.clone()),
+                )
+                .await
+                {
+                    Ok(result) => (
+                        Some(result.client),
+                        result.mcp_tools,
+                        result.tools,
+                        Some(result.server_shutdown_tx),
+                        Some(result.proxy_shutdown_tx),
+                    ),
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to initialize MCP client: {}, continuing without tools",
+                            e
+                        );
+                        (None, Vec::new(), Vec::new(), None, None)
+                    }
+                };
 
-            let tools_map = if let Some(clients) = &clients {
-                clients.get_tools().await.map_err(|e| e.to_string())?
-            } else {
-                HashMap::new()
-            };
-            let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_tui.as_ref());
+            let tools = convert_tools_with_filter(&mcp_tools, allowed_tools_for_tui.as_ref());
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
@@ -345,6 +351,18 @@ pub async fn run_interactive(
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
                         tools_queue.clear();
                         messages.push(user_msg);
+
+                        if matches!(provider_type, ProviderType::Local)
+                            && let Some(ref anonymous_id) = ctx_clone.anonymous_id
+                            && ctx_clone.collect_telemetry.unwrap_or(true)
+                        {
+                            capture_event(
+                                anonymous_id,
+                                ctx_clone.machine_name.as_deref(),
+                                true,
+                                TelemetryEvent::UserPrompted,
+                            );
+                        }
                     }
                     OutputEvent::AcceptTool(tool_call) => {
                         send_input_event(
@@ -352,10 +370,10 @@ pub async fn run_interactive(
                             InputEvent::StartLoadingOperation(LoadingOperation::ToolExecution),
                         )
                         .await?;
-                        let result = if let Some(ref client_manager) = clients {
+                        let result = if let Some(ref client) = mcp_client {
                             run_tool_call(
-                                client_manager.as_ref(),
-                                &tools_map,
+                                client.as_ref(),
+                                &mcp_tools,
                                 &tool_call,
                                 Some(cancel_rx.resubscribe()),
                                 current_session_id,
@@ -1167,81 +1185,4 @@ https://stakpak.dev/{}/agent-sessions/{}",
     } // End of 'profile_switch_loop
 
     Ok(())
-}
-
-async fn initialize_mcp_server_and_tools(
-    config: &AppConfig,
-    client: Arc<dyn AgentProvider>,
-    progress_tx: Option<
-        tokio::sync::mpsc::Sender<
-            stakpak_shared::models::integrations::openai::ToolCallResultProgress,
-        >,
-    >,
-    privacy_mode: bool,
-) -> Result<
-    (
-        String,
-        Arc<ClientManager>,
-        Vec<stakpak_shared::models::integrations::openai::Tool>,
-    ),
-    String,
-> {
-    // Find available bind address
-    let (bind_address, listener) = network::find_available_bind_address_with_listener()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // Generate certificates for mTLS
-    let certificate_chain = Arc::new(Some(
-        CertificateChain::generate().map_err(|e| e.to_string())?,
-    ));
-
-    let protocol = "https";
-    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
-
-    // Start MCP server in background
-    let certificate_chain_for_server = certificate_chain.clone();
-    let client_for_server = client.clone();
-
-    tokio::spawn(async move {
-        let _ = start_server(
-            MCPServerConfig {
-                client: Some(client_for_server),
-                redact_secrets: true,
-                privacy_mode,
-                enabled_tools: EnabledToolsConfig { slack: false },
-                tool_mode: ToolMode::Combined,
-                bind_address,
-                certificate_chain: certificate_chain_for_server,
-                subagent_configs: None,
-            },
-            Some(listener),
-            None,
-        )
-        .await;
-    });
-
-    // Initialize MCP clients
-    let clients = Arc::new(
-        ClientManager::new(
-            config
-                .mcp_server_host
-                .clone()
-                .unwrap_or(local_mcp_server_host.clone()),
-            progress_tx,
-            certificate_chain,
-        )
-        .await
-        .map_err(|e| format!("Failed to create MCP clients: {}", e))?,
-    );
-
-    // Get tools from MCP clients
-    let tools_map: HashMap<String, Vec<rmcp::model::Tool>> = clients
-        .get_tools()
-        .await
-        .map_err(|e| format!("Failed to get tools: {}", e))?;
-
-    let tools = convert_tools_map_with_filter(&tools_map, config.allowed_tools.as_ref());
-
-    Ok((local_mcp_server_host, clients, tools))
 }

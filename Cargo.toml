@@ -5,6 +5,7 @@ members = [
     "tui",
     "libs/shared",
     "libs/api",
+    "libs/ai",
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
@@ -13,11 +14,23 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.9"
 edition = "2024"
+description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
+license = "Apache-2.0"
+repository = "https://github.com/stakpak/agent"
+homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
+stakai = { path = "libs/ai", version = "0.3.9" }
+stakpak-api = { path = "libs/api", version = "0.3.9" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.9" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.9" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.9" }
+stakpak-tui = { path = "tui", version = "0.3.9" }
+stakpak-shared = { path = "libs/shared", version = "0.3.9" }
+popup-widget = { package = "stakpak-popup-widget", path = "libs/popup-widget", version = "0.3.9" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
@@ -25,7 +38,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 anyhow = "1.0.98"
-rmcp = { version = "0.8.3", features = [
+rmcp = { version = "0.11.0", features = [
     "base64",
     "macros",
     "client",
@@ -63,6 +76,7 @@ rcgen = "0.12.1"
 rustls-pemfile = "2.1.2"
 tokio-rustls = "0.26.0"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+axum = "0.8"
 time = { version = "0.3", features = ["macros"] }
 rustls-platform-verifier = "0.5"
 crossterm = "0.29"

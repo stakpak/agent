@@ -46,6 +46,11 @@ Stakpak is built different:
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
+### Try Stakpak Now
+```bash
+curl -sSL https://stakpak.dev/install.sh | sh
+```
+[For more installation options...](https://github.com/stakpak/agent#installation)
 
 ## 🔒 Security Hardened
 
@@ -199,6 +204,8 @@ docker run -it \
    --entrypoint stakpak ghcr.io/stakpak/agent:latest
 ```
 
+
+
 ### MCP Modes
 
 You can use Stakpak as a secure MCP proxy or expose its security-hardened tools through an [MCP](https://modelcontextprotocol.io/) server.
@@ -325,6 +332,12 @@ tags:
 
 Your deployment procedures and guidelines here...
 ```
+
+### Shell Mode
+
+Execute system commands explicitly from the input bar.
+
+[Check the Shell Mode docs](docs/shell_mode.md) for details on background vs foreground execution.
 
 ## Platform Testing
 

@@ -2,9 +2,13 @@
 name = "stakpak-api"
 version = { workspace = true }
 edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
-stakpak-shared = { path = "../../libs/shared" }
+stakpak-shared = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

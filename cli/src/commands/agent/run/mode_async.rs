@@ -3,27 +3,23 @@ use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_map_with_filter, tool_result,
-    user_message,
+    add_local_context, add_rulebooks, add_subagents, tool_result, user_message,
 };
+use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::{AppConfig, ProviderType};
 use crate::utils::local_context::LocalContext;
-use crate::utils::network;
 use stakpak_api::{
     AgentProvider,
     local::{LocalClient, LocalClientConfig},
     models::ListRuleBook,
     remote::{ClientConfig, RemoteClient},
 };
-use stakpak_mcp_client::ClientManager;
-use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
 use stakpak_shared::models::subagent::SubagentConfigs;
-use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -58,79 +54,30 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         "{}",
         renderer.render_info("Initializing MCP server and client connections...")
     );
-    let ctx_clone = ctx.clone();
-    let allowed_tools_for_filter = config.allowed_tools.clone(); // Clone before moving config
-    let (bind_address, listener) = network::find_available_bind_address_with_listener().await?;
 
-    // Generate certificates if mTLS is enabled
-    let certificate_chain = Arc::new(if config.enable_mtls {
-        Some(CertificateChain::generate().map_err(|e| e.to_string())?)
-    } else {
-        None
-    });
-
-    let protocol = if config.enable_mtls { "https" } else { "http" };
-    let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
-
-    let certificate_chain_for_server = certificate_chain.clone();
-    let subagent_configs = config.subagent_configs.clone();
-
-    // Create AgentProvider instance
-    let client_for_server: Arc<dyn AgentProvider> = match ctx.provider {
-        ProviderType::Remote => {
-            let remote_client = RemoteClient::new(&ClientConfig {
-                api_key: ctx_clone.api_key.clone(),
-                api_endpoint: ctx_clone.api_endpoint.clone(),
-            })
-            .map_err(|e| e.to_string())?;
-            Arc::new(remote_client)
-        }
-        ProviderType::Local => {
-            let client = LocalClient::new(LocalClientConfig {
-                stakpak_base_url: Some(ctx_clone.api_endpoint.clone()),
-                store_path: None,
-                anthropic_config: ctx_clone.anthropic.clone(),
-                openai_config: ctx_clone.openai.clone(),
-                gemini_config: ctx_clone.gemini.clone(),
-                eco_model: ctx_clone.eco_model.clone(),
-                recovery_model: ctx_clone.recovery_model.clone(),
-                smart_model: ctx_clone.smart_model.clone(),
-                hook_registry: None,
-            })
-            .await
-            .map_err(|e| format!("Failed to create local client: {}", e))?;
-            Arc::new(client)
-        }
+    // Initialize MCP server, proxy, and client using the same method as TUI mode
+    let mcp_init_config = McpInitConfig {
+        redact_secrets: config.redact_secrets,
+        privacy_mode: config.privacy_mode,
+        enabled_tools: config.enabled_tools.clone(),
+        enable_mtls: config.enable_mtls,
     };
+    let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
+    let mcp_client = mcp_init_result.client;
+    let mcp_tools = mcp_init_result.mcp_tools;
+    let _server_shutdown_tx = mcp_init_result.server_shutdown_tx;
+    let _proxy_shutdown_tx = mcp_init_result.proxy_shutdown_tx;
 
-    tokio::spawn(async move {
-        let _ = start_server(
-            MCPServerConfig {
-                client: Some(client_for_server),
-                redact_secrets: config.redact_secrets,
-                privacy_mode: config.privacy_mode,
-                enabled_tools: config.enabled_tools.clone(),
-                tool_mode: ToolMode::Combined,
-                subagent_configs,
-                bind_address,
-                certificate_chain: certificate_chain_for_server,
-            },
-            Some(listener),
-            None,
-        )
-        .await;
-    });
-
-    // Initialize clients and tools
-    let clients = ClientManager::new(
-        ctx.mcp_server_host.unwrap_or(local_mcp_server_host),
-        None,
-        certificate_chain,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let tools_map = clients.get_tools().await.map_err(|e| e.to_string())?;
-    let tools = convert_tools_map_with_filter(&tools_map, allowed_tools_for_filter.as_ref());
+    // Filter tools if allowed_tools is specified
+    let tools = if let Some(allowed) = &config.allowed_tools {
+        mcp_init_result
+            .tools
+            .into_iter()
+            .filter(|t| allowed.contains(&t.function.name))
+            .collect()
+    } else {
+        mcp_init_result.tools
+    };
 
     let client: Box<dyn AgentProvider> = match ctx.provider {
         ProviderType::Remote => {
@@ -309,7 +256,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
                 // Add timeout for tool execution
                 let tool_execution = async {
-                    run_tool_call(&clients, &tools_map, tool_call, None, current_session_id).await
+                    run_tool_call(&mcp_client, &mcp_tools, tool_call, None, current_session_id)
+                        .await
                 };
 
                 let result = match tokio::time::timeout(

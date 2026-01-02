@@ -23,7 +23,6 @@ use tokio::sync::mpsc::Sender;
 pub struct EventChannels<'a> {
     pub output_tx: &'a Sender<OutputEvent>,
     pub input_tx: &'a Sender<InputEvent>,
-    pub shell_tx: &'a Sender<InputEvent>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -61,6 +60,128 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for Shell Mode (only when not loading)
+    if state.show_shell_mode
+        && state.active_shell_command.is_some()
+        && !state.is_dialog_open
+        && !state.approval_popup.is_visible()
+        && !state.shell_loading
+    {
+        match event {
+            InputEvent::InputChanged(c) => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, &c.to_string());
+                return;
+            }
+            InputEvent::InputBackspace => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x7f");
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                state.shell_scroll = 0;
+                // Windows ConPTY expects carriage return, Unix expects newline
+                #[cfg(windows)]
+                shell::send_shell_input(state, "\r");
+                #[cfg(not(windows))]
+                shell::send_shell_input(state, "\n");
+                return;
+            }
+            InputEvent::CursorLeft => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[D");
+                return;
+            }
+            InputEvent::CursorRight => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[C");
+                return;
+            }
+            InputEvent::Up => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[A");
+                return;
+            }
+            InputEvent::Down => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x1b[B");
+                return;
+            }
+
+            InputEvent::ScrollUp => {
+                // Scroll popup up (show older content)
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_add(1);
+                } else {
+                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_history_lines.len();
+                    let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                    state.shell_scroll = state.shell_scroll.saturating_add(1).min(max_scroll);
+                }
+                return;
+            }
+            InputEvent::ScrollDown => {
+                // Scroll popup down (show newer content)
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    state.shell_popup_scroll = state.shell_popup_scroll.saturating_sub(1);
+                } else {
+                    state.shell_scroll = state.shell_scroll.saturating_sub(1);
+                }
+                return;
+            }
+            InputEvent::PageUp => {
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    let page_size = state.terminal_size.height / 4;
+                    state.shell_popup_scroll =
+                        state.shell_popup_scroll.saturating_add(page_size as usize);
+                } else {
+                    let visible_height = state.terminal_size.height.saturating_sub(2) as usize;
+                    let total_lines = state.shell_history_lines.len();
+                    let max_scroll = total_lines.saturating_sub(visible_height) as u16;
+                    let page_size = state.terminal_size.height / 2;
+                    state.shell_scroll =
+                        state.shell_scroll.saturating_add(page_size).min(max_scroll);
+                }
+                return;
+            }
+            InputEvent::PageDown => {
+                if state.shell_popup_visible && state.shell_popup_expanded {
+                    let page_size = state.terminal_size.height / 4;
+                    state.shell_popup_scroll =
+                        state.shell_popup_scroll.saturating_sub(page_size as usize);
+                } else {
+                    let page_size = state.terminal_size.height / 2;
+                    state.shell_scroll = state.shell_scroll.saturating_sub(page_size);
+                }
+                return;
+            }
+            InputEvent::HandleEsc => {
+                // Don't send ESC to shell - let it fall through to handle_esc_event
+                // which will terminate the shell and cancel the tool call
+            }
+            InputEvent::Tab => {
+                shell::send_shell_input(state, "\t");
+                return;
+            }
+            InputEvent::AttemptQuit => {
+                // Ctrl+C sends SIGINT to cancel running commands in shell
+                shell::send_shell_input(state, "\x03");
+                return;
+            }
+            InputEvent::InputDelete => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x15");
+                return;
+            }
+            InputEvent::InputDeleteWord => {
+                state.shell_scroll = 0;
+                shell::send_shell_input(state, "\x17");
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // Route events to appropriate handlers
     match event {
         // Input handlers
@@ -71,7 +192,7 @@ pub fn update(
             input::handle_input_backspace_event(state, input_tx);
         }
         InputEvent::InputChangedNewline => {
-            input::handle_input_changed(state, '\n');
+            input::handle_input_changed(state, '\n', input_tx);
         }
         InputEvent::InputSubmitted => {
             input::handle_input_submitted_event(
@@ -80,6 +201,7 @@ pub fn update(
                 output_tx,
                 input_tx,
                 shell_tx,
+                cancel_tx,
             );
         }
         InputEvent::InputSubmittedWith(s) => {
@@ -151,7 +273,6 @@ pub fn update(
             let channels = EventChannels {
                 output_tx,
                 input_tx,
-                shell_tx,
             };
             dialog::handle_esc(state, &channels, cancel_tx, message, should_stop, color);
         }
@@ -170,13 +291,19 @@ pub fn update(
 
         // Tool handlers
         InputEvent::StreamToolResult(progress) => {
-            tool::handle_stream_tool_result(state, progress);
+            if let Some(command) = tool::handle_stream_tool_result(state, progress) {
+                // Interactive stall detected - trigger shell mode with the command
+                tool::handle_interactive_stall_detected(state, command, input_tx);
+            }
         }
         InputEvent::MessageToolCalls(tool_calls) => {
             tool::handle_message_tool_calls(state, tool_calls);
         }
         InputEvent::RetryLastToolCall => {
             tool::handle_retry_tool_call(state, input_tx, cancel_tx);
+        }
+        InputEvent::InteractiveStallDetected(command) => {
+            tool::handle_interactive_stall_detected(state, command, input_tx);
         }
         InputEvent::ToggleApprovalStatus => {
             tool::handle_toggle_approval_status(state);
@@ -194,11 +321,20 @@ pub fn update(
             tool::handle_approval_popup_escape(state);
         }
         // Shell handlers
+        InputEvent::RunShellCommand(command) => {
+            shell::handle_run_shell_command(state, command, input_tx);
+        }
+        InputEvent::RunShellWithCommand(command) => {
+            shell::handle_run_shell_with_command(state, command, input_tx);
+        }
         InputEvent::ShellMode => {
-            shell::handle_shell_mode(state);
+            shell::handle_shell_mode(state, input_tx);
         }
         InputEvent::ShellOutput(line) => {
-            shell::handle_shell_output(state, line);
+            let should_auto_complete = shell::handle_shell_output(state, line);
+            if should_auto_complete {
+                let _ = input_tx.try_send(InputEvent::ShellCompleted(0));
+            }
         }
         InputEvent::ShellError(line) => {
             shell::handle_shell_error(state, line);

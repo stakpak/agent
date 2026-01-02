@@ -2,7 +2,13 @@ name: Build and Release
 
 on:
   push:
-    branches: [main]
+    # Branches trigger builds only (no release)
+    # - main: production builds
+    # - beta: beta channel builds  
+    branches: [main, beta]
+    # Tags trigger full release workflow
+    # - v1.2.3: stable release
+    # - v1.2.3-beta.1: beta/prerelease
     tags: ["v*"]
   # pull_request:
   #   branches: [main]
@@ -18,6 +24,26 @@ env:
   BINARY_NAME: stakpak
 
 jobs:
+  # Determine release type once, other jobs reference this
+  setup:
+    runs-on: ubuntu-22.04
+    outputs:
+      is_beta: ${{ steps.check.outputs.is_beta }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Check release type
+        id: check
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          # Remove 'v' prefix if present
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$TAG" == *"-beta"* ]]; then
+            echo "is_beta=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_beta=false" >> $GITHUB_OUTPUT
+          fi
+
   build:
     strategy:
       fail-fast: false
@@ -86,7 +112,7 @@ jobs:
           retention-days: 1
 
   release:
-    needs: build
+    needs: [setup, build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
 
@@ -104,13 +130,94 @@ jobs:
             stakpak-darwin-aarch64/stakpak-darwin-aarch64.tar.gz
             stakpak-windows-x86_64/stakpak-windows-x86_64.zip
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.setup.outputs.is_beta == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  docker:
+  publish_crates_io:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          # Remove 'v' prefix if present
+          VERSION=${VERSION#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Tag version: $VERSION"
+          
+          # Verify version matches Cargo.toml
+          CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+          
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "Warning: Tag version ($VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            echo "Updating Cargo.toml to match tag version"
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          fi
+
+      - name: Login to crates.io
+        run: echo "$CRATES_IO_TOKEN" | cargo login
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+      - name: Publish workspace members to crates.io
+        run: |
+          set -e
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          
+          echo "Publishing workspace members to crates.io version $VERSION"
+          
+          # Function to publish a package, skip if already published
+          publish_package() {
+            local pkg=$1
+            echo "Publishing $pkg..."
+            # Capture output and exit code
+            set +e
+            OUTPUT=$(cargo publish -p "$pkg" --no-verify 2>&1)
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "$pkg published successfully"
+              echo "Waiting 15s for index propagation..."
+              sleep 15
+            elif echo "$OUTPUT" | grep -q "already uploaded"; then
+              echo "$pkg version $VERSION already published, skipping"
+            else
+              echo "Error publishing $pkg:"
+              echo "$OUTPUT"
+              exit 1
+            fi
+          }
+          
+          # Publish dependencies first, then the main crate
+          # Order matters: publish dependencies before dependents
+          publish_package stakai
+          publish_package stakpak-shared
+          publish_package stakpak-api
+          publish_package stakpak-popup-widget
+          publish_package stakpak-mcp-client
+          publish_package stakpak-mcp-server
+          publish_package stakpak-mcp-proxy
+          publish_package stakpak-tui
+          # Finally publish the main CLI crate
+          publish_package stakpak
+          
+          echo "All packages published successfully!"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  docker:
+    needs: [setup, build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     steps:
@@ -125,10 +232,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract tag version
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -137,11 +240,11 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ needs.setup.outputs.version }}
+            ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}:latest', github.repository) || '' }}
 
   docker_warden:
-    needs: docker
+    needs: [setup, docker]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     steps:
@@ -157,20 +260,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract tag version
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .warden
           push: true
           build-args: |
-            BASE_IMAGE_TAG=${{ steps.get_version.outputs.VERSION }}
+            BASE_IMAGE_TAG=${{ needs.setup.outputs.version }}
           tags: |
-            ghcr.io/${{ github.repository }}-warden:${{ steps.get_version.outputs.VERSION }}
-            ghcr.io/${{ github.repository }}-warden:latest
+            ghcr.io/${{ github.repository }}-warden:${{ needs.setup.outputs.version }}
+            ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}-warden:latest', github.repository) || '' }}
 
   update-release-notes:
     needs: release
@@ -228,8 +327,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   homebrew:
-    needs: release
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [setup, release]
+    # Only update homebrew for stable releases (not beta)
+    if: startsWith(github.ref, 'refs/tags/') && needs.setup.outputs.is_beta == 'false'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -240,8 +340,9 @@ jobs:
       - name: Update Homebrew formula
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          VERSION: ${{ needs.setup.outputs.version }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-x86_64.tar.gz" -o stakpak-darwin-x86_64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-darwin-aarch64.tar.gz" -o stakpak-darwin-aarch64.tar.gz
           curl -L "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/stakpak-linux-x86_64.tar.gz" -o stakpak-linux-x86_64.tar.gz
