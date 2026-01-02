@@ -234,7 +234,12 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                     .get_secret_manager()
                     .redact_and_store_secrets(&command_result.output, None)
                     .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    .map_err(|e| {
+                        McpError::internal_error(
+                            format!("Failed to redact command output: {}", e),
+                            None,
+                        )
+                    })?;
 
                 if command_result.exit_code != 0 {
                     return Ok(CallToolResult::error(vec![
@@ -300,7 +305,12 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             .get_secret_manager()
             .restore_secrets_in_string(&command)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in command: {}", e),
+                    None,
+                )
+            })?;
 
         let timeout_duration = timeout.map(std::time::Duration::from_secs);
 
@@ -378,7 +388,12 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                             self.get_secret_manager()
                                 .redact_and_store_secrets(output, None)
                                 .await
-                                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                                .map_err(|e| {
+                                    McpError::internal_error(
+                                        format!("Failed to redact task output: {}", e),
+                                        None,
+                                    )
+                                })?,
                         );
                     }
                     redacted_tasks.push(task);
@@ -407,12 +422,22 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         .get_secret_manager()
                         .redact_and_store_secrets(&task.command, None)
                         .await
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        .map_err(|e| {
+                            McpError::internal_error(
+                                format!("Failed to redact task command: {}", e),
+                                None,
+                            )
+                        })?;
                     let redacted_output = if let Some(ref out) = task.output {
                         self.get_secret_manager()
                             .redact_and_store_secrets(out, None)
                             .await
-                            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+                            .map_err(|e| {
+                                McpError::internal_error(
+                                    format!("Failed to redact task output: {}", e),
+                                    None,
+                                )
+                            })?
                     } else {
                         "No output yet".to_string()
                     };
@@ -537,7 +562,12 @@ This tool enables proper task synchronization and coordination in complex workfl
                             self.get_secret_manager()
                                 .redact_and_store_secrets(output, None)
                                 .await
-                                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                                .map_err(|e| {
+                                    McpError::internal_error(
+                                        format!("Failed to redact task output: {}", e),
+                                        None,
+                                    )
+                                })?,
                         );
                     }
                     redacted_tasks.push(task);
@@ -546,7 +576,12 @@ This tool enables proper task synchronization and coordination in complex workfl
                 let table = self
                     .format_tasks_table(&redacted_tasks, &task_ids)
                     .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    .map_err(|e| {
+                        McpError::internal_error(
+                            format!("Failed to format tasks table: {}", e),
+                            None,
+                        )
+                    })?;
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -596,14 +631,24 @@ Use this tool to check the progress and results of long-running background tasks
                     .get_secret_manager()
                     .redact_and_store_secrets(&task_info.command, None)
                     .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    .map_err(|e| {
+                        McpError::internal_error(
+                            format!("Failed to redact task command: {}", e),
+                            None,
+                        )
+                    })?;
 
                 let redacted_output = if let Some(ref output) = task_info.output {
                     let redacted_output_str = self
                         .get_secret_manager()
                         .redact_and_store_secrets(output, None)
                         .await
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        .map_err(|e| {
+                            McpError::internal_error(
+                                format!("Failed to redact task output: {}", e),
+                                None,
+                            )
+                        })?;
                     match handle_large_output(&redacted_output_str, "task.output") {
                         Ok(result) => result,
                         Err(e) => {
@@ -839,7 +884,9 @@ SECURITY FEATURES:
             .get_secret_manager()
             .redact_and_store_password(&password, &password)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to redact password: {}", e), None)
+            })?;
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
@@ -1345,7 +1392,12 @@ SAFETY NOTES:
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(path))
                         .await
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        .map_err(|e| {
+                            McpError::internal_error(
+                                format!("Failed to redact file content: {}", e),
+                                None,
+                            )
+                        })?;
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
@@ -1424,7 +1476,12 @@ SAFETY NOTES:
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(original_path))
                         .await
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        .map_err(|e| {
+                            McpError::internal_error(
+                                format!("Failed to redact remote file content: {}", e),
+                                None,
+                            )
+                        })?;
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
@@ -1563,12 +1620,22 @@ SAFETY NOTES:
             .get_secret_manager()
             .restore_secrets_in_string(old_str)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in old_str: {}", e),
+                    None,
+                )
+            })?;
         let actual_new_str = self
             .get_secret_manager()
             .restore_secrets_in_string(new_str)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in new_str: {}", e),
+                    None,
+                )
+            })?;
 
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
@@ -1631,7 +1698,9 @@ SAFETY NOTES:
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(original_path))
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to redact edit output: {}", e), None)
+            })?;
 
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
@@ -1650,12 +1719,22 @@ SAFETY NOTES:
             .get_secret_manager()
             .restore_secrets_in_string(old_str)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in old_str: {}", e),
+                    None,
+                )
+            })?;
         let actual_new_str = self
             .get_secret_manager()
             .restore_secrets_in_string(new_str)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in new_str: {}", e),
+                    None,
+                )
+            })?;
 
         if actual_old_str == actual_new_str {
             return Ok(CallToolResult::error(vec![
@@ -1717,7 +1796,9 @@ SAFETY NOTES:
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(path))
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to redact edit output: {}", e), None)
+            })?;
 
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
@@ -1765,7 +1846,12 @@ SAFETY NOTES:
             .get_secret_manager()
             .restore_secrets_in_string(file_text)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in file content: {}", e),
+                    None,
+                )
+            })?;
 
         // Create the file using the correct SFTP method
         if let Err(e) = conn
@@ -1816,7 +1902,12 @@ SAFETY NOTES:
             .get_secret_manager()
             .restore_secrets_in_string(file_text)
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            .map_err(|e| {
+                McpError::internal_error(
+                    format!("Failed to restore secrets in file content: {}", e),
+                    None,
+                )
+            })?;
 
         match fs::write(path, actual_file_text) {
             Ok(_) => {
