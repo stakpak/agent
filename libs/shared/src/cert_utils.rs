@@ -28,6 +28,12 @@ impl std::fmt::Debug for CertificateChain {
 }
 
 pub fn default_cert_dir() -> Result<PathBuf> {
+    // Check for explicit CERTS_DIR override first
+    if let Ok(certs_dir) = std::env::var("CERTS_DIR") {
+        return Ok(PathBuf::from(certs_dir));
+    }
+
+    // Fall back to ~/.stakpak/certs
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .context("Could not determine home directory")?;

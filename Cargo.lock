@@ -4589,6 +4589,7 @@ dependencies = [
  "http 1.4.0",
  "paste",
  "pin-project-lite",
+ "process-wrap",
  "reqwest",
  "rmcp-macros 0.9.1",
  "schemars",
