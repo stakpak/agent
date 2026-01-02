@@ -295,6 +295,15 @@ pub fn generate_password(
     include_symbols: bool,
     redaction_map: &HashMap<String, String>,
 ) -> Result<Password, PasswordGenerationError> {
+    // Validate length early to prevent potential underflow
+    if length < 8 {
+        tracing::error!(
+            "Password generation failed: length must be at least 8 characters, received {}",
+            length
+        );
+        return Err(PasswordGenerationError::TooShort);
+    }
+
     let mut rng = rand::rng();
 
     // Define character sets
