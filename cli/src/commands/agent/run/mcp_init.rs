@@ -119,11 +119,10 @@ async fn start_mcp_server(
 
     tokio::spawn(async move {
         // Load server config from certificate chain
-        let server_config_for_mcp = cert_chain.as_ref().as_ref().map(|chain| {
-            chain
-                .create_server_config()
-                .expect("Failed to create server config")
-        });
+        let server_config_for_mcp = cert_chain
+            .as_ref()
+            .as_ref()
+            .and_then(|chain| chain.create_server_config().ok());
 
         let config = MCPServerConfig {
             client: Some(api_client),
