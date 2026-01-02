@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
             name: "generate_password".into(),
             arguments: Some(rmcp::object!({
                 "length": 20,
-                "no_symbols": false
+                "with_symbols": true
             })),
         };
 
