@@ -1411,24 +1411,29 @@ export PORT=3000
 
     #[test]
     fn test_redact_password_skip_already_redacted() {
-        // Content that already contains redacted secrets should not be double-redacted
-        let content = "[REDACTED_SECRET:password:existing123]";
-        let password = "newpassword";
-        let result = redact_password(content, password, &HashMap::new());
+        // If a password is already in the redaction map, it should reuse the existing key
+        let password = Password::new("newpassword".to_string()).unwrap();
 
-        // Should return content unchanged
-        assert_eq!(result.redacted_string, content);
-        // Should not add any new redactions
-        assert!(result.redaction_map.is_empty());
+        // First redaction
+        let first_result = redact_password(&password, &HashMap::new());
+        assert!(
+            first_result
+                .redacted_string
+                .contains("[REDACTED_SECRET:password:")
+        );
+
+        // Second redaction with the same password should reuse the key
+        let second_result = redact_password(&password, &first_result.redaction_map);
+        assert_eq!(second_result.redacted_string, first_result.redacted_string);
     }
 
     #[test]
     fn test_redact_secrets_skip_nested_redaction() {
         // Simulate what happens when local_tools redacts and proxy tries to redact again
-        let original_password = "MySecureP@ssw0rd!";
+        let original_password = Password::new("MySecureP@ssw0rd!".to_string()).unwrap();
 
         // First redaction (simulating local_tools)
-        let first_result = redact_password(original_password, original_password, &HashMap::new());
+        let first_result = redact_password(&original_password, &HashMap::new());
         assert!(
             first_result
                 .redacted_string
