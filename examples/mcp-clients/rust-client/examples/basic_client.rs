@@ -105,8 +105,9 @@ async fn main() -> Result<()> {
                 if !result.content.is_empty() {
                     info!("Generated password:");
                     for content_item in &result.content {
-                        let x = content_item.as_text().unwrap().text.to_string();
-                        info!("{}", x);
+                        if let Some(text) = content_item.as_text() {
+                            info!("{}", text.text);
+                        }
                     }
                 }
             }
