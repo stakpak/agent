@@ -4,7 +4,7 @@ use rmcp::model::{
 };
 use stakpak_api::AgentProvider;
 use stakpak_api::models::AgentSession;
-use stakpak_mcp_client::ClientManager;
+use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCall;
 use stakpak_tui::SessionInfo;
@@ -50,19 +50,16 @@ pub async fn list_sessions(client: &dyn AgentProvider) -> Result<Vec<SessionInfo
 }
 
 pub async fn run_tool_call(
-    client_manager: &ClientManager,
-    tools_map: &std::collections::HashMap<String, Vec<rmcp::model::Tool>>,
+    mcp_client: &McpClient,
+    tools: &[rmcp::model::Tool],
     tool_call: &ToolCall,
     cancel_rx: Option<tokio::sync::broadcast::Receiver<()>>,
     session_id: Option<Uuid>,
 ) -> Result<Option<CallToolResult>, String> {
     let tool_name = &tool_call.function.name;
-    let client_name = tools_map
-        .iter()
-        .find(|(_, tools)| tools.iter().any(|tool| tool.name == *tool_name))
-        .map(|(name, _)| name.clone());
+    let tool_exists = tools.iter().any(|tool| tool.name == *tool_name);
 
-    if let Some(client_name) = client_name {
+    if tool_exists {
         // Parse arguments safely
         let arguments = match serde_json::from_str(&tool_call.function.arguments) {
             Ok(args) => Some(args),
@@ -77,16 +74,15 @@ pub async fn run_tool_call(
         };
 
         // Call tool and handle errors gracefully
-        let handle = match client_manager
-            .call_tool(
-                &client_name,
-                CallToolRequestParam {
-                    name: tool_name.clone().into(),
-                    arguments,
-                },
-                session_id,
-            )
-            .await
+        let handle = match stakpak_mcp_client::call_tool(
+            mcp_client,
+            CallToolRequestParam {
+                name: tool_name.clone().into(),
+                arguments,
+            },
+            session_id,
+        )
+        .await
         {
             Ok(handle) => handle,
             Err(e) => {

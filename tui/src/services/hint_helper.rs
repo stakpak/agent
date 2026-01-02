@@ -1,4 +1,3 @@
-use crate::constants::{CONTEXT_APPROACH_PERCENT, CONTEXT_HIGH_UTIL_THRESHOLD};
 use crate::services::detect_term::{detect_terminal, should_use_rgb_colors};
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use crate::{app::AppState, services::detect_term::AdaptiveColors};
@@ -10,6 +9,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 use stakpak_shared::models::integrations::openai::AgentModel;
+use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
     if state.is_pasting {
@@ -31,7 +31,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
-            "Shell mode is on     '$' to undo shell mode",
+            "Shell mode is on   Esc to exit",
             Style::default().fg(AdaptiveColors::dark_magenta()),
         ));
         f.render_widget(hint, area);
@@ -49,9 +49,16 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
         f.render_widget(shortcuts_widget, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
+        let context_info = state
+            .llm_model
+            .as_ref()
+            .map(|model| model.context_info())
+            .unwrap_or_default();
+        let max_tokens = context_info.max_tokens as u32;
         let high_cost_warning =
-            state.total_session_usage.total_tokens >= CONTEXT_HIGH_UTIL_THRESHOLD;
-        let approaching_max = state.context_usage_percent >= CONTEXT_APPROACH_PERCENT;
+            state.total_session_usage.total_tokens >= (max_tokens as f64 * 0.9) as u32;
+        let approaching_max = (state.total_session_usage.total_tokens as f64 / max_tokens as f64)
+            >= context_info.approach_warning_threshold;
 
         if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
             // Create a line with both hints - shortcuts on left, retry on right
@@ -94,7 +101,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let (right_text, right_style) = {
                 let profile_text = format!(
                     "model {} | profile {}",
-                    state.model, state.current_profile_name
+                    state.agent_model, state.current_profile_name
                 );
                 let rulebooks_text = " | ctrl+k: rulebooks";
                 (
@@ -114,7 +121,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 spans.push(Span::styled(right_text, right_style));
             } else {
                 spans.push(Span::styled("model ", Style::default().fg(Color::DarkGray)));
-                match state.model {
+                match state.agent_model {
                     AgentModel::Smart => {
                         spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
                     }

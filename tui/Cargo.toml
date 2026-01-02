@@ -2,11 +2,15 @@
 name = "stakpak-tui"
 version = { workspace = true }
 edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
-stakpak-shared = { path = "../libs/shared" }
-stakpak-api = { path = "../libs/api" }
-popup-widget = { path = "../libs/popup-widget" }
+stakpak-shared = { workspace = true }
+stakpak-api = { workspace = true }
+popup-widget = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -32,13 +36,14 @@ image = { version = "0.25.6", default-features = false, features = ["jpeg", "png
 shlex = "1.3.0"
 url = "2"
 base64 = "0.22"
+vt100 = "0.15.2"
 
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
 
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(unix, windows))'.dependencies]
 portable-pty = "0.8"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

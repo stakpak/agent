@@ -8,6 +8,7 @@ use serde::Deserialize;
 use stakpak_api::models::{
     SearchDocsRequest as ApiSearchDocsRequest, SearchMemoryRequest as ApiSearchMemoryRequest,
 };
+use stakpak_shared::utils::{handle_large_output, sanitize_text_output};
 // use stakpak_api::models::CodeIndex;
 // use stakpak_shared::local_store::LocalStore;
 // use stakpak_shared::models::indexing::IndexingStatus;
@@ -393,7 +394,6 @@ If your goal requires understanding multiple distinct topics or technologies, ma
         &self,
         Parameters(mut request): Parameters<SearchDocsRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Cap the limit to a maximum of 5
         request.limit = request.limit.map(|l| l.min(5)).or(Some(5));
 
         let client = match self.get_client() {
@@ -416,7 +416,41 @@ If your goal requires understanding multiple distinct topics or technologies, ma
             }
         };
 
-        Ok(CallToolResult::success(response))
+        const MAX_LINES: usize = 600;
+
+        let mut remaining_lines = MAX_LINES;
+        let mut remaining_items = response.len();
+
+        let processed: Vec<Content> = response
+            .into_iter()
+            .map(|c| {
+                // Compute this element's allowance at the last possible moment
+                let allowance = if remaining_items > 0 {
+                    (remaining_lines / remaining_items).max(1)
+                } else {
+                    1
+                };
+
+                remaining_items = remaining_items.saturating_sub(1);
+
+                if let Some(RawTextContent { text, meta: None }) = c.as_text() {
+                    let sanitized = sanitize_text_output(text);
+                    match handle_large_output(&sanitized, "search", allowance, true) {
+                        Ok(final_text) => {
+                            // Estimate consumption (best-effort)
+                            let used = final_text.lines().count().min(remaining_lines);
+                            remaining_lines = remaining_lines.saturating_sub(used);
+                            Content::text(final_text)
+                        }
+                        Err(e) => Content::text(format!("FAILED_TO_HANDLE_LARGE_OUTPUT: {}", e)),
+                    }
+                } else {
+                    c
+                }
+            })
+            .collect();
+
+        Ok(CallToolResult::success(processed))
     }
 
     #[tool(

@@ -2,14 +2,19 @@
 name = "stakpak"
 version = { workspace = true }
 edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+readme = "../README.md"
 
 [dependencies]
-stakpak-api = { path = "../libs/api" }
-stakpak-mcp-server = { path = "../libs/mcp/server" }
-stakpak-mcp-client = { path = "../libs/mcp/client" }
-stakpak-mcp-proxy = { path = "../libs/mcp/proxy" }
-stakpak-tui = { path = "../tui" }
-stakpak-shared = { path = "../libs/shared" }
+stakpak-api = { workspace = true }
+stakpak-mcp-server = { workspace = true }
+stakpak-mcp-client = { workspace = true }
+stakpak-mcp-proxy = { workspace = true }
+stakpak-tui = { workspace = true }
+stakpak-shared = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
@@ -36,7 +41,7 @@ crossterm = { workspace = true }
 open = { workspace = true }
 glob = "0.3"
 # ACP dependencies
-agent-client-protocol = "0.4.7"
+agent-client-protocol = "0.9.2"
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 tokio-util = { version = "0.7", features = ["compat"] }
@@ -47,6 +52,7 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+test-case = "3"
 
 [lints.clippy]
 unwrap_used = "deny"

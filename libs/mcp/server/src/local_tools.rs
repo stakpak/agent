@@ -1,5 +1,4 @@
 use crate::tool_container::ToolContainer;
-use rand::Rng;
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*, schemars, tool};
 use rmcp::{RoleServer, tool_router};
@@ -13,13 +12,14 @@ use html2md;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
-use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use stakpak_shared::secret_manager::SecretManagerError;
 use stakpak_shared::task_manager::TaskInfo;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
-use stakpak_shared::utils::{LocalFileSystemProvider, generate_directory_tree};
+use stakpak_shared::utils::{
+    LocalFileSystemProvider, generate_directory_tree, handle_large_output, sanitize_text_output,
+};
 use std::fs::{self};
 use std::path::Path;
 use std::sync::Arc;
@@ -185,12 +185,12 @@ REMOTE EXECUTION:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
-- Examples: 
+- Examples:
   * 'user@server.com' (uses default port 22 and auto-discovered keys)
   * 'user@server.com:2222' with password authentication
   * Remote paths: 'ssh://user@host/path' or 'user@host:/path'
 
-SECRET HANDLING: 
+SECRET HANDLING:
 - Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
 - You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
 - Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
@@ -216,7 +216,8 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         {
             Ok(mut command_result) => {
                 command_result.output =
-                    match handle_large_output(&command_result.output, "command.output") {
+                    match handle_large_output(&command_result.output, "command.output", 300, false)
+                    {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -244,7 +245,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
                 if command_result.exit_code != 0 {
                     return Ok(CallToolResult::error(vec![
                         Content::text("COMMAND_FAILED"),
-                        Content::text(redacted_output),
+                        Content::text(&redacted_output),
                     ]));
                 }
                 Ok(CallToolResult::success(vec![Content::text(
@@ -260,7 +261,7 @@ If the command's output exceeds 300 lines the result will be truncated and the f
 
 REMOTE EXECUTION SUPPORT:
 - Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH background execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth  
+- Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
 - Examples:
   * 'user@server.com' - Remote background task with auto-discovered keys
@@ -270,7 +271,7 @@ Use this for port-forwarding, starting servers, tailing logs, or other long-runn
 
 PARAMETERS:
 - command: The shell command to execute (locally or remotely)
-- description: Optional description of the command (not used in execution)  
+- description: Optional description of the command (not used in execution)
 - timeout: Optional timeout in seconds after which the task will be terminated
 - remote: Optional remote connection string for SSH execution
 - password: Optional password for remote authentication
@@ -360,7 +361,7 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
 RETURNS:
 - A markdown-formatted table showing all background tasks with:
   - Task ID: Full unique identifier (required for cancel_task)
-  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)  
+  - Status: Current status (Running, Completed, Failed, Cancelled, TimedOut)
   - Start Time: When the task was started
   - Duration: How long the task has been running or took to complete
   - Output: Command output preview (truncated to 80 chars, redacted for security)
@@ -555,6 +556,7 @@ This tool enables proper task synchronization and coordination in complex workfl
             .await
         {
             Ok(tasks) => {
+                // <<<<<<< HEAD
                 let mut redacted_tasks: Vec<TaskInfo> = Vec::with_capacity(tasks.len());
                 for mut task in tasks {
                     if let Some(ref output) = task.output {
@@ -582,6 +584,9 @@ This tool enables proper task synchronization and coordination in complex workfl
                             None,
                         )
                     })?;
+                // =======
+                //                 let table = self.format_tasks_table(&tasks, &task_ids);
+                // >>>>>>> main
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -649,7 +654,7 @@ Use this tool to check the progress and results of long-running background tasks
                                 None,
                             )
                         })?;
-                    match handle_large_output(&redacted_output_str, "task.output") {
+                    match handle_large_output(&redacted_output_str, "task.output", 300, false) {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
@@ -860,7 +865,7 @@ PARAMETERS:
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
-- Numbers: 0-9 (always included)  
+- Numbers: 0-9 (always included)
 - Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
 
 SECURITY FEATURES:
@@ -964,8 +969,8 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             ]));
         }
 
-        let html_content = match response.text().await {
-            Ok(content) => content,
+        let html_bytes = match response.bytes().await {
+            Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to read response body: {}", e);
                 return Ok(CallToolResult::error(vec![
@@ -975,10 +980,11 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
             }
         };
 
-        // is this enough? or do we need to sanitize the html before turning it to markdown
+        let html_content = String::from_utf8_lossy(&html_bytes).to_string();
         let markdown_content = html2md::rewrite_html(&html_content, false);
+        let sanitized_content = sanitize_text_output(&markdown_content);
 
-        let result = match handle_large_output(&markdown_content, "webpage") {
+        let result = match handle_large_output(&sanitized_content, "webpage", 300, false) {
             Ok(result) => result,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![
@@ -1000,7 +1006,7 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
 
 REMOTE FILE REMOVAL:
 - Supports SSH connections for remote file operations
-- Use format: 'user@host:/path' or 'user@host#port:/path' 
+- Use format: 'user@host:/path' or 'user@host#port:/path'
 - IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/file.txt' not 'file.txt')
 - Use 'password' for password authentication or 'private_key_path' for key-based auth
 - Automatic SSH key discovery from ~/.ssh/ if no credentials provided
@@ -1222,52 +1228,86 @@ SAFETY NOTES:
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
 
+        // Stall detection: track last output time and whether we've sent stall notification
+        let mut last_output_time = std::time::Instant::now();
+        let mut stall_notified = false;
+        const STALL_TIMEOUT_SECS: u64 = 5;
+
         // Helper function to stream output and wait for process completion
         let stream_and_wait = async {
+            // Stall check interval
+            let mut stall_check_interval = tokio::time::interval(Duration::from_secs(1));
+            stall_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            macro_rules! handle_output {
+                ($read_result:expr, $buf:expr) => {
+                    match $read_result {
+                        Ok(Ok(0)) => break, // EOF
+                        Ok(Ok(_)) => {
+                            last_output_time = std::time::Instant::now();
+                            stall_notified = false;
+                            let line = $buf.trim_end_matches('\n').to_string();
+                            $buf.clear();
+                            result.push_str(&format!("{}\n", line));
+                            let _ = ctx
+                                .peer
+                                .notify_progress(ProgressNotificationParam {
+                                    progress_token: ProgressToken(NumberOrString::Number(0)),
+                                    progress: 50.0,
+                                    total: Some(100.0),
+                                    message: Some(
+                                        serde_json::to_string(&ToolCallResultProgress {
+                                            id: progress_id,
+                                            message: format!("{}\n", line),
+                                        })
+                                        .unwrap_or_default(),
+                                    ),
+                                })
+                                .await;
+                        }
+                        Ok(Err(_)) => break, // Read error
+                        Err(_) => {}         // Timeout - continue loop
+                    }
+                };
+            }
+
             // Read from both streams concurrently
             loop {
+                // Use biased selection so interval gets priority
                 tokio::select! {
-                    Ok(n) = stderr_reader.read_line(&mut stderr_buf) => {
-                        if n == 0 {
-                            break;
+                    biased;
+
+                    _ = stall_check_interval.tick() => {
+                        // Check for stall condition: no output for 5 seconds
+                        if !stall_notified && last_output_time.elapsed().as_secs() >= STALL_TIMEOUT_SECS {
+                            stall_notified = true;
+                            // Send stall notification - don't require pattern matching for now
+                            // Just notify that command is taking a while with no output
+                            let stall_msg = "__INTERACTIVE_STALL__: Command has produced no output for 5 seconds. if you think it's stuck use ctrl+r";
+                            let _ = ctx.peer.notify_progress(ProgressNotificationParam {
+                                progress_token: ProgressToken(NumberOrString::Number(0)),
+                                progress: 50.0,
+                                total: Some(100.0),
+                                message: Some(serde_json::to_string(&ToolCallResultProgress {
+                                    id: progress_id,
+                                    message: stall_msg.to_string(),
+                                }).unwrap_or_default()),
+                            }).await;
                         }
-                        let line = stderr_buf.trim_end_matches('\n').to_string();
-                        stderr_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50.0,
-                            total: Some(100.0),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: line,
-                            }).unwrap_or_default()),
-                        }).await;
                     }
-                    Ok(n) = stdout_reader.read_line(&mut stdout_buf) => {
-                        if n == 0 {
-                            break;
-                        }
-                        let line = stdout_buf.trim_end_matches('\n').to_string();
-                        stdout_buf.clear();
-                        result.push_str(&format!("{}\n", line));
-                        // Send notification but continue processing
-                        // skip if message is empty
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let _ = ctx.peer.notify_progress(ProgressNotificationParam {
-                            progress_token: ProgressToken(NumberOrString::Number(0)),
-                            progress: 50.0,
-                            total: Some(100.0),
-                            message: Some(serde_json::to_string(&ToolCallResultProgress {
-                                id: progress_id,
-                                message: format!("{}\n", line),
-                            }).unwrap_or_default()),
-                        }).await;
+
+                    read_result = tokio::time::timeout(Duration::from_millis(100), stderr_reader.read_line(&mut stderr_buf)) => {
+                        handle_output!(read_result, stderr_buf);
                     }
-                    else => break,
+
+                    read_result = tokio::time::timeout(Duration::from_millis(100), stdout_reader.read_line(&mut stdout_buf)) => {
+                        handle_output!(read_result, stdout_buf);
+                    }
+                }
+
+                // Check if process has exited
+                if let Ok(Some(_)) = child.try_wait() {
+                    break;
                 }
             }
 
@@ -1388,6 +1428,7 @@ SAFETY NOTES:
                         }
                     };
 
+                    // <<<<<<< HEAD
                     let redacted_result = self
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(path))
@@ -1401,6 +1442,9 @@ SAFETY NOTES:
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
+                    // =======
+                    //                     Ok(CallToolResult::success(vec![Content::text(&result)]))
+                    // >>>>>>> main
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1472,6 +1516,7 @@ SAFETY NOTES:
                         }
                     };
 
+                    // <<<<<<< HEAD
                     let redacted_result = self
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(original_path))
@@ -1485,6 +1530,9 @@ SAFETY NOTES:
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
+                    // =======
+                    //                     Ok(CallToolResult::success(vec![Content::text(&result)]))
+                    // >>>>>>> main
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1694,6 +1742,7 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
+        // <<<<<<< HEAD
         let redacted_output = self
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(original_path))
@@ -1705,6 +1754,9 @@ SAFETY NOTES:
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
         )]))
+        // =======
+        //         Ok(CallToolResult::success(vec![Content::text(&output)]))
+        // >>>>>>> main
     }
 
     /// Replace a specific string in a local file
@@ -1792,6 +1844,7 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
+        // <<<<<<< HEAD
         let redacted_output = self
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(path))
@@ -1803,6 +1856,9 @@ SAFETY NOTES:
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
         )]))
+        // =======
+        //         Ok(CallToolResult::success(vec![Content::text(&output)]))
+        // >>>>>>> main
     }
 
     /// Create a remote file with the specified content
@@ -2221,47 +2277,5 @@ SAFETY NOTES:
         table.push_str("═══════════════════════════════════════\n\n");
 
         Ok(table)
-    }
-}
-
-/// Helper method to handle large output by truncating and saving to file
-fn handle_large_output(output: &str, file_prefix: &str) -> Result<String, McpError> {
-    const MAX_LINES: usize = 300;
-
-    let output_lines = output.lines().collect::<Vec<_>>();
-
-    if output_lines.len() >= MAX_LINES {
-        // Create a output file to store the full output
-        let output_file = format!(
-            "{}.{:06x}.txt",
-            file_prefix,
-            rand::rng().random_range(0..=0xFFFFFF)
-        );
-        let output_file_path = match LocalStore::write_session_data(&output_file, output) {
-            Ok(path) => path,
-            Err(e) => {
-                error!("Failed to write session data to {}: {}", output_file, e);
-                return Err(McpError::internal_error(
-                    "Failed to write session data",
-                    Some(json!({ "error": e.to_string() })),
-                ));
-            }
-        };
-
-        Ok(format!(
-            "Showing the last {} / {} output lines. Full output saved to {}\n...\n{}",
-            MAX_LINES,
-            output_lines.len(),
-            output_file_path,
-            output_lines
-                .into_iter()
-                .rev()
-                .take(MAX_LINES)
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
-        ))
-    } else {
-        Ok(output.to_string())
     }
 }

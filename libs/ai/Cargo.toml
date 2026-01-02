@@ -1,0 +1,49 @@
+[package]
+name = "stakai"
+version.workspace = true
+edition = "2024"
+authors = ["Stakpak <engineering@stakpak.dev>"]
+description = "A provider-agnostic Rust SDK for AI completions with streaming support - Built by Stakpak"
+license = "Apache-2.0"
+repository = "https://github.com/stakpak/agent"
+homepage = "https://stakpak.dev"
+documentation = "https://docs.rs/stakai"
+keywords = ["ai", "llm", "openai", "anthropic", "sdk"]
+categories = ["api-bindings", "asynchronous"]
+readme = "README.md"
+
+[lib]
+name = "stakai"
+path = "src/lib.rs"
+
+[features]
+default = ["openai"]
+openai = []
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+async-stream = "0.3"
+
+# HTTP client
+reqwest = { workspace = true }
+reqwest-eventsource = "0.6"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Utilities
+bytes = "1"
+pin-project = "1"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1"
+anyhow = { workspace = true }

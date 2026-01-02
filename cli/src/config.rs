@@ -2,6 +2,7 @@ use config::ConfigError;
 use serde::{Deserialize, Serialize};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
+use stakpak_shared::models::integrations::gemini::GeminiConfig;
 use stakpak_shared::models::integrations::openai::OpenAIConfig;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
@@ -11,17 +12,12 @@ use std::path::{Path, PathBuf};
 const STAKPAK_API_ENDPOINT: &str = "https://apiv2.stakpak.dev";
 const STAKPAK_CONFIG_PATH: &str = ".stakpak/config.toml";
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
+    #[default]
     Remote,
     Local,
-}
-
-impl Default for ProviderType {
-    fn default() -> Self {
-        Self::Remote
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -59,6 +55,8 @@ pub struct ProfileConfig {
     pub warden: Option<WardenConfig>,
     /// OpenAI configuration
     pub openai: Option<OpenAIConfig>,
+    /// Gemini configuration
+    pub gemini: Option<GeminiConfig>,
     /// Anthropic configuration
     pub anthropic: Option<AnthropicConfig>,
     pub eco_model: Option<String>,
@@ -70,6 +68,10 @@ pub struct ProfileConfig {
 pub struct Settings {
     pub machine_name: Option<String>,
     pub auto_append_gitignore: Option<bool>,
+    /// Unique ID for anonymous telemetry (formerly user_id)
+    #[serde(alias = "user_id")]
+    pub anonymous_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -99,9 +101,12 @@ pub struct AppConfig {
     pub warden: Option<WardenConfig>,
     pub openai: Option<OpenAIConfig>,
     pub anthropic: Option<AnthropicConfig>,
+    pub gemini: Option<GeminiConfig>,
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
+    pub anonymous_id: Option<String>,
+    pub collect_telemetry: Option<bool>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -136,6 +141,8 @@ impl From<AppConfig> for Settings {
         Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
+            anonymous_id: config.anonymous_id,
+            collect_telemetry: config.collect_telemetry,
         }
     }
 }
@@ -145,6 +152,8 @@ impl From<OldAppConfig> for Settings {
         Settings {
             machine_name: old_config.machine_name,
             auto_append_gitignore: old_config.auto_append_gitignore,
+            anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+            collect_telemetry: Some(true),
         }
     }
 }
@@ -152,9 +161,13 @@ impl From<OldAppConfig> for Settings {
 impl From<OldAppConfig> for ConfigFile {
     // OldAppConfigConfig will always create a 'default' ConfigFile
     fn from(old_config: OldAppConfig) -> Self {
+        let settings: Settings = old_config.clone().into();
         ConfigFile {
-            profiles: HashMap::from([("default".to_string(), old_config.clone().into())]),
-            settings: old_config.into(),
+            profiles: HashMap::from([(
+                "default".to_string(),
+                ProfileConfig::migrated_from_old_config(old_config),
+            )]),
+            settings,
         }
     }
 }
@@ -171,10 +184,24 @@ impl From<AppConfig> for ProfileConfig {
             provider: None,
             openai: config.openai,
             anthropic: config.anthropic,
+            gemini: config.gemini,
             eco_model: config.eco_model,
             smart_model: config.smart_model,
             recovery_model: config.recovery_model,
         }
+    }
+}
+
+impl From<ConfigFile> for AppConfig {
+    fn from(file: ConfigFile) -> Self {
+        let profile_name = "default";
+        let profile = file.profiles.get(profile_name).cloned().unwrap_or_default();
+        Self::build(
+            "default",
+            PathBuf::from(STAKPAK_CONFIG_PATH),
+            file.settings,
+            profile,
+        )
     }
 }
 
@@ -185,6 +212,8 @@ impl Default for ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -200,6 +229,8 @@ impl ConfigFile {
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
+                collect_telemetry: Some(true),
             },
         }
     }
@@ -231,7 +262,16 @@ impl ConfigFile {
     }
 
     fn set_app_config_settings(&mut self, config: AppConfig) {
-        self.settings = config.into();
+        // Preserve existing anonymous_id and collect_telemetry if AppConfig values are None
+        let existing_anonymous_id = self.settings.anonymous_id.clone();
+        let existing_collect_telemetry = self.settings.collect_telemetry;
+
+        self.settings = Settings {
+            machine_name: config.machine_name,
+            auto_append_gitignore: config.auto_append_gitignore,
+            anonymous_id: config.anonymous_id.or(existing_anonymous_id),
+            collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
+        };
     }
 
     fn contains_readonly(&self) -> bool {
@@ -298,6 +338,14 @@ impl ProfileConfig {
         }
     }
 
+    fn migrated_from_old_config(old_config: OldAppConfig) -> Self {
+        ProfileConfig {
+            api_endpoint: Some(old_config.api_endpoint),
+            api_key: old_config.api_key,
+            ..ProfileConfig::default()
+        }
+    }
+
     fn merge(&self, other: Option<&ProfileConfig>) -> ProfileConfig {
         ProfileConfig {
             api_endpoint: self
@@ -336,6 +384,10 @@ impl ProfileConfig {
                 .anthropic
                 .clone()
                 .or_else(|| other.and_then(|config| config.anthropic.clone())),
+            gemini: self
+                .gemini
+                .clone()
+                .or_else(|| other.and_then(|config| config.gemini.clone())),
             eco_model: self
                 .eco_model
                 .clone()
@@ -444,9 +496,12 @@ impl AppConfig {
             provider: profile_config.provider.unwrap_or(ProviderType::Remote),
             openai: profile_config.openai,
             anthropic: profile_config.anthropic,
+            gemini: profile_config.gemini,
             smart_model: profile_config.smart_model,
             eco_model: profile_config.eco_model,
             recovery_model: profile_config.recovery_model,
+            anonymous_id: settings.anonymous_id,
+            collect_telemetry: settings.collect_telemetry,
         }
     }
 
@@ -631,9 +686,12 @@ auto_append_gitignore = true
             provider: ProviderType::Remote,
             openai: None,
             anthropic: None,
+            gemini: None,
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            anonymous_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         }
     }
 
@@ -750,6 +808,8 @@ auto_append_gitignore = true
             settings: Settings {
                 machine_name: None,
                 auto_append_gitignore: Some(true),
+                anonymous_id: Some("test-user-id".into()),
+                collect_telemetry: Some(true),
             },
         };
 
@@ -773,6 +833,7 @@ auto_append_gitignore = true
                 provider: None,
                 openai: None,
                 anthropic: None,
+                gemini: None,
                 smart_model: None,
                 eco_model: None,
                 recovery_model: None,
@@ -791,6 +852,7 @@ auto_append_gitignore = true
                 provider: None,
                 openai: None,
                 anthropic: None,
+                gemini: None,
                 smart_model: None,
                 eco_model: None,
                 recovery_model: None,
@@ -990,9 +1052,12 @@ auto_append_gitignore = true
             provider: ProviderType::Remote,
             openai: None,
             anthropic: None,
+            gemini: None,
             smart_model: None,
             eco_model: None,
             recovery_model: None,
+            anonymous_id: Some("test-user-id".into()),
+            collect_telemetry: Some(true),
         };
 
         config.save().unwrap();
