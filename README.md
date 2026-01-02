@@ -1,5 +1,42 @@
 
-# Stakpak
+
+<p align="center">
+  <picture>
+    <source srcset="assets/stakpak-light.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/stakpak-dark.png" width="400" />
+  </picture>
+</p>
+
+<h3 align="center">Open source AI DevOps Agent in Your Terminal</h3>
+
+<p align="center">
+Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy, and run infra from the terminal.
+</p>
+
+<br />
+
+<!-- Badges Section -->
+<p align="center">
+  <!-- Built With Ratatui -->
+  <a href="https://ratatui.rs/"><img src="https://ratatui.rs/built-with-ratatui/badge.svg" /></a>
+  <!-- License -->
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" />
+  <!-- Release (latest GitHub tag) -->
+  <img src="https://img.shields.io/github/v/release/stakpak/agent?style=flat-square" />
+  <!-- Build CI status (GitHub Actions) -->
+  <img src="https://github.com/stakpak/agent/actions/workflows/ci.yml/badge.svg?style=flat-square" />
+  <!-- Downloads (GitHub releases total) -->
+  <img src="https://img.shields.io/github/downloads/stakpak/agent/total?style=flat-square" />
+  <!-- Documentation -->
+  <a href="https://stakpak.gitbook.io/docs/"><img src="https://img.shields.io/badge/Docs-Documentation-0A84FF?style=flat-square" /></a>
+  <!-- Discord Community -->
+  <a href="https://discord.gg/QTZjETP7GB"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white&style=flat-square" /></a>
+
+:star: Help us reach more developers and grow the Stakpak community. Star this repo!
+
+![til](./assets/stakpak-overview.gif)
+
+</p>
 
 You can't trust most AI agents with your DevOps. One mistake, and your production is toast.
 Stakpak is built different:
@@ -9,9 +46,11 @@ Stakpak is built different:
 
 Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production.
 
-[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
-
-![til](./assets/stakpak-overview.gif)
+### Try Stakpak Now
+```bash
+curl -sSL https://stakpak.dev/install.sh | sh
+```
+[For more installation options...](https://github.com/stakpak/agent#installation)
 
 ## 🔒 Security Hardened
 
@@ -118,6 +157,9 @@ api_key = "sk-ant-..."
 [profiles.byok.openai]
 api_key = "sk-..."
 
+[profiles.byok.gemini]
+api_key = "sk-..."
+
 [settings]
 ```
 
@@ -162,17 +204,7 @@ docker run -it \
    --entrypoint stakpak ghcr.io/stakpak/agent:latest
 ```
 
-### Keyboard Shortcuts
 
-<img src="assets/keyboardshortcuts.jpeg" width="800">
-
-- Use `Arrow keys` or **Tab** to select options
-- Press `Esc` to exit the prompt
-- `?` for Shortcuts
-- `/` for commands
-- `↵` to send message
-- `Shift + Enter` or `Ctrl + J` to insert newline
-- `Ctrl + C` to quit
 
 ### MCP Modes
 
@@ -300,6 +332,12 @@ tags:
 
 Your deployment procedures and guidelines here...
 ```
+
+### Shell Mode
+
+Execute system commands explicitly from the input bar.
+
+[Check the Shell Mode docs](docs/shell_mode.md) for details on background vs foreground execution.
 
 ## Platform Testing
 

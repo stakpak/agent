@@ -49,6 +49,7 @@ pub async fn validate_profile_switch(
                 store_path: None,
                 anthropic_config: new_config.anthropic.clone(),
                 openai_config: new_config.openai.clone(),
+                gemini_config: new_config.gemini.clone(),
                 eco_model: new_config.eco_model.clone(),
                 recovery_model: new_config.recovery_model.clone(),
                 smart_model: new_config.smart_model.clone(),

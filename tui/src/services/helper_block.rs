@@ -233,7 +233,7 @@ pub fn push_model_message(state: &mut AppState) {
         "Switched to ",
         Style::default().fg(Color::DarkGray),
     ));
-    match state.model {
+    match state.agent_model {
         AgentModel::Smart => {
             line.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
         }

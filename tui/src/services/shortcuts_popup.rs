@@ -7,6 +7,8 @@ use ratatui::{
 };
 use std::sync::OnceLock;
 
+use crate::constants::SCROLL_BUFFER_LINES;
+
 #[derive(Debug, Clone)]
 pub struct Shortcut {
     pub key: String,
@@ -85,6 +87,7 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
         Shortcut::new("/quit", "Quit application", "Commands"),
         // File Search
         Shortcut::new("@", "Trigger file search", "File Search"),
+        Shortcut::new("$", "Enter interactive shell mode", "File Search"),
         Shortcut::new("Tab", "Select file from search", "File Search"),
         // Mouse
         Shortcut::new("Scroll Up/Down", "Scroll messages", "Mouse"),
@@ -100,11 +103,11 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
         let shortcuts = get_all_shortcuts();
 
         // Group shortcuts by category
-        let mut categories: std::collections::HashMap<String, Vec<&Shortcut>> =
+        let mut categories: std::collections::HashMap<&str, Vec<&Shortcut>> =
             std::collections::HashMap::new();
         for shortcut in &shortcuts {
             categories
-                .entry(shortcut.category.clone())
+                .entry(&shortcut.category)
                 .or_default()
                 .push(shortcut);
         }
@@ -127,7 +130,7 @@ pub fn get_cached_shortcuts_content(width: Option<usize>) -> &'static Vec<Line<'
 
         // Process categories in the EXACT order defined above
         for category_name in &category_order {
-            if let Some(category_shortcuts) = categories.get(*category_name) {
+            if let Some(category_shortcuts) = categories.get(category_name) {
                 // Add category header
                 let category_style = Style::default()
                     .fg(Color::Cyan)
@@ -174,7 +177,7 @@ pub fn get_shortcuts_count() -> usize {
     get_all_shortcuts().len()
 }
 
-pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
+pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     // Calculate popup size (60% width, fit height to content)
     let area = centered_rect(60, 80, f.area());
 
@@ -220,13 +223,10 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &crate::app::AppState) {
     let shortcuts_count = get_shortcuts_count();
 
     // Calculate scroll position (similar to collapsed messages)
-    const SCROLL_BUFFER_LINES: usize = 2;
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
-    let scroll = if state.shortcuts_scroll > max_scroll {
-        max_scroll
-    } else {
-        state.shortcuts_scroll
-    };
+
+    state.shortcuts_scroll = state.shortcuts_scroll.min(max_scroll);
+    let scroll = state.shortcuts_scroll;
 
     // Add top arrow indicator if there are hidden items above
     let mut visible_lines = Vec::new();

@@ -40,6 +40,11 @@ pub fn redact_secrets(
     old_redaction_map: HashMap<String, String>,
     privacy_mode: bool,
 ) -> RedactionResult {
+    // Skip redaction if content already contains redacted secrets (avoid double redaction)
+    if content.contains("[REDACTED_SECRET:") {
+        return RedactionResult::new(content.to_string(), HashMap::new());
+    }
+
     let mut secrets = detect_secrets(content, path, privacy_mode);
 
     let mut redaction_map = old_redaction_map.clone();
@@ -161,6 +166,13 @@ pub fn redact_password(
         return RedactionResult::new(content.to_string(), old_redaction_map);
     }
 
+    // Skip redaction if content already contains redacted secrets (avoid double redaction)
+    if content.contains("[REDACTED_SECRET:") {
+        return RedactionResult::new(content.to_string(), HashMap::new());
+    }
+
+    let mut redacted_string = content.to_string();
+    let mut redaction_map = old_redaction_map.clone();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
         .iter()
         .map(|(k, v)| (v.clone(), k.clone()))
@@ -1475,5 +1487,52 @@ export PORT=3000
                 .unwrap(),
             "mysecretvalue123"
         );
+    }
+
+    #[test]
+    fn test_redact_secrets_skip_already_redacted() {
+        // Content that already contains redacted secrets should not be double-redacted
+        let content = "The password is [REDACTED_SECRET:password:abc123] and API key is [REDACTED_SECRET:api-key:xyz789]";
+        let result = redact_secrets(content, None, &HashMap::new(), false);
+
+        // Should return content unchanged
+        assert_eq!(result.redacted_string, content);
+        // Should not add any new redactions
+        assert!(result.redaction_map.is_empty());
+    }
+
+    #[test]
+    fn test_redact_password_skip_already_redacted() {
+        // Content that already contains redacted secrets should not be double-redacted
+        let content = "[REDACTED_SECRET:password:existing123]";
+        let password = "newpassword";
+        let result = redact_password(content, password, &HashMap::new());
+
+        // Should return content unchanged
+        assert_eq!(result.redacted_string, content);
+        // Should not add any new redactions
+        assert!(result.redaction_map.is_empty());
+    }
+
+    #[test]
+    fn test_redact_secrets_skip_nested_redaction() {
+        // Simulate what happens when local_tools redacts and proxy tries to redact again
+        let original_password = "MySecureP@ssw0rd!";
+
+        // First redaction (simulating local_tools)
+        let first_result = redact_password(original_password, original_password, &HashMap::new());
+        assert!(
+            first_result
+                .redacted_string
+                .contains("[REDACTED_SECRET:password:")
+        );
+
+        // Second redaction attempt (simulating proxy) - should be skipped
+        let second_result =
+            redact_secrets(&first_result.redacted_string, None, &HashMap::new(), false);
+
+        // Should return the already-redacted content unchanged
+        assert_eq!(second_result.redacted_string, first_result.redacted_string);
+        assert!(second_result.redaction_map.is_empty());
     }
 }

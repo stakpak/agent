@@ -1,7 +1,10 @@
 use rmcp::model::ServerCapabilities;
 use rmcp::service::{NotificationContext, Peer, RequestContext};
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpService, session::local::LocalSessionManager,
+};
 use rmcp::{
-    RoleServer, ServerHandler, ServiceError,
+    RoleClient, RoleServer, ServerHandler, ServiceError,
     model::{
         CallToolRequestParam, CallToolResult, CancelledNotificationParam, Content, ErrorData,
         GetPromptRequestParam, GetPromptResult, Implementation, InitializeRequestParam,
@@ -16,11 +19,31 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast::Receiver;
+
+/// Helper to convert ServiceError to ErrorData with context
+fn service_error_to_error_data(e: ServiceError, context: &str) -> ErrorData {
+    match e {
+        ServiceError::McpError(err) => err,
+        ServiceError::Cancelled { reason } => ErrorData::internal_error(
+            format!(
+                "{}: cancelled - {}",
+                context,
+                reason.unwrap_or_else(|| "unknown reason".to_string())
+            ),
+            None,
+        ),
+        _ => ErrorData::internal_error(context.to_string(), None),
+    }
+}
 
 pub struct ProxyServer {
     pool: Arc<ClientPool>,
@@ -49,6 +72,171 @@ impl ProxyServer {
     pub async fn set_client_config(&self, config: ClientPoolConfig) {
         let mut stored_config = self.client_config.lock().await;
         *stored_config = Some(config);
+    }
+
+    /// Track a request ID to client mapping for cancellation forwarding
+    async fn track_request(&self, request_id: RequestId, client_name: String) {
+        self.request_id_to_client
+            .lock()
+            .await
+            .insert(request_id, client_name);
+    }
+
+    /// Remove and return the client name for a request ID
+    async fn untrack_request(&self, request_id: &RequestId) -> Option<String> {
+        self.request_id_to_client.lock().await.remove(request_id)
+    }
+
+    /// Aggregate results from all clients using a provided async operation.
+    /// Collects successful results and logs failures.
+    async fn aggregate_from_clients<T, F, Fut>(&self, operation_name: &str, operation: F) -> Vec<T>
+    where
+        F: Fn(String, Peer<RoleClient>) -> Fut,
+        Fut: Future<Output = Result<Vec<T>, (String, ServiceError)>>,
+    {
+        let client_peers = self.pool.get_all_client_peers().await;
+        let mut results = Vec::new();
+
+        for (name, peer) in client_peers {
+            match operation(name.clone(), peer).await {
+                Ok(items) => results.extend(items),
+                Err((client_name, e)) => {
+                    tracing::warn!(
+                        "Failed to {} from client {}: {:?}",
+                        operation_name,
+                        client_name,
+                        e
+                    );
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Try an operation on each client until one succeeds.
+    /// Returns the first successful result or the last error.
+    async fn find_in_clients<T, F, Fut>(
+        &self,
+        resource_type: &str,
+        resource_name: &str,
+        operation: F,
+    ) -> Result<T, ErrorData>
+    where
+        F: Fn(String, Peer<RoleClient>) -> Fut,
+        Fut: Future<Output = Result<T, ServiceError>>,
+    {
+        let client_peers = self.pool.get_all_client_peers().await;
+        let mut last_error = None;
+
+        for (name, peer) in client_peers {
+            match operation(name.clone(), peer).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    tracing::debug!(
+                        "{} {} not found on server {}",
+                        resource_type,
+                        resource_name,
+                        name
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(match last_error {
+            Some(ServiceError::McpError(e)) => e,
+            _ => ErrorData::resource_not_found(
+                format!(
+                    "{} {} not found on any server",
+                    resource_type, resource_name
+                ),
+                None,
+            ),
+        })
+    }
+
+    /// Parse tool name in format "client_name__tool_name"
+    fn parse_tool_name(full_name: &str) -> Result<(String, String), ErrorData> {
+        let parts: Vec<&str> = full_name.splitn(2, "__").collect();
+        if parts.len() != 2 {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "Invalid tool name format: {}. Expected format: client_name__tool_name",
+                    full_name
+                ),
+                None,
+            ));
+        }
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    }
+
+    /// Prepare tool parameters, restoring any redacted secrets
+    fn prepare_tool_params(
+        &self,
+        params: &CallToolRequestParam,
+        tool_name: &str,
+    ) -> CallToolRequestParam {
+        let mut tool_params = params.clone();
+        tool_params.name = tool_name.to_string().into();
+
+        if let Some(arguments) = &tool_params.arguments
+            && let Ok(arguments_str) = serde_json::to_string(arguments)
+        {
+            let restored = self
+                .secret_manager
+                .restore_secrets_in_string(&arguments_str);
+            if let Ok(restored_arguments) = serde_json::from_str(&restored) {
+                tool_params.arguments = Some(restored_arguments);
+            }
+        }
+
+        tool_params
+    }
+
+    /// Execute a tool call with cancellation monitoring
+    async fn execute_with_cancellation(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        client_peer: &Peer<RoleClient>,
+        tool_params: CallToolRequestParam,
+    ) -> Result<CallToolResult, ServiceError> {
+        tokio::select! {
+            biased;
+
+            _ = ctx.ct.cancelled() => {
+                // Forward cancellation to upstream server
+                let _ = client_peer
+                    .notify_cancelled(CancelledNotificationParam {
+                        request_id: ctx.id.clone(),
+                        reason: Some("Request cancelled by downstream client".to_string()),
+                    })
+                    .await;
+
+                Err(ServiceError::Cancelled {
+                    reason: Some("Request cancelled by downstream client".to_string()),
+                })
+            }
+
+            result = client_peer.call_tool(tool_params) => result
+        }
+    }
+
+    /// Redact secrets in content items
+    fn redact_content(&self, content: Vec<Content>) -> Vec<Content> {
+        content
+            .into_iter()
+            .map(|item| {
+                if let Some(text_content) = item.raw.as_text() {
+                    let redacted = self
+                        .secret_manager
+                        .redact_and_store_secrets(&text_content.text, None);
+                    Content::text(&redacted)
+                } else {
+                    item
+                }
+            })
+            .collect()
     }
 
     /// Initialize a single upstream client from server configuration
@@ -87,7 +275,11 @@ impl ProxyServer {
                     }
                 }
             }
-            crate::client::ServerConfig::Http { url, headers } => {
+            crate::client::ServerConfig::Http {
+                url,
+                headers,
+                certificate_chain,
+            } => {
                 // Validate TLS usage
                 if !url.starts_with("https://") {
                     tracing::warn!(
@@ -100,7 +292,24 @@ impl ProxyServer {
                     );
                 }
 
-                let mut client_builder = reqwest::Client::builder();
+                let mut client_builder = reqwest::Client::builder()
+                    .pool_idle_timeout(std::time::Duration::from_secs(90))
+                    .pool_max_idle_per_host(10)
+                    .tcp_keepalive(std::time::Duration::from_secs(60));
+
+                // Configure mTLS if certificate chain is provided
+                if let Some(cert_chain) = certificate_chain.as_ref() {
+                    match cert_chain.create_client_config() {
+                        Ok(tls_config) => {
+                            client_builder = client_builder.use_preconfigured_tls(tls_config);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create TLS config for {}: {:?}", name, e);
+                            return;
+                        }
+                    }
+                }
+
                 if let Some(headers_map) = headers {
                     let mut header_map = reqwest::header::HeaderMap::new();
                     for (key, value) in headers_map {
@@ -155,24 +364,31 @@ impl ServerHandler for ProxyServer {
             if !*initialized {
                 let config = self.client_config.lock().await.take();
                 if let Some(config) = config {
-                    // Initialize clients asynchronously (don't wait for completion)
                     let pool = self.pool.clone();
                     let peer = Arc::new(Mutex::new(Some(ctx.peer.clone())));
-                    tokio::spawn(async move {
-                        for (name, server_config) in config.servers {
-                            let pool_clone = pool.clone();
-                            let peer_clone = peer.clone();
-                            tokio::spawn(async move {
-                                Self::initialize_single_client(
-                                    pool_clone,
-                                    name,
-                                    server_config,
-                                    peer_clone,
-                                )
-                                .await;
-                            });
-                        }
-                    });
+
+                    // Initialize all clients and wait for them to complete
+                    let mut handles = Vec::new();
+                    for (name, server_config) in config.servers {
+                        let pool_clone = pool.clone();
+                        let peer_clone = peer.clone();
+                        let handle = tokio::spawn(async move {
+                            Self::initialize_single_client(
+                                pool_clone,
+                                name,
+                                server_config,
+                                peer_clone,
+                            )
+                            .await;
+                        });
+                        handles.push(handle);
+                    }
+
+                    // Wait for all clients to initialize
+                    for handle in handles {
+                        let _ = handle.await;
+                    }
+
                     *initialized = true;
                 }
             }
@@ -198,107 +414,78 @@ impl ServerHandler for ProxyServer {
         params: Option<PaginatedRequestParam>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let mut all_tools = Vec::new();
-
-        // Aggregate tools from all MCP servers
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.list_tools(params.clone()).await {
-                Ok(result) => {
-                    all_tools.extend(result.tools.into_iter().map(|mut tool| {
-                        // Using double underscore as separator to support underscores in server names
-                        tool.name = format!("{}__{}", name, tool.name).into();
-                        tool
-                    }));
+        let tools = self
+            .aggregate_from_clients("list tools", |name, peer| {
+                let params = params.clone();
+                async move {
+                    peer.list_tools(params)
+                        .await
+                        .map(|result| {
+                            result
+                                .tools
+                                .into_iter()
+                                .map(|mut tool| {
+                                    // Prefix tool name with client name using double underscore separator
+                                    tool.name = format!("{}__{}", name, tool.name).into();
+                                    tool
+                                })
+                                .collect()
+                        })
+                        .map_err(|e| (name, e))
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to list tools from client {}: {:?}", name, e);
-                }
-            }
-        }
+            })
+            .await;
 
         Ok(ListToolsResult {
-            tools: all_tools,
+            tools,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
     async fn call_tool(
         &self,
         params: CallToolRequestParam,
-        _ctx: RequestContext<RoleServer>,
+        ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         // Parse the client name from the tool name (format: client_name__tool_name)
-        // Using double underscore as separator to support underscores in server names
-        let parts: Vec<&str> = params.name.splitn(2, "__").collect();
+        let (client_name, tool_name) = Self::parse_tool_name(&params.name)?;
 
-        if parts.len() != 2 {
-            return Err(ErrorData::invalid_params(
-                format!(
-                    "Invalid tool name format: {}. Expected format: client_name__tool_name",
-                    params.name
+        // Get a cloned peer for the client (releases lock immediately)
+        let client_peer = self
+            .pool
+            .get_client_peer(&client_name)
+            .await
+            .ok_or_else(|| {
+                ErrorData::resource_not_found(format!("Client {} not found", client_name), None)
+            })?;
+
+        // Track request for cancellation forwarding
+        self.track_request(ctx.id.clone(), client_name.clone())
+            .await;
+
+        // Prepare and execute the tool call
+        let tool_params = self.prepare_tool_params(&params, &tool_name);
+        let result = self
+            .execute_with_cancellation(&ctx, &client_peer, tool_params)
+            .await;
+
+        // Always clean up request tracking
+        self.untrack_request(&ctx.id).await;
+
+        // Process result and redact secrets
+        let mut result = result.map_err(|e| {
+            service_error_to_error_data(
+                e,
+                &format!(
+                    "Failed to call tool {} on client {}",
+                    tool_name, client_name
                 ),
-                None,
-            ));
-        }
+            )
+        })?;
 
-        let client_name = parts[0].to_string();
-        let tool_name = parts[1];
-
-        // Find the specific client and call the tool
-        let clients = self.pool.get_clients().await;
-        match clients.get(&client_name) {
-            Some(client) => {
-                let mut tool_params = params.clone();
-                tool_params.name = tool_name.to_string().into();
-
-                // Restore secrets in tool arguments before forwarding to upstream
-                if let Some(arguments) = &tool_params.arguments {
-                    let arguments_str = serde_json::to_string(arguments).unwrap_or_default();
-                    let restored_arguments_str = self
-                        .secret_manager
-                        .restore_secrets_in_string(&arguments_str);
-
-                    if let Ok(restored_arguments) = serde_json::from_str(&restored_arguments_str) {
-                        tool_params.arguments = Some(restored_arguments);
-                    }
-                }
-                let mut result = client.call_tool(tool_params).await.map_err(|e| match e {
-                    ServiceError::McpError(err) => err,
-                    _ => ErrorData::internal_error(
-                        format!(
-                            "Failed to call tool {} on client {}",
-                            tool_name, client_name
-                        ),
-                        None,
-                    ),
-                })?;
-
-                // Redact secrets in the result content
-                let redacted_content: Vec<Content> = result
-                    .content
-                    .into_iter()
-                    .map(|content| {
-                        if let Some(text_content) = content.raw.as_text() {
-                            let redacted_text = self
-                                .secret_manager
-                                .redact_and_store_secrets(&text_content.text, None);
-                            Content::text(&redacted_text)
-                        } else {
-                            content
-                        }
-                    })
-                    .collect();
-
-                result.content = redacted_content;
-
-                Ok(result)
-            }
-            None => Err(ErrorData::resource_not_found(
-                format!("Client {} not found", client_name),
-                None,
-            )),
-        }
+        result.content = self.redact_content(result.content);
+        Ok(result)
     }
 
     async fn list_prompts(
@@ -306,24 +493,22 @@ impl ServerHandler for ProxyServer {
         params: Option<PaginatedRequestParam>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        let mut all_prompts = Vec::new();
-
-        // Aggregate prompts from all MCP servers
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.list_prompts(params.clone()).await {
-                Ok(result) => {
-                    all_prompts.extend(result.prompts);
+        let prompts = self
+            .aggregate_from_clients("list prompts", |name, peer| {
+                let params = params.clone();
+                async move {
+                    peer.list_prompts(params)
+                        .await
+                        .map(|result| result.prompts)
+                        .map_err(|e| (name, e))
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to list prompts from client {}: {:?}", name, e);
-                }
-            }
-        }
+            })
+            .await;
 
         Ok(ListPromptsResult {
-            prompts: all_prompts,
+            prompts,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -332,27 +517,12 @@ impl ServerHandler for ProxyServer {
         params: GetPromptRequestParam,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
-        // Try to get the prompt from each server until one succeeds
-        let mut last_error = None;
-
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.get_prompt(params.clone()).await {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    last_error = Some(e);
-                    tracing::debug!("Prompt {} not found on server {}", params.name, name);
-                }
-            }
-        }
-
-        Err(match last_error {
-            Some(ServiceError::McpError(e)) => e,
-            _ => ErrorData::resource_not_found(
-                format!("Prompt {} not found on any server", params.name),
-                None,
-            ),
+        let name = params.name.clone();
+        self.find_in_clients("Prompt", &name, |_, peer| {
+            let params = params.clone();
+            async move { peer.get_prompt(params).await }
         })
+        .await
     }
 
     async fn list_resources(
@@ -360,24 +530,22 @@ impl ServerHandler for ProxyServer {
         params: Option<PaginatedRequestParam>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let mut all_resources = Vec::new();
-
-        // Aggregate resources from all MCP servers
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.list_resources(params.clone()).await {
-                Ok(result) => {
-                    all_resources.extend(result.resources);
+        let resources = self
+            .aggregate_from_clients("list resources", |name, peer| {
+                let params = params.clone();
+                async move {
+                    peer.list_resources(params)
+                        .await
+                        .map(|result| result.resources)
+                        .map_err(|e| (name, e))
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to list resources from client {}: {:?}", name, e);
-                }
-            }
-        }
+            })
+            .await;
 
         Ok(ListResourcesResult {
-            resources: all_resources,
+            resources,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -386,28 +554,22 @@ impl ServerHandler for ProxyServer {
         params: Option<PaginatedRequestParam>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let mut all_templates = Vec::new();
-
-        // Aggregate resource templates from all MCP servers
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.list_resource_templates(params.clone()).await {
-                Ok(result) => {
-                    all_templates.extend(result.resource_templates);
+        let resource_templates = self
+            .aggregate_from_clients("list resource templates", |name, peer| {
+                let params = params.clone();
+                async move {
+                    peer.list_resource_templates(params)
+                        .await
+                        .map(|result| result.resource_templates)
+                        .map_err(|e| (name, e))
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to list resource templates from client {}: {:?}",
-                        name,
-                        e
-                    );
-                }
-            }
-        }
+            })
+            .await;
 
         Ok(ListResourceTemplatesResult {
-            resource_templates: all_templates,
+            resource_templates,
             next_cursor: None,
+            meta: Default::default(),
         })
     }
 
@@ -416,27 +578,12 @@ impl ServerHandler for ProxyServer {
         params: ReadResourceRequestParam,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
-        // Try to read the resource from each server until one succeeds
-        let mut last_error = None;
-
-        let clients = self.pool.get_clients().await;
-        for (name, client) in clients.iter() {
-            match client.read_resource(params.clone()).await {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    last_error = Some(e);
-                    tracing::debug!("Resource {} not found on server {}", params.uri, name);
-                }
-            }
-        }
-
-        Err(match last_error {
-            Some(ServiceError::McpError(e)) => e,
-            _ => ErrorData::resource_not_found(
-                format!("Resource {} not found on any server", params.uri),
-                None,
-            ),
+        let uri = params.uri.to_string();
+        self.find_in_clients("Resource", &uri, |_, peer| {
+            let params = params.clone();
+            async move { peer.read_resource(params).await }
         })
+        .await
     }
 
     async fn on_cancelled(
@@ -444,29 +591,85 @@ impl ServerHandler for ProxyServer {
         notification: CancelledNotificationParam,
         _ctx: NotificationContext<RoleServer>,
     ) {
-        // Forward cancellation notification from downstream client to upstream server
         let request_id = notification.request_id.clone();
-        let client_name = {
-            let mapping = self.request_id_to_client.lock().await;
-            mapping.get(&request_id).cloned()
-        };
 
-        if let Some(client_name) = client_name {
-            let clients = self.pool.get_clients().await;
-            if let Some(client) = clients.get(&client_name) {
-                // Forward cancellation to upstream server
-                let _ = client.notify_cancelled(notification).await;
-            } else {
-                tracing::warn!(
-                    "Cancellation notification received for unknown client: {}",
-                    client_name
-                );
-            }
-        } else {
+        // Atomically get and remove the mapping
+        let Some(client_name) = self.untrack_request(&request_id).await else {
             tracing::debug!(
                 "Cancellation notification received but no request ID mapping found for: {:?}",
                 request_id
             );
+            return;
+        };
+
+        // Get a cloned peer and forward cancellation
+        let Some(client_peer) = self.pool.get_client_peer(&client_name).await else {
+            tracing::warn!(
+                "Cancellation notification received for unknown client: {}",
+                client_name
+            );
+            return;
+        };
+
+        if let Err(e) = client_peer.notify_cancelled(notification).await {
+            tracing::warn!(
+                "Failed to forward cancellation to upstream server {}: {:?}",
+                client_name,
+                e
+            );
+        } else {
+            tracing::debug!(
+                "Forwarded cancellation for request {:?} to client {}",
+                request_id,
+                client_name
+            );
         }
     }
+}
+
+/// Start the proxy server as an HTTPS service with mTLS
+pub async fn start_proxy_server(
+    config: ClientPoolConfig,
+    tcp_listener: TcpListener,
+    certificate_chain: Arc<CertificateChain>,
+    redact_secrets: bool,
+    privacy_mode: bool,
+    shutdown_rx: Option<Receiver<()>>,
+) -> anyhow::Result<()> {
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(ProxyServer::new(
+                config.clone(),
+                redact_secrets,
+                privacy_mode,
+            ))
+        },
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+
+    let router = axum::Router::new().nest_service("/mcp", service);
+
+    let tls_config = certificate_chain.create_server_config()?;
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+
+    tokio::spawn(async move {
+        if let Some(mut shutdown_rx) = shutdown_rx {
+            let _ = shutdown_rx.recv().await;
+        } else {
+            // Wait for ctrl+c
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        shutdown_handle.graceful_shutdown(None);
+    });
+
+    axum_server::from_tcp_rustls(tcp_listener.into_std()?, rustls_config)
+        .handle(handle)
+        .serve(router.into_make_service())
+        .await?;
+
+    Ok(())
 }

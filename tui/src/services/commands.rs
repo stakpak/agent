@@ -9,9 +9,7 @@
 //! All commands are defined here and executed through a unified executor.
 
 use crate::app::{AppState, HelperCommand};
-use crate::constants::{
-    CONTEXT_MAX_UTIL_TOKENS, CONTEXT_MAX_UTIL_TOKENS_ECO, SUMMARIZE_PROMPT_BASE,
-};
+use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
@@ -29,6 +27,7 @@ use ratatui::{
 };
 use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
 
 /// Command identifier - the slash command string (e.g., "/help", "/clear")
@@ -50,6 +49,7 @@ pub enum CommandAction {
     OpenRulebookSwitcher,
     OpenSessions,
     OpenShortcuts,
+    OpenShellMode,
     ResumeSession,
     ShowStatus,
     MemorizeConversation,
@@ -76,7 +76,8 @@ impl CommandAction {
             // These don't have slash commands, handled separately
             CommandAction::OpenProfileSwitcher
             | CommandAction::OpenRulebookSwitcher
-            | CommandAction::OpenShortcuts => None,
+            | CommandAction::OpenShortcuts
+            | CommandAction::OpenShellMode => None,
         }
     }
 }
@@ -127,6 +128,12 @@ pub fn get_all_commands() -> Vec<Command> {
             "Show all keyboard shortcuts",
             "Ctrl+S",
             CommandAction::OpenShortcuts,
+        ),
+        Command::new(
+            "Shell Mode",
+            "Open interactive shell",
+            "$",
+            CommandAction::OpenShellMode,
         ),
         Command::new(
             "New Session",
@@ -294,7 +301,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             Ok(()) => {
                 let _ = ctx
                     .output_tx
-                    .try_send(OutputEvent::SwitchModel(ctx.state.model.clone()));
+                    .try_send(OutputEvent::SwitchModel(ctx.state.agent_model.clone()));
                 push_model_message(ctx.state);
                 ctx.state.text_area.set_text("");
                 ctx.state.show_helper_dropdown = false;
@@ -420,30 +427,57 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
 // ========== Helper Functions ==========
 
 pub fn switch_model(state: &mut AppState) -> Result<(), String> {
-    match state.model {
+    match state.agent_model {
         AgentModel::Smart => {
-            if state.current_message_usage.total_tokens < CONTEXT_MAX_UTIL_TOKENS_ECO {
-                state.model = AgentModel::Eco;
-                Ok(())
-            } else {
-                Err(
-                    "Cannot switch model: context exceeds eco model context window size."
-                        .to_string(),
-                )
-            }
+            // TODO: Check if context exceeds eco model context window size
+            state.agent_model = AgentModel::Eco;
+            Ok(())
         }
         AgentModel::Eco => {
-            state.model = AgentModel::Smart;
+            // TODO: Check if context exceeds smart model context window size
+            state.agent_model = AgentModel::Smart;
             Ok(())
         }
         AgentModel::Recovery => {
-            state.model = AgentModel::Smart;
+            // TODO: Check if context exceeds recovery model context window size
+            state.agent_model = AgentModel::Smart;
             Ok(())
         }
     }
 }
 
+/// Terminate any active shell command before switching sessions
+fn terminate_active_shell(state: &mut AppState) {
+    if let Some(cmd) = &state.active_shell_command {
+        // Kill the running command
+        let _ = cmd.kill();
+    }
+
+    // Remove the shell message box if it exists
+    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+        state.messages.retain(|m| m.id != shell_msg_id);
+    }
+
+    // Reset all shell-related state
+    state.active_shell_command = None;
+    state.active_shell_command_output = None;
+    state.interactive_shell_message_id = None;
+    state.show_shell_mode = false;
+    state.shell_popup_visible = false;
+    state.shell_popup_expanded = false;
+    state.waiting_for_shell_input = false;
+    state.shell_pending_command_executed = false;
+    state.shell_pending_command_value = None;
+    state.shell_pending_command_output = None;
+    state.shell_pending_command_output_count = 0;
+    state.dialog_command = None;
+    state.text_area.set_shell_mode(false);
+}
+
 pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Terminate any active shell before switching sessions
+    terminate_active_shell(state);
+
     state.message_tool_calls = None;
     state.message_approved_tools.clear();
     state.message_rejected_tools.clear();
@@ -472,6 +506,9 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 }
 
 pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
+    // Terminate any active shell before starting new session
+    terminate_active_shell(state);
+
     let _ = output_tx.try_send(OutputEvent::NewSession);
     state.text_area.set_text("");
     state.messages.clear();
@@ -496,8 +533,16 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     let total_tokens = usage.total_tokens;
     let prompt_tokens = usage.prompt_tokens;
     let completion_tokens = usage.completion_tokens;
-    let context_usage_pct = if CONTEXT_MAX_UTIL_TOKENS > 0 {
-        (total_tokens as f64 / CONTEXT_MAX_UTIL_TOKENS as f64) * 100.0
+
+    let context_info = state
+        .llm_model
+        .as_ref()
+        .map(|model| model.context_info())
+        .unwrap_or_default();
+    let max_tokens = context_info.max_tokens as u32;
+
+    let context_usage_pct = if max_tokens > 0 {
+        (total_tokens as f64 / max_tokens as f64) * 100.0
     } else {
         0.0
     };
@@ -518,7 +563,7 @@ pub fn build_summarize_prompt(state: &AppState) -> String {
     prompt.push_str(&format!(
         "- Context window usage: {:.1}% of {} tokens\n",
         context_usage_pct.min(100.0),
-        CONTEXT_MAX_UTIL_TOKENS
+        max_tokens
     ));
     if !recent_inputs.is_empty() {
         prompt.push('\n');

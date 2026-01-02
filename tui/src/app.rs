@@ -2,7 +2,7 @@ mod events;
 mod types;
 
 pub use events::{InputEvent, OutputEvent};
-use stakpak_shared::models::llm::LLMTokenUsage;
+use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
 pub use types::*;
 
 use crate::services::approval_popup::PopupService;
@@ -70,15 +70,31 @@ pub struct AppState {
     pub spinner_frame: usize,
     pub loading_manager: LoadingStateManager,
 
-    // ========== Shell Mode State ==========
-    pub show_shell_mode: bool,
+    // ========== Shell Popup State ==========
+    pub shell_popup_visible: bool,
+    pub shell_popup_expanded: bool,
+    pub shell_popup_scroll: usize,
+    pub shell_cursor_visible: bool,
+    pub shell_cursor_blink_timer: u8,
     pub active_shell_command: Option<ShellCommand>,
     pub active_shell_command_output: Option<String>,
-    pub shell_mode_input: String,
     pub waiting_for_shell_input: bool,
+    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub shell_loading: bool,
+    pub shell_pending_command_value: Option<String>,
+    pub shell_pending_command_executed: bool,
+    pub shell_pending_command_output: Option<String>,
+    // Backward compatibility aliases (to be removed after full migration)
+    pub show_shell_mode: bool, // alias for shell_popup_visible && shell_popup_expanded
+    pub shell_mode_input: String, // unused, kept for compatibility
     pub is_tool_call_shell_command: bool,
     pub ondemand_shell_mode: bool,
-    pub shell_tool_calls: Option<Vec<ToolCallResult>>,
+    pub shell_pending_command: Option<String>,
+    pub shell_pending_command_output_count: usize,
+    /// Tracks if the initial shell prompt has been shown (before command is typed)
+    pub shell_initial_prompt_shown: bool,
+    /// Tracks if the command has been typed into the shell (after initial prompt)
+    pub shell_command_typed: bool,
 
     // ========== Tool Call State ==========
     pub pending_bash_message_id: Option<Uuid>,
@@ -157,13 +173,19 @@ pub struct AppState {
     pub is_git_repo: bool,
     pub auto_approve_manager: AutoApproveManager,
     pub allowed_tools: Option<Vec<String>>,
-    pub model: AgentModel,
+    pub agent_model: AgentModel,
+    pub llm_model: Option<LLMModel>,
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
     pub ctrl_c_timer: Option<std::time::Instant>,
     pub mouse_capture_enabled: bool,
     pub terminal_size: Size,
+    pub shell_screen: vt100::Parser,
+    pub shell_scroll: u16,
+    pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
+    pub interactive_shell_message_id: Option<Uuid>,
+    pub shell_interaction_occurred: bool,
 }
 
 pub struct AppStateOptions<'a> {
@@ -174,7 +196,7 @@ pub struct AppStateOptions<'a> {
     pub auto_approve_tools: Option<&'a Vec<String>>,
     pub allowed_tools: Option<&'a Vec<String>>,
     pub input_tx: Option<mpsc::Sender<InputEvent>>,
-    pub model: AgentModel,
+    pub agent_model: AgentModel,
 }
 
 impl AppState {
@@ -213,7 +235,7 @@ impl AppState {
             auto_approve_tools,
             allowed_tools,
             input_tx,
-            model,
+            agent_model,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -249,15 +271,29 @@ impl AppState {
             streaming_tool_results: HashMap::new(),
             streaming_tool_result_id: None,
             completed_tool_calls: std::collections::HashSet::new(),
-            show_shell_mode: false,
+            shell_popup_visible: false,
+            shell_popup_expanded: false,
+            shell_popup_scroll: 0,
+            shell_cursor_visible: true,
+            shell_cursor_blink_timer: 0,
             active_shell_command: None,
             active_shell_command_output: None,
-            shell_mode_input: String::new(),
             waiting_for_shell_input: false,
-            is_tool_call_shell_command: false,
             is_pasting: false,
-            ondemand_shell_mode: false,
             shell_tool_calls: None,
+            shell_loading: false,
+            shell_pending_command_value: None,
+            shell_pending_command_executed: false,
+            shell_pending_command_output: None,
+            // Backward compatibility aliases
+            show_shell_mode: false,
+            shell_mode_input: String::new(),
+            is_tool_call_shell_command: false,
+            ondemand_shell_mode: false,
+            shell_pending_command: None,
+            shell_pending_command_output_count: 0,
+            shell_initial_prompt_shown: false,
+            shell_command_typed: false,
             attached_images: Vec::new(),
             pending_path_start: None,
             dialog_message_id: None,
@@ -309,6 +345,11 @@ impl AppState {
             session_tool_calls_queue: std::collections::HashMap::new(),
             tool_call_execution_order: Vec::new(),
             last_message_tool_calls: Vec::new(),
+            shell_screen: vt100::Parser::new(24, 80, 1000),
+            shell_scroll: 0,
+            shell_history_lines: Vec::new(),
+            interactive_shell_message_id: None,
+            shell_interaction_occurred: false,
 
             // Profile switcher initialization
             show_profile_switcher: false,
@@ -348,7 +389,8 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
-            model,
+            agent_model,
+            llm_model: None,
         }
     }
 
@@ -403,8 +445,19 @@ impl AppState {
             AdaptiveColors::dark_magenta(),
         );
         self.messages.push(Message::plain_text("SPACING_MARKER"));
+        let rows = if self.terminal_size.height > 0 {
+            self.terminal_size.height
+        } else {
+            24
+        };
+        let cols = if self.terminal_size.width > 0 {
+            self.terminal_size.width
+        } else {
+            80
+        };
+
         #[cfg(unix)]
-        let shell_cmd = match run_pty_command(command.clone(), shell_tx) {
+        let shell_cmd = match run_pty_command(command.clone(), None, shell_tx, rows, cols) {
             Ok(cmd) => cmd,
             Err(e) => {
                 push_error_message(self, &format!("Failed to run command: {}", e), None);
@@ -417,6 +470,7 @@ impl AppState {
 
         self.active_shell_command = Some(shell_cmd.clone());
         self.active_shell_command_output = Some(String::new());
+        self.shell_screen = vt100::Parser::new(rows, cols, 0);
         let input_tx = input_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = shell_rx.recv().await {
@@ -427,9 +481,7 @@ impl AppState {
                     ShellEvent::Error(line) => {
                         let _ = input_tx.send(InputEvent::ShellError(line)).await;
                     }
-                    ShellEvent::WaitingForInput => {
-                        let _ = input_tx.send(InputEvent::ShellWaitingForInput).await;
-                    }
+
                     ShellEvent::Completed(code) => {
                         let _ = input_tx.send(InputEvent::ShellCompleted(code)).await;
                         break;

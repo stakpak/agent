@@ -2,7 +2,7 @@ use ratatui::style::Color;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::{
     integrations::openai::{AgentModel, ToolCall, ToolCallResult, ToolCallResultProgress},
-    llm::LLMTokenUsage,
+    llm::{LLMModel, LLMTokenUsage},
 };
 use uuid::Uuid;
 
@@ -20,6 +20,9 @@ pub enum InputEvent {
     EndLoadingOperation(LoadingOperation),
     InputChanged(char),
     ShellMode,
+    RunShellCommand(String),
+    /// Spawn the user's shell and then execute a command in it (for interactive stall recovery)
+    RunShellWithCommand(String),
     GetStatus(String),
     Error(String),
     SetSessions(Vec<SessionInfo>),
@@ -67,6 +70,8 @@ pub enum InputEvent {
     AutoApproveCurrentTool,
     ToggleDialogFocus,
     RetryLastToolCall,
+    /// Interactive stall detected - automatically switch to shell mode and fire the command
+    InteractiveStallDetected(String),
     AttemptQuit,
     ToggleCollapsedMessages,
     ToggleContextPopup,
@@ -113,6 +118,9 @@ pub enum InputEvent {
     StreamUsage(LLMTokenUsage),
     RequestTotalUsage,
     TotalUsage(LLMTokenUsage),
+
+    // Model events
+    StreamModel(LLMModel),
 }
 
 #[derive(Debug)]

@@ -5,6 +5,8 @@ mod event_loop;
 mod terminal;
 mod view;
 
+pub mod utils;
+
 pub use app::{AppState, InputEvent, LoadingOperation, OutputEvent, SessionInfo};
 pub use event_loop::{RulebookConfig, run_tui};
 pub use ratatui::style::Color;

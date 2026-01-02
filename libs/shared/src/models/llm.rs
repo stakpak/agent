@@ -1,35 +1,73 @@
 use crate::models::{
-    error::{AgentError, BadRequestErrorMessage},
     integrations::{
-        anthropic::{Anthropic, AnthropicConfig, AnthropicInput, AnthropicModel},
-        openai::{OpenAI, OpenAIConfig, OpenAIInput, OpenAIModel},
+        anthropic::{AnthropicConfig, AnthropicModel},
+        gemini::{GeminiConfig, GeminiModel},
+        openai::{OpenAIConfig, OpenAIModel},
     },
+    model_pricing::{ContextAware, ModelContextInfo},
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum LLMModel {
     Anthropic(AnthropicModel),
+    Gemini(GeminiModel),
     OpenAI(OpenAIModel),
     Custom(String),
+}
+
+impl ContextAware for LLMModel {
+    fn context_info(&self) -> ModelContextInfo {
+        match self {
+            LLMModel::Anthropic(model) => model.context_info(),
+            LLMModel::Gemini(model) => model.context_info(),
+            LLMModel::OpenAI(model) => model.context_info(),
+            LLMModel::Custom(_) => ModelContextInfo::default(),
+        }
+    }
+
+    fn model_name(&self) -> String {
+        match self {
+            LLMModel::Anthropic(model) => model.model_name(),
+            LLMModel::Gemini(model) => model.model_name(),
+            LLMModel::OpenAI(model) => model.model_name(),
+            LLMModel::Custom(model_name) => model_name.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct LLMProviderConfig {
     pub anthropic_config: Option<AnthropicConfig>,
+    pub gemini_config: Option<GeminiConfig>,
     pub openai_config: Option<OpenAIConfig>,
 }
 
 impl From<String> for LLMModel {
     fn from(value: String) -> Self {
-        match value.as_str() {
-            "claude-haiku-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
-            "claude-sonnet-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Sonnet),
-            "claude-opus-4-5" => LLMModel::Anthropic(AnthropicModel::Claude45Opus),
-            "gpt-5" => LLMModel::OpenAI(OpenAIModel::GPT5),
-            "gpt-5-mini" => LLMModel::OpenAI(OpenAIModel::GPT5Mini),
-            _ => LLMModel::Custom(value),
+        if value.starts_with("claude-haiku-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
+        } else if value.starts_with("claude-sonnet-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)
+        } else if value.starts_with("claude-opus-4-5") {
+            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
+        } else if value == "gemini-2.5-flash-lite" {
+            LLMModel::Gemini(GeminiModel::Gemini25FlashLite)
+        } else if value.starts_with("gemini-2.5-flash") {
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        } else if value.starts_with("gemini-2.5-pro") {
+            LLMModel::Gemini(GeminiModel::Gemini25Pro)
+        } else if value.starts_with("gemini-3-pro-preview") {
+            LLMModel::Gemini(GeminiModel::Gemini3Pro)
+        } else if value.starts_with("gemini-3-flash-preview") {
+            LLMModel::Gemini(GeminiModel::Gemini3Flash)
+        } else if value.starts_with("gpt-5-mini") {
+            LLMModel::OpenAI(OpenAIModel::GPT5Mini)
+        } else if value.starts_with("gpt-5") {
+            LLMModel::OpenAI(OpenAIModel::GPT5)
+        } else {
+            LLMModel::Custom(value)
         }
     }
 }
@@ -38,10 +76,66 @@ impl Display for LLMModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LLMModel::Anthropic(model) => write!(f, "{}", model),
+            LLMModel::Gemini(model) => write!(f, "{}", model),
             LLMModel::OpenAI(model) => write!(f, "{}", model),
             LLMModel::Custom(model) => write!(f, "{}", model),
         }
     }
+}
+
+/// Provider-specific options for LLM requests
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMProviderOptions {
+    /// Anthropic-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<LLMAnthropicOptions>,
+
+    /// OpenAI-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openai: Option<LLMOpenAIOptions>,
+
+    /// Google/Gemini-specific options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google: Option<LLMGoogleOptions>,
+}
+
+/// Anthropic-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMAnthropicOptions {
+    /// Extended thinking configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<LLMThinkingOptions>,
+}
+
+/// Thinking/reasoning options
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LLMThinkingOptions {
+    /// Budget tokens for thinking (must be >= 1024)
+    pub budget_tokens: u32,
+}
+
+impl LLMThinkingOptions {
+    pub fn new(budget_tokens: u32) -> Self {
+        Self {
+            budget_tokens: budget_tokens.max(1024),
+        }
+    }
+}
+
+/// OpenAI-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMOpenAIOptions {
+    /// Reasoning effort for o1/o3/o4 models ("low", "medium", "high")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
+/// Google/Gemini-specific options
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct LLMGoogleOptions {
+    /// Thinking budget in tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,6 +144,8 @@ pub struct LLMInput {
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub tools: Option<Vec<LLMTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<LLMProviderOptions>,
 }
 
 #[derive(Debug)]
@@ -59,6 +155,7 @@ pub struct LLMStreamInput {
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
+    pub provider_options: Option<LLMProviderOptions>,
 }
 
 impl From<&LLMStreamInput> for LLMInput {
@@ -68,139 +165,7 @@ impl From<&LLMStreamInput> for LLMInput {
             messages: value.messages.clone(),
             max_tokens: value.max_tokens,
             tools: value.tools.clone(),
-        }
-    }
-}
-
-pub async fn chat(
-    config: &LLMProviderConfig,
-    input: LLMInput,
-) -> Result<LLMCompletionResponse, AgentError> {
-    match input.model {
-        LLMModel::Anthropic(model) => {
-            if let Some(anthropic_config) = &config.anthropic_config {
-                let anthropic_input = AnthropicInput {
-                    model,
-                    messages: input.messages,
-                    grammar: None,
-                    max_tokens: input.max_tokens,
-                    stop_sequences: None,
-                    tools: input.tools,
-                    thinking: Default::default(),
-                };
-                Anthropic::chat(anthropic_config, anthropic_input).await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "Anthropic config not found".to_string(),
-                    ),
-                ))
-            }
-        }
-        LLMModel::OpenAI(model) => {
-            if let Some(openai_config) = &config.openai_config {
-                let openai_input = OpenAIInput {
-                    model,
-                    messages: input.messages,
-                    max_tokens: input.max_tokens,
-                    json: None,
-                    tools: input.tools,
-                    reasoning_effort: None,
-                };
-                OpenAI::chat(openai_config, openai_input).await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "OpenAI config not found".to_string(),
-                    ),
-                ))
-            }
-        }
-        LLMModel::Custom(model_name) => {
-            if let Some(openai_config) = &config.openai_config {
-                let openai_input = OpenAIInput {
-                    model: OpenAIModel::Custom(model_name),
-                    messages: input.messages,
-                    max_tokens: input.max_tokens,
-                    json: None,
-                    tools: input.tools,
-                    reasoning_effort: None,
-                };
-                OpenAI::chat(openai_config, openai_input).await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "OpenAI config not found".to_string(),
-                    ),
-                ))
-            }
-        }
-    }
-}
-
-pub async fn chat_stream(
-    config: &LLMProviderConfig,
-    input: LLMStreamInput,
-) -> Result<LLMCompletionResponse, AgentError> {
-    match input.model {
-        LLMModel::Anthropic(model) => {
-            if let Some(anthropic_config) = &config.anthropic_config {
-                let anthropic_input = AnthropicInput {
-                    model,
-                    messages: input.messages,
-                    grammar: None,
-                    max_tokens: input.max_tokens,
-                    stop_sequences: None,
-                    tools: input.tools,
-                    thinking: Default::default(),
-                };
-                Anthropic::chat_stream(anthropic_config, input.stream_channel_tx, anthropic_input)
-                    .await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "Anthropic config not found".to_string(),
-                    ),
-                ))
-            }
-        }
-        LLMModel::OpenAI(model) => {
-            if let Some(openai_config) = &config.openai_config {
-                let openai_input = OpenAIInput {
-                    model,
-                    messages: input.messages,
-                    max_tokens: input.max_tokens,
-                    json: None,
-                    tools: input.tools,
-                    reasoning_effort: None,
-                };
-                OpenAI::chat_stream(openai_config, input.stream_channel_tx, openai_input).await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "OpenAI config not found".to_string(),
-                    ),
-                ))
-            }
-        }
-        LLMModel::Custom(model_name) => {
-            if let Some(openai_config) = &config.openai_config {
-                let openai_input = OpenAIInput {
-                    model: OpenAIModel::Custom(model_name),
-                    messages: input.messages,
-                    max_tokens: input.max_tokens,
-                    json: None,
-                    tools: input.tools,
-                    reasoning_effort: None,
-                };
-                OpenAI::chat_stream(openai_config, input.stream_channel_tx, openai_input).await
-            } else {
-                Err(AgentError::BadRequest(
-                    BadRequestErrorMessage::InvalidAgentInput(
-                        "OpenAI config not found".to_string(),
-                    ),
-                ))
-            }
+            provider_options: value.provider_options.clone(),
         }
     }
 }
