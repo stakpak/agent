@@ -4,7 +4,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{error, warn};
 
@@ -16,6 +16,9 @@ const DEFAULT_OPERATION_TIMEOUT_SECS: u64 = 30;
 pub enum SecretManagerError {
     #[error("Secret manager actor channel closed")]
     ChannelClosed,
+
+    #[error("Secret manager actor channel full")]
+    ChannelFull,
 
     #[error("Secret manager actor dropped response channel")]
     ActorDropped,
@@ -30,6 +33,15 @@ pub enum SecretManagerError {
 impl<T> From<SendError<T>> for SecretManagerError {
     fn from(_: SendError<T>) -> Self {
         Self::ChannelClosed
+    }
+}
+
+impl<T> From<TrySendError<T>> for SecretManagerError {
+    fn from(err: TrySendError<T>) -> Self {
+        match err {
+            TrySendError::Full(_) => Self::ChannelFull,
+            TrySendError::Closed(_) => Self::ChannelClosed,
+        }
     }
 }
 
@@ -266,6 +278,29 @@ impl SecretManagerHandle {
         };
 
         self.tx.send(msg).await?;
+
+        Self::await_response(resp_rx).await
+    }
+
+    /// returns immediately if the channel is full
+    pub async fn try_redact_and_store_secrets(
+        &self,
+        content: &str,
+        path: Option<&str>,
+    ) -> Result<String, SecretManagerError> {
+        // Fast-path optimization: skip message passing if redaction is disabled
+        if !self.redact_secrets {
+            return Ok(content.to_string());
+        }
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let msg = SecretMessage::RedactAndStore {
+            content: content.to_string(),
+            path: path.map(|s| s.to_string()),
+            resp: resp_tx,
+        };
+
+        self.tx.try_send(msg)?;
 
         Self::await_response(resp_rx).await
     }

@@ -26,7 +26,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{Duration, sleep, timeout as tokio_timeout};
-use tracing::error;
+use tracing::{error, warn};
 use url;
 use uuid::Uuid;
 
@@ -2172,10 +2172,21 @@ SAFETY NOTES:
                 "running".to_string()
             };
 
-            let redacted_command = self
+            // If the channel is full, fallback to unredacted truncated 30 chars output
+            let redacted_command = match self
                 .get_secret_manager()
-                .redact_and_store_secrets(&task.command, None)
-                .await?;
+                .try_redact_and_store_secrets(&task.command, None)
+                .await
+            {
+                Ok(result) => result,
+                Err(stakpak_shared::secret_manager::SecretManagerError::ChannelFull) => {
+                    warn!(
+                        "Secret manager channel full during progress update, using unredacted command"
+                    );
+                    task.command.clone()
+                }
+                Err(e) => return Err(e),
+            };
 
             let truncated_command = redacted_command
                 .chars()
