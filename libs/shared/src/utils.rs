@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use rand::Rng;
 use rand::seq::{IndexedRandom, SliceRandom};
 use std::collections::HashMap;
 use std::fs;
@@ -334,13 +333,25 @@ pub fn generate_password(
 
     for attempt in 0..MAX_RETRIES {
         if redaction_map.values().any(|v| v.as_bytes() == password) {
-            password.shuffle(&mut rng);
-
             tracing::warn!(
                 "Password collision detected, regenerating (attempt {}/{})",
                 attempt + 1,
                 MAX_RETRIES
             );
+
+            password.clear();
+            password.push(*lowercase.choose(&mut rng).unwrap());
+            password.push(*uppercase.choose(&mut rng).unwrap());
+            password.push(*digits.choose(&mut rng).unwrap());
+
+            if include_symbols {
+                password.push(*symbols.choose(&mut rng).unwrap());
+            }
+
+            password
+                .extend((0..(length - password.len())).map(|_| charset.choose(&mut rng).unwrap()));
+            password.shuffle(&mut rng);
+
             continue;
         }
 
