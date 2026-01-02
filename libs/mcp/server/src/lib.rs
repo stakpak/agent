@@ -13,7 +13,6 @@ pub use tool_container::ToolContainer;
 use tracing::error;
 
 use stakpak_api::AgentProvider;
-use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
@@ -127,7 +126,7 @@ pub struct MCPServerConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
-    pub certificate_chain: Arc<Option<CertificateChain>>,
+    pub server_config: Arc<Option<rustls::ServerConfig>>,
 }
 
 /// Initialize gitleaks configuration if secret redaction is enabled
@@ -309,10 +308,9 @@ async fn start_server_internal(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    if let Some(cert_chain) = config.certificate_chain.as_ref() {
-        let tls_config = cert_chain.create_server_config()?;
+    if let Some(server_config) = config.server_config.as_ref() {
         let rustls_config =
-            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config.clone()));
 
         let handle = axum_server::Handle::new();
         let shutdown_handle = handle.clone();

@@ -15,7 +15,7 @@ use stakpak_mcp_client::McpClient;
 use stakpak_mcp_proxy::client::{ClientPoolConfig, ServerConfig};
 use stakpak_mcp_proxy::server::start_proxy_server;
 use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server};
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::{CertificateChain, CertificateStrategy};
 use stakpak_shared::models::integrations::openai::ToolCallResultProgress;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,12 +61,12 @@ pub struct McpInitResult {
     pub proxy_shutdown_tx: broadcast::Sender<()>,
 }
 
-/// Certificate chains for server and proxy communication
-struct CertificateChains {
-    /// Certificate chain for MCP server <-> Proxy communication
-    server_chain: Arc<Option<CertificateChain>>,
-    /// Certificate chain for Proxy <-> Client communication
-    proxy_chain: Arc<CertificateChain>,
+/// Certificate strategies for server and proxy communication
+struct CertificateStrategies {
+    /// Certificate strategy for MCP server <-> Proxy communication
+    server_strategy: CertificateStrategy,
+    /// Certificate strategy for Proxy <-> Client communication
+    proxy_strategy: CertificateStrategy,
 }
 
 /// Server binding information
@@ -75,23 +75,13 @@ struct ServerBinding {
     listener: TcpListener,
 }
 
-impl CertificateChains {
-    /// Generate two separate certificate chains for server and proxy
-    fn generate() -> Result<Self, String> {
-        let server_chain =
-            Arc::new(Some(CertificateChain::generate().map_err(|e| {
-                format!("Failed to generate server certificates: {}", e)
-            })?));
-
-        let proxy_chain = Arc::new(
-            CertificateChain::generate()
-                .map_err(|e| format!("Failed to generate proxy certificates: {}", e))?,
-        );
-
-        Ok(Self {
-            server_chain,
-            proxy_chain,
-        })
+impl CertificateStrategies {
+    /// Create ephemeral certificate strategies for server and proxy
+    fn ephemeral() -> Self {
+        Self {
+            server_strategy: CertificateStrategy::Ephemeral,
+            proxy_strategy: CertificateStrategy::Ephemeral,
+        }
     }
 }
 
@@ -128,7 +118,14 @@ async fn start_mcp_server(
     let enabled_tools = mcp_config.enabled_tools.clone();
 
     tokio::spawn(async move {
-        let server_config = MCPServerConfig {
+        // Load server config from certificate chain
+        let server_config_for_mcp = cert_chain.as_ref().as_ref().map(|chain| {
+            chain
+                .create_server_config()
+                .expect("Failed to create server config")
+        });
+
+        let config = MCPServerConfig {
             client: Some(api_client),
             bind_address,
             redact_secrets,
@@ -136,14 +133,13 @@ async fn start_mcp_server(
             enabled_tools,
             tool_mode: ToolMode::Combined,
             subagent_configs: None,
-            certificate_chain: cert_chain,
+            server_config: Arc::new(server_config_for_mcp),
         };
 
         // Signal that we're about to start
         let _ = ready_tx.send(Ok(()));
 
-        if let Err(e) = start_server(server_config, Some(binding.listener), Some(shutdown_rx)).await
-        {
+        if let Err(e) = start_server(config, Some(binding.listener), Some(shutdown_rx)).await {
             tracing::error!("Local MCP server error: {}", e);
         }
     });
@@ -195,7 +191,7 @@ async fn start_proxy(
     pool_config: ClientPoolConfig,
     mcp_config: &McpInitConfig,
     binding: ServerBinding,
-    cert_chain: Arc<CertificateChain>,
+    cert_strategy: CertificateStrategy,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), String> {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
@@ -210,7 +206,7 @@ async fn start_proxy(
         if let Err(e) = start_proxy_server(
             pool_config,
             binding.listener,
-            cert_chain,
+            cert_strategy,
             redact_secrets,
             privacy_mode,
             Some(shutdown_rx),
@@ -233,20 +229,22 @@ async fn start_proxy(
 /// Connect to the proxy with retry logic
 async fn connect_to_proxy(
     proxy_url: &str,
-    cert_chain: Arc<CertificateChain>,
+    cert_strategy: &CertificateStrategy,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<Arc<McpClient>, String> {
     const MAX_RETRIES: u32 = 5;
     let mut retry_delay = tokio::time::Duration::from_millis(50);
     let mut last_error = None;
 
+    // Get certificate chain from strategy for client connection
+    let cert_chain =
+        Some(Arc::new(cert_strategy.get_certificate_chain().map_err(
+            |e| format!("Failed to get certificate chain: {}", e),
+        )?));
+
     for attempt in 1..=MAX_RETRIES {
-        match stakpak_mcp_client::connect_https(
-            proxy_url,
-            Some(cert_chain.clone()),
-            progress_tx.clone(),
-        )
-        .await
+        match stakpak_mcp_client::connect_https(proxy_url, cert_chain.clone(), progress_tx.clone())
+            .await
         {
             Ok(client) => return Ok(Arc::new(client)),
             Err(e) => {
@@ -269,7 +267,7 @@ async fn connect_to_proxy(
 /// Initialize the MCP server, proxy, and client infrastructure
 ///
 /// This function sets up the complete MCP infrastructure:
-/// 1. Generates certificate chains for mTLS
+/// 1. Creates certificate strategies for mTLS
 /// 2. Starts the local MCP server with tools
 /// 3. Starts the proxy server that aggregates MCP servers
 /// 4. Connects a client to the proxy
@@ -280,8 +278,8 @@ pub async fn initialize_mcp_server_and_tools(
     mcp_config: McpInitConfig,
     progress_tx: Option<Sender<ToolCallResultProgress>>,
 ) -> Result<McpInitResult, String> {
-    // 1. Generate certificate chains
-    let certs = CertificateChains::generate()?;
+    // 1. Create certificate strategies
+    let certs = CertificateStrategies::ephemeral();
 
     // 2. Find available ports
     let server_binding = ServerBinding::new("MCP server").await?;
@@ -295,28 +293,35 @@ pub async fn initialize_mcp_server_and_tools(
     let (proxy_shutdown_tx, proxy_shutdown_rx) = broadcast::channel::<()>(1);
 
     // 4. Start local MCP server
+    // Get certificate chain for server config
+    let server_chain = Arc::new(Some(
+        certs
+            .server_strategy
+            .get_certificate_chain()
+            .map_err(|e| format!("Failed to get server certificate chain: {}", e))?,
+    ));
     start_mcp_server(
         app_config,
         &mcp_config,
         server_binding,
-        certs.server_chain.clone(),
+        server_chain.clone(),
         server_shutdown_rx,
     )
     .await?;
 
     // 5. Build and start proxy
-    let pool_config = build_proxy_config(local_mcp_server_url, certs.server_chain);
+    let pool_config = build_proxy_config(local_mcp_server_url, server_chain);
     start_proxy(
         pool_config,
         &mcp_config,
         proxy_binding,
-        certs.proxy_chain.clone(),
+        certs.proxy_strategy.clone(),
         proxy_shutdown_rx,
     )
     .await?;
 
     // 6. Connect client to proxy
-    let mcp_client = connect_to_proxy(&proxy_url, certs.proxy_chain, progress_tx).await?;
+    let mcp_client = connect_to_proxy(&proxy_url, &certs.proxy_strategy, progress_tx).await?;
 
     // 7. Get tools from MCP client
     let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)

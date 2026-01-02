@@ -19,7 +19,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::CertificateStrategy;
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use std::future::Future;
@@ -631,7 +631,7 @@ impl ServerHandler for ProxyServer {
 pub async fn start_proxy_server(
     config: ClientPoolConfig,
     tcp_listener: TcpListener,
-    certificate_chain: Arc<CertificateChain>,
+    cert_strategy: CertificateStrategy,
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
@@ -650,7 +650,7 @@ pub async fn start_proxy_server(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    let tls_config = certificate_chain.create_server_config()?;
+    let tls_config = cert_strategy.load_server_config()?;
     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
 
     let handle = axum_server::Handle::new();
