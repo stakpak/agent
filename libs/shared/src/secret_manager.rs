@@ -226,7 +226,6 @@ pub struct SecretManagerHandle {
     tx: mpsc::Sender<SecretMessage>,
     shutdown_tx: broadcast::Sender<()>,
     redact_secrets: bool,
-    privacy_mode: bool,
 }
 
 impl SecretManagerHandle {
@@ -250,6 +249,11 @@ impl SecretManagerHandle {
         content: &str,
         path: Option<&str>,
     ) -> Result<String, SecretManagerError> {
+        // Fast-path optimization: skip message passing if redaction is disabled
+        if !self.redact_secrets {
+            return Ok(content.to_string());
+        }
+
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = SecretMessage::RedactAndStore {
             content: content.to_string(),
@@ -267,6 +271,11 @@ impl SecretManagerHandle {
         content: &str,
         password: &str,
     ) -> Result<String, SecretManagerError> {
+        // Fast-path optimization: skip message passing if redaction is disabled
+        if !self.redact_secrets {
+            return Ok(content.to_string());
+        }
+
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = SecretMessage::RedactPassword {
             content: content.to_string(),
@@ -314,7 +323,6 @@ pub fn launch_secret_manager(
         tx,
         shutdown_tx,
         redact_secrets,
-        privacy_mode,
     })
 }
 
@@ -360,7 +368,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_secret_manager_graceful_shutdown() {
-        let handle = launch_secret_manager(false, false, None);
+        // Use `redact_secrets=true` to test actual channel closure, not the fast-path optimization
+        let handle = launch_secret_manager(true, false, None);
 
         let result = handle.redact_and_store_secrets("test content", None).await;
         assert!(result.is_ok());
