@@ -43,11 +43,11 @@ pub fn redact_secrets(
 ) -> RedactionResult {
     let mut secrets = detect_secrets(content, path, config);
 
-    let mut redaction_map = old_redaction_map.clone();
+    // Track only NEW mappings to return (not the full old map)
+    let mut new_redaction_map: HashMap<String, String> = HashMap::new();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
-        .clone()
-        .into_iter()
-        .map(|(k, v)| (v, k))
+        .iter()
+        .map(|(k, v)| (v.clone(), k.clone()))
         .collect();
 
     for (original_secret, redaction_key) in &reverse_redaction_map {
@@ -129,8 +129,8 @@ pub fn redact_secrets(
             existing_key.clone()
         } else {
             let key = generate_redaction_key(&secret.rule_id);
-            // Store the mapping (only once per unique secret value)
-            redaction_map.insert(key.clone(), secret.value.clone());
+            // Store the NEW mapping
+            new_redaction_map.insert(key.clone(), secret.value.clone());
             reverse_redaction_map.insert(secret.value, key.clone());
             key
         };
@@ -139,7 +139,7 @@ pub fn redact_secrets(
         redacted_string.replace_range(secret.start_pos..secret.end_pos, &redaction_key);
     }
 
-    RedactionResult::new(redacted_string, redaction_map)
+    RedactionResult::new(redacted_string, new_redaction_map)
 }
 
 /// Restores secrets in a redacted string using the provided redaction map
@@ -164,11 +164,11 @@ pub fn redact_password(
     }
 
     let mut redacted_string = content.to_string();
-    let mut redaction_map = old_redaction_map.clone();
+    // Track only NEW mappings to return (not the full old map)
+    let mut new_redaction_map: HashMap<String, String> = HashMap::new();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
-        .clone()
-        .into_iter()
-        .map(|(k, v)| (v, k))
+        .iter()
+        .map(|(k, v)| (v.clone(), k.clone()))
         .collect();
 
     // Check if we already have a redaction key for this password
@@ -176,8 +176,8 @@ pub fn redact_password(
         existing_key.clone()
     } else {
         let key = generate_redaction_key("password");
-        // Store the mapping
-        redaction_map.insert(key.clone(), password.to_string());
+        // Store the NEW mapping
+        new_redaction_map.insert(key.clone(), password.to_string());
         reverse_redaction_map.insert(password.to_string(), key.clone());
         key
     };
@@ -185,7 +185,7 @@ pub fn redact_password(
     // Replace all occurrences of the password
     redacted_string = redacted_string.replace(password, &redaction_key);
 
-    RedactionResult::new(redacted_string, redaction_map)
+    RedactionResult::new(redacted_string, new_redaction_map)
 }
 
 /// Generates a random redaction key
@@ -302,7 +302,8 @@ mod tests {
         let result_1 = redact_secrets(input_1, None, &HashMap::new(), &config);
         let result_2 = redact_secrets(input_2, None, &result_1.redaction_map, &config);
 
-        assert_eq!(result_1.redaction_map, result_2.redaction_map);
+        // Second call should return empty map (reuses existing secret mapping)
+        assert_eq!(result_2.redaction_map.len(), 0);
     }
 
     #[test]
@@ -1321,13 +1322,8 @@ export PORT=3000
         let password = "mypassword";
         let result = redact_password(content, password, &existing_map);
 
-        // Should reuse the existing key
-        assert_eq!(result.redaction_map.len(), 1);
-        assert!(
-            result
-                .redaction_map
-                .contains_key("[REDACTED_SECRET:password:abc123]")
-        );
+        // Should reuse the existing key, so no NEW mappings returned
+        assert_eq!(result.redaction_map.len(), 0);
         assert!(
             result
                 .redacted_string
@@ -1348,33 +1344,15 @@ export PORT=3000
         let password = "newpassword123";
         let result = redact_password(content, password, &existing_map);
 
-        // Should preserve existing mapping and add new one
-        assert_eq!(result.redaction_map.len(), 2);
+        // Should return only the NEW password mapping, not the existing api-key
+        assert_eq!(result.redaction_map.len(), 1);
         assert!(
-            result
+            !result
                 .redaction_map
                 .contains_key("[REDACTED_SECRET:api-key:xyz789]")
         );
-        assert!(
-            result
-                .redaction_map
-                .get("[REDACTED_SECRET:api-key:xyz789]")
-                .unwrap()
-                == "some_api_key"
-        );
-
-        // Should add new password mapping
-        let new_keys: Vec<_> = result
-            .redaction_map
-            .keys()
-            .filter(|k| k.contains("password"))
-            .collect();
-        assert_eq!(new_keys.len(), 1);
-        let password_key = new_keys[0];
-        assert_eq!(
-            result.redaction_map.get(password_key).unwrap(),
-            "newpassword123"
-        );
+        // The new password mapping should be present
+        assert!(result.redaction_map.values().any(|v| v == "newpassword123"));
     }
 
     #[test]
@@ -1432,18 +1410,7 @@ export PORT=3000
         );
         assert!(!result.redacted_string.contains("mysecretvalue123"));
 
-        // The redaction map should contain the existing mapping
-        assert!(
-            result
-                .redaction_map
-                .contains_key("[REDACTED_SECRET:manual:abc123]")
-        );
-        assert_eq!(
-            result
-                .redaction_map
-                .get("[REDACTED_SECRET:manual:abc123]")
-                .unwrap(),
-            "mysecretvalue123"
-        );
+        // The redaction map should be EMPTY (reusing existing mapping, no new secrets)
+        assert_eq!(result.redaction_map.len(), 0);
     }
 }
