@@ -2,13 +2,24 @@ use std::string::FromUtf8Error;
 
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// This type wraps `SecretString` from the secrecy crate to provide automatic protection
 /// against accidental password leakage in logs
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, JsonSchema)]
 pub struct Password(#[schemars(with = "String", length(min = 8))] SecretString);
+
+// Custom deserializer to ensure validation happens during deserialization
+impl<'de> Deserialize<'de> for Password {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Password::new(s).map_err(serde::de::Error::custom)
+    }
+}
 
 // if `Password` needs to be serialized without redaction
 //
@@ -82,6 +93,16 @@ mod tests {
         let password: Password = serde_json::from_str(json).unwrap();
 
         assert_eq!(password.expose_secret(), "test_pass");
+    }
+
+    #[test]
+    fn test_json_deserialization_rejects_short_password() {
+        let json = r#""short"""#;
+        let result: Result<Password, _> = serde_json::from_str(json);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert_eq!(err_msg, PasswordGenerationError::TooShort.to_string());
     }
 
     #[test]
