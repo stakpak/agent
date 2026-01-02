@@ -32,6 +32,7 @@ pub enum MessageContent {
     Markdown(String),
     PlainText(String),
     RenderPendingBorderBlock(ToolCall, bool),
+    RenderPendingBorderBlockWithStallWarning(ToolCall, bool, String),
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
     RenderResultBorderBlock(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
@@ -42,6 +43,12 @@ pub enum MessageContent {
         colors: BubbleColors,
         tool_type: String,
     },
+    RenderRefreshedTerminal(
+        String,             // Title
+        Vec<Line<'static>>, // Content
+        Option<BubbleColors>,
+        usize, // Width
+    ),
 }
 
 fn term_color(color: Color) -> Color {
@@ -339,34 +346,77 @@ fn render_shell_bubble_with_unicode_border(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let border_width = width.max(20); // Minimum width for the bubble
+    let inner_width = border_width.saturating_sub(4); // Account for "│ " and " │"
     let horizontal = "─".repeat(border_width - 2);
+
     // Top border
     lines.push(Line::from(vec![Span::styled(
         format!("╭{}╮", horizontal),
         Style::default().fg(Color::Magenta),
     )]));
-    // Command line
+
+    // Command line - truncate if too long
     let cmd_line = format!("{}{}", SHELL_PROMPT_PREFIX, &command[1..].trim());
-    let cmd_content_width = cmd_line.len();
-    let cmd_padding = border_width.saturating_sub(4 + cmd_content_width);
+    let cmd_display_width = unicode_width::UnicodeWidthStr::width(cmd_line.as_str());
+    let truncated_cmd = if cmd_display_width > inner_width {
+        // Truncate command
+        let mut truncated = String::new();
+        let mut char_width = 0;
+        for ch in cmd_line.chars() {
+            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+            if char_width + ch_width <= inner_width {
+                truncated.push(ch);
+                char_width += ch_width;
+            } else {
+                break;
+            }
+        }
+        truncated
+    } else {
+        cmd_line.clone()
+    };
+    let cmd_content_width = unicode_width::UnicodeWidthStr::width(truncated_cmd.as_str());
+    let cmd_padding = inner_width.saturating_sub(cmd_content_width);
     lines.push(Line::from(vec![
         Span::styled("│ ", Style::default().fg(Color::Magenta)),
         Span::styled(
-            cmd_line,
+            truncated_cmd,
             Style::default().fg(term_color(Color::LightYellow)),
         ),
         Span::from(" ".repeat(cmd_padding)),
         Span::styled(" │", Style::default().fg(Color::Magenta)),
     ]));
-    // Output lines
+
+    // Output lines - truncate if too long
     for out in output_lines {
-        let padded = format!("{:<width$}", out, width = border_width - 4);
+        let out_display_width = unicode_width::UnicodeWidthStr::width(out.as_str());
+        let truncated_out = if out_display_width > inner_width {
+            // Truncate output line
+            let mut truncated = String::new();
+            let mut char_width = 0;
+            for ch in out.chars() {
+                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if char_width + ch_width <= inner_width {
+                    truncated.push(ch);
+                    char_width += ch_width;
+                } else {
+                    break;
+                }
+            }
+            truncated
+        } else {
+            out.clone()
+        };
+        let content_width = unicode_width::UnicodeWidthStr::width(truncated_out.as_str());
+        let padding = inner_width.saturating_sub(content_width);
         lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(Color::Magenta)),
-            Span::styled(padded, Style::default().fg(AdaptiveColors::text())),
+            Span::styled(truncated_out, Style::default().fg(AdaptiveColors::text())),
+            Span::from(" ".repeat(padding)),
             Span::styled(" │", Style::default().fg(Color::Magenta)),
         ]));
     }
+
     // Bottom border
     lines.push(Line::from(vec![Span::styled(
         format!("╰{}╯", horizontal),
@@ -400,7 +450,19 @@ pub fn get_wrapped_message_lines(
 }
 
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
-    let messages = state.messages.clone();
+    // Filter out RenderRefreshedTerminal messages when shell popup is visible
+    // This hides the old bordered box when using the new popup
+    let messages: Vec<Message> = if state.shell_popup_visible {
+        state
+            .messages
+            .iter()
+            .filter(|m| !matches!(&m.content, MessageContent::RenderRefreshedTerminal(..)))
+            .cloned()
+            .collect()
+    } else {
+        state.messages.clone()
+    };
+
     // Check if cache is valid
     let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
         cached_messages.len() == messages.len()
@@ -728,6 +790,46 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
 
+            MessageContent::RenderPendingBorderBlockWithStallWarning(
+                tool_call,
+                is_auto_approved,
+                stall_message,
+            ) => {
+                let full_command = extract_full_command_arguments(tool_call);
+                let mut rendered_lines =
+                    render_bash_block(tool_call, &full_command, false, width, *is_auto_approved);
+
+                // Insert stall warning inside the block (before the bottom border)
+                // Find the bottom border line (last line before SPACING_MARKER)
+                if rendered_lines.len() >= 2 {
+                    let insert_pos = rendered_lines.len() - 2; // Before bottom border and SPACING_MARKER
+                    let inner_width = if width > 4 { width - 4 } else { 40 };
+                    let border_color = Color::Cyan;
+
+                    // Add warning line inside the block (use simple ASCII to avoid width issues)
+                    let warning_text = stall_message;
+                    let warning_display_width =
+                        unicode_width::UnicodeWidthStr::width(warning_text.as_str());
+                    let warning_padding = inner_width.saturating_sub(warning_display_width + 1); // +4 for "  " prefix and " │" suffix spacing
+                    let warning_line = Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::styled(
+                            format!("  {}{}", warning_text, " ".repeat(warning_padding)),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]);
+
+                    rendered_lines.insert(insert_pos, warning_line);
+                }
+
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+
             MessageContent::RenderCollapsedMessage(tool_call) => {
                 if crate::utils::strip_tool_name(&tool_call.function.name) == "str_replace" {
                     let rendered_lines = render_file_diff_full(tool_call, width, Some(true));
@@ -785,6 +887,18 @@ fn get_wrapped_message_lines_internal(
                 tool_type: _,
             } => {
                 let borrowed_lines = get_wrapped_bash_bubble_lines(title, content, colors);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderRefreshedTerminal(title, content, colors, _stored_width) => {
+                // Use the current terminal width, not the stored width
+                let rendered_lines = crate::services::bash_block::render_refreshed_terminal_bubble(
+                    title,
+                    content,
+                    colors.clone(),
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }
