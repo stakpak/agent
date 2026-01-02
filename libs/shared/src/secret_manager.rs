@@ -199,9 +199,11 @@ impl SecretManager {
         let config = self.gitleaks_config.as_ref().unwrap();
         let redaction_result = redact_secrets(content, path, &self.redaction_map, config);
 
+        let old_len = self.redaction_map.len();
         self.redaction_map.extend(redaction_result.redaction_map);
-
-        self.save_session_redaction_map().await;
+        if self.redaction_map.len() > old_len {
+            self.save_session_redaction_map().await;
+        }
 
         redaction_result.redacted_string
     }
@@ -213,9 +215,11 @@ impl SecretManager {
 
         let redaction_result = redact_password(content, password, &self.redaction_map);
 
+        let old_len = self.redaction_map.len();
         self.redaction_map.extend(redaction_result.redaction_map);
-
-        self.save_session_redaction_map().await;
+        if self.redaction_map.len() > old_len {
+            self.save_session_redaction_map().await;
+        }
 
         redaction_result.redacted_string
     }
