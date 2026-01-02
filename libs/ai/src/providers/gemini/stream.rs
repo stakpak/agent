@@ -261,6 +261,7 @@ mod tests {
                         text: None,
                         inline_data: None,
                         function_call: Some(GeminiFunctionCall {
+                            id: None,
                             name: "get_weather".to_string(),
                             args: serde_json::json!({"location": "San Francisco"}),
                         }),
@@ -312,6 +313,7 @@ mod tests {
                             text: None,
                             inline_data: None,
                             function_call: Some(GeminiFunctionCall {
+                                id: None,
                                 name: "get_weather".to_string(),
                                 args: serde_json::json!({"location": "NYC"}),
                             }),
@@ -321,6 +323,7 @@ mod tests {
                             text: None,
                             inline_data: None,
                             function_call: Some(GeminiFunctionCall {
+                                id: None,
                                 name: "get_time".to_string(),
                                 args: serde_json::json!({"timezone": "EST"}),
                             }),
