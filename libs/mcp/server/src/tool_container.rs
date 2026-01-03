@@ -7,14 +7,14 @@ use rmcp::{
 use stakpak_api::AgentProvider;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
-use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::secret_manager::{SecretManagerHandle, launch_secret_manager};
 use stakpak_shared::task_manager::TaskManagerHandle;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ToolContainer {
     pub client: Option<Arc<dyn AgentProvider>>,
-    pub secret_manager: SecretManager,
+    pub secret_manager: Arc<SecretManagerHandle>,
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
     pub subagent_configs: Option<SubagentConfigs>,
@@ -33,9 +33,11 @@ impl ToolContainer {
         subagent_configs: Option<SubagentConfigs>,
         tool_router: ToolRouter<Self>,
     ) -> Result<Self, String> {
+        let secret_manager = launch_secret_manager(redact_secrets, privacy_mode, None);
+
         Ok(Self {
             client,
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            secret_manager,
             task_manager,
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
             subagent_configs,
@@ -44,7 +46,7 @@ impl ToolContainer {
         })
     }
 
-    pub fn get_secret_manager(&self) -> &SecretManager {
+    pub fn get_secret_manager(&self) -> &SecretManagerHandle {
         &self.secret_manager
     }
 
