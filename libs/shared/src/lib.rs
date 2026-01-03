@@ -1,3 +1,4 @@
+pub mod auth_manager;
 pub mod cert_utils;
 pub mod container;
 pub mod file_backup_manager;
@@ -6,6 +7,7 @@ pub mod helper;
 pub mod hooks;
 pub mod local_store;
 pub mod models;
+pub mod oauth;
 pub mod remote_connection;
 pub mod remote_store;
 pub mod secret_manager;

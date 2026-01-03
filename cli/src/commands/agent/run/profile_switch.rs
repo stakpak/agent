@@ -44,12 +44,13 @@ pub async fn validate_profile_switch(
             Box::new(client)
         }
         ProviderType::Local => {
+            // Use credential resolution with auth.toml fallback chain
             let client = LocalClient::new(LocalClientConfig {
                 stakpak_base_url: Some(new_config.api_endpoint.clone()),
                 store_path: None,
-                anthropic_config: new_config.anthropic.clone(),
-                openai_config: new_config.openai.clone(),
-                gemini_config: new_config.gemini.clone(),
+                anthropic_config: new_config.get_anthropic_config_with_auth(),
+                openai_config: new_config.get_openai_config_with_auth(),
+                gemini_config: new_config.get_gemini_config_with_auth(),
                 eco_model: new_config.eco_model.clone(),
                 recovery_model: new_config.recovery_model.clone(),
                 smart_model: new_config.smart_model.clone(),

@@ -14,7 +14,8 @@ use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Inference, InferenceConfig, Message, MessageContent,
     OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions, Tool,
-    ToolFunction, Usage, registry::ProviderRegistry,
+    ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
+    registry::ProviderRegistry,
 };
 
 /// Convert CLI LLMMessage to StakAI Message
@@ -367,11 +368,30 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
         inference_config = inference_config.openai(api_key.clone(), openai.api_endpoint.clone());
     }
 
-    if let Some(anthropic) = &config.anthropic_config
-        && let Some(api_key) = &anthropic.api_key
-    {
-        inference_config =
-            inference_config.anthropic(api_key.clone(), anthropic.api_endpoint.clone());
+    // For Anthropic, check if we have OAuth access_token or API key
+    // OAuth tokens need to use Bearer auth, API keys use x-api-key header
+    if let Some(anthropic) = &config.anthropic_config {
+        let stakai_config = if let Some(ref access_token) = anthropic.access_token {
+            // OAuth authentication - uses Bearer token header
+            let mut cfg = StakaiAnthropicConfig::with_oauth(access_token);
+            if let Some(ref endpoint) = anthropic.api_endpoint {
+                cfg = cfg.with_base_url(endpoint);
+            }
+            Some(cfg)
+        } else if let Some(ref api_key) = anthropic.api_key {
+            // API key authentication - uses x-api-key header
+            let mut cfg = StakaiAnthropicConfig::new(api_key);
+            if let Some(ref endpoint) = anthropic.api_endpoint {
+                cfg = cfg.with_base_url(endpoint);
+            }
+            Some(cfg)
+        } else {
+            None
+        };
+
+        if let Some(cfg) = stakai_config {
+            inference_config = inference_config.anthropic_config(cfg);
+        }
     }
 
     if let Some(gemini) = &config.gemini_config
@@ -1352,6 +1372,7 @@ mod tests {
             anthropic_config: Some(AnthropicConfig {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
+                access_token: None,
             }),
             openai_config: None,
             gemini_config: None,
@@ -1388,6 +1409,7 @@ mod tests {
             anthropic_config: Some(AnthropicConfig {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
+                access_token: None,
             }),
             openai_config: Some(OpenAIConfig {
                 api_key: Some("sk-openai-test".to_string()),

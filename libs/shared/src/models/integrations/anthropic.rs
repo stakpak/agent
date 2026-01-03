@@ -1,10 +1,12 @@
-use crate::models::llm::{
-    LLMChoice, LLMCompletionResponse, LLMMessage, LLMMessageContent, LLMTokenUsage, LLMTool,
-    PromptTokensDetails,
-};
+//! Anthropic provider configuration and model definitions
+//!
+//! This module contains configuration types and model enums for Anthropic.
+//! Request/response types for API communication are in `libs/ai/src/providers/anthropic/`.
+
 use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use serde::{Deserialize, Serialize};
 
+/// Anthropic model identifiers
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AnthropicModel {
     #[serde(rename = "claude-haiku-4-5-20251001")]
@@ -14,6 +16,7 @@ pub enum AnthropicModel {
     #[serde(rename = "claude-opus-4-5-20251101")]
     Claude45Opus,
 }
+
 impl std::fmt::Display for AnthropicModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -118,194 +121,67 @@ impl ContextAware for AnthropicModel {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicInput {
-    pub model: AnthropicModel,
-    pub messages: Vec<LLMMessage>,
-    pub grammar: Option<String>,
-    pub max_tokens: u32,
-    pub stop_sequences: Option<Vec<String>>,
-    pub tools: Option<Vec<LLMTool>>,
-    pub thinking: ThinkingInput,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ThinkingInput {
-    pub r#type: ThinkingType,
-    // Must be ≥1024 and less than max_tokens
-    pub budget_tokens: u32,
-}
-
-impl Default for ThinkingInput {
-    fn default() -> Self {
-        Self {
-            r#type: ThinkingType::default(),
-            budget_tokens: 1024,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ThinkingType {
-    Enabled,
-    #[default]
-    Disabled,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicOutputUsage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-    #[serde(default)]
-    pub cache_creation_input_tokens: Option<u32>,
-    #[serde(default)]
-    pub cache_read_input_tokens: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicOutput {
-    pub id: String,
-    pub r#type: String,
-    pub role: String,
-    pub content: LLMMessageContent,
-    pub model: String,
-    pub stop_reason: String,
-    pub usage: AnthropicOutputUsage,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicErrorOutput {
-    pub r#type: String,
-    pub error: AnthropicError,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicError {
-    pub message: String,
-    pub r#type: String,
-}
-
-impl From<AnthropicOutput> for LLMCompletionResponse {
-    fn from(val: AnthropicOutput) -> Self {
-        let choices = vec![LLMChoice {
-            finish_reason: Some(val.stop_reason.clone()),
-            index: 0,
-            message: LLMMessage {
-                role: val.role.clone(),
-                content: val.content,
-            },
-        }];
-
-        LLMCompletionResponse {
-            id: val.id,
-            model: val.model,
-            object: val.r#type,
-            choices,
-            created: chrono::Utc::now().timestamp_millis() as u64,
-            usage: Some(val.usage.into()),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicStreamEvent {
-    #[serde(rename = "type")]
-    pub event: String,
-    #[serde(flatten)]
-    pub data: AnthropicStreamEventData,
-}
-
-impl From<AnthropicOutputUsage> for LLMTokenUsage {
-    fn from(usage: AnthropicOutputUsage) -> Self {
-        let input_tokens = usage.input_tokens
-            + usage.cache_creation_input_tokens.unwrap_or(0)
-            + usage.cache_read_input_tokens.unwrap_or(0);
-        let output_tokens = usage.output_tokens;
-        Self {
-            completion_tokens: output_tokens,
-            prompt_tokens: input_tokens,
-            total_tokens: input_tokens + output_tokens,
-            prompt_tokens_details: Some(PromptTokensDetails {
-                input_tokens: Some(input_tokens),
-                output_tokens: Some(output_tokens),
-                cache_read_input_tokens: usage.cache_read_input_tokens,
-                cache_write_input_tokens: usage.cache_creation_input_tokens,
-            }),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AnthropicStreamOutput {
-    pub id: String,
-    pub r#type: String,
-    pub role: String,
-    pub content: LLMMessageContent,
-    pub model: String,
-    pub stop_reason: Option<String>,
-    pub usage: AnthropicOutputUsage,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum AnthropicStreamEventData {
-    MessageStart {
-        message: AnthropicStreamOutput,
-    },
-    ContentBlockStart {
-        index: usize,
-        content_block: ContentBlock,
-    },
-    ContentBlockDelta {
-        index: usize,
-        delta: ContentDelta,
-    },
-    ContentBlockStop {
-        index: usize,
-    },
-    MessageDelta {
-        delta: MessageDelta,
-        usage: Option<AnthropicOutputUsage>,
-    },
-    MessageStop {},
-    Ping {},
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type")]
-pub enum ContentBlock {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "thinking")]
-    Thinking { thinking: String },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type")]
-pub enum ContentDelta {
-    #[serde(rename = "text_delta")]
-    TextDelta { text: String },
-    #[serde(rename = "thinking_delta")]
-    ThinkingDelta { thinking: String },
-    #[serde(rename = "input_json_delta")]
-    InputJsonDelta { partial_json: String },
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MessageDelta {
-    pub stop_reason: Option<String>,
-    pub stop_sequence: Option<String>,
-}
-
+/// Configuration for Anthropic provider
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct AnthropicConfig {
     pub api_endpoint: Option<String>,
     pub api_key: Option<String>,
+    /// OAuth access token (takes precedence over api_key when set)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+}
+
+impl AnthropicConfig {
+    /// Create config with API key
+    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: Some(api_key.into()),
+            api_endpoint: None,
+            access_token: None,
+        }
+    }
+
+    /// Create config with OAuth access token
+    pub fn with_access_token(access_token: impl Into<String>) -> Self {
+        Self {
+            access_token: Some(access_token.into()),
+            api_endpoint: None,
+            api_key: None,
+        }
+    }
+
+    /// Create config from ProviderAuth
+    pub fn from_provider_auth(auth: &crate::models::auth::ProviderAuth) -> Self {
+        match auth {
+            crate::models::auth::ProviderAuth::Api { key } => Self::with_api_key(key),
+            crate::models::auth::ProviderAuth::OAuth { access, .. } => {
+                Self::with_access_token(access)
+            }
+        }
+    }
+
+    /// Get the effective credential (OAuth token takes precedence)
+    pub fn effective_credential(&self) -> Option<&str> {
+        self.access_token.as_deref().or(self.api_key.as_deref())
+    }
+
+    /// Check if using OAuth
+    pub fn is_oauth(&self) -> bool {
+        self.access_token.is_some()
+    }
+
+    /// Merge with credentials from ProviderAuth, preserving existing endpoint
+    pub fn with_provider_auth(mut self, auth: &crate::models::auth::ProviderAuth) -> Self {
+        match auth {
+            crate::models::auth::ProviderAuth::Api { key } => {
+                self.api_key = Some(key.clone());
+                self.access_token = None;
+            }
+            crate::models::auth::ProviderAuth::OAuth { access, .. } => {
+                self.access_token = Some(access.clone());
+                self.api_key = None;
+            }
+        }
+        self
+    }
 }

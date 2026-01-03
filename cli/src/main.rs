@@ -226,7 +226,8 @@ async fn main() {
             match cli.command {
                 Some(command) => {
                     // check_update is only run in interactive mode (when no command is specified)
-                    if config.api_key.is_none() && command.requires_auth() {
+                    // Use get_stakpak_api_key() to check auth.toml fallback chain
+                    if config.get_stakpak_api_key().is_none() && command.requires_auth() {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
 
@@ -242,7 +243,10 @@ async fn main() {
                     }
                 }
                 None => {
-                    if config.api_key.is_none() && config.provider == ProviderType::Remote {
+                    // Use get_stakpak_api_key() to check auth.toml fallback chain
+                    if config.get_stakpak_api_key().is_none()
+                        && config.provider == ProviderType::Remote
+                    {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
@@ -257,12 +261,20 @@ async fn main() {
                             Arc::new(client)
                         }
                         ProviderType::Local => {
+                            // Use credential resolution with auth.toml fallback chain
+                            // Refresh OAuth tokens in parallel to minimize startup delay
+                            let (anthropic_config, openai_config, gemini_config) = tokio::join!(
+                                config.get_anthropic_config_with_auth_async(),
+                                config.get_openai_config_with_auth_async(),
+                                config.get_gemini_config_with_auth_async()
+                            );
+
                             let client = LocalClient::new(LocalClientConfig {
                                 store_path: None,
                                 stakpak_base_url: Some(config.api_endpoint.clone()),
-                                anthropic_config: config.anthropic.clone(),
-                                openai_config: config.openai.clone(),
-                                gemini_config: config.gemini.clone(),
+                                anthropic_config,
+                                openai_config,
+                                gemini_config,
                                 eco_model: config.eco_model.clone(),
                                 recovery_model: config.recovery_model.clone(),
                                 smart_model: config.smart_model.clone(),

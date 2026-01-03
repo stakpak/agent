@@ -16,10 +16,12 @@ use stakpak_api::{
 
 pub mod acp;
 pub mod agent;
+pub mod auth;
 pub mod auto_update;
 pub mod mcp;
 pub mod warden;
 
+pub use auth::AuthCommands;
 pub use mcp::McpCommands;
 
 /// Frontmatter structure for rulebook metadata
@@ -100,14 +102,16 @@ pub enum RulebookCommands {
 pub enum Commands {
     /// Get CLI Version
     Version,
-    /// Login to Stakpak
+    /// Login to Stakpak (DEPRECATED: use `stakpak auth login -p stakpak` instead)
+    #[command(hide = true)]
     Login {
         /// API key for authentication
         #[arg(long, env("STAKPAK_API_KEY"))]
         api_key: String,
     },
 
-    /// Logout from Stakpak
+    /// Logout from Stakpak (DEPRECATED: use `stakpak auth logout -p stakpak` instead)
+    #[command(hide = true)]
     Logout,
 
     /// Start Agent Client Protocol server (for editor integration)
@@ -143,6 +147,10 @@ pub enum Commands {
     #[command(subcommand)]
     Mcp(McpCommands),
 
+    /// Provider authentication commands (OAuth, API keys)
+    #[command(subcommand)]
+    Auth(AuthCommands),
+
     /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
     Warden {
         /// Environment variables to pass to container
@@ -165,12 +173,20 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
             Ok(Arc::new(client))
         }
         ProviderType::Local => {
+            // Use credential resolution with auth.toml fallback chain
+            // Refresh OAuth tokens in parallel to minimize startup delay
+            let (anthropic_config, openai_config, gemini_config) = tokio::join!(
+                config.get_anthropic_config_with_auth_async(),
+                config.get_openai_config_with_auth_async(),
+                config.get_gemini_config_with_auth_async()
+            );
+
             let client = LocalClient::new(LocalClientConfig {
                 stakpak_base_url: Some(config.api_endpoint.clone()),
                 store_path: None,
-                anthropic_config: config.anthropic.clone(),
-                openai_config: config.openai.clone(),
-                gemini_config: config.gemini.clone(),
+                anthropic_config,
+                openai_config,
+                gemini_config,
                 eco_model: config.eco_model.clone(),
                 recovery_model: config.recovery_model.clone(),
                 smart_model: config.smart_model.clone(),
@@ -203,6 +219,7 @@ impl Commands {
                 | Commands::Version
                 | Commands::Update
                 | Commands::Acp { .. }
+                | Commands::Auth(_)
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -211,6 +228,11 @@ impl Commands {
                 command.run(config).await?;
             }
             Commands::Login { api_key } => {
+                // Show deprecation warning
+                eprintln!("\x1b[33mWarning: 'stakpak login' is deprecated.\x1b[0m");
+                eprintln!("Please use: \x1b[1;34mstakpak auth login --provider stakpak\x1b[0m");
+                eprintln!();
+
                 let mut updated_config = config.clone();
                 updated_config.api_key = Some(api_key);
 
@@ -219,6 +241,11 @@ impl Commands {
                     .map_err(|e| format!("Failed to save config: {}", e))?;
             }
             Commands::Logout => {
+                // Show deprecation warning
+                eprintln!("\x1b[33mWarning: 'stakpak logout' is deprecated.\x1b[0m");
+                eprintln!("Please use: \x1b[1;34mstakpak auth logout --provider stakpak\x1b[0m");
+                eprintln!();
+
                 let mut updated_config = config.clone();
                 updated_config.api_key = None;
 
@@ -427,6 +454,9 @@ impl Commands {
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
+            }
+            Commands::Auth(auth_command) => {
+                auth_command.run(config).await?;
             }
             Commands::Acp { system_prompt_file } => {
                 let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {

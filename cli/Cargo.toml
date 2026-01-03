@@ -49,6 +49,7 @@ log = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
+dirs = "5.0"
 
 [dev-dependencies]
 tempfile = "3"
