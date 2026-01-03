@@ -725,6 +725,40 @@ impl AppConfig {
         self.anthropic.clone()
     }
 
+    /// Get Anthropic config with resolved credentials, refreshing OAuth tokens if needed
+    ///
+    /// This async version checks if OAuth tokens are expired/expiring and refreshes them
+    /// before returning the config.
+    pub async fn get_anthropic_config_with_auth_async(&self) -> Option<AnthropicConfig> {
+        // Try to resolve credentials from auth.toml first
+        if let Some(auth) = self.resolve_provider_auth("anthropic") {
+            // Check if token needs refresh and refresh it
+            let auth = match self
+                .refresh_provider_auth_if_needed("anthropic", &auth)
+                .await
+            {
+                Ok(refreshed_auth) => refreshed_auth,
+                Err(e) => {
+                    eprintln!(
+                        "\x1b[33mWarning: Failed to refresh Anthropic token: {}\x1b[0m",
+                        e
+                    );
+                    auth
+                }
+            };
+
+            // If we have existing anthropic config, merge credentials into it
+            if let Some(existing) = &self.anthropic {
+                return Some(existing.clone().with_provider_auth(&auth));
+            }
+            // Otherwise create new config from auth
+            return Some(AnthropicConfig::from_provider_auth(&auth));
+        }
+
+        // Fall back to existing config.toml config
+        self.anthropic.clone()
+    }
+
     /// Get OpenAI config with resolved credentials from auth.toml fallback chain
     pub fn get_openai_config_with_auth(&self) -> Option<OpenAIConfig> {
         if let Some(auth) = self.resolve_provider_auth("openai") {
@@ -736,9 +770,53 @@ impl AppConfig {
         self.openai.clone()
     }
 
+    /// Get OpenAI config with resolved credentials, refreshing OAuth tokens if needed
+    pub async fn get_openai_config_with_auth_async(&self) -> Option<OpenAIConfig> {
+        if let Some(auth) = self.resolve_provider_auth("openai") {
+            let auth = match self.refresh_provider_auth_if_needed("openai", &auth).await {
+                Ok(refreshed_auth) => refreshed_auth,
+                Err(e) => {
+                    eprintln!(
+                        "\x1b[33mWarning: Failed to refresh OpenAI token: {}\x1b[0m",
+                        e
+                    );
+                    auth
+                }
+            };
+
+            if let Some(existing) = &self.openai {
+                return existing.clone().with_provider_auth(&auth);
+            }
+            return OpenAIConfig::from_provider_auth(&auth);
+        }
+        self.openai.clone()
+    }
+
     /// Get Gemini config with resolved credentials from auth.toml fallback chain
     pub fn get_gemini_config_with_auth(&self) -> Option<GeminiConfig> {
         if let Some(auth) = self.resolve_provider_auth("gemini") {
+            if let Some(existing) = &self.gemini {
+                return existing.clone().with_provider_auth(&auth);
+            }
+            return GeminiConfig::from_provider_auth(&auth);
+        }
+        self.gemini.clone()
+    }
+
+    /// Get Gemini config with resolved credentials, refreshing OAuth tokens if needed
+    pub async fn get_gemini_config_with_auth_async(&self) -> Option<GeminiConfig> {
+        if let Some(auth) = self.resolve_provider_auth("gemini") {
+            let auth = match self.refresh_provider_auth_if_needed("gemini", &auth).await {
+                Ok(refreshed_auth) => refreshed_auth,
+                Err(e) => {
+                    eprintln!(
+                        "\x1b[33mWarning: Failed to refresh Gemini token: {}\x1b[0m",
+                        e
+                    );
+                    auth
+                }
+            };
+
             if let Some(existing) = &self.gemini {
                 return existing.clone().with_provider_auth(&auth);
             }
