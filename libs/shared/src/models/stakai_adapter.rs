@@ -175,18 +175,20 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
                 index: 0,
             },
         }),
-        StreamEvent::ToolCallEnd {
-            id,
-            name,
-            arguments,
-        } => Some(GenerationDelta::ToolUse {
-            tool_use: GenerationDeltaToolUse {
-                id: Some(id.clone()),
-                name: Some(name.clone()),
-                input: Some(arguments.to_string()),
-                index: 0,
-            },
-        }),
+        StreamEvent::ToolCallEnd { id, name, .. } => {
+            // ToolCallEnd signals completion - don't emit arguments here as they
+            // were already accumulated via ToolCallDelta events. Including them
+            // would cause doubling for providers like Anthropic that stream deltas.
+            // We emit name to ensure it's set (for providers like Gemini that only send ToolCallEnd).
+            Some(GenerationDelta::ToolUse {
+                tool_use: GenerationDeltaToolUse {
+                    id: Some(id.clone()),
+                    name: Some(name.clone()),
+                    input: None,
+                    index: 0,
+                },
+            })
+        }
         StreamEvent::Finish { usage, .. } => Some(GenerationDelta::Usage {
             usage: from_stakai_usage(usage),
         }),
@@ -1019,8 +1021,10 @@ mod tests {
 
         if let Some(GenerationDelta::ToolUse { tool_use }) = delta {
             assert_eq!(tool_use.id, Some("call_xyz".to_string()));
+            // ToolCallEnd emits name (for providers like Gemini) but NOT input
+            // to avoid doubling arguments that were already accumulated via ToolCallDelta
             assert_eq!(tool_use.name, Some("run_command".to_string()));
-            assert!(tool_use.input.is_some());
+            assert!(tool_use.input.is_none());
         } else {
             panic!("Expected ToolUse delta");
         }

@@ -186,8 +186,18 @@ fn process_gemini_response(
         }
 
         // Handle function calls (Gemini sends complete function calls, not deltas)
+        // We emit ToolCallStart + ToolCallDelta to match the expected streaming pattern.
+        // ToolCallEnd is just a completion signal (no arguments) to avoid doubling.
         if let Some(function_call) = &part.function_call {
             let call_id = format!("call_{}", uuid::Uuid::new_v4());
+            events.push(StreamEvent::tool_call_start(
+                call_id.clone(),
+                function_call.name.clone(),
+            ));
+            events.push(StreamEvent::tool_call_delta(
+                call_id.clone(),
+                function_call.args.to_string(),
+            ));
             events.push(StreamEvent::tool_call_end(
                 call_id,
                 function_call.name.clone(),
@@ -278,21 +288,31 @@ mod tests {
 
         let result = process_gemini_response(resp, &mut usage, &mut stream_id);
 
-        // Should have ToolCallEnd and Finish
-        assert_eq!(result.len(), 2);
+        // Should have ToolCallStart, ToolCallDelta, ToolCallEnd, and Finish
+        assert_eq!(result.len(), 4);
 
-        // Gemini sends complete tool calls, so we emit ToolCallEnd directly
-        if let StreamEvent::ToolCallEnd {
-            name, arguments, ..
-        } = &result[0]
-        {
+        // Verify ToolCallStart
+        if let StreamEvent::ToolCallStart { name, .. } = &result[0] {
             assert_eq!(name, "get_weather");
-            assert_eq!(arguments["location"], "San Francisco");
         } else {
-            panic!("Expected ToolCallEnd, got {:?}", result[0]);
+            panic!("Expected ToolCallStart, got {:?}", result[0]);
         }
 
-        if let StreamEvent::Finish { reason, .. } = &result[1] {
+        // Verify ToolCallDelta has the arguments
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[1] {
+            assert!(delta.contains("San Francisco"));
+        } else {
+            panic!("Expected ToolCallDelta, got {:?}", result[1]);
+        }
+
+        // Verify ToolCallEnd
+        if let StreamEvent::ToolCallEnd { name, .. } = &result[2] {
+            assert_eq!(name, "get_weather");
+        } else {
+            panic!("Expected ToolCallEnd, got {:?}", result[2]);
+        }
+
+        if let StreamEvent::Finish { reason, .. } = &result[3] {
             assert!(matches!(reason, FinishReason::Stop));
         } else {
             panic!("Expected Finish");
@@ -341,27 +361,33 @@ mod tests {
 
         let result = process_gemini_response(resp, &mut usage, &mut stream_id);
 
-        // Should have 2 ToolCallEnd + Finish
-        assert_eq!(result.len(), 3);
+        // Should have 2 * (ToolCallStart + ToolCallDelta + ToolCallEnd) + Finish = 7
+        assert_eq!(result.len(), 7);
 
-        if let StreamEvent::ToolCallEnd {
-            name, arguments, ..
-        } = &result[0]
-        {
+        // First tool call
+        if let StreamEvent::ToolCallStart { name, .. } = &result[0] {
             assert_eq!(name, "get_weather");
-            assert_eq!(arguments["location"], "NYC");
         } else {
-            panic!("Expected ToolCallEnd for first tool");
+            panic!("Expected ToolCallStart for first tool");
         }
 
-        if let StreamEvent::ToolCallEnd {
-            name, arguments, ..
-        } = &result[1]
-        {
-            assert_eq!(name, "get_time");
-            assert_eq!(arguments["timezone"], "EST");
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[1] {
+            assert!(delta.contains("NYC"));
         } else {
-            panic!("Expected ToolCallEnd for second tool");
+            panic!("Expected ToolCallDelta for first tool");
+        }
+
+        // Second tool call
+        if let StreamEvent::ToolCallStart { name, .. } = &result[3] {
+            assert_eq!(name, "get_time");
+        } else {
+            panic!("Expected ToolCallStart for second tool");
+        }
+
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[4] {
+            assert!(delta.contains("EST"));
+        } else {
+            panic!("Expected ToolCallDelta for second tool");
         }
     }
 
