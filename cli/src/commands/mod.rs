@@ -16,10 +16,12 @@ use stakpak_api::{
 
 pub mod acp;
 pub mod agent;
+pub mod auth;
 pub mod auto_update;
 pub mod mcp;
 pub mod warden;
 
+pub use auth::AuthCommands;
 pub use mcp::McpCommands;
 
 /// Frontmatter structure for rulebook metadata
@@ -143,6 +145,10 @@ pub enum Commands {
     #[command(subcommand)]
     Mcp(McpCommands),
 
+    /// Provider authentication commands (OAuth, API keys)
+    #[command(subcommand)]
+    Auth(AuthCommands),
+
     /// Stakpak Warden wraps coding agents to apply security policies and limit their capabilities
     Warden {
         /// Environment variables to pass to container
@@ -165,12 +171,13 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
             Ok(Arc::new(client))
         }
         ProviderType::Local => {
+            // Use credential resolution with auth.toml fallback chain
             let client = LocalClient::new(LocalClientConfig {
                 stakpak_base_url: Some(config.api_endpoint.clone()),
                 store_path: None,
-                anthropic_config: config.anthropic.clone(),
-                openai_config: config.openai.clone(),
-                gemini_config: config.gemini.clone(),
+                anthropic_config: config.get_anthropic_config_with_auth(),
+                openai_config: config.get_openai_config_with_auth(),
+                gemini_config: config.get_gemini_config_with_auth(),
                 eco_model: config.eco_model.clone(),
                 recovery_model: config.recovery_model.clone(),
                 smart_model: config.smart_model.clone(),
@@ -203,6 +210,7 @@ impl Commands {
                 | Commands::Version
                 | Commands::Update
                 | Commands::Acp { .. }
+                | Commands::Auth(_)
         )
     }
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
@@ -427,6 +435,9 @@ impl Commands {
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
+            }
+            Commands::Auth(auth_command) => {
+                auth_command.run(config).await?;
             }
             Commands::Acp { system_prompt_file } => {
                 let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {

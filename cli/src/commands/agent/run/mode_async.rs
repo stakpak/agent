@@ -89,12 +89,13 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             Box::new(client)
         }
         ProviderType::Local => {
+            // Use credential resolution with auth.toml fallback chain
             let client = LocalClient::new(LocalClientConfig {
                 stakpak_base_url: Some(ctx.api_endpoint.clone()),
                 store_path: None,
-                anthropic_config: ctx.anthropic.clone(),
-                openai_config: ctx.openai.clone(),
-                gemini_config: ctx.gemini.clone(),
+                anthropic_config: ctx.get_anthropic_config_with_auth(),
+                openai_config: ctx.get_openai_config_with_auth(),
+                gemini_config: ctx.get_gemini_config_with_auth(),
                 eco_model: ctx.eco_model.clone(),
                 recovery_model: ctx.recovery_model.clone(),
                 smart_model: ctx.smart_model.clone(),

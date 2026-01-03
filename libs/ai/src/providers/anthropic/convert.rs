@@ -1,9 +1,9 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
-    AnthropicResponse, AnthropicSource, AnthropicThinkingConfig as AnthropicThinking,
-    infer_max_tokens,
+    infer_max_tokens, AnthropicContent, AnthropicMessage, AnthropicMessageContent,
+    AnthropicRequest, AnthropicResponse, AnthropicSource, AnthropicSystemBlock,
+    AnthropicThinkingConfig as AnthropicThinking, CLAUDE_CODE_SYSTEM_PREFIX,
 };
 use crate::error::{Error, Result};
 use crate::types::{
@@ -13,7 +13,17 @@ use crate::types::{
 use serde_json::json;
 
 /// Convert unified request to Anthropic request
-pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<AnthropicRequest> {
+///
+/// # Arguments
+/// * `req` - The unified generate request
+/// * `stream` - Whether this is a streaming request
+/// * `is_oauth` - Whether OAuth authentication is being used. When true, the Claude Code
+///                system prefix will be prepended to ensure compatibility with OAuth tokens.
+pub fn to_anthropic_request(
+    req: &GenerateRequest,
+    stream: bool,
+    is_oauth: bool,
+) -> Result<AnthropicRequest> {
     // Extract system messages and combine them
     let system_messages: Vec<String> = req
         .messages
@@ -22,12 +32,31 @@ pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<Anthr
         .filter_map(|m| m.text())
         .collect();
 
-    let system = if system_messages.is_empty() {
-        None
+    // Build system content based on OAuth mode
+    let system = if is_oauth {
+        // For OAuth, we MUST use the array format with cache_control
+        // and prepend the Claude Code prefix
+        let mut blocks = vec![AnthropicSystemBlock::with_ephemeral_cache(
+            CLAUDE_CODE_SYSTEM_PREFIX,
+        )];
+
+        // Add user's system messages with ephemeral cache
+        if !system_messages.is_empty() {
+            blocks.push(AnthropicSystemBlock::with_ephemeral_cache(
+                system_messages.join("\n\n"),
+            ));
+        }
+
+        Some(AnthropicMessageContent::SystemBlocks(blocks))
     } else {
-        Some(AnthropicMessageContent::String(
-            system_messages.join("\n\n"),
-        ))
+        // For API key auth, use simple string format
+        if system_messages.is_empty() {
+            None
+        } else {
+            Some(AnthropicMessageContent::String(
+                system_messages.join("\n\n"),
+            ))
+        }
     };
 
     // Convert non-system messages

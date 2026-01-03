@@ -2,11 +2,42 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Authentication type for Anthropic
+#[derive(Debug, Clone)]
+pub enum AnthropicAuth {
+    /// API key authentication (x-api-key header)
+    ApiKey(String),
+    /// OAuth 2.0 authentication (Bearer token)
+    OAuth {
+        /// Access token
+        access_token: String,
+    },
+}
+
+impl AnthropicAuth {
+    /// Create API key authentication
+    pub fn api_key(key: impl Into<String>) -> Self {
+        Self::ApiKey(key.into())
+    }
+
+    /// Create OAuth authentication
+    pub fn oauth(access_token: impl Into<String>) -> Self {
+        Self::OAuth {
+            access_token: access_token.into(),
+        }
+    }
+
+    /// Check if this is OAuth authentication
+    pub fn is_oauth(&self) -> bool {
+        matches!(self, Self::OAuth { .. })
+    }
+}
+
 /// Configuration for Anthropic provider
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
-    /// API key
-    pub api_key: String,
+    /// Authentication (API key or OAuth)
+    pub auth: AnthropicAuth,
     /// Base URL (default: https://api.anthropic.com/v1)
     pub base_url: String,
     /// Anthropic API version (default: 2023-06-01)
@@ -15,14 +46,66 @@ pub struct AnthropicConfig {
     pub beta_features: Vec<String>,
 }
 
+/// Beta header for OAuth authentication
+/// Required headers for Claude Pro/Max OAuth tokens to work:
+/// - oauth-2025-04-20: REQUIRED - enables OAuth authentication support
+/// - claude-code-20250219: Required for Claude Code product access (OAuth tokens are restricted to this)
+/// - interleaved-thinking-2025-05-14: Extended thinking support
+/// - fine-grained-tool-streaming-2025-05-14: Tool streaming support
+pub const OAUTH_BETA_HEADER: &str =
+    "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14";
+
+/// System prompt prefix required for Claude Code OAuth tokens
+/// OAuth tokens from Claude Pro/Max subscriptions are restricted to "Claude Code" product.
+/// This exact prefix MUST be the first system block with ephemeral cache control
+/// for the API to accept requests to advanced models like Opus/Sonnet.
+pub const CLAUDE_CODE_SYSTEM_PREFIX: &str =
+    "You are Claude Code, Anthropic's official CLI for Claude.";
+
 impl AnthropicConfig {
     /// Create new config with API key
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            auth: AnthropicAuth::api_key(api_key),
             base_url: "https://api.anthropic.com/v1/".to_string(),
             anthropic_version: "2023-06-01".to_string(),
             beta_features: vec![],
+        }
+    }
+
+    /// Create new config with OAuth access token
+    pub fn with_oauth(access_token: impl Into<String>) -> Self {
+        Self {
+            auth: AnthropicAuth::oauth(access_token),
+            base_url: "https://api.anthropic.com/v1/".to_string(),
+            anthropic_version: "2023-06-01".to_string(),
+            beta_features: vec![OAUTH_BETA_HEADER.to_string()],
+        }
+    }
+
+    /// Create new config with authentication
+    pub fn with_auth(auth: AnthropicAuth) -> Self {
+        let beta_features = if auth.is_oauth() {
+            vec![OAUTH_BETA_HEADER.to_string()]
+        } else {
+            vec![]
+        };
+
+        Self {
+            auth,
+            base_url: "https://api.anthropic.com/v1/".to_string(),
+            anthropic_version: "2023-06-01".to_string(),
+            beta_features,
+        }
+    }
+
+    /// Get API key (for backward compatibility)
+    /// Returns empty string for OAuth auth
+    #[deprecated(note = "Use auth field directly instead")]
+    pub fn api_key(&self) -> &str {
+        match &self.auth {
+            AnthropicAuth::ApiKey(key) => key,
+            AnthropicAuth::OAuth { .. } => "",
         }
     }
 
@@ -157,6 +240,48 @@ pub enum AnthropicContent {
 pub enum AnthropicMessageContent {
     String(String),
     Blocks(Vec<AnthropicContent>),
+    /// System blocks with cache control support (for OAuth Claude Code prefix)
+    SystemBlocks(Vec<AnthropicSystemBlock>),
+}
+
+/// System block with cache control support
+/// Used for OAuth requests that need the Claude Code prefix with ephemeral caching
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnthropicSystemBlock {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<AnthropicCacheControl>,
+}
+
+/// Cache control configuration for prompt caching
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnthropicCacheControl {
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl AnthropicSystemBlock {
+    /// Create a new system block with ephemeral cache control
+    pub fn with_ephemeral_cache(text: impl Into<String>) -> Self {
+        Self {
+            type_: "text".to_string(),
+            text: text.into(),
+            cache_control: Some(AnthropicCacheControl {
+                type_: "ephemeral".to_string(),
+            }),
+        }
+    }
+
+    /// Create a new system block without cache control
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            type_: "text".to_string(),
+            text: text.into(),
+            cache_control: None,
+        }
+    }
 }
 
 /// Anthropic source (for images/PDFs)

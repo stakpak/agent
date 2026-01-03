@@ -43,6 +43,7 @@ pub fn generate_anthropic_config(api_key: String) -> ProfileConfig {
         anthropic: Some(AnthropicConfig {
             api_key: Some(api_key),
             api_endpoint: None,
+            access_token: None,
         }),
         ..ProfileConfig::default()
     }
@@ -132,6 +133,7 @@ pub fn generate_hybrid_config(smart: HybridModelConfig, eco: HybridModelConfig) 
                 Some(eco.api_key.clone())
             },
             api_endpoint: None,
+            access_token: None,
         });
     }
 

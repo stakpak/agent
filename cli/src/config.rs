@@ -1,6 +1,8 @@
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
+use stakpak_shared::auth_manager::AuthManager;
+use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
 use stakpak_shared::models::integrations::gemini::GeminiConfig;
 use stakpak_shared::models::integrations::openai::OpenAIConfig;
@@ -561,6 +563,188 @@ impl AppConfig {
         } else {
             Ok(())
         }
+    }
+
+    /// Get the config directory from the config path
+    pub fn get_config_dir(&self) -> PathBuf {
+        if !self.config_path.is_empty() {
+            let path = PathBuf::from(&self.config_path);
+            if let Some(parent) = path.parent() {
+                return parent.to_path_buf();
+            }
+        }
+        // Default to ~/.stakpak/
+        std::env::home_dir().unwrap_or_default().join(".stakpak")
+    }
+
+    /// Resolve provider credentials with fallback chain
+    ///
+    /// Resolution order:
+    /// 1. auth.toml → [{profile}.{provider}] (profile-specific)
+    /// 2. auth.toml → [all.{provider}] (shared fallback)
+    /// 3. config.toml → [profiles.{profile}.{provider}].api_key (legacy)
+    /// 4. Environment variable (e.g., ANTHROPIC_API_KEY)
+    pub fn resolve_provider_auth(&self, provider: &str) -> Option<ProviderAuth> {
+        let config_dir = self.get_config_dir();
+
+        // 1 & 2: Check auth.toml (handles profile inheritance internally)
+        if let Ok(auth_manager) = AuthManager::new(&config_dir)
+            && let Some(auth) = auth_manager.get(&self.profile_name, provider)
+        {
+            return Some(auth.clone());
+        }
+
+        // 3: Check config.toml legacy API key
+        match provider {
+            "anthropic" => {
+                if let Some(ref anthropic_config) = self.anthropic
+                    && let Some(ref key) = anthropic_config.api_key
+                    && !key.is_empty()
+                {
+                    return Some(ProviderAuth::api_key(key));
+                }
+            }
+            "openai" => {
+                if let Some(ref openai_config) = self.openai
+                    && let Some(ref key) = openai_config.api_key
+                    && !key.is_empty()
+                {
+                    return Some(ProviderAuth::api_key(key));
+                }
+            }
+            "gemini" => {
+                if let Some(ref gemini_config) = self.gemini
+                    && let Some(ref key) = gemini_config.api_key
+                    && !key.is_empty()
+                {
+                    return Some(ProviderAuth::api_key(key));
+                }
+            }
+            _ => {}
+        }
+
+        // 4: Check environment variable
+        let env_var = match provider {
+            "anthropic" => "ANTHROPIC_API_KEY",
+            "openai" => "OPENAI_API_KEY",
+            "gemini" => "GEMINI_API_KEY",
+            _ => return None,
+        };
+
+        if let Ok(key) = std::env::var(env_var)
+            && !key.is_empty()
+        {
+            return Some(ProviderAuth::api_key(key));
+        }
+
+        None
+    }
+
+    /// Check if OAuth tokens for a provider need refresh and refresh them if needed
+    ///
+    /// Returns the updated auth if refresh was successful, or the original auth if no refresh was needed.
+    /// Returns None if the auth is expired and refresh failed.
+    pub async fn refresh_provider_auth_if_needed(
+        &self,
+        provider: &str,
+        auth: &ProviderAuth,
+    ) -> Result<ProviderAuth, String> {
+        if !auth.needs_refresh() {
+            return Ok(auth.clone());
+        }
+
+        // Only OAuth tokens need refresh
+        let refresh_token = match auth.refresh_token() {
+            Some(token) => token,
+            None => return Ok(auth.clone()), // API keys don't need refresh
+        };
+
+        // Get OAuth provider for refresh
+        use stakpak_shared::oauth::{OAuthFlow, ProviderRegistry};
+
+        let registry = ProviderRegistry::new();
+        let oauth_provider = registry
+            .get(provider)
+            .ok_or_else(|| format!("Unknown provider: {}", provider))?;
+
+        // Get OAuth config (use claude-max as default for Anthropic)
+        let method_id = match provider {
+            "anthropic" => "claude-max",
+            _ => return Err(format!("OAuth refresh not implemented for {}", provider)),
+        };
+
+        let oauth_config = oauth_provider
+            .oauth_config(method_id)
+            .ok_or("OAuth not supported for this method")?;
+
+        // Refresh the token
+        let flow = OAuthFlow::new(oauth_config);
+        let tokens = flow.refresh_token(refresh_token).await.map_err(|e| {
+            format!(
+                "Token refresh failed: {}. Please re-authenticate with 'stakpak auth login'.",
+                e
+            )
+        })?;
+
+        // Create new auth with updated tokens
+        let new_expires = chrono::Utc::now().timestamp_millis() + (tokens.expires_in * 1000);
+        let new_auth =
+            ProviderAuth::oauth(&tokens.access_token, &tokens.refresh_token, new_expires);
+
+        // Save the updated tokens
+        let config_dir = self.get_config_dir();
+        if let Ok(mut auth_manager) = AuthManager::new(&config_dir)
+            && let Err(e) = auth_manager.set(&self.profile_name, provider, new_auth.clone())
+        {
+            // Log but don't fail - the tokens are still valid for this session
+            tracing::warn!("Failed to save refreshed tokens: {}", e);
+        }
+
+        Ok(new_auth)
+    }
+
+    /// Get Anthropic config with resolved credentials from auth.toml fallback chain
+    ///
+    /// This method resolves credentials in the following order:
+    /// 1. auth.toml → [{profile}.anthropic]
+    /// 2. auth.toml → [all.anthropic]
+    /// 3. config.toml → existing anthropic config
+    /// 4. ANTHROPIC_API_KEY environment variable
+    pub fn get_anthropic_config_with_auth(&self) -> Option<AnthropicConfig> {
+        // Try to resolve credentials from auth.toml first
+        if let Some(auth) = self.resolve_provider_auth("anthropic") {
+            // If we have existing anthropic config, merge credentials into it
+            if let Some(existing) = &self.anthropic {
+                return Some(existing.clone().with_provider_auth(&auth));
+            }
+            // Otherwise create new config from auth
+            return Some(AnthropicConfig::from_provider_auth(&auth));
+        }
+
+        // Fall back to existing config.toml config
+        self.anthropic.clone()
+    }
+
+    /// Get OpenAI config with resolved credentials from auth.toml fallback chain
+    pub fn get_openai_config_with_auth(&self) -> Option<OpenAIConfig> {
+        if let Some(auth) = self.resolve_provider_auth("openai") {
+            if let Some(existing) = &self.openai {
+                return existing.clone().with_provider_auth(&auth);
+            }
+            return OpenAIConfig::from_provider_auth(&auth);
+        }
+        self.openai.clone()
+    }
+
+    /// Get Gemini config with resolved credentials from auth.toml fallback chain
+    pub fn get_gemini_config_with_auth(&self) -> Option<GeminiConfig> {
+        if let Some(auth) = self.resolve_provider_auth("gemini") {
+            if let Some(existing) = &self.gemini {
+                return existing.clone().with_provider_auth(&auth);
+            }
+            return GeminiConfig::from_provider_auth(&auth);
+        }
+        self.gemini.clone()
     }
 }
 

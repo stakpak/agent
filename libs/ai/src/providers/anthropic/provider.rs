@@ -2,7 +2,7 @@
 
 use super::convert::{from_anthropic_response, to_anthropic_request};
 use super::stream::create_stream;
-use super::types::{AnthropicConfig, AnthropicResponse};
+use super::types::{AnthropicAuth, AnthropicConfig, AnthropicResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
@@ -25,8 +25,15 @@ impl AnthropicProvider {
 
     /// Create a new Anthropic provider
     pub fn new(config: AnthropicConfig) -> Result<Self> {
-        if config.api_key.is_empty() {
-            return Err(Error::MissingApiKey("anthropic".to_string()));
+        // Validate that we have some form of authentication
+        match &config.auth {
+            AnthropicAuth::ApiKey(key) if key.is_empty() => {
+                return Err(Error::MissingApiKey("anthropic".to_string()));
+            }
+            AnthropicAuth::OAuth { access_token } if access_token.is_empty() => {
+                return Err(Error::MissingApiKey("anthropic (OAuth token)".to_string()));
+            }
+            _ => {}
         }
 
         let client = Client::new();
@@ -40,6 +47,11 @@ impl AnthropicProvider {
 
         Self::new(AnthropicConfig::new(api_key))
     }
+
+    /// Create provider with OAuth access token
+    pub fn with_oauth(access_token: impl Into<String>) -> Result<Self> {
+        Self::new(AnthropicConfig::with_oauth(access_token))
+    }
 }
 
 #[async_trait]
@@ -51,8 +63,16 @@ impl Provider for AnthropicProvider {
     fn build_headers(&self, custom_headers: Option<&Headers>) -> Headers {
         let mut headers = Headers::new();
 
-        // Anthropic uses x-api-key header
-        headers.insert("x-api-key", &self.config.api_key);
+        // Apply authentication based on auth type
+        match &self.config.auth {
+            AnthropicAuth::ApiKey(api_key) => {
+                headers.insert("x-api-key", api_key);
+            }
+            AnthropicAuth::OAuth { access_token } => {
+                headers.insert("authorization", format!("Bearer {}", access_token));
+            }
+        }
+
         headers.insert("anthropic-version", &self.config.anthropic_version);
         headers.insert("Content-Type", "application/json");
 
@@ -71,7 +91,8 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let anthropic_req = to_anthropic_request(&request, false)?;
+        let is_oauth = self.config.auth.is_oauth();
+        let anthropic_req = to_anthropic_request(&request, false, is_oauth)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
@@ -98,7 +119,8 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let anthropic_req = to_anthropic_request(&request, true)?;
+        let is_oauth = self.config.auth.is_oauth();
+        let anthropic_req = to_anthropic_request(&request, true, is_oauth)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
