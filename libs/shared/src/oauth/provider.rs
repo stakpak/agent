@@ -110,18 +110,25 @@ mod tests {
 
     #[test]
     fn test_auth_method_oauth() {
-        let method = AuthMethod::oauth("claude-max", "Claude Pro/Max", Some("Use your subscription".to_string()));
-        
+        let method = AuthMethod::oauth(
+            "claude-max",
+            "Claude Pro/Max",
+            Some("Use your subscription".to_string()),
+        );
+
         assert_eq!(method.id, "claude-max");
         assert_eq!(method.label, "Claude Pro/Max");
-        assert_eq!(method.description, Some("Use your subscription".to_string()));
+        assert_eq!(
+            method.description,
+            Some("Use your subscription".to_string())
+        );
         assert_eq!(method.method_type, AuthMethodType::OAuth);
     }
 
     #[test]
     fn test_auth_method_api_key() {
         let method = AuthMethod::api_key("api-key", "Manual API Key", None);
-        
+
         assert_eq!(method.id, "api-key");
         assert_eq!(method.label, "Manual API Key");
         assert_eq!(method.description, None);
@@ -130,11 +137,8 @@ mod tests {
 
     #[test]
     fn test_auth_method_display() {
-        let with_desc = AuthMethod::oauth(
-            "test",
-            "Test Method",
-            Some("Description here".to_string()),
-        );
+        let with_desc =
+            AuthMethod::oauth("test", "Test Method", Some("Description here".to_string()));
         assert_eq!(with_desc.display(), "Test Method - Description here");
 
         let without_desc = AuthMethod::oauth("test", "Test Method", None);

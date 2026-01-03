@@ -23,7 +23,8 @@ impl AnthropicProvider {
     const REDIRECT_URL: &'static str = "https://console.anthropic.com/oauth/code/callback";
 
     /// OAuth scopes
-    const SCOPES: &'static [&'static str] = &["org:create_api_key", "user:profile", "user:inference"];
+    const SCOPES: &'static [&'static str] =
+        &["org:create_api_key", "user:profile", "user:inference"];
 
     /// Claude.ai authorization URL (for Pro/Max subscriptions)
     const CLAUDE_AI_AUTH_URL: &'static str = "https://claude.ai/oauth/authorize";
@@ -235,7 +236,10 @@ mod tests {
         let provider = AnthropicProvider::new();
         let config = provider.oauth_config("console").unwrap();
 
-        assert_eq!(config.auth_url, "https://console.anthropic.com/oauth/authorize");
+        assert_eq!(
+            config.auth_url,
+            "https://console.anthropic.com/oauth/authorize"
+        );
     }
 
     #[test]
@@ -259,10 +263,7 @@ mod tests {
 
         provider.apply_auth_headers(&auth, &mut headers).unwrap();
 
-        assert_eq!(
-            headers.get("authorization").unwrap(),
-            "Bearer access-token"
-        );
+        assert_eq!(headers.get("authorization").unwrap(), "Bearer access-token");
         assert!(headers.get("anthropic-beta").is_some());
         assert!(headers.get("x-api-key").is_none()); // Should be removed
     }

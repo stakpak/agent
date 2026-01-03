@@ -27,9 +27,20 @@ impl AnthropicAuth {
         }
     }
 
-    /// Check if this is OAuth authentication
-    pub fn is_oauth(&self) -> bool {
-        matches!(self, Self::OAuth { .. })
+    /// Check if credentials are empty
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::ApiKey(key) => key.is_empty(),
+            Self::OAuth { access_token } => access_token.is_empty(),
+        }
+    }
+
+    /// Get the authorization header value
+    pub fn to_header(&self) -> (&'static str, String) {
+        match self {
+            Self::ApiKey(key) => ("x-api-key", key.clone()),
+            Self::OAuth { access_token } => ("authorization", format!("Bearer {}", access_token)),
+        }
     }
 }
 
@@ -52,8 +63,7 @@ pub struct AnthropicConfig {
 /// - claude-code-20250219: Required for Claude Code product access (OAuth tokens are restricted to this)
 /// - interleaved-thinking-2025-05-14: Extended thinking support
 /// - fine-grained-tool-streaming-2025-05-14: Tool streaming support
-pub const OAUTH_BETA_HEADER: &str =
-    "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14";
+pub const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14";
 
 /// System prompt prefix required for Claude Code OAuth tokens
 /// OAuth tokens from Claude Pro/Max subscriptions are restricted to "Claude Code" product.
@@ -85,10 +95,9 @@ impl AnthropicConfig {
 
     /// Create new config with authentication
     pub fn with_auth(auth: AnthropicAuth) -> Self {
-        let beta_features = if auth.is_oauth() {
-            vec![OAUTH_BETA_HEADER.to_string()]
-        } else {
-            vec![]
+        let beta_features = match &auth {
+            AnthropicAuth::OAuth { .. } => vec![OAUTH_BETA_HEADER.to_string()],
+            AnthropicAuth::ApiKey(_) => vec![],
         };
 
         Self {
@@ -260,6 +269,27 @@ pub struct AnthropicSystemBlock {
 pub struct AnthropicCacheControl {
     #[serde(rename = "type")]
     pub type_: String,
+}
+
+impl AnthropicMessageContent {
+    /// Build system content based on authentication type
+    ///
+    /// For OAuth: Returns SystemBlocks with Claude Code prefix and cache control
+    /// For API key: Returns simple String format
+    pub fn build_system(auth: &AnthropicAuth, user_system: Option<String>) -> Option<Self> {
+        match auth {
+            AnthropicAuth::OAuth { .. } => {
+                let mut blocks = vec![AnthropicSystemBlock::with_ephemeral_cache(
+                    CLAUDE_CODE_SYSTEM_PREFIX,
+                )];
+                if let Some(system) = user_system {
+                    blocks.push(AnthropicSystemBlock::with_ephemeral_cache(system));
+                }
+                Some(Self::SystemBlocks(blocks))
+            }
+            AnthropicAuth::ApiKey(_) => user_system.map(Self::String),
+        }
+    }
 }
 
 impl AnthropicSystemBlock {

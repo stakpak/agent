@@ -4,9 +4,7 @@ use crate::onboarding::menu::{prompt_password, select_option_no_header};
 use crate::onboarding::navigation::NavResult;
 use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::auth::ProviderAuth;
-use stakpak_shared::oauth::{
-    AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry,
-};
+use stakpak_shared::oauth::{AuthMethodType, OAuthFlow, OAuthProvider, ProviderRegistry};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -16,7 +14,12 @@ pub async fn handle_login(
     provider: Option<&str>,
     profile: Option<&str>,
 ) -> Result<(), String> {
-    let profile = profile.unwrap_or("all");
+    // Select profile if not specified
+    let profile = match profile {
+        Some(p) => p.to_string(),
+        None => select_profile_for_auth(config_dir).await?,
+    };
+
     let registry = ProviderRegistry::new();
 
     // Select provider if not specified
@@ -84,11 +87,45 @@ pub async fn handle_login(
 
     match method.method_type {
         AuthMethodType::OAuth => {
-            handle_oauth_login(config_dir, provider, &method_id, profile).await
+            handle_oauth_login(config_dir, provider, &method_id, &profile).await
         }
-        AuthMethodType::ApiKey => {
-            handle_api_key_login(config_dir, provider, profile).await
-        }
+        AuthMethodType::ApiKey => handle_api_key_login(config_dir, provider, &profile).await,
+    }
+}
+
+/// Select profile interactively for auth commands
+/// Shows: "All profiles (shared)" and existing profiles
+async fn select_profile_for_auth(config_dir: &Path) -> Result<String, String> {
+    use crate::config::AppConfig;
+
+    // Get available profiles from config
+    let config_path = config_dir.join("config.toml");
+    let available_profiles = AppConfig::list_available_profiles(Some(&config_path))
+        .unwrap_or_else(|_| vec!["default".to_string()]);
+
+    // Build options: "all" (shared) + existing profiles
+    let mut options: Vec<(String, String, bool)> = vec![(
+        "all".to_string(),
+        "All profiles (shared credentials)".to_string(),
+        true, // recommended
+    )];
+
+    for profile in &available_profiles {
+        options.push((profile.clone(), format!("Profile: {}", profile), false));
+    }
+
+    let options_refs: Vec<(String, &str, bool)> = options
+        .iter()
+        .map(|(id, display, recommended)| (id.clone(), display.as_str(), *recommended))
+        .collect();
+
+    println!();
+    println!("Save credentials to:");
+    println!();
+
+    match select_option_no_header(&options_refs, true) {
+        NavResult::Forward(selected) => Ok(selected),
+        NavResult::Back | NavResult::Cancel => Err("Cancelled.".to_string()),
     }
 }
 
@@ -110,7 +147,8 @@ async fn handle_oauth_login(
     println!("Opening browser for {} authentication...", provider.name());
     println!();
     println!("If browser doesn't open, visit:");
-    println!("{}", auth_url);
+    // Use OSC 8 escape sequence to make the URL clickable in supported terminals
+    println!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", auth_url, auth_url);
     println!();
 
     // Try to open browser
@@ -145,8 +183,8 @@ async fn handle_oauth_login(
         .map_err(|e| format!("Post-authorization failed: {}", e))?;
 
     // Save credentials
-    let mut auth_manager = AuthManager::new(config_dir)
-        .map_err(|e| format!("Failed to load auth manager: {}", e))?;
+    let mut auth_manager =
+        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
 
     auth_manager
         .set(profile, provider.id(), auth)
@@ -186,8 +224,8 @@ async fn handle_api_key_login(
 
     let auth = ProviderAuth::api_key(key);
 
-    let mut auth_manager = AuthManager::new(config_dir)
-        .map_err(|e| format!("Failed to load auth manager: {}", e))?;
+    let mut auth_manager =
+        AuthManager::new(config_dir).map_err(|e| format!("Failed to load auth manager: {}", e))?;
 
     auth_manager
         .set(profile, provider.id(), auth)

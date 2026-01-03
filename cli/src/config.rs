@@ -746,6 +746,27 @@ impl AppConfig {
         }
         self.gemini.clone()
     }
+
+    /// Get Stakpak API key with resolved credentials from auth.toml fallback chain
+    ///
+    /// Resolution order:
+    /// 1. STAKPAK_API_KEY environment variable (already in self.api_key)
+    /// 2. config.toml → [profiles.{profile}].api_key (already in self.api_key)
+    /// 3. auth.toml → [{profile}.stakpak]
+    /// 4. auth.toml → [all.stakpak]
+    pub fn get_stakpak_api_key(&self) -> Option<String> {
+        // First check if we already have an API key from env or config.toml
+        if self.api_key.is_some() {
+            return self.api_key.clone();
+        }
+
+        // Try to resolve from auth.toml
+        if let Some(ProviderAuth::Api { key }) = self.resolve_provider_auth("stakpak") {
+            return Some(key);
+        }
+
+        None
+    }
 }
 
 impl RulebookConfig {

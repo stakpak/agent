@@ -56,10 +56,7 @@ impl OAuthFlow {
     ///
     /// The code should be in the format "authorization_code#state" as returned by Anthropic.
     pub async fn exchange_code(&self, code: &str) -> OAuthResult<TokenResponse> {
-        let pkce = self
-            .pkce
-            .as_ref()
-            .ok_or(OAuthError::PkceNotInitialized)?;
+        let pkce = self.pkce.as_ref().ok_or(OAuthError::PkceNotInitialized)?;
 
         // Parse the authorization code - format: "authorization_code#state"
         let (auth_code, state) = parse_auth_code(code)?;
@@ -138,7 +135,7 @@ impl OAuthFlow {
 fn parse_auth_code(code: &str) -> OAuthResult<(String, String)> {
     // Handle both "#" and "%23" (URL-encoded #)
     let code = code.replace("%23", "#");
-    
+
     if let Some(pos) = code.find('#') {
         let auth_code = code[..pos].to_string();
         let state = code[pos + 1..].to_string();

@@ -4,7 +4,7 @@
 //! PKCE provides additional security for public clients by using a code verifier
 //! and code challenge.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 
 /// PKCE challenge pair containing the verifier and challenge

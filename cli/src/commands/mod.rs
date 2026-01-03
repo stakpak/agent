@@ -102,14 +102,16 @@ pub enum RulebookCommands {
 pub enum Commands {
     /// Get CLI Version
     Version,
-    /// Login to Stakpak
+    /// Login to Stakpak (DEPRECATED: use `stakpak auth login -p stakpak` instead)
+    #[command(hide = true)]
     Login {
         /// API key for authentication
         #[arg(long, env("STAKPAK_API_KEY"))]
         api_key: String,
     },
 
-    /// Logout from Stakpak
+    /// Logout from Stakpak (DEPRECATED: use `stakpak auth logout -p stakpak` instead)
+    #[command(hide = true)]
     Logout,
 
     /// Start Agent Client Protocol server (for editor integration)
@@ -219,6 +221,11 @@ impl Commands {
                 command.run(config).await?;
             }
             Commands::Login { api_key } => {
+                // Show deprecation warning
+                eprintln!("\x1b[33mWarning: 'stakpak login' is deprecated.\x1b[0m");
+                eprintln!("Please use: \x1b[1;34mstakpak auth login --provider stakpak\x1b[0m");
+                eprintln!();
+
                 let mut updated_config = config.clone();
                 updated_config.api_key = Some(api_key);
 
@@ -227,6 +234,11 @@ impl Commands {
                     .map_err(|e| format!("Failed to save config: {}", e))?;
             }
             Commands::Logout => {
+                // Show deprecation warning
+                eprintln!("\x1b[33mWarning: 'stakpak logout' is deprecated.\x1b[0m");
+                eprintln!("Please use: \x1b[1;34mstakpak auth logout --provider stakpak\x1b[0m");
+                eprintln!();
+
                 let mut updated_config = config.clone();
                 updated_config.api_key = None;
 

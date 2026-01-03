@@ -22,30 +22,30 @@ use std::path::PathBuf;
 pub enum AuthCommands {
     /// Login to an LLM provider
     Login {
-        /// Provider to authenticate with (e.g., "anthropic")
-        #[arg(long, short)]
+        /// Provider to authenticate with (e.g., "anthropic", "stakpak")
+        #[arg(long)]
         provider: Option<String>,
 
         /// Profile to save credentials to (default: "all" for shared)
-        #[arg(long, short = 'P')]
+        #[arg(long, short)]
         profile: Option<String>,
     },
 
     /// Logout from an LLM provider
     Logout {
         /// Provider to logout from
-        #[arg(long, short)]
+        #[arg(long)]
         provider: Option<String>,
 
         /// Profile to remove credentials from
-        #[arg(long, short = 'P')]
+        #[arg(long, short)]
         profile: Option<String>,
     },
 
     /// List configured credentials
     List {
         /// Filter by profile
-        #[arg(long, short = 'P')]
+        #[arg(long, short)]
         profile: Option<String>,
     },
 }
@@ -58,23 +58,12 @@ impl AuthCommands {
 
         match self {
             AuthCommands::Login { provider, profile } => {
-                login::handle_login(
-                    &config_dir,
-                    provider.as_deref(),
-                    profile.as_deref(),
-                )
-                .await
+                login::handle_login(&config_dir, provider.as_deref(), profile.as_deref()).await
             }
             AuthCommands::Logout { provider, profile } => {
-                logout::handle_logout(
-                    &config_dir,
-                    provider.as_deref(),
-                    profile.as_deref(),
-                )
+                logout::handle_logout(&config_dir, provider.as_deref(), profile.as_deref())
             }
-            AuthCommands::List { profile } => {
-                list::handle_list(&config_dir, profile.as_deref())
-            }
+            AuthCommands::List { profile } => list::handle_list(&config_dir, profile.as_deref()),
         }
     }
 }
