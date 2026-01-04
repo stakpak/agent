@@ -57,8 +57,25 @@ fn find_mcp_proxy_config_file() -> Result<String, String> {
 
 #[derive(Subcommand, PartialEq)]
 pub enum McpCommands {
-    /// Start the MCP server (standalone HTTP/HTTPS server with tools)
+    /// Generate and save mTLS certificates (one-time setup)
+    Setup {
+        /// Directory to save certificates (default: ~/.stakpak/certs)
+        #[arg(long = "out-dir")]
+        out_dir: Option<PathBuf>,
+
+        /// Overwrite existing certificates
+        #[arg(long, short)]
+        force: bool,
+    },
+    /// Start the MCP server
     Start {
+        /// Directory to load certificates from (default: ~/.stakpak/certs)
+        #[arg(long = "config-dir")]
+        config_dir: Option<PathBuf>,
+
+        /// Port to bind to, overrides automatic port selection
+        #[arg(long, short)]
+        port: Option<u16>,
         /// Disable secret redaction (WARNING: this will print secrets to the console)
         #[arg(long = "disable-secret-redaction", default_value_t = false)]
         disable_secret_redaction: bool,
@@ -102,7 +119,12 @@ pub enum McpCommands {
 impl McpCommands {
     pub async fn run(self, config: AppConfig) -> Result<(), String> {
         match self {
+            McpCommands::Setup { out_dir, force } => {
+                server::setup_certificates(out_dir, force).await
+            }
             McpCommands::Start {
+                config_dir,
+                port,
                 disable_secret_redaction,
                 privacy_mode,
                 tool_mode,
@@ -112,12 +134,16 @@ impl McpCommands {
             } => {
                 server::run_server(
                     config,
-                    disable_secret_redaction,
-                    privacy_mode,
-                    tool_mode,
-                    enable_slack_tools,
-                    index_big_project,
-                    disable_mcp_mtls,
+                    server::ServerOptions {
+                        config_dir,
+                        port,
+                        disable_secret_redaction,
+                        privacy_mode,
+                        tool_mode,
+                        enable_slack_tools,
+                        index_big_project,
+                        disable_mcp_mtls,
+                    },
                 )
                 .await
             }

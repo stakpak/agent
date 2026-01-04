@@ -27,6 +27,7 @@ fast_html2md = "=0.0.48"
 walkdir = { workspace = true }
 toml = "0.8"
 similar = { workspace = true }
+rustls = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.8"

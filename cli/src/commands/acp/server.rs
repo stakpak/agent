@@ -1,5 +1,6 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
 use crate::config::ProviderType;
+use crate::utils::network;
 use crate::{commands::agent::run::helpers::convert_tools_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
@@ -10,6 +11,8 @@ use stakpak_api::{
     remote::{ClientConfig, RemoteClient},
 };
 use stakpak_mcp_client::McpClient;
+use stakpak_mcp_server::{EnabledToolsConfig, MCPServerConfig, ToolMode, start_server, tool_names};
+use stakpak_shared::cert_utils::CertificateStrategy;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
@@ -101,10 +104,10 @@ impl StakpakAcpAgent {
 
         // Initialize MCP client and tools (optional for ACP)
         let (mcp_client, mcp_tools, tools) =
-            match Self::initialize_mcp_server_and_tools(&config).await {
+            match Self::initialize_mcp_server_and_tools(&config, client.clone()).await {
                 Ok((client, mcp_tools, tool_list)) => {
                     log::info!("MCP client initialized successfully");
-                    (Some(client), mcp_tools, tool_list)
+                    (Some(Arc::new(client)), mcp_tools, tool_list)
                 }
                 Err(e) => {
                     log::warn!(
@@ -303,7 +306,6 @@ impl StakpakAcpAgent {
 
     // Helper method to generate appropriate tool title based on tool type and arguments
     fn generate_tool_title(&self, tool_name: &str, raw_input: &serde_json::Value) -> String {
-        use super::tool_names;
         match tool_name {
             tool_names::VIEW => {
                 // Extract path from arguments for view tool
@@ -393,7 +395,6 @@ impl StakpakAcpAgent {
 
     // Helper method to get appropriate ToolKind based on tool name
     fn get_tool_kind(&self, tool_name: &str) -> acp::ToolKind {
-        use super::tool_names;
         if tool_names::is_fs_file_read(tool_name) || tool_name == tool_names::READ_RULEBOOK {
             acp::ToolKind::Read
         } else if tool_names::is_fs_file_write(tool_name) {
@@ -412,17 +413,17 @@ impl StakpakAcpAgent {
 
     // Helper method to determine if a tool should use Diff content type
     fn should_use_diff_content(&self, tool_name: &str) -> bool {
-        super::tool_names::is_fs_file_write(tool_name)
+        tool_names::is_fs_file_write(tool_name)
     }
 
     // Helper method to determine if a tool is a file creation tool
     fn is_file_creation_tool(&self, tool_name: &str) -> bool {
-        tool_name == super::tool_names::CREATE || tool_name == super::tool_names::CREATE_FILE
+        tool_name == tool_names::CREATE || tool_name == tool_names::CREATE_FILE
     }
 
     // Helper method to determine if a tool should be auto-approved
     fn is_auto_approved_tool(&self, tool_name: &str) -> bool {
-        super::tool_names::is_auto_approved(tool_name)
+        tool_names::is_auto_approved(tool_name)
     }
 
     // Helper method to create proper rawInput for tool calls
@@ -861,15 +862,15 @@ impl StakpakAcpAgent {
 
             // Check if this is a filesystem tool that should use native ACP
             // Decide if this should be handled by native ACP FS. Avoid read_text_file for directories.
-            let is_view_directory = if tool_call.function.name == super::tool_names::VIEW {
+            let tool_name = tool_call.function.name.as_str();
+            let is_view_directory = if tool_name == tool_names::VIEW {
                 Path::new(&abs_path).is_dir()
             } else {
                 false
             };
 
-            let tool_name = tool_call.function.name.as_str();
-            let is_read_tool = super::tool_names::is_fs_file_read(tool_name) && !is_view_directory;
-            let is_write_tool = super::tool_names::is_fs_file_write(tool_name);
+            let is_read_tool = tool_names::is_fs_file_read(tool_name) && !is_view_directory;
+            let is_write_tool = tool_names::is_fs_file_write(tool_name);
 
             // Delegate fs operations to the client so it can access unsaved editor
             // state and track modifications. Per ACP spec, both read and write
@@ -1065,13 +1066,58 @@ impl StakpakAcpAgent {
 
     pub async fn initialize_mcp_server_and_tools(
         config: &AppConfig,
-    ) -> Result<(Arc<McpClient>, Vec<rmcp::model::Tool>, Vec<Tool>), String> {
-        // Initialize MCP client via stdio proxy
-        let mcp_client = Arc::new(
-            stakpak_mcp_client::connect(None) // progress_tx will be set later in run_stdio
-                .await
-                .map_err(|e| format!("Failed to connect to MCP proxy: {}", e))?,
+        client: Arc<dyn AgentProvider>,
+    ) -> Result<(McpClient, Vec<rmcp::model::Tool>, Vec<Tool>), String> {
+        // Find available bind address
+        let (bind_address, listener) = network::find_available_bind_address_with_listener()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Generate ephemeral certificates for mTLS
+        let strategy = CertificateStrategy::Ephemeral;
+        let certificate_chain = Some(Arc::new(
+            strategy
+                .get_certificate_chain()
+                .map_err(|e| e.to_string())?,
+        ));
+
+        let protocol = "https";
+        let local_mcp_server_host = format!("{}://{}", protocol, bind_address);
+
+        // Start MCP server in background
+        let server_config_for_server = Some(
+            strategy
+                .load_server_config()
+                .map_err(|e| format!("Failed to create server config: {}", e))?,
         );
+        let client_for_server = client.clone();
+
+        tokio::spawn(async move {
+            let _ = start_server(
+                MCPServerConfig {
+                    client: Some(client_for_server),
+                    redact_secrets: true,
+                    privacy_mode: false,
+                    enabled_tools: EnabledToolsConfig { slack: false },
+                    tool_mode: ToolMode::Combined,
+                    bind_address,
+                    server_config: Arc::new(server_config_for_server),
+                    subagent_configs: None,
+                },
+                Some(listener),
+                None,
+            )
+            .await;
+        });
+
+        // Initialize MCP client
+        let mcp_client = stakpak_mcp_client::connect_https(
+            &local_mcp_server_host,
+            certificate_chain.clone(),
+            None, // progress_tx will be set later in run_stdio
+        )
+        .await
+        .map_err(|e| format!("Failed to connect to MCP server: {}", e))?;
 
         // Get tools from MCP client
         let mcp_tools = stakpak_mcp_client::get_tools(&mcp_client)
@@ -1363,10 +1409,10 @@ impl StakpakAcpAgent {
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<ToolCallResultProgress>(100);
 
                 // Reinitialize MCP client with progress channel
-                let (mcp_client, mcp_tools, tools) = match Self::initialize_mcp_server_and_tools(&self.config).await {
+                let (mcp_client, mcp_tools, tools) = match Self::initialize_mcp_server_and_tools(&self.config, self.client.clone()).await {
                     Ok((client, mcp_tools, tool_list)) => {
                         log::info!("MCP client reinitialized with progress channel");
-                        (Some(client), mcp_tools, tool_list)
+                        (Some(Arc::new(client)), mcp_tools, tool_list)
                     }
                     Err(e) => {
                         log::warn!("Failed to reinitialize MCP client with progress channel: {}, continuing without tools", e);

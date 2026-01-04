@@ -19,7 +19,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use stakpak_shared::cert_utils::CertificateChain;
+use stakpak_shared::cert_utils::{CertificateChain, CertificateStrategy};
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use std::future::Future;
@@ -297,7 +297,7 @@ impl ProxyServer {
                     .pool_max_idle_per_host(10)
                     .tcp_keepalive(std::time::Duration::from_secs(60));
 
-                // Configure mTLS if certificate chain is provided
+                // Configure mTLS: use provided chain, or auto-load from ~/.stakpak/certs/ for HTTPS
                 if let Some(cert_chain) = certificate_chain.as_ref() {
                     match cert_chain.create_client_config() {
                         Ok(tls_config) => {
@@ -306,6 +306,36 @@ impl ProxyServer {
                         Err(e) => {
                             tracing::error!("Failed to create TLS config for {}: {:?}", name, e);
                             return;
+                        }
+                    }
+                } else if url.starts_with("https://") {
+                    // Try to auto-load certificates from default location
+                    if let Ok(certs_dir) = stakpak_shared::cert_utils::default_cert_dir() {
+                        if CertificateChain::exists_in_directory(&certs_dir) {
+                            match CertificateChain::load_client_config(&certs_dir) {
+                                Ok(tls_config) => {
+                                    tracing::info!(
+                                        "Loaded mTLS certificates from {:?} for {}",
+                                        certs_dir,
+                                        name
+                                    );
+                                    client_builder =
+                                        client_builder.use_preconfigured_tls(tls_config);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to load mTLS certificates for {}: {:?}",
+                                        name,
+                                        e
+                                    );
+                                }
+                            }
+                        } else {
+                            tracing::debug!(
+                                "No mTLS certificates found at {:?} for HTTPS connection to {}",
+                                certs_dir,
+                                name
+                            );
                         }
                     }
                 }
@@ -631,7 +661,7 @@ impl ServerHandler for ProxyServer {
 pub async fn start_proxy_server(
     config: ClientPoolConfig,
     tcp_listener: TcpListener,
-    certificate_chain: Arc<CertificateChain>,
+    cert_strategy: CertificateStrategy,
     redact_secrets: bool,
     privacy_mode: bool,
     shutdown_rx: Option<Receiver<()>>,
@@ -650,7 +680,7 @@ pub async fn start_proxy_server(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    let tls_config = certificate_chain.create_server_config()?;
+    let tls_config = cert_strategy.load_server_config()?;
     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
 
     let handle = axum_server::Handle::new();
