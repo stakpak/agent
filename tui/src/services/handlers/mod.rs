@@ -60,6 +60,48 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    state.scroll = state.scroll.max(0);
+
+    // Intercept keys for File Changes Popup
+    if state.show_file_changes_popup {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_file_changes_popup_cancel(state);
+                return;
+            }
+            InputEvent::RetryLastToolCall => {
+                // Map Ctrl+R to Revert All
+                popup::handle_file_changes_popup_revert_all(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_file_changes_popup_navigate(state, -1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_file_changes_popup_navigate(state, 1);
+                return;
+            }
+            InputEvent::InputChanged(c) => {
+                popup::handle_file_changes_popup_search_input(state, c);
+                return;
+            }
+            InputEvent::InputBackspace => {
+                popup::handle_file_changes_popup_backspace(state);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                // Enter triggers revert on selected file
+                popup::handle_file_changes_popup_revert(state);
+                return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
+
     // Intercept keys for Shell Mode (only when not loading)
     if state.show_shell_mode
         && state.active_shell_command.is_some()
@@ -440,6 +482,17 @@ pub fn update(
             popup::handle_toggle_more_shortcuts(state);
         }
 
+        // Side panel handlers
+        InputEvent::ToggleSidePanel => {
+            popup::handle_toggle_side_panel(state);
+        }
+        InputEvent::SidePanelNextSection => {
+            popup::handle_side_panel_next_section(state);
+        }
+        InputEvent::SidePanelToggleSection => {
+            popup::handle_side_panel_toggle_section(state);
+        }
+
         // Message handlers
         InputEvent::StreamAssistantMessage(id, s) => {
             message::handle_stream_message(state, id, s, message_area_height);
@@ -513,8 +566,13 @@ pub fn update(
             misc::handle_stream_model(state, model);
         }
         InputEvent::RunToolCall(_) => {}
-        InputEvent::ToolResult(_) => {}
+        InputEvent::ToolResult(result) => {
+            tool::handle_tool_result(state, result);
+        }
         InputEvent::ApprovalPopupSubmit => {}
+        InputEvent::MouseClick(col, row) => {
+            popup::handle_side_panel_mouse_click(state, col, row);
+        }
     }
 
     navigation::adjust_scroll(state, message_area_height, message_area_width);

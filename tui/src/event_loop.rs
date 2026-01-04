@@ -6,7 +6,7 @@ use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::handlers::tool::{
-    clear_streaming_tool_results, update_session_tool_calls_queue,
+    clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
 };
 use crate::services::message::Message;
 use crate::view::view;
@@ -158,6 +158,8 @@ pub async fn run_tui(
 
                        }
                        render_collapsed_result_block(tool_call_result, &mut state);
+                       // Handle file changes for the Changeset
+                       handle_tool_result(&mut state, tool_call_result.clone());
 
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }

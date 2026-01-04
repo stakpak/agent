@@ -7,6 +7,7 @@ pub use types::*;
 
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
 use crate::services::helper_block::push_error_message;
@@ -162,6 +163,12 @@ pub struct AppState {
     // ========== Context Popup State ==========
     pub show_context_popup: bool,
 
+    // ========== File Changes Popup State ==========
+    pub show_file_changes_popup: bool,
+    pub file_changes_selected: usize,
+    pub file_changes_scroll: usize,
+    pub file_changes_search: String,
+
     // ========== Usage Tracking State ==========
     pub current_message_usage: LLMTokenUsage,
     pub total_session_usage: LLMTokenUsage,
@@ -186,6 +193,19 @@ pub struct AppState {
     pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
     pub interactive_shell_message_id: Option<Uuid>,
     pub shell_interaction_occurred: bool,
+
+    // ========== Side Panel State ==========
+    pub show_side_panel: bool,
+    pub side_panel_focus: SidePanelSection,
+    pub side_panel_section_collapsed: std::collections::HashMap<SidePanelSection, bool>,
+    /// Stores the screen area for each side panel section to handle mouse clicks
+    pub side_panel_areas: HashMap<SidePanelSection, ratatui::layout::Rect>,
+    /// Current session ID for backup paths
+    pub session_id: String,
+    pub changeset: Changeset,
+
+    pub todos: Vec<TodoItem>,
+    pub session_start_time: std::time::Instant,
 }
 
 pub struct AppStateOptions<'a> {
@@ -328,9 +348,7 @@ impl AppState {
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
-            mouse_capture_enabled: crate::services::detect_term::is_unsupported_terminal(
-                &crate::services::detect_term::detect_terminal().emulator,
-            ), // Start with mouse capture enabled only for supported terminals
+            mouse_capture_enabled: true, // Enable mouse capture by default for side panel interaction
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
@@ -375,6 +393,13 @@ impl AppState {
             command_palette_selected: 0,
             command_palette_scroll: 0,
             command_palette_search: String::new(),
+
+            // File changes popup initialization
+            show_file_changes_popup: false,
+            file_changes_selected: 0,
+            file_changes_scroll: 0,
+            file_changes_search: String::new(),
+
             // Usage tracking
             current_message_usage: LLMTokenUsage {
                 prompt_tokens: 0,
@@ -391,6 +416,22 @@ impl AppState {
             context_usage_percent: 0,
             agent_model,
             llm_model: None,
+
+            // Side panel initialization
+            show_side_panel: false,
+            side_panel_focus: SidePanelSection::Context,
+            side_panel_section_collapsed: {
+                let mut collapsed = std::collections::HashMap::new();
+                collapsed.insert(SidePanelSection::Context, false); // Always expanded
+                collapsed.insert(SidePanelSection::Todos, false); // Expanded by default
+                collapsed.insert(SidePanelSection::Changeset, false); // Expanded by default
+                collapsed
+            },
+            side_panel_areas: HashMap::new(),
+            changeset: Changeset::new(),
+            todos: Vec::new(),
+            session_start_time: std::time::Instant::now(),
+            session_id: String::new(), // Will be set when session starts
         }
     }
 

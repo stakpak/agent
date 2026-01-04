@@ -81,7 +81,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::ShowProfileSwitcher)
                 }
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::CursorLeft)
+                    Some(InputEvent::ToggleSidePanel)
                 }
                 KeyCode::Char('<') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorPrevWord)
@@ -159,6 +159,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
         Event::Mouse(me) => match me.kind {
             MouseEventKind::ScrollUp => Some(InputEvent::ScrollUp),
             MouseEventKind::ScrollDown => Some(InputEvent::ScrollDown),
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                Some(InputEvent::MouseClick(me.column, me.row))
+            }
             _ => None,
         },
         Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),

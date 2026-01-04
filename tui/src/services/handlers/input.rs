@@ -146,6 +146,24 @@ pub fn handle_input_submitted_event(
         state.approval_popup.escape();
         return;
     }
+
+    // If side panel is visible and input is empty, Enter toggles the focused section
+    if state.show_side_panel && state.text_area.text().is_empty() {
+        use crate::services::changeset::SidePanelSection;
+        // Context section cannot be collapsed
+        if state.side_panel_focus != SidePanelSection::Context {
+            let current = state
+                .side_panel_section_collapsed
+                .get(&state.side_panel_focus)
+                .copied()
+                .unwrap_or(false);
+            state
+                .side_panel_section_collapsed
+                .insert(state.side_panel_focus, !current);
+        }
+        return;
+    }
+
     if !state.is_pasting {
         handle_input_submitted(
             state,

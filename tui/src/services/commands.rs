@@ -420,6 +420,7 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
+
         _ => Err(format!("Unknown command: {}", command_id)),
     }
 }

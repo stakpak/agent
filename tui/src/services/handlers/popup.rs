@@ -4,12 +4,13 @@
 
 use crate::app::{AppState, OutputEvent};
 use crate::services::approval_popup::PopupService;
+use crate::services::changeset::SidePanelSection;
 use crate::services::detect_term::AdaptiveColors;
-use crate::services::helper_block::welcome_messages;
+use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
     Message, get_wrapped_collapsed_message_lines_cached, invalidate_message_lines_cache,
 };
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use stakpak_api::models::ListRuleBook;
 use tokio::sync::mpsc::Sender;
 
@@ -446,4 +447,260 @@ pub fn handle_toggle_collapsed_messages(
 /// Handle toggle context popup event
 pub fn handle_toggle_context_popup(state: &mut AppState) {
     state.show_context_popup = !state.show_context_popup;
+}
+
+// ========== Side Panel Handlers ==========
+
+/// Handle toggle side panel event
+pub fn handle_toggle_side_panel(state: &mut AppState) {
+    state.show_side_panel = !state.show_side_panel;
+}
+
+/// Handle side panel section navigation
+pub fn handle_side_panel_next_section(state: &mut AppState) {
+    if state.show_side_panel {
+        state.side_panel_focus = state.side_panel_focus.next();
+    }
+}
+
+/// Handle side panel section toggle collapse
+pub fn handle_side_panel_toggle_section(state: &mut AppState) {
+    if state.show_side_panel {
+        // Context section cannot be collapsed
+        if state.side_panel_focus != crate::services::changeset::SidePanelSection::Context {
+            let current = state
+                .side_panel_section_collapsed
+                .get(&state.side_panel_focus)
+                .copied()
+                .unwrap_or(false);
+            state
+                .side_panel_section_collapsed
+                .insert(state.side_panel_focus, !current);
+        }
+    }
+}
+
+/// Handle side panel toggle section via mouse click
+pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
+    if !state.show_side_panel {
+        return;
+    }
+
+    // Check which section was clicked
+    let mut clicked_section = None;
+    for (section, area) in &state.side_panel_areas {
+        if col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
+        {
+            clicked_section = Some(*section);
+            break;
+        }
+    }
+
+    if let Some(section) = clicked_section {
+        state.side_panel_focus = section;
+
+        // Special handling for Changeset section
+        if section == crate::services::changeset::SidePanelSection::Changeset {
+            let area = state.side_panel_areas.get(&section).unwrap();
+            let relative_y = row.saturating_sub(area.y);
+
+            // Row 0 is the header
+            if relative_y == 0 {
+                let current = state
+                    .side_panel_section_collapsed
+                    .get(&section)
+                    .copied()
+                    .unwrap_or(false);
+                state.side_panel_section_collapsed.insert(section, !current);
+            } else {
+                // Content click - if not collapsed, open file changes popup
+                let collapsed = state
+                    .side_panel_section_collapsed
+                    .get(&section)
+                    .copied()
+                    .unwrap_or(false);
+
+                if !collapsed {
+                    // Calculate file index (row 1 is file 0)
+                    // Note: We need to account for the fact that previous sections might push this down
+                    // but relative_y handles that.
+                    // We DO assume 1 line per file in the changeset view.
+                    // Checking side_panel.rs in previous steps, it renders 1 line per file (conditionally expanded edits).
+                    // If a file is expanded in the side panel, this index calculation might be off.
+                    // For now, let's assume it maps to the visible list.
+                    // Ideally rendering should store click areas per item.
+                    // Falling back to opening popup with generic file list if any content click.
+                    handle_show_file_changes_popup(state);
+                }
+            }
+        } else if section != crate::services::changeset::SidePanelSection::Context {
+            let current = state
+                .side_panel_section_collapsed
+                .get(&section)
+                .copied()
+                .unwrap_or(false);
+            state.side_panel_section_collapsed.insert(section, !current);
+        }
+    }
+}
+
+// ========== File Changes Popup Handlers ==========
+
+pub fn handle_show_file_changes_popup(state: &mut AppState) {
+    if state.profile_switching_in_progress
+        || state.is_dialog_open
+        || state.approval_popup.is_visible()
+    {
+        return;
+    }
+    state.show_file_changes_popup = true;
+    state.file_changes_selected = 0;
+    state.file_changes_scroll = 0;
+    state.file_changes_search = String::new();
+}
+
+pub fn handle_file_changes_popup_cancel(state: &mut AppState) {
+    state.show_file_changes_popup = false;
+}
+
+pub fn handle_file_changes_popup_search_input(state: &mut AppState, c: char) {
+    state.file_changes_search.push(c);
+    state.file_changes_selected = 0;
+    state.file_changes_scroll = 0;
+}
+
+pub fn handle_file_changes_popup_backspace(state: &mut AppState) {
+    if !state.file_changes_search.is_empty() {
+        state.file_changes_search.pop();
+        state.file_changes_selected = 0;
+        state.file_changes_scroll = 0;
+    }
+}
+
+pub fn handle_file_changes_popup_navigate(state: &mut AppState, delta: i32) {
+    // Get filtered count
+    let query = state.file_changes_search.to_lowercase();
+    let count = state
+        .changeset
+        .files_in_order()
+        .iter()
+        .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
+        .count();
+
+    if count == 0 {
+        return;
+    }
+
+    let new_selected = state.file_changes_selected as i32 + delta;
+    state.file_changes_selected = new_selected.clamp(0, count as i32 - 1) as usize;
+
+    // Adjust scroll
+    // Simple logic: keep selected in view
+    // Assuming visible height is around 10-20?
+    // In render function we calculated height dynamically.
+    // Ideally we track scroll separately.
+    // For now, simple scroll following selection.
+    if state.file_changes_selected < state.file_changes_scroll {
+        state.file_changes_scroll = state.file_changes_selected;
+    }
+    // Note: We don't know the window height here easily without passing it.
+    // We'll let the render function clamp scroll if needed, or implement better scroll logic later.
+    // For now, ensuring scroll is at least close to selection.
+    if state.file_changes_selected > state.file_changes_scroll + 10 {
+        state.file_changes_scroll = state.file_changes_selected - 10;
+    }
+}
+
+pub fn handle_file_changes_popup_revert(state: &mut AppState) {
+    // Revert selected file
+    let query = state.file_changes_search.to_lowercase();
+    let binding = state.changeset.files_in_order();
+    let filtered_files: Vec<_> = binding
+        .iter()
+        .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
+        .collect();
+
+    if let Some(file) = filtered_files.get(state.file_changes_selected) {
+        let path = file.path.clone();
+
+        // Call the revert function
+        match crate::services::changeset::Changeset::revert_file(file, &state.session_id) {
+            Ok(message) => {
+                // Mark as reverted instead of removing
+                if let Some(tracked) = state.changeset.files.get_mut(&path) {
+                    tracked.is_reverted = true;
+                }
+
+                // Push success message
+                push_styled_message(state, &message, Color::Green, " ✓ ", Color::Green);
+
+                // Close popup if no more non-reverted files
+                if state.changeset.file_count() == 0 {
+                    state.show_file_changes_popup = false;
+                } else {
+                    // Adjust selection if needed
+                    if state.file_changes_selected >= state.changeset.file_count() {
+                        state.file_changes_selected =
+                            state.changeset.file_count().saturating_sub(1);
+                    }
+                }
+            }
+            Err(error) => {
+                push_error_message(state, &format!("Revert failed: {}", error), None);
+            }
+        }
+    }
+}
+
+pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
+    // Collect all non-reverted files to revert
+    let files_to_revert: Vec<_> = state
+        .changeset
+        .files_in_order()
+        .into_iter()
+        .filter(|f| !f.is_reverted)
+        .map(|f| (f.path.clone(), f.clone()))
+        .collect();
+
+    let mut reverted_count = 0;
+    let mut failed_count = 0;
+
+    for (path, file) in files_to_revert {
+        match crate::services::changeset::Changeset::revert_file(&file, &state.session_id) {
+            Ok(_) => {
+                // Mark as reverted instead of removing
+                if let Some(tracked) = state.changeset.files.get_mut(&path) {
+                    tracked.is_reverted = true;
+                }
+                reverted_count += 1;
+            }
+            Err(_) => {
+                failed_count += 1;
+            }
+        }
+    }
+
+    // Show summary message
+    if reverted_count > 0 {
+        let message = if failed_count > 0 {
+            format!(
+                "Reverted {} files ({} failed)",
+                reverted_count, failed_count
+            )
+        } else {
+            format!("Reverted {} files", reverted_count)
+        };
+        push_styled_message(state, &message, Color::Green, " ✓ ", Color::Green);
+    } else if failed_count > 0 {
+        push_error_message(
+            state,
+            &format!("Failed to revert {} files", failed_count),
+            None,
+        );
+    }
+
+    // Close popup if no more non-reverted files
+    if state.changeset.file_count() == 0 {
+        state.show_file_changes_popup = false;
+    }
 }

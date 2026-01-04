@@ -9,9 +9,10 @@ use crate::services::message::{
 use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
 use crate::services::shell_popup;
+use crate::services::side_panel;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -19,8 +20,26 @@ use ratatui::{
 use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
+    // First, handle the horizontal split for the side panel
+    let (main_area, side_panel_area) = if state.show_side_panel {
+        // Fixed width of 35 characters for side panel
+        let panel_width = 35u16;
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(panel_width)])
+            .split(f.area());
+        (horizontal_chunks[0], Some(horizontal_chunks[1]))
+    } else {
+        (f.area(), None)
+    };
+
+    // Render side panel if visible
+    if let Some(panel_area) = side_panel_area {
+        side_panel::render_side_panel(f, state, panel_area);
+    }
+
     // Calculate the required height for the input area based on content
-    let input_area_width = f.area().width.saturating_sub(4) as usize;
+    let input_area_width = main_area.width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
@@ -59,7 +78,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
     // Calculate shell popup height (goes above input)
-    let shell_popup_height = shell_popup::calculate_popup_height(state, f.area().height);
+    let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
     // Hide input when shell popup is expanded (takes over input)
     let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
@@ -81,10 +100,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         constraints.push(Constraint::Length(dropdown_height));
     }
     constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
-    let chunks = ratatui::layout::Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.area());
+        .split(main_area);
 
     let message_area = chunks[0];
     let loading_area = chunks[1]; // Reserved line for loading indicator
@@ -184,6 +203,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render profile switcher
     if state.show_profile_switcher {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
+    }
+
+    // Render file changes popup
+    if state.show_file_changes_popup {
+        crate::services::file_changes_popup::render_file_changes_popup(f, state);
     }
 
     // Render shortcuts popup

@@ -329,3 +329,246 @@ pub fn execute_command_palette_selection(
         state.show_helper_dropdown = false;
     }
 }
+
+/// Handle completed tool result event
+pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
+    use crate::services::changeset::FileEdit;
+    use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
+
+    // Debug log to check if handler is reached
+    state.messages.push(Message::info(
+        format!(
+            "DEBUG: handle_tool_result called for {}",
+            result.call.function.name
+        ),
+        None,
+    ));
+
+    // Only process successful tool calls
+    if result.status != ToolCallResultStatus::Success {
+        state.messages.push(Message::info(
+            "DEBUG: Tool call failed, skipping changeset update",
+            None,
+        ));
+        return;
+    }
+
+    let function_name = result.call.function.name.as_str();
+    let args_str = &result.call.function.arguments;
+
+    // Parse arguments
+    let args: serde_json::Value = match serde_json::from_str(args_str) {
+        Ok(v) => v,
+        Err(e) => {
+            state.messages.push(Message::info(
+                format!("DEBUG: Failed to parse args for {}: {}", function_name, e),
+                None,
+            ));
+            return;
+        } // Should not happen if tool call was successful
+    };
+
+    state.messages.push(Message::info(
+        format!("DEBUG: Processing function: {}", function_name),
+        None,
+    ));
+
+    // Normalize/Strip tool name for checking
+    let tool_name_stripped = crate::utils::strip_tool_name(function_name);
+
+    match tool_name_stripped {
+        "write_to_file" | "create" | "create_file" => {
+            if let Some(path) = args
+                .get("TargetFile")
+                .or(args.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                state.messages.push(Message::info(
+                    format!("DEBUG: write_to_file tracking path: {}", path),
+                    None,
+                ));
+                let code_content = args
+                    .get("CodeContent")
+                    .or(args.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let is_overwrite = args
+                    .get("Overwrite")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let line_count = code_content.lines().count();
+
+                let summary = if is_overwrite {
+                    "Overwrote file"
+                } else {
+                    "Created file"
+                };
+
+                let edit = FileEdit::new(summary.to_string())
+                    .with_stats(line_count, 0)
+                    .with_tool_call(result.call.clone());
+
+                // Only track if file still exists (important for resumed sessions)
+                if std::path::Path::new(path).exists() {
+                    state.changeset.track_file(path, edit);
+                }
+            } else {
+                state.messages.push(Message::info(
+                    "DEBUG: write_to_file missing TargetFile/path",
+                    None,
+                ));
+            }
+        }
+        "replace_file_content" | "multi_replace_file_content" | "str_replace" | "edit_file" => {
+            if let Some(path) = args
+                .get("TargetFile")
+                .or(args.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                state.messages.push(Message::info(
+                    format!("DEBUG: {} tracking path: {}", function_name, path),
+                    None,
+                ));
+                
+                // Only track if file still exists (important for resumed sessions)
+                if !std::path::Path::new(path).exists() {
+                    return;
+                }
+                
+                // For str_replace, check if the changes are still present in the file
+                // This prevents tracking reverted or manually edited files
+                if tool_name_stripped == "str_replace" {
+                    if let Some(new_str) = args.get("new_str").and_then(|v| v.as_str()) {
+                        if let Ok(current_content) = std::fs::read_to_string(path) {
+                            if !current_content.contains(new_str) {
+                                // File was reverted or manually edited, don't track it
+                                state.messages.push(Message::info(
+                                    format!("DEBUG: Skipping {} - changes not present in file", path),
+                                    None,
+                                ));
+                                return;
+                            }
+                        }
+                    }
+                }
+                
+                // Parse diff from the result message
+                let (added, removed) = parse_diff_stats(&result.result);
+
+                let summary = if tool_name_stripped == "replace_file_content"
+                    || tool_name_stripped == "str_replace"
+                {
+                    "Edited file"
+                } else {
+                    "Multi-edit file"
+                };
+
+                // Extract diff preview - first few lines of the diff block
+                let diff_preview = extract_diff_preview(&result.result);
+
+                let mut edit = FileEdit::new(summary.to_string())
+                    .with_stats(added, removed)
+                    .with_tool_call(result.call.clone());
+
+                if let Some(preview) = diff_preview {
+                    edit = edit.with_diff_preview(preview);
+                }
+
+                state.changeset.track_file(path, edit);
+            } else {
+                state.messages.push(Message::info(
+                    format!("DEBUG: {} missing TargetFile/path", function_name),
+                    None,
+                ));
+            }
+        }
+        "remove_file" | "delete_file" => {
+            // Assuming remove_file takes "path" or "TargetFile"
+            if let Some(path) = args
+                .get("path")
+                .or(args.get("TargetFile"))
+                .and_then(|v| v.as_str())
+            {
+                state.messages.push(Message::info(
+                    format!("DEBUG: remove_file tracking path: {}", path),
+                    None,
+                ));
+                // For removal, we don't know lines removed without reading, just mark as deleted
+                state.changeset.mark_deleted(path, None);
+            } else {
+                state
+                    .messages
+                    .push(Message::info("DEBUG: remove_file missing path", None));
+            }
+        }
+        _ => {
+            state.messages.push(Message::info(
+                format!("DEBUG: Unhandled function: {}", function_name),
+                None,
+            ));
+        }
+    }
+}
+
+/// Parse added/removed lines from a diff string
+fn parse_diff_stats(message: &str) -> (usize, usize) {
+    let mut added = 0;
+    let mut removed = 0;
+    let mut in_diff_block = false;
+
+    for line in message.lines() {
+        if line.trim().starts_with("```diff") {
+            in_diff_block = true;
+            continue;
+        }
+        if line.trim().starts_with("```") && in_diff_block {
+            in_diff_block = false;
+            continue;
+        }
+
+        if in_diff_block {
+            // Skip diff headers
+            if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+                continue;
+            }
+
+            if line.starts_with('+') {
+                added += 1;
+            } else if line.starts_with('-') {
+                removed += 1;
+            }
+        }
+    }
+
+    (added, removed)
+}
+
+/// Extract the first few lines of the diff for preview
+fn extract_diff_preview(message: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut in_diff_block = false;
+
+    for line in message.lines() {
+        if line.trim().starts_with("```diff") {
+            in_diff_block = true;
+            continue;
+        }
+        if line.trim().starts_with("```") && in_diff_block {
+            break;
+        }
+
+        if in_diff_block {
+            lines.push(line);
+            if lines.len() >= 5 {
+                // Keep only first 5 lines
+                break;
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}

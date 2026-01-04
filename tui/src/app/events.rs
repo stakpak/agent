@@ -121,6 +121,12 @@ pub enum InputEvent {
 
     // Model events
     StreamModel(LLMModel),
+
+    // Side panel events
+    ToggleSidePanel,
+    SidePanelNextSection,
+    SidePanelToggleSection,
+    MouseClick(u16, u16),
 }
 
 #[derive(Debug)]

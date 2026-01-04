@@ -229,6 +229,8 @@ impl Message {
     pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
         let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
             && tool_call_result.result.lines().count() > 3;
+        eprintln!("is_collapsed: {}", is_collapsed);
+        eprintln!("tool_call_result: {:#?}", tool_call_result);
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderResultBorderBlock(tool_call_result),

@@ -124,6 +124,12 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
+    // If side panel is visible and input is empty, cycle sections
+    if state.show_side_panel && state.text_area.text().is_empty() {
+        state.side_panel_focus = state.side_panel_focus.next();
+        return;
+    }
+
     // Check if we're already in helper dropdown mode
     if state.show_helper_dropdown {
         // If in file file_search mode, handle file selection
