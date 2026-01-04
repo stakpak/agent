@@ -145,7 +145,7 @@ impl Changeset {
     /// Track a file modification
     pub fn track_file(&mut self, path: &str, edit: FileEdit) {
         // Check if this is a file creation based on tool call
-        let is_creation = edit.tool_call.as_ref().map_or(false, |tc| {
+        let is_creation = edit.tool_call.as_ref().is_some_and(|tc| {
             tc.function.name == "stakpak__create" || tc.function.name == "stakpak__write"
         });
 

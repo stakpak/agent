@@ -173,40 +173,79 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         // Stats
         let added = file.total_lines_added();
         let removed = file.total_lines_removed();
-        
+
         let added_str = format!("+{}", added);
         let removed_str = format!("-{}", removed);
         let revert_icon = "↩"; // display width usually 1
 
         // Calculate spacing
         let name = file.display_name();
-        
+
         // Ensure stats take up fixed width or just right align?
         // Right align within the row: spacing between name and stats.
         // We have 1 char padding left, 1 char padding right.
         // len = 1 + name.len() + spacing + added.len() + 1 + removed.len() + 1 + icon.len() + 1
-        
+
         // Check if file is reverted
         let (stats_spans, stats_len) = if file.is_reverted {
             // Show "REVERTED" in dark gray instead of stats
             let reverted_text = " REVERTED";
-            let reverted_span = Span::styled(reverted_text, Style::default().fg(Color::DarkGray).bg(bg_color));
-            (vec![reverted_span, Span::styled(" ", Style::default().bg(bg_color))], reverted_text.len() + 1)
+            let reverted_span = Span::styled(
+                reverted_text,
+                Style::default().fg(Color::DarkGray).bg(bg_color),
+            );
+            (
+                vec![
+                    reverted_span,
+                    Span::styled(" ", Style::default().bg(bg_color)),
+                ],
+                reverted_text.len() + 1,
+            )
         } else {
             // Show normal stats
             let stats_len_calc = added_str.len() + 1 + removed_str.len() + 1 + 1; // 1 for visual width of "↩"
-            (vec![
-                Span::styled(added_str, Style::default().fg(if is_selected { Color::Black} else { Color::Green }).bg(bg_color)),
-                Span::styled(" ", Style::default().bg(bg_color)),
-                Span::styled(removed_str, Style::default().fg(if is_selected { Color::Black } else { Color::Red }).bg(bg_color)),
-                Span::styled(" ", Style::default().bg(bg_color)),
-                Span::styled(revert_icon, Style::default().fg(if is_selected { Color::Black } else { Color::Blue }).bg(bg_color)),
-                Span::styled(" ", Style::default().bg(bg_color)), // padding Right
-            ], stats_len_calc)
+            (
+                vec![
+                    Span::styled(
+                        added_str,
+                        Style::default()
+                            .fg(if is_selected {
+                                Color::Black
+                            } else {
+                                Color::Green
+                            })
+                            .bg(bg_color),
+                    ),
+                    Span::styled(" ", Style::default().bg(bg_color)),
+                    Span::styled(
+                        removed_str,
+                        Style::default()
+                            .fg(if is_selected {
+                                Color::Black
+                            } else {
+                                Color::Red
+                            })
+                            .bg(bg_color),
+                    ),
+                    Span::styled(" ", Style::default().bg(bg_color)),
+                    Span::styled(
+                        revert_icon,
+                        Style::default()
+                            .fg(if is_selected {
+                                Color::Black
+                            } else {
+                                Color::Blue
+                            })
+                            .bg(bg_color),
+                    ),
+                    Span::styled(" ", Style::default().bg(bg_color)), // padding Right
+                ],
+                stats_len_calc,
+            )
         };
-        
+
         let available_content_width = inner_area.width as usize; // Full inner width
-        
+
         // Padding L (1) + Name + Spacing + Stats + Padding R (1) = Width
         // Spacing = Width - 2 - Name - Stats
         let spacing = available_content_width.saturating_sub(2 + name.len() + stats_len);

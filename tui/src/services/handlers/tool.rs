@@ -429,29 +429,27 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     format!("DEBUG: {} tracking path: {}", function_name, path),
                     None,
                 ));
-                
+
                 // Only track if file still exists (important for resumed sessions)
                 if !std::path::Path::new(path).exists() {
                     return;
                 }
-                
+
                 // For str_replace, check if the changes are still present in the file
                 // This prevents tracking reverted or manually edited files
-                if tool_name_stripped == "str_replace" {
-                    if let Some(new_str) = args.get("new_str").and_then(|v| v.as_str()) {
-                        if let Ok(current_content) = std::fs::read_to_string(path) {
-                            if !current_content.contains(new_str) {
-                                // File was reverted or manually edited, don't track it
-                                state.messages.push(Message::info(
-                                    format!("DEBUG: Skipping {} - changes not present in file", path),
-                                    None,
-                                ));
-                                return;
-                            }
-                        }
-                    }
+                if tool_name_stripped == "str_replace"
+                    && let Some(new_str) = args.get("new_str").and_then(|v| v.as_str())
+                    && let Ok(current_content) = std::fs::read_to_string(path)
+                    && !current_content.contains(new_str)
+                {
+                    // File was reverted or manually edited, don't track it
+                    state.messages.push(Message::info(
+                        format!("DEBUG: Skipping {} - changes not present in file", path),
+                        None,
+                    ));
+                    return;
                 }
-                
+
                 // Parse diff from the result message
                 let (added, removed) = parse_diff_stats(&result.result);
 

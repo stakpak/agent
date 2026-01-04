@@ -292,9 +292,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
             let prefix = if file.is_expanded { "▾" } else { "▸" };
             let deleted_marker = if file.is_deleted { " [del]" } else { "" };
 
-            let added = file.total_lines_added();
-            let removed = file.total_lines_removed();
-            let stats = format!("+{} -{}", added, removed);
+
 
             // File Name Style: DarkGray unless selected or deleted
             let name_style = if is_selected {
@@ -321,20 +319,27 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
             let (stats_spans, stats_len) = if file.is_reverted {
                 // Show "REVERTED" in dark gray instead of stats
                 let reverted_text = "REVERTED";
-                (vec![
-                    Span::styled(reverted_text, Style::default().fg(Color::DarkGray)),
-                ], reverted_text.len())
+                (
+                    vec![Span::styled(
+                        reverted_text,
+                        Style::default().fg(Color::DarkGray),
+                    )],
+                    reverted_text.len(),
+                )
             } else {
                 // Show normal stats
                 let added = file.total_lines_added();
                 let removed = file.total_lines_removed();
                 let stats = format!("+{} -{}", added, removed);
                 let stats_len_calc = stats.len();
-                (vec![
-                    Span::styled(format!("+{}", added), Style::default().fg(Color::Green)),
-                    Span::raw(" "),
-                    Span::styled(format!("-{}", removed), Style::default().fg(Color::Red)),
-                ], stats_len_calc)
+                (
+                    vec![
+                        Span::styled(format!("+{}", added), Style::default().fg(Color::Green)),
+                        Span::raw(" "),
+                        Span::styled(format!("-{}", removed), Style::default().fg(Color::Red)),
+                    ],
+                    stats_len_calc,
+                )
             };
 
             let available_width = area.width as usize;
@@ -343,7 +348,8 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
             let truncated_name = truncate_string(&combined_name, space_for_name);
 
             // Calculate spacing using visual lengths
-            let spacing = available_width.saturating_sub(prefix_visual_len + truncated_name.len() + stats_len);
+            let spacing = available_width
+                .saturating_sub(prefix_visual_len + truncated_name.len() + stats_len);
 
             let mut line_spans = vec![
                 Span::styled(prefix_part, Style::default().fg(Color::DarkGray)),
@@ -427,7 +433,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     // Line 2+: CWD without label, wrapping
     lines.push(Line::from(vec![
         Span::styled(
-            format!("{}", LEFT_PADDING),
+            LEFT_PADDING.to_string(),
             Style::default().fg(Color::Reset),
         ),
         Span::styled(&cwd, Style::default().fg(Color::DarkGray)),

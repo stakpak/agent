@@ -4,7 +4,6 @@
 
 use crate::app::{AppState, OutputEvent};
 use crate::services::approval_popup::PopupService;
-use crate::services::changeset::SidePanelSection;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
@@ -501,7 +500,9 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
 
         // Special handling for Changeset section
         if section == crate::services::changeset::SidePanelSection::Changeset {
-            let area = state.side_panel_areas.get(&section).unwrap();
+            let Some(area) = state.side_panel_areas.get(&section) else {
+                return;
+            };
             let relative_y = row.saturating_sub(area.y);
 
             // Row 0 is the header
