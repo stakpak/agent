@@ -200,7 +200,7 @@ pub struct AnthropicMessage {
 }
 
 /// Anthropic response
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnthropicResponse {
     pub id: String,
     #[serde(rename = "type")]
@@ -324,7 +324,7 @@ pub struct AnthropicSource {
 }
 
 /// Anthropic usage statistics
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnthropicUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,

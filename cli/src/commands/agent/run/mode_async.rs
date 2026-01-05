@@ -65,8 +65,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;
     let mcp_tools = mcp_init_result.mcp_tools;
-    let _server_shutdown_tx = mcp_init_result.server_shutdown_tx;
-    let _proxy_shutdown_tx = mcp_init_result.proxy_shutdown_tx;
+    let server_shutdown_tx = mcp_init_result.server_shutdown_tx;
+    let proxy_shutdown_tx = mcp_init_result.proxy_shutdown_tx;
 
     // Filter tools if allowed_tools is specified
     let tools = if let Some(allowed) = &config.allowed_tools {
@@ -405,6 +405,17 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             renderer.render_info("No checkpoint available to save")
         );
     }
+
+    // Gracefully shutdown MCP server and proxy
+    print!(
+        "{}",
+        renderer.render_info("Shutting down MCP server and proxy...")
+    );
+    let _ = server_shutdown_tx.send(());
+    let _ = proxy_shutdown_tx.send(());
+    // Give the servers a moment to cleanup
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    print!("{}", renderer.render_success("Shutdown complete"));
 
     Ok(())
 }
