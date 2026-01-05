@@ -115,7 +115,7 @@ pub struct ChatChoice {
 }
 
 /// OpenAI usage statistics
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -123,7 +123,7 @@ pub struct ChatUsage {
 }
 
 /// OpenAI streaming chunk
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct ChatCompletionChunk {
     pub id: String,
@@ -136,7 +136,7 @@ pub struct ChatCompletionChunk {
 }
 
 /// OpenAI chunk choice
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct ChunkChoice {
     pub index: u32,
@@ -145,7 +145,7 @@ pub struct ChunkChoice {
 }
 
 /// OpenAI delta content
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChatDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -156,7 +156,7 @@ pub struct ChatDelta {
 }
 
 /// OpenAI tool call delta (for streaming)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct OpenAIToolCallDelta {
     pub index: u32,
@@ -169,7 +169,7 @@ pub struct OpenAIToolCallDelta {
 }
 
 /// OpenAI function call delta
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OpenAIFunctionCallDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
