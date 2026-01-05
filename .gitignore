@@ -4,3 +4,6 @@ debug.log
 
 # Stakpak local files
 .stakpak
+
+# IDE
+.idea/

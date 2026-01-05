@@ -172,7 +172,7 @@ fn build_proxy_config(
         "stakpak".to_string(),
         ServerConfig::Http {
             url: local_server_url,
-            headers: None,
+            headers: std::collections::HashMap::new(),
             certificate_chain: server_cert_chain,
         },
     );
@@ -182,7 +182,7 @@ fn build_proxy_config(
         "paks".to_string(),
         ServerConfig::Http {
             url: "https://apiv2.stakpak.dev/v1/paks/mcp".to_string(),
-            headers: None,
+            headers: std::collections::HashMap::new(),
             certificate_chain: Arc::new(None),
         },
     );
@@ -244,6 +244,7 @@ async fn connect_to_proxy(
         match stakpak_mcp_client::connect_https(
             proxy_url,
             Some(cert_chain.clone()),
+            std::collections::HashMap::new(),
             progress_tx.clone(),
         )
         .await
