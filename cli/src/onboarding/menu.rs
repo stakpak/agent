@@ -60,7 +60,12 @@ fn select_option_internal<T: Clone>(
 
             // Render options
             for (idx, (_, name, is_recommended)) in filtered.iter().enumerate() {
-                styled_output::render_option(name, idx == selected, *is_recommended);
+                let display_name = if *name == "Anthropic" && idx == selected {
+                    format!("{} {}(Claude Pro/Max or API key)", name, Colors::GRAY)
+                } else {
+                    name.to_string()
+                };
+                styled_output::render_option(&display_name, idx == selected, *is_recommended);
                 current_height += 1;
             }
         } else {

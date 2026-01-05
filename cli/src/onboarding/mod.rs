@@ -124,7 +124,11 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                     "Use Stakpak API (recommended)",
                     true,
                 ),
-                (InitialChoice::OwnKeys, "Use my own Model/API Key", false),
+                (
+                    InitialChoice::OwnKeys,
+                    "Use my own Model/API Key (or Claude Pro/Max Subscription)",
+                    false,
+                ),
             ],
             0,
             2,

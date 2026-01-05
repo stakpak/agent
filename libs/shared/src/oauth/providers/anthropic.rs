@@ -74,6 +74,33 @@ impl AnthropicProvider {
 
         Ok(result.raw_key)
     }
+
+    /// Helper to decode JWT payload (without verification)
+    fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+        let payload_part = parts[1];
+        let decoded = match engine.decode(payload_part) {
+            Ok(d) => d,
+            Err(_) => {
+                let rem = payload_part.len() % 4;
+                if rem > 0 {
+                    let padded = format!("{}{}", payload_part, "=".repeat(4 - rem));
+                    engine.decode(&padded).ok()?
+                } else {
+                    return None;
+                }
+            }
+        };
+
+        serde_json::from_slice(&decoded).ok()
+    }
 }
 
 impl Default for AnthropicProvider {
@@ -137,10 +164,24 @@ impl OAuthProvider for AnthropicProvider {
             "claude-max" => {
                 // Return OAuth tokens for direct API use
                 let expires = chrono::Utc::now().timestamp_millis() + (tokens.expires_in * 1000);
-                Ok(ProviderAuth::oauth(
+
+                // Try to determine subscription tier from JWT claims
+                let mut name = "Claude Pro/Max".to_string();
+                if let Some(claims) = Self::decode_jwt_payload(&tokens.access_token)
+                    && let Some(tier) = claims.get("tier").and_then(|v| v.as_str())
+                {
+                    match tier {
+                        "pro" => name = "Claude Pro".to_string(),
+                        "max" => name = "Claude Max".to_string(),
+                        _ => {} // Keep default
+                    }
+                }
+
+                Ok(ProviderAuth::oauth_with_name(
                     &tokens.access_token,
                     &tokens.refresh_token,
                     expires,
+                    name,
                 ))
             }
             "console" => {
@@ -285,5 +326,67 @@ mod tests {
     fn test_api_key_env_var() {
         let provider = AnthropicProvider::new();
         assert_eq!(provider.api_key_env_var(), Some("ANTHROPIC_API_KEY"));
+    }
+
+    #[tokio::test]
+    async fn test_post_authorize_claude_pro() {
+        let provider = AnthropicProvider::new();
+
+        // Create a dummy JWT with "tier": "pro"
+        let payload = r#"{"sub":"123","tier":"pro"}"#;
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let encoded_payload = engine.encode(payload);
+        let token = format!("header.{}.signature", encoded_payload);
+
+        let tokens = TokenResponse {
+            access_token: token,
+            refresh_token: "refresh".to_string(),
+            expires_in: 3600,
+            token_type: "Bearer".to_string(),
+        };
+
+        let auth = provider
+            .post_authorize("claude-max", &tokens)
+            .await
+            .unwrap();
+
+        match auth {
+            ProviderAuth::OAuth { name, .. } => {
+                assert_eq!(name, Some("Claude Pro".to_string()));
+            }
+            _ => panic!("Expected OAuth auth"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_authorize_claude_max() {
+        let provider = AnthropicProvider::new();
+
+        // Create a dummy JWT with "tier": "max"
+        let payload = r#"{"sub":"123","tier":"max"}"#;
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let encoded_payload = engine.encode(payload);
+        let token = format!("header.{}.signature", encoded_payload);
+
+        let tokens = TokenResponse {
+            access_token: token,
+            refresh_token: "refresh".to_string(),
+            expires_in: 3600,
+            token_type: "Bearer".to_string(),
+        };
+
+        let auth = provider
+            .post_authorize("claude-max", &tokens)
+            .await
+            .unwrap();
+
+        match auth {
+            ProviderAuth::OAuth { name, .. } => {
+                assert_eq!(name, Some("Claude Max".to_string()));
+            }
+            _ => panic!("Expected OAuth auth"),
+        }
     }
 }

@@ -120,6 +120,7 @@ pub async fn run_interactive(
         });
 
         let model_clone = model.clone();
+        let auth_display_info_for_tui = ctx.get_auth_display_info();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -136,6 +137,7 @@ pub async fn run_interactive(
                 current_profile_for_tui,
                 rulebook_config_for_tui,
                 model_clone,
+                auth_display_info_for_tui,
             )
             .await
             .map_err(|e| e.to_string())
