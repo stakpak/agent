@@ -4,6 +4,7 @@ use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
+use stakpak_shared::models::password::Password;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -43,7 +44,7 @@ pub struct RunCommandRequest {
     )]
     pub remote: Option<String>,
     #[schemars(description = "Optional password for remote connection")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(description = "Optional path to private key for remote connection")]
     pub private_key_path: Option<String>,
 }
@@ -91,7 +92,7 @@ pub struct ViewRequest {
     )]
     pub view_range: Option<[i32; 2]>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -119,7 +120,7 @@ pub struct StrReplaceRequest {
     )]
     pub replace_all: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -137,7 +138,7 @@ pub struct CreateRequest {
     )]
     pub file_text: String,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -146,10 +147,13 @@ pub struct CreateRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GeneratePasswordRequest {
-    #[schemars(description = "The length of the password to generate")]
+    #[schemars(
+        description = "The length of the password to generate (minimum: 8 characters, default: 15)",
+        range(min = 8)
+    )]
     pub length: Option<usize>,
-    #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
-    pub no_symbols: Option<bool>,
+    #[schemars(description = "Whether to include symbols in the password (default: true)")]
+    pub include_symbols: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -163,7 +167,7 @@ pub struct RemoveRequest {
     )]
     pub recursive: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -556,7 +560,6 @@ This tool enables proper task synchronization and coordination in complex workfl
             .await
         {
             Ok(tasks) => {
-                // <<<<<<< HEAD
                 let mut redacted_tasks: Vec<TaskInfo> = Vec::with_capacity(tasks.len());
                 for mut task in tasks {
                     if let Some(ref output) = task.output {
@@ -584,9 +587,6 @@ This tool enables proper task synchronization and coordination in complex workfl
                             None,
                         )
                     })?;
-                // =======
-                //                 let table = self.format_tasks_table(&tasks, &task_ids);
-                // >>>>>>> main
 
                 Ok(CallToolResult::success(vec![Content::text(table)]))
             }
@@ -860,13 +860,13 @@ SECRET HANDLING:
         description = "Generate a cryptographically secure password with the specified constraints. The generated password will be automatically redacted in the response for security.
 
 PARAMETERS:
-- length: The length of the password to generate (default: 15 characters)
-- no_symbols: Whether to exclude symbols from the password (default: false, includes symbols)
+- length: The length of the password to generate (minimum: 8 characters, default: 15)
+- include_symbols: Whether to include symbols in the password (default: true)
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
-- Numbers: 0-9 (always included)
-- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
+- Numbers: 0-9 (always included)  
+- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless include_symbols=false)
 
 SECURITY FEATURES:
 - Uses cryptographically secure random number generation
@@ -876,21 +876,21 @@ SECURITY FEATURES:
     )]
     pub async fn generate_password(
         &self,
-        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
-            GeneratePasswordRequest,
-        >,
+        Parameters(GeneratePasswordRequest {
+            length,
+            include_symbols,
+        }): Parameters<GeneratePasswordRequest>,
     ) -> Result<CallToolResult, McpError> {
         let length = length.unwrap_or(15);
-        let no_symbols = no_symbols.unwrap_or(false);
+        let include_symbols = include_symbols.unwrap_or(true);
 
-        let password = stakpak_shared::utils::generate_password(length, no_symbols);
-
+        // Delegate generation and redaction to the SecretManager actor
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(&password, &password)
+            .generate_password(length, include_symbols)
             .await
             .map_err(|e| {
-                McpError::internal_error(format!("Failed to redact password: {}", e), None)
+                McpError::internal_error(format!("Failed to generate password: {}", e), None)
             })?;
 
         Ok(CallToolResult::success(vec![Content::text(
@@ -1064,7 +1064,7 @@ SAFETY NOTES:
     async fn get_remote_connection(
         &self,
         path: &str,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
     ) -> Result<(Arc<RemoteConnection>, String), CallToolResult> {
         let path_location = PathLocation::parse(path).map_err(|e| {
@@ -1121,7 +1121,7 @@ SAFETY NOTES:
         command: &str,
         timeout: Option<u64>,
         remote: Option<String>,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
@@ -1428,7 +1428,6 @@ SAFETY NOTES:
                         }
                     };
 
-                    // <<<<<<< HEAD
                     let redacted_result = self
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(path))
@@ -1442,9 +1441,6 @@ SAFETY NOTES:
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
-                    // =======
-                    //                     Ok(CallToolResult::success(vec![Content::text(&result)]))
-                    // >>>>>>> main
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1516,7 +1512,6 @@ SAFETY NOTES:
                         }
                     };
 
-                    // <<<<<<< HEAD
                     let redacted_result = self
                         .get_secret_manager()
                         .redact_and_store_secrets(&result, Some(original_path))
@@ -1530,9 +1525,6 @@ SAFETY NOTES:
                     Ok(CallToolResult::success(vec![Content::text(
                         &redacted_result,
                     )]))
-                    // =======
-                    //                     Ok(CallToolResult::success(vec![Content::text(&result)]))
-                    // >>>>>>> main
                 }
                 Err(e) => Ok(CallToolResult::error(vec![
                     Content::text("READ_ERROR"),
@@ -1742,7 +1734,6 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
-        // <<<<<<< HEAD
         let redacted_output = self
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(original_path))
@@ -1754,9 +1745,6 @@ SAFETY NOTES:
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
         )]))
-        // =======
-        //         Ok(CallToolResult::success(vec![Content::text(&output)]))
-        // >>>>>>> main
     }
 
     /// Replace a specific string in a local file
@@ -1844,7 +1832,6 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
-        // <<<<<<< HEAD
         let redacted_output = self
             .get_secret_manager()
             .redact_and_store_secrets(&output, Some(path))
@@ -1856,9 +1843,6 @@ SAFETY NOTES:
         Ok(CallToolResult::success(vec![Content::text(
             redacted_output,
         )]))
-        // =======
-        //         Ok(CallToolResult::success(vec![Content::text(&output)]))
-        // >>>>>>> main
     }
 
     /// Create a remote file with the specified content

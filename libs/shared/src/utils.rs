@@ -1,9 +1,13 @@
 use crate::local_store::LocalStore;
 use async_trait::async_trait;
 use rand::Rng;
+use rand::seq::{IndexedRandom, SliceRandom};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::DirEntry;
+
+use crate::models::password::{Password, PasswordGenerationError};
 
 /// Read .gitignore patterns from the specified base directory
 pub fn read_gitignore_patterns(base_dir: &str) -> Vec<String> {
@@ -285,81 +289,116 @@ temp*
     }
 }
 
+const MAX_RETRIES: usize = 10;
+
 /// Generate a secure password with alphanumeric characters and optional symbols
-pub fn generate_password(length: usize, no_symbols: bool) -> String {
+pub fn generate_password(
+    length: usize,
+    include_symbols: bool,
+    redaction_map: &HashMap<String, String>,
+) -> Result<Password, PasswordGenerationError> {
+    // Validate length early to prevent potential underflow
+    if length < 8 {
+        tracing::error!(
+            "Password generation failed: length must be at least 8 characters, received {}",
+            length
+        );
+        return Err(PasswordGenerationError::TooShort);
+    }
+
     let mut rng = rand::rng();
 
     // Define character sets
-    let lowercase = "abcdefghijklmnopqrstuvwxyz";
-    let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let digits = "0123456789";
-    let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+    let lowercase = b"abcdefghijklmnopqrstuvwxyz";
+    let uppercase = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let digits = b"0123456789";
+    let symbols = b"!@#$%^&*()_+-=[]{}|;:,.<>?";
 
     // Build the character set based on options
-    let mut charset = String::new();
-    charset.push_str(lowercase);
-    charset.push_str(uppercase);
-    charset.push_str(digits);
+    let mut charset = Vec::new();
+    charset.extend_from_slice(lowercase);
+    charset.extend_from_slice(uppercase);
+    charset.extend_from_slice(digits);
 
-    if !no_symbols {
-        charset.push_str(symbols);
+    if include_symbols {
+        charset.extend_from_slice(symbols);
     }
 
-    let charset_chars: Vec<char> = charset.chars().collect();
-
     // Generate password ensuring at least one character from each required category
-    let mut password = String::new();
+    let mut password = Vec::with_capacity(length);
 
+    populate_password_with_random_chars(
+        length,
+        include_symbols,
+        &mut rng,
+        lowercase,
+        uppercase,
+        digits,
+        symbols,
+        &charset,
+        &mut password,
+    );
+
+    for attempt in 0..MAX_RETRIES {
+        if redaction_map.values().any(|v| v.as_bytes() == password) {
+            tracing::warn!(
+                "Password collision detected, regenerating (attempt {}/{})",
+                attempt + 1,
+                MAX_RETRIES
+            );
+
+            password.clear();
+            populate_password_with_random_chars(
+                length,
+                include_symbols,
+                &mut rng,
+                lowercase,
+                uppercase,
+                digits,
+                symbols,
+                &charset,
+                &mut password,
+            );
+
+            continue;
+        }
+
+        return Ok(Password::new(String::from_utf8(password)?)?);
+    }
+
+    tracing::error!(
+        "Could not create a non conflicting password after {} retries",
+        MAX_RETRIES
+    );
+
+    Err(PasswordGenerationError::Conflict)
+}
+
+fn populate_password_with_random_chars(
+    length: usize,
+    include_symbols: bool,
+    rng: &mut rand::prelude::ThreadRng,
+    lowercase: &[u8; 26],
+    uppercase: &[u8; 26],
+    digits: &[u8; 10],
+    symbols: &[u8; 26],
+    charset: &Vec<u8>,
+    password: &mut Vec<u8>,
+) {
     // Ensure at least one character from each category
-    password.push(
-        lowercase
-            .chars()
-            .nth(rng.random_range(0..lowercase.len()))
-            .unwrap(),
-    );
-    password.push(
-        uppercase
-            .chars()
-            .nth(rng.random_range(0..uppercase.len()))
-            .unwrap(),
-    );
-    password.push(
-        digits
-            .chars()
-            .nth(rng.random_range(0..digits.len()))
-            .unwrap(),
-    );
+    password.push(*lowercase.choose(rng).unwrap());
+    password.push(*uppercase.choose(rng).unwrap());
+    password.push(*digits.choose(rng).unwrap());
 
-    if !no_symbols {
-        password.push(
-            symbols
-                .chars()
-                .nth(rng.random_range(0..symbols.len()))
-                .unwrap(),
-        );
+    if include_symbols {
+        password.push(*symbols.choose(rng).unwrap());
     }
 
     // Fill the rest with random characters from the full charset
-    let remaining_length = if length > password.len() {
-        length - password.len()
-    } else {
-        0
-    };
-
-    for _ in 0..remaining_length {
-        let random_char = charset_chars[rng.random_range(0..charset_chars.len())];
-        password.push(random_char);
-    }
+    password.extend((0..(length - password.len())).map(|_| charset.choose(rng).unwrap()));
 
     // Shuffle the password to randomize the order
-    let mut password_chars: Vec<char> = password.chars().collect();
-    for i in 0..password_chars.len() {
-        let j = rng.random_range(0..password_chars.len());
-        password_chars.swap(i, j);
-    }
-
-    // Take only the requested length
-    password_chars.into_iter().take(length).collect()
+    password.shuffle(rng);
 }
 
 /// Sanitize text output by removing control characters while preserving essential whitespace
@@ -434,22 +473,35 @@ mod password_tests {
     use super::*;
 
     #[test]
-    fn test_generate_password_length() {
-        let password = generate_password(10, false);
-        assert_eq!(password.len(), 10);
+    fn test_generate_password_length_too_short() {
+        let redaction_map = HashMap::new();
+        let result = generate_password(7, true, &redaction_map);
 
-        let password = generate_password(20, true);
-        assert_eq!(password.len(), 20);
+        match result {
+            Ok(_) => panic!("Expected an error, but got a valid password"),
+            Err(e) => assert_eq!(e, PasswordGenerationError::TooShort),
+        }
+    }
+
+    #[test]
+    fn test_generate_password_length() {
+        let redaction_map = HashMap::new();
+        let password = generate_password(10, true, &redaction_map).unwrap();
+        assert_eq!(password.expose_secret().len(), 10);
+
+        let password = generate_password(20, false, &redaction_map).unwrap();
+        assert_eq!(password.expose_secret().len(), 20);
     }
 
     #[test]
     fn test_generate_password_no_symbols() {
-        let password = generate_password(50, true);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, false, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         for symbol in symbols.chars() {
             assert!(
-                !password.contains(symbol),
+                !password.expose_secret().contains(symbol),
                 "Password should not contain symbol: {}",
                 symbol
             );
@@ -458,21 +510,32 @@ mod password_tests {
 
     #[test]
     fn test_generate_password_with_symbols() {
-        let password = generate_password(50, false);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, true, &redaction_map).unwrap();
         let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
         // At least one symbol should be present (due to our algorithm)
-        let has_symbol = password.chars().any(|c| symbols.contains(c));
+        let has_symbol = password
+            .expose_secret()
+            .chars()
+            .any(|c| symbols.contains(c));
         assert!(has_symbol, "Password should contain at least one symbol");
     }
 
     #[test]
     fn test_generate_password_contains_required_chars() {
-        let password = generate_password(50, false);
+        let redaction_map = HashMap::new();
+        let password = generate_password(50, true, &redaction_map).unwrap();
 
-        let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
-        let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
-        let has_digit = password.chars().any(|c| c.is_ascii_digit());
+        let has_lowercase = password
+            .expose_secret()
+            .chars()
+            .any(|c| c.is_ascii_lowercase());
+        let has_uppercase = password
+            .expose_secret()
+            .chars()
+            .any(|c| c.is_ascii_uppercase());
+        let has_digit = password.expose_secret().chars().any(|c| c.is_ascii_digit());
 
         assert!(has_lowercase, "Password should contain lowercase letters");
         assert!(has_uppercase, "Password should contain uppercase letters");
@@ -481,11 +544,12 @@ mod password_tests {
 
     #[test]
     fn test_generate_password_uniqueness() {
-        let password1 = generate_password(20, false);
-        let password2 = generate_password(20, false);
+        let redaction_map = HashMap::new();
+        let password1 = generate_password(20, true, &redaction_map).unwrap();
+        let password2 = generate_password(20, true, &redaction_map).unwrap();
 
         // Very unlikely to generate the same password twice
-        assert_ne!(password1, password2);
+        assert_ne!(password1.expose_secret(), password2.expose_secret());
     }
 }
 
