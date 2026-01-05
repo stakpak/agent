@@ -186,8 +186,18 @@ fn process_gemini_response(
         }
 
         // Handle function calls (Gemini sends complete function calls, not deltas)
+        // We emit ToolCallStart + ToolCallDelta to match the expected streaming pattern.
+        // ToolCallEnd is just a completion signal (no arguments) to avoid doubling.
         if let Some(function_call) = &part.function_call {
             let call_id = format!("call_{}", uuid::Uuid::new_v4());
+            events.push(StreamEvent::tool_call_start(
+                call_id.clone(),
+                function_call.name.clone(),
+            ));
+            events.push(StreamEvent::tool_call_delta(
+                call_id.clone(),
+                function_call.args.to_string(),
+            ));
             events.push(StreamEvent::tool_call_end(
                 call_id,
                 function_call.name.clone(),
@@ -212,10 +222,12 @@ fn process_gemini_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::gemini::types::{GeminiCandidate, GeminiContent, GeminiPart};
+    use crate::providers::gemini::types::{
+        GeminiCandidate, GeminiContent, GeminiFunctionCall, GeminiPart,
+    };
 
     #[test]
-    fn test_process_gemini_response() {
+    fn test_process_gemini_response_text() {
         let mut usage = Usage::default();
         let mut stream_id = String::new();
 
@@ -244,5 +256,180 @@ mod tests {
         if let Some(StreamEvent::TextDelta { delta, .. }) = result.first() {
             assert_eq!(delta, "Hello");
         }
+    }
+
+    #[test]
+    fn test_process_gemini_response_function_call() {
+        let mut usage = Usage::default();
+        let mut stream_id = String::new();
+
+        let resp = GeminiResponse {
+            candidates: Some(vec![GeminiCandidate {
+                content: Some(GeminiContent {
+                    role: "model".to_string(),
+                    parts: vec![GeminiPart {
+                        text: None,
+                        inline_data: None,
+                        function_call: Some(GeminiFunctionCall {
+                            id: None,
+                            name: "get_weather".to_string(),
+                            args: serde_json::json!({"location": "San Francisco"}),
+                        }),
+                        function_response: None,
+                    }],
+                }),
+                finish_reason: Some("STOP".to_string()),
+                safety_ratings: None,
+            }]),
+            usage_metadata: None,
+            model_version: None,
+            response_id: None,
+        };
+
+        let result = process_gemini_response(resp, &mut usage, &mut stream_id);
+
+        // Should have ToolCallStart, ToolCallDelta, ToolCallEnd, and Finish
+        assert_eq!(result.len(), 4);
+
+        // Verify ToolCallStart
+        if let StreamEvent::ToolCallStart { name, .. } = &result[0] {
+            assert_eq!(name, "get_weather");
+        } else {
+            panic!("Expected ToolCallStart, got {:?}", result[0]);
+        }
+
+        // Verify ToolCallDelta has the arguments
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[1] {
+            assert!(delta.contains("San Francisco"));
+        } else {
+            panic!("Expected ToolCallDelta, got {:?}", result[1]);
+        }
+
+        // Verify ToolCallEnd
+        if let StreamEvent::ToolCallEnd { name, .. } = &result[2] {
+            assert_eq!(name, "get_weather");
+        } else {
+            panic!("Expected ToolCallEnd, got {:?}", result[2]);
+        }
+
+        if let StreamEvent::Finish { reason, .. } = &result[3] {
+            assert!(matches!(reason, FinishReason::Stop));
+        } else {
+            panic!("Expected Finish");
+        }
+    }
+
+    #[test]
+    fn test_process_gemini_response_multiple_function_calls() {
+        let mut usage = Usage::default();
+        let mut stream_id = String::new();
+
+        let resp = GeminiResponse {
+            candidates: Some(vec![GeminiCandidate {
+                content: Some(GeminiContent {
+                    role: "model".to_string(),
+                    parts: vec![
+                        GeminiPart {
+                            text: None,
+                            inline_data: None,
+                            function_call: Some(GeminiFunctionCall {
+                                id: None,
+                                name: "get_weather".to_string(),
+                                args: serde_json::json!({"location": "NYC"}),
+                            }),
+                            function_response: None,
+                        },
+                        GeminiPart {
+                            text: None,
+                            inline_data: None,
+                            function_call: Some(GeminiFunctionCall {
+                                id: None,
+                                name: "get_time".to_string(),
+                                args: serde_json::json!({"timezone": "EST"}),
+                            }),
+                            function_response: None,
+                        },
+                    ],
+                }),
+                finish_reason: Some("STOP".to_string()),
+                safety_ratings: None,
+            }]),
+            usage_metadata: None,
+            model_version: None,
+            response_id: None,
+        };
+
+        let result = process_gemini_response(resp, &mut usage, &mut stream_id);
+
+        // Should have 2 * (ToolCallStart + ToolCallDelta + ToolCallEnd) + Finish = 7
+        assert_eq!(result.len(), 7);
+
+        // First tool call
+        if let StreamEvent::ToolCallStart { name, .. } = &result[0] {
+            assert_eq!(name, "get_weather");
+        } else {
+            panic!("Expected ToolCallStart for first tool");
+        }
+
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[1] {
+            assert!(delta.contains("NYC"));
+        } else {
+            panic!("Expected ToolCallDelta for first tool");
+        }
+
+        // Second tool call
+        if let StreamEvent::ToolCallStart { name, .. } = &result[3] {
+            assert_eq!(name, "get_time");
+        } else {
+            panic!("Expected ToolCallStart for second tool");
+        }
+
+        if let StreamEvent::ToolCallDelta { delta, .. } = &result[4] {
+            assert!(delta.contains("EST"));
+        } else {
+            panic!("Expected ToolCallDelta for second tool");
+        }
+    }
+
+    #[test]
+    fn test_process_gemini_response_with_usage() {
+        let mut usage = Usage::default();
+        let mut stream_id = String::new();
+
+        let resp = GeminiResponse {
+            candidates: Some(vec![GeminiCandidate {
+                content: Some(GeminiContent {
+                    role: "model".to_string(),
+                    parts: vec![GeminiPart {
+                        text: Some("Hello".to_string()),
+                        inline_data: None,
+                        function_call: None,
+                        function_response: None,
+                    }],
+                }),
+                finish_reason: Some("STOP".to_string()),
+                safety_ratings: None,
+            }]),
+            usage_metadata: Some(crate::providers::gemini::types::GeminiUsageMetadata {
+                prompt_token_count: Some(10),
+                cached_content_token_count: None,
+                candidates_token_count: Some(20),
+                total_token_count: Some(30),
+                prompt_tokens_details: None,
+                candidates_tokens_details: None,
+            }),
+            model_version: None,
+            response_id: None,
+        };
+
+        let result = process_gemini_response(resp, &mut usage, &mut stream_id);
+
+        // Check usage was accumulated
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 20);
+        assert_eq!(usage.total_tokens, 30);
+
+        // Should have TextDelta and Finish
+        assert_eq!(result.len(), 2);
     }
 }

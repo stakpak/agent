@@ -13,7 +13,6 @@ pub use tool_container::ToolContainer;
 use tracing::error;
 
 use stakpak_api::AgentProvider;
-use stakpak_shared::cert_utils::CertificateChain;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::task_manager::{TaskManager, TaskManagerHandle};
 
@@ -109,23 +108,7 @@ pub struct MCPServerConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub tool_mode: ToolMode,
     pub subagent_configs: Option<SubagentConfigs>,
-    pub certificate_chain: Arc<Option<CertificateChain>>,
-}
-
-/// Initialize gitleaks configuration if secret redaction is enabled
-async fn init_gitleaks_if_needed(redact_secrets: bool, privacy_mode: bool) {
-    if redact_secrets {
-        tokio::spawn(async move {
-            match std::panic::catch_unwind(|| {
-                stakpak_shared::secrets::initialize_gitleaks_config(privacy_mode)
-            }) {
-                Ok(_rule_count) => {}
-                Err(_) => {
-                    // Failed to initialize, will initialize on first use
-                }
-            }
-        });
-    }
+    pub server_config: Arc<Option<rustls::ServerConfig>>,
 }
 
 /// Create graceful shutdown handler
@@ -270,13 +253,11 @@ async fn start_server_internal(
     tcp_listener: TcpListener,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
-
     // Create and start TaskManager
     let task_manager = TaskManager::new();
     let task_manager_handle = task_manager.handle();
 
-    // Spawn the task manager to run in background_manager_handle_for_
+    // Spawn the task manager to run in background
     tokio::spawn(async move {
         task_manager.run().await;
     });
@@ -291,10 +272,9 @@ async fn start_server_internal(
 
     let router = axum::Router::new().nest_service("/mcp", service);
 
-    if let Some(cert_chain) = config.certificate_chain.as_ref() {
-        let tls_config = cert_chain.create_server_config()?;
+    if let Some(server_config) = config.server_config.as_ref() {
         let rustls_config =
-            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config.clone()));
 
         let handle = axum_server::Handle::new();
         let shutdown_handle = handle.clone();
@@ -338,8 +318,6 @@ pub async fn start_server_stdio(
     config: MCPServerConfig,
     shutdown_rx: Option<Receiver<()>>,
 ) -> Result<()> {
-    init_gitleaks_if_needed(config.redact_secrets, config.privacy_mode).await;
-
     // Create and start TaskManager
     let task_manager = TaskManager::new();
     let task_manager_handle = task_manager.handle();

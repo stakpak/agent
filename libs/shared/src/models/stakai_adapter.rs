@@ -175,18 +175,20 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
                 index: 0,
             },
         }),
-        StreamEvent::ToolCallEnd {
-            id,
-            name,
-            arguments,
-        } => Some(GenerationDelta::ToolUse {
-            tool_use: GenerationDeltaToolUse {
-                id: Some(id.clone()),
-                name: Some(name.clone()),
-                input: Some(arguments.to_string()),
-                index: 0,
-            },
-        }),
+        StreamEvent::ToolCallEnd { id, name, .. } => {
+            // ToolCallEnd signals completion - don't emit arguments here as they
+            // were already accumulated via ToolCallDelta events. Including them
+            // would cause doubling for providers like Anthropic that stream deltas.
+            // We emit name to ensure it's set (for providers like Gemini that only send ToolCallEnd).
+            Some(GenerationDelta::ToolUse {
+                tool_use: GenerationDeltaToolUse {
+                    id: Some(id.clone()),
+                    name: Some(name.clone()),
+                    input: None,
+                    index: 0,
+                },
+            })
+        }
         StreamEvent::Finish { usage, .. } => Some(GenerationDelta::Usage {
             usage: from_stakai_usage(usage),
         }),
@@ -504,20 +506,54 @@ impl StakAIClient {
                                 accumulated_text.push_str(content);
                             }
                             GenerationDelta::ToolUse { tool_use } => {
-                                if let (Some(id), Some(name)) = (&tool_use.id, &tool_use.name) {
-                                    // Check if this is a new tool call or update
+                                if let Some(id) = &tool_use.id {
+                                    // Find existing tool call by id
                                     let existing = accumulated_tool_calls.iter_mut().find(|tc| {
                                         matches!(tc, LLMMessageTypedContent::ToolCall { id: tc_id, .. } if tc_id == id)
                                     });
 
-                                    if existing.is_none() {
-                                        accumulated_tool_calls.push(
-                                            LLMMessageTypedContent::ToolCall {
-                                                id: id.clone(),
-                                                name: name.clone(),
-                                                args: serde_json::Value::Object(Default::default()),
-                                            },
-                                        );
+                                    match existing {
+                                        Some(LLMMessageTypedContent::ToolCall {
+                                            args,
+                                            name: existing_name,
+                                            ..
+                                        }) => {
+                                            // Update existing tool call
+                                            // Update name if provided and current is empty
+                                            if let Some(new_name) = &tool_use.name
+                                                && existing_name.is_empty()
+                                            {
+                                                *existing_name = new_name.clone();
+                                            }
+                                            // Append arguments if provided
+                                            if let Some(input) = &tool_use.input {
+                                                // Accumulate as string first, parse later
+                                                if let serde_json::Value::String(s) = args {
+                                                    s.push_str(input);
+                                                } else {
+                                                    *args =
+                                                        serde_json::Value::String(input.clone());
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // Create new tool call
+                                            let name = tool_use.name.clone().unwrap_or_default();
+                                            let args = tool_use
+                                                .input
+                                                .clone()
+                                                .map(serde_json::Value::String)
+                                                .unwrap_or_else(|| {
+                                                    serde_json::Value::String(String::new())
+                                                });
+                                            accumulated_tool_calls.push(
+                                                LLMMessageTypedContent::ToolCall {
+                                                    id: id.clone(),
+                                                    name,
+                                                    args,
+                                                },
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -546,13 +582,35 @@ impl StakAIClient {
         }
 
         // Build final response
-        let message_content = if accumulated_tool_calls.is_empty() {
+        // Parse accumulated JSON string arguments into proper JSON values
+        let parsed_tool_calls: Vec<LLMMessageTypedContent> = accumulated_tool_calls
+            .into_iter()
+            .map(|tc| {
+                if let LLMMessageTypedContent::ToolCall { id, name, args } = tc {
+                    let parsed_args = match args {
+                        serde_json::Value::String(s) if !s.is_empty() => {
+                            serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+                        }
+                        other => other,
+                    };
+                    LLMMessageTypedContent::ToolCall {
+                        id,
+                        name,
+                        args: parsed_args,
+                    }
+                } else {
+                    tc
+                }
+            })
+            .collect();
+
+        let message_content = if parsed_tool_calls.is_empty() {
             LLMMessageContent::String(accumulated_text)
         } else {
             let mut parts = vec![LLMMessageTypedContent::Text {
                 text: accumulated_text,
             }];
-            parts.extend(accumulated_tool_calls);
+            parts.extend(parsed_tool_calls);
             LLMMessageContent::List(parts)
         };
 
@@ -963,8 +1021,10 @@ mod tests {
 
         if let Some(GenerationDelta::ToolUse { tool_use }) = delta {
             assert_eq!(tool_use.id, Some("call_xyz".to_string()));
+            // ToolCallEnd emits name (for providers like Gemini) but NOT input
+            // to avoid doubling arguments that were already accumulated via ToolCallDelta
             assert_eq!(tool_use.name, Some("run_command".to_string()));
-            assert!(tool_use.input.is_some());
+            assert!(tool_use.input.is_none());
         } else {
             panic!("Expected ToolUse delta");
         }
