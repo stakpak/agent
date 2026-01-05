@@ -146,7 +146,16 @@ fn handle_tab_normal(state: &mut AppState) {
         // Handle helper selection - auto-complete the selected helper
         if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
             let selected_helper = &state.filtered_helpers[state.helper_selected];
-            state.text_area.set_text(selected_helper.command);
+            // Commands that take arguments should have a trailing space
+            let needs_space = matches!(selected_helper.command, "/editor" | "/toggle_auto_approve");
+            let new_text = if needs_space {
+                format!("{} ", selected_helper.command)
+            } else {
+                selected_helper.command.to_string()
+            };
+            state.text_area.set_text(&new_text);
+            // Position cursor at the end of the text
+            state.text_area.set_cursor(new_text.len());
             state.show_helper_dropdown = false;
             state.filtered_helpers.clear();
             state.helper_selected = 0;

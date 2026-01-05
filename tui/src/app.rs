@@ -206,13 +206,13 @@ pub struct AppState {
 
     pub todos: Vec<TodoItem>,
     pub session_start_time: std::time::Instant,
-    
+
     // Auto-show side panel tracking
     pub side_panel_auto_shown: bool,
-    
+
     /// External editor command (vim, nvim, or nano)
     pub editor_command: String,
-    
+
     /// Pending file to open in editor (set by handler, consumed by event loop)
     pub pending_editor_open: Option<String>,
 }
@@ -590,11 +590,12 @@ impl AppState {
         if !self.side_panel_auto_shown && !self.show_side_panel {
             self.show_side_panel = true;
             self.side_panel_auto_shown = true;
-            
+
             // Also enable mouse capture
             #[cfg(unix)]
             if !self.mouse_capture_enabled {
-                let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
+                let _ =
+                    crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
                 self.mouse_capture_enabled = true;
             }
         }

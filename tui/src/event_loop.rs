@@ -17,8 +17,8 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakpak_shared::models::integrations::openai::{AgentModel, ToolCallResultStatus};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::interval;
@@ -129,14 +129,12 @@ pub async fn run_tui(
             }
 
             // Use poll with timeout instead of blocking read to allow checking pause flag
-            if let Ok(true) = crossterm::event::poll(Duration::from_millis(50)) {
-                if let Ok(event) = crossterm::event::read() {
-                    if let Some(event) = crate::event::map_crossterm_event_to_input_event(event) {
-                        if internal_tx_thread.blocking_send(event).is_err() {
-                            break;
-                        }
-                    }
-                }
+            if let Ok(true) = crossterm::event::poll(Duration::from_millis(50))
+                && let Ok(event) = crossterm::event::read()
+                && let Some(event) = crate::event::map_crossterm_event_to_input_event(event)
+                && internal_tx_thread.blocking_send(event).is_err()
+            {
+                break;
             }
         }
     });
@@ -311,11 +309,9 @@ pub async fn run_tui(
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                        eprintln!("Event loop checking state after update. Pending: {:?}", state.pending_editor_open);
                         crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        eprintln!("Event loop checking state after update return. Pending: {:?}", state.pending_editor_open);
                         state.poll_file_search_results();
-                        
+
                         // Handle pending editor open request
                          if let Some(file_path) = state.pending_editor_open.take() {
                              // Pause input thread to avoid stealing input from editor
@@ -347,7 +343,7 @@ pub async fn run_tui(
                                      ));
                                  }
                              }
-                             
+
                              // Restore mouse capture if it was enabled before
                              if was_mouse_capture_enabled {
                                  let _ = execute!(std::io::stdout(), EnableMouseCapture);
@@ -357,7 +353,7 @@ pub async fn run_tui(
                              // Resume input thread
                              input_paused.store(false, Ordering::Relaxed);
                          }
-                        
+
                         state.update_session_empty_status();
                     }
                 }

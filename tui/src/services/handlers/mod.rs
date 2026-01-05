@@ -578,8 +578,9 @@ pub fn update(
             misc::handle_stream_model(state, model);
         }
         InputEvent::RunToolCall(_) => {}
-        InputEvent::ToolResult(result) => {
-            tool::handle_tool_result(state, result);
+        InputEvent::ToolResult(_) => {
+            // NOTE: handle_tool_result is called in event_loop.rs before routing here,
+            // so we don't need to call it again to avoid double-counting file changes.
         }
         InputEvent::ApprovalPopupSubmit => {}
         InputEvent::MouseClick(col, row) => {

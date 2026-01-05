@@ -174,12 +174,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
-    } else if state.show_sessions_dialog {
-        render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
     } else if state.shell_popup_visible && state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
-    } else {
+    } else if !state.show_sessions_dialog {
+        // Don't render input when sessions dialog is visible
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         render_file_search_dropdown(f, state, dropdown_area);
@@ -195,7 +194,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_hint_or_shortcuts(f, state, padded_hint_area);
     }
 
-    // Render approval popup LAST to ensure it appears on top of everything
+    // === POPUPS - rendered last to appear on top of side panel ===
+
+    // Render sessions dialog (on top of side panel)
+    if state.show_sessions_dialog {
+        render_sessions_dialog(f, state);
+    }
+
+    // Render approval popup to ensure it appears on top of everything
     if state.approval_popup.is_visible() {
         state.approval_popup.render(f, f.area());
     }

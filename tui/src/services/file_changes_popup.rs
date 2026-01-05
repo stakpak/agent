@@ -3,6 +3,7 @@
 //! Renders the popup showing modified files with revert options.
 
 use crate::app::AppState;
+use crate::services::changeset::FileState;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -160,14 +161,18 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         };
 
         // Unselected file names to DarkGray
-        let name_style = if is_selected {
-            Style::default()
-                .fg(Color::Black)
-                .add_modifier(Modifier::UNDERLINED)
-        } else {
-            Style::default()
-                .fg(Color::Reset)
-                .add_modifier(Modifier::UNDERLINED)
+        let name_style = match file.state {
+            FileState::Reverted | FileState::Deleted | FileState::Removed => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::CROSSED_OUT),
+            _ => {
+                let style = if is_selected {
+                    Style::default().fg(Color::Black)
+                } else {
+                    Style::default().fg(Color::Reset)
+                };
+                style.add_modifier(Modifier::UNDERLINED)
+            }
         };
 
         // Stats
@@ -187,19 +192,35 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         // len = 1 + name.len() + spacing + added.len() + 1 + removed.len() + 1 + icon.len() + 1
 
         // Check if file is reverted
-        let (stats_spans, stats_len) = if file.is_reverted {
-            // Show "REVERTED" in dark gray instead of stats
-            let reverted_text = " REVERTED";
-            let reverted_span = Span::styled(
-                reverted_text,
-                Style::default().fg(Color::DarkGray).bg(bg_color),
-            );
+        // Use FileState
+
+        // Check if file is reverted, deleted or removed
+        let (stats_spans, stats_len) = if file.state == FileState::Reverted
+            || file.state == FileState::Deleted
+            || file.state == FileState::Removed
+        {
+            // Show "REVERTED", "DELETED" or "REMOVED" in dark gray instead of stats
+            let state_text = match file.state {
+                FileState::Reverted => "REVERTED",
+                FileState::Deleted => "DELETED",
+                FileState::Removed => "REMOVED",
+                _ => "UNKNOWN",
+            };
             (
                 vec![
-                    reverted_span,
-                    Span::styled(" ", Style::default().bg(bg_color)),
+                    Span::styled(
+                        state_text,
+                        Style::default()
+                            .fg(if is_selected {
+                                Color::Black
+                            } else {
+                                Color::DarkGray
+                            })
+                            .bg(bg_color),
+                    ),
+                    Span::styled(" ", Style::default().bg(bg_color)), // padding Right
                 ],
-                reverted_text.len() + 1,
+                state_text.len() + 1,
             )
         } else {
             // Show normal stats

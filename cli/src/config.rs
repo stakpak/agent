@@ -158,7 +158,7 @@ impl From<OldAppConfig> for Settings {
             auto_append_gitignore: old_config.auto_append_gitignore,
             anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
             collect_telemetry: Some(true),
-            editor: None,
+            editor: Some("nano".to_string()),
         }
     }
 }
@@ -219,7 +219,7 @@ impl Default for ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
-                editor: None,
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -237,7 +237,7 @@ impl ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
-                editor: None,
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -790,7 +790,7 @@ auto_append_gitignore = true
         assert!(config.profile_config("default").is_none());
         assert_eq!(config.settings.machine_name, None);
         assert_eq!(config.settings.auto_append_gitignore, Some(true));
-        assert_eq!(config.settings.editor, None);
+        assert_eq!(config.settings.editor, Some("nano".to_string()));
     }
 
     #[test]

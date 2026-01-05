@@ -147,8 +147,13 @@ pub fn handle_input_submitted_event(
         return;
     }
 
+    // Sessions dialog takes priority over side panel
+    if state.show_sessions_dialog {
+        // Let handle_input_submitted process it
+    }
     // If side panel is visible and input is empty, Enter toggles the focused section
-    if state.show_side_panel && state.text_area.text().is_empty() {
+    // BUT only if no other popup is open (sessions dialog, etc.)
+    else if state.show_side_panel && state.text_area.text().is_empty() {
         use crate::services::changeset::SidePanelSection;
         // Context section cannot be collapsed
         if state.side_panel_focus != SidePanelSection::Context {
@@ -417,10 +422,37 @@ fn handle_input_submitted(
             }
             return; // Only return after executing a valid command
         }
+
         // IMPORTANT: If no matching helpers and not in file search,
-        // fall through to normal message submission below
-        // This fixes the issue where "/invalid" would not submit
+        // fall through to check for commands with arguments below
         state.show_helper_dropdown = false;
+    }
+
+    // Check if input starts with a known command that takes arguments
+    // This runs regardless of show_helper_dropdown state to handle cases like:
+    // - User types "/editor path/to/file" manually
+    // - User selects a file via @ dropdown, resulting in "/editor filename"
+    {
+        let input = state.input().to_string();
+        let command_with_args: Option<&str> = if input.starts_with("/editor ") {
+            Some("/editor")
+        } else if input.starts_with("/toggle_auto_approve ") {
+            Some("/toggle_auto_approve")
+        } else {
+            None
+        };
+
+        if let Some(command_id) = command_with_args {
+            let ctx = CommandContext {
+                state,
+                input_tx,
+                output_tx,
+            };
+            if let Err(e) = execute_command(command_id, ctx) {
+                push_error_message(state, &e, None);
+            }
+            return;
+        }
     }
 
     if !state.input().trim().is_empty() || !state.attached_images.is_empty() {

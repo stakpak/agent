@@ -264,7 +264,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
     let header = Line::from(Span::styled(
         format!(
-            "{}{} Modified files{}",
+            "{}{} Changeset{}",
             LEFT_PADDING, collapse_indicator, count_label
         ),
         header_style,
@@ -278,6 +278,9 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
     let mut lines = vec![header];
 
+    // Import FileState
+    use crate::services::changeset::FileState;
+
     if state.changeset.file_count() == 0 {
         lines.push(Line::from(Span::styled(
             format!("{}  No changes", LEFT_PADDING),
@@ -286,73 +289,101 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
+        // Show all files including reverted/deleted ones so user can see history
+        // The file_count() filter might need adjustment if we want to hide them totally
+        // But for "Removed" files we definitely want to show them
+
         for (i, file) in state.changeset.files_in_order().iter().enumerate() {
             let is_selected = i == state.changeset.selected_index && focused;
             // Prefix: "  ▸ " (4 chars)
             let prefix = if file.is_expanded { "▾" } else { "▸" };
-            let deleted_marker = if file.is_deleted { " [del]" } else { "" };
 
+            // Determine state label and color
+            let state_label = file.state.label();
+            let state_color = match file.state {
+                FileState::Created => Color::Green,
+                FileState::Modified => Color::Blue,
+                FileState::Removed => Color::Red,
+                FileState::Reverted => Color::DarkGray,
+                FileState::Deleted => Color::DarkGray,
+            };
 
-
-            // File Name Style: DarkGray unless selected or deleted
+            // File Name Style
             let name_style = if is_selected {
                 Style::default().fg(Color::Black).bg(Color::White)
-            } else if file.is_deleted {
-                Style::default().fg(Color::Red)
             } else {
-                Style::default().fg(Color::DarkGray)
+                match file.state {
+                    FileState::Removed => Style::default().fg(Color::Red),
+                    FileState::Reverted | FileState::Deleted => Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                    _ => Style::default().fg(Color::DarkGray),
+                }
             };
 
             let display_name = file.display_name();
-            // Calculate available width for name
-            // Total = Width
 
             // Prefix part: " " (1) + "  " (2) + "▸" (1) + " " (1) = 5 chars
-            // Note: "▸" is 3 bytes, but visually 1 char (width 1).
-            // We use visual length for spacing calculation.
             let prefix_part = format!("{}  {} ", LEFT_PADDING, prefix);
             let prefix_visual_len = 5;
 
-            let combined_name = format!("{}{}", display_name, deleted_marker);
-
-            // Check if file is reverted
-            let (stats_spans, stats_len) = if file.is_reverted {
-                // Show "REVERTED" in dark gray instead of stats
-                let reverted_text = "REVERTED";
-                (
+            // Stats or State Label
+            let (stats_spans, stats_len) = match file.state {
+                FileState::Reverted => (
                     vec![Span::styled(
-                        reverted_text,
+                        "REVERTED",
                         Style::default().fg(Color::DarkGray),
                     )],
-                    reverted_text.len(),
-                )
-            } else {
-                // Show normal stats
-                let added = file.total_lines_added();
-                let removed = file.total_lines_removed();
-                let stats = format!("+{} -{}", added, removed);
-                let stats_len_calc = stats.len();
-                (
-                    vec![
-                        Span::styled(format!("+{}", added), Style::default().fg(Color::Green)),
-                        Span::raw(" "),
-                        Span::styled(format!("-{}", removed), Style::default().fg(Color::Red)),
-                    ],
-                    stats_len_calc,
-                )
+                    8,
+                ),
+                FileState::Deleted => (
+                    vec![Span::styled(
+                        "DELETED",
+                        Style::default().fg(Color::DarkGray),
+                    )],
+                    7,
+                ),
+                FileState::Removed => (
+                    vec![Span::styled("REMOVED", Style::default().fg(Color::Red))],
+                    7,
+                ),
+                _ => {
+                    let added = file.total_lines_added();
+                    let removed = file.total_lines_removed();
+                    (
+                        vec![
+                            Span::styled(format!("+{}", added), Style::default().fg(Color::Green)),
+                            Span::raw(" "),
+                            Span::styled(format!("-{}", removed), Style::default().fg(Color::Red)),
+                        ],
+                        format!("+{} -{}", added, removed).len(),
+                    )
+                }
             };
 
+            // Calculate available width
             let available_width = area.width as usize;
-            let space_for_name = available_width.saturating_sub(prefix_visual_len + stats_len + 1); // +1 min padding
 
-            let truncated_name = truncate_string(&combined_name, space_for_name);
+            // Format: [PREFIX] [STATE_LABEL] [NAME] ... [STATS]
+            // We want the state label to be next to the name
 
-            // Calculate spacing using visual lengths
+            let label_span = Span::styled(
+                format!("{} ", state_label),
+                Style::default().fg(state_color),
+            );
+            let label_len = state_label.len() + 1;
+
+            let space_for_name =
+                available_width.saturating_sub(prefix_visual_len + label_len + stats_len + 1); // +1 padding
+
+            let truncated_name = truncate_string(display_name, space_for_name);
+
             let spacing = available_width
-                .saturating_sub(prefix_visual_len + truncated_name.len() + stats_len);
+                .saturating_sub(prefix_visual_len + label_len + truncated_name.len() + stats_len);
 
             let mut line_spans = vec![
                 Span::styled(prefix_part, Style::default().fg(Color::DarkGray)),
+                label_span,
                 Span::styled(truncated_name, name_style),
                 Span::raw(" ".repeat(spacing)),
             ];
@@ -360,7 +391,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
             lines.push(Line::from(line_spans));
 
-            // Show edits if expanded (keep left aligned or indented)
+            // Show edits if expanded
             if file.is_expanded {
                 for (j, edit) in file.edits.iter().enumerate().rev().take(5) {
                     let time = edit.timestamp.format("%H:%M").to_string();
@@ -432,10 +463,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
 
     // Line 2+: CWD without label, wrapping
     lines.push(Line::from(vec![
-        Span::styled(
-            LEFT_PADDING.to_string(),
-            Style::default().fg(Color::Reset),
-        ),
+        Span::styled(LEFT_PADDING.to_string(), Style::default().fg(Color::Reset)),
         Span::styled(&cwd, Style::default().fg(Color::DarkGray)),
     ]));
 
@@ -446,9 +474,9 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     // Tab: Select (Cyan)
     // Enter: toggle (LightMagenta)
     // Ctrl+b: On/Off (Yellow)
-    
+
     let left_padding_span = Span::styled(
-        format!("{}", LEFT_PADDING),
+        LEFT_PADDING.to_string(),
         Style::default().fg(Color::DarkGray),
     );
 
@@ -460,7 +488,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
         Span::styled("Enter:", Style::default().fg(Color::LightMagenta)),
         Span::styled(" toggle", Style::default().fg(Color::Reset)),
     ]));
-    
+
     lines.push(Line::from(vec![
         left_padding_span,
         Span::styled("Ctrl+b: ", Style::default().fg(Color::Yellow)),

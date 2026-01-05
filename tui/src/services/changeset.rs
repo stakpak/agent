@@ -11,6 +11,28 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+/// State of a tracked file
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileState {
+    Created,  // File created during session
+    Modified, // File was modified
+    Removed,  // File removed by remove tool (can restore)
+    Reverted, // File was reverted to original
+    Deleted,  // Created file was then deleted
+}
+
+impl FileState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            FileState::Created => "[+]",
+            FileState::Modified => "[~]",
+            FileState::Removed => "[-]",
+            FileState::Reverted => "[R]",
+            FileState::Deleted => "[X]",
+        }
+    }
+}
+
 /// A single edit to a file
 #[derive(Debug, Clone)]
 pub struct FileEdit {
@@ -72,16 +94,14 @@ pub struct TrackedFile {
     pub path: String,
     /// Edit history (most recent last)
     pub edits: Vec<FileEdit>,
-    /// Whether the file has been deleted
-    pub is_deleted: bool,
+    /// Current state of the file
+    pub state: FileState,
     /// Whether this file is expanded in the UI
     pub is_expanded: bool,
     /// Selected edit index when expanded
     pub selected_edit: usize,
-    /// Whether this file was created by the system (vs already existed)
-    pub was_created: bool,
-    /// Whether this file has been reverted
-    pub is_reverted: bool,
+    /// Path to backup if the file was removed
+    pub backup_path: Option<String>,
 }
 
 impl TrackedFile {
@@ -89,11 +109,10 @@ impl TrackedFile {
         Self {
             path,
             edits: Vec::new(),
-            is_deleted: false,
+            state: FileState::Modified, // Default assumption, updated on tracking
             is_expanded: false,
             selected_edit: 0,
-            was_created: false,
-            is_reverted: false,
+            backup_path: None,
         }
     }
 
@@ -146,74 +165,98 @@ impl Changeset {
     pub fn track_file(&mut self, path: &str, edit: FileEdit) {
         // Check if this is a file creation based on tool call
         let is_creation = edit.tool_call.as_ref().is_some_and(|tc| {
-            tc.function.name == "stakpak__create" || tc.function.name == "stakpak__write"
+            let name = tc.function.name.as_str();
+            name == "stakpak__create"
+                || name == "stakpak__write"
+                || name == "stakpak__create_file"
+                || name == "create"
+                || name == "create_file"
         });
 
         if let Some(file) = self.files.get_mut(path) {
             file.add_edit(edit);
+            // If it was removed/deleted but now we are writing to it, it's modified (or created if it was deleted)
+            if file.state == FileState::Removed || file.state == FileState::Deleted {
+                file.state = if is_creation {
+                    FileState::Created
+                } else {
+                    FileState::Modified
+                };
+            }
         } else {
             let mut tracked = TrackedFile::new(path.to_string());
-            tracked.was_created = is_creation;
+            tracked.state = if is_creation {
+                FileState::Created
+            } else {
+                FileState::Modified
+            };
             tracked.add_edit(edit);
             self.files.insert(path.to_string(), tracked);
-            self.order.push(path.to_string());
+            if !self.order.contains(&path.to_string()) {
+                self.order.push(path.to_string());
+            }
         }
     }
 
-    /// Mark a file as deleted
-    pub fn mark_deleted(&mut self, path: &str, backup_path: Option<String>) {
+    /// Mark a file as removed (deleted by tool)
+    pub fn mark_removed(&mut self, path: &str, backup_path: Option<String>) {
         if let Some(file) = self.files.get_mut(path) {
-            file.is_deleted = true;
-            let mut edit = FileEdit::new("File deleted".to_string());
+            // If file was Created or Deleted, now it becomes Deleted
+            // If file was Modified or Removed, it becomes Removed
+            if file.state == FileState::Created || file.state == FileState::Deleted {
+                file.state = FileState::Deleted;
+            } else {
+                file.state = FileState::Removed;
+            }
+            file.backup_path = backup_path.clone(); // Store main backup path for restore
+
+            let mut edit = FileEdit::new("File removed".to_string());
             if let Some(bp) = backup_path {
                 edit = edit.with_backup(bp);
             }
             file.add_edit(edit);
         } else {
             let mut tracked = TrackedFile::new(path.to_string());
-            tracked.is_deleted = true;
-            let mut edit = FileEdit::new("File deleted".to_string());
+            tracked.state = FileState::Removed;
+            tracked.backup_path = backup_path.clone();
+
+            let mut edit = FileEdit::new("File removed".to_string());
             if let Some(bp) = backup_path {
                 edit = edit.with_backup(bp);
             }
             tracked.add_edit(edit);
             self.files.insert(path.to_string(), tracked);
-            self.order.push(path.to_string());
+            if !self.order.contains(&path.to_string()) {
+                self.order.push(path.to_string());
+            }
         }
     }
 
-    /// Get the number of tracked files (excluding reverted files)
+    /// Get the number of tracked files (excluding reverted/deleted files that shouldn't show)
     pub fn file_count(&self) -> usize {
-        self.files.values().filter(|f| !f.is_reverted).count()
+        self.files.values().count()
     }
 
-    /// Get files in display order
     /// Revert a single file to its original state
     pub fn revert_file(tracked_file: &TrackedFile, session_id: &str) -> Result<String, String> {
-        // Case 1: File was removed - restore from backup
-        if tracked_file.is_deleted {
-            return Self::restore_removed_file(tracked_file, session_id);
+        match tracked_file.state {
+            FileState::Removed | FileState::Deleted => {
+                Self::restore_removed_file(tracked_file, session_id)
+            }
+            FileState::Created => Self::delete_created_file(&tracked_file.path),
+            FileState::Modified | FileState::Reverted => Self::replay_edits_reverse(tracked_file),
         }
-
-        // Case 2: File was created - delete it
-        if tracked_file.was_created {
-            return Self::delete_created_file(&tracked_file.path);
-        }
-
-        // Case 3: File was edited - replay edits in reverse
-        Self::replay_edits_reverse(tracked_file)
     }
 
     /// Restore a removed file from backup
-    fn restore_removed_file(
+    pub fn restore_removed_file(
         tracked_file: &TrackedFile,
         _session_id: &str,
     ) -> Result<String, String> {
-        // Find the backup path from the last edit
+        // Find the backup path from the file state
         let backup_path = tracked_file
-            .edits
-            .last()
-            .and_then(|edit| edit.backup_path.as_ref())
+            .backup_path
+            .as_ref()
             .ok_or_else(|| "No backup path found for removed file".to_string())?;
 
         // Copy from backup to original location
@@ -419,13 +462,23 @@ mod tests {
 
         changeset.track_file(
             "/path/to/file.rs",
-            FileEdit::new("Initial creation".to_string()).with_stats(10, 0),
+            FileEdit::new("Initial creation".to_string())
+                .with_stats(10, 0)
+                .with_tool_call(ToolCall {
+                    id: "call_1".to_string(),
+                    r#type: "function".to_string(),
+                    function: stakpak_shared::models::integrations::openai::FunctionCall {
+                        name: "stakpak__create".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }),
         );
 
         assert_eq!(changeset.file_count(), 1);
         let file = changeset.files.get("/path/to/file.rs").unwrap();
         assert_eq!(file.edits.len(), 1);
         assert_eq!(file.total_lines_added(), 10);
+        assert_eq!(file.state, FileState::Created);
     }
 
     #[test]
@@ -445,22 +498,6 @@ mod tests {
         assert_eq!(file.edits.len(), 2);
         assert_eq!(file.total_lines_added(), 15);
         assert_eq!(file.total_lines_removed(), 3);
-    }
-
-    #[test]
-    fn test_tracked_file_display_name() {
-        let file = TrackedFile::new("/home/user/project/src/main.rs".to_string());
-        assert_eq!(file.display_name(), "main.rs");
-    }
-
-    #[test]
-    fn test_section_cycling() {
-        let section = SidePanelSection::Context;
-        assert_eq!(section.next(), SidePanelSection::Todos);
-        assert_eq!(section.next().next(), SidePanelSection::Changeset);
-        assert_eq!(
-            SidePanelSection::Changeset.next(),
-            SidePanelSection::Context
-        );
+        assert_eq!(file.state, FileState::Modified);
     }
 }

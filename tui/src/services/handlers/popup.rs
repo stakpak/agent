@@ -453,7 +453,7 @@ pub fn handle_toggle_context_popup(state: &mut AppState) {
 /// Handle toggle side panel event
 pub fn handle_toggle_side_panel(state: &mut AppState) {
     state.show_side_panel = !state.show_side_panel;
-    
+
     // Toggle mouse capture along with side panel
     if state.show_side_panel {
         // Enable mouse capture when opening side panel
@@ -642,15 +642,32 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
         .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
         .collect();
 
+    // Import FileState
+    use crate::services::changeset::FileState;
+
     if let Some(file) = filtered_files.get(state.file_changes_selected) {
+        if file.state == FileState::Deleted && file.backup_path.is_none() {
+            return;
+        }
         let path = file.path.clone();
+        let old_state = file.state;
 
         // Call the revert function
         match crate::services::changeset::Changeset::revert_file(file, &state.session_id) {
             Ok(message) => {
-                // Mark as reverted instead of removing
+                // Update state based on what happened
                 if let Some(tracked) = state.changeset.files.get_mut(&path) {
-                    tracked.is_reverted = true;
+                    if !std::path::Path::new(&path).exists() {
+                        // If file is gone, it's definitively Deleted
+                        tracked.state = FileState::Deleted;
+                    } else {
+                        match old_state {
+                            FileState::Deleted => tracked.state = FileState::Created, // Restored a created-then-deleted file
+                            FileState::Removed => tracked.state = FileState::Modified, // Restored a removed file
+                            FileState::Created => tracked.state = FileState::Deleted, // Should be caught by !exists check, but fallback
+                            _ => tracked.state = FileState::Reverted, // Reverted edits
+                        }
+                    }
                 }
 
                 // Push success message
@@ -675,12 +692,17 @@ pub fn handle_file_changes_popup_revert(state: &mut AppState) {
 }
 
 pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
-    // Collect all non-reverted files to revert
+    use crate::services::changeset::FileState;
+
+    // Collect all non-reverted and non-deleted files to revert
     let files_to_revert: Vec<_> = state
         .changeset
         .files_in_order()
         .into_iter()
-        .filter(|f| !f.is_reverted)
+        .filter(|f| {
+            f.state != FileState::Reverted
+                && (f.state != FileState::Deleted || f.backup_path.is_some())
+        })
         .map(|f| (f.path.clone(), f.clone()))
         .collect();
 
@@ -688,11 +710,21 @@ pub fn handle_file_changes_popup_revert_all(state: &mut AppState) {
     let mut failed_count = 0;
 
     for (path, file) in files_to_revert {
+        let old_state = file.state;
         match crate::services::changeset::Changeset::revert_file(&file, &state.session_id) {
             Ok(_) => {
-                // Mark as reverted instead of removing
+                // Update state based on what happened
                 if let Some(tracked) = state.changeset.files.get_mut(&path) {
-                    tracked.is_reverted = true;
+                    if !std::path::Path::new(&path).exists() {
+                        tracked.state = FileState::Deleted;
+                    } else {
+                        match old_state {
+                            FileState::Deleted => tracked.state = FileState::Created,
+                            FileState::Removed => tracked.state = FileState::Modified,
+                            FileState::Created => tracked.state = FileState::Deleted,
+                            _ => tracked.state = FileState::Reverted,
+                        }
+                    }
                 }
                 reverted_count += 1;
             }
@@ -737,6 +769,9 @@ pub fn handle_file_changes_popup_open_editor(state: &mut AppState) {
         .collect();
 
     if let Some(file) = filtered_files.get(state.file_changes_selected) {
+        if file.state == crate::services::changeset::FileState::Deleted {
+            return;
+        }
         let path = file.path.clone();
         // Set the pending editor open request - will be handled by event loop
         state.pending_editor_open = Some(path);
@@ -749,31 +784,35 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
     let term_size = crossterm::terminal::size().unwrap_or((80, 24));
     let term_width = term_size.0;
     let term_height = term_size.1;
-    
+
     // Calculate centered popup area (50% width, 40% height)
     let popup_width = (term_width * 50) / 100;
     let popup_height = (term_height * 40) / 100;
     let popup_x = (term_width - popup_width) / 2;
     let popup_y = (term_height - popup_height) / 2;
-    
+
     // Check if click is within popup bounds
-    if col < popup_x || col >= popup_x + popup_width || row < popup_y || row >= popup_y + popup_height {
+    if col < popup_x
+        || col >= popup_x + popup_width
+        || row < popup_y
+        || row >= popup_y + popup_height
+    {
         return;
     }
-    
+
     // Calculate relative position within popup
     let relative_row = row.saturating_sub(popup_y + 1); // +1 for border
-    
+
     // File list starts after: title (1) + search (1) + separator (1) = 3 lines
     // And ends before: scroll indicator (1) + footer (1) = 2 lines from bottom
     // File list starts after: title (1) + search (3) + separator (0?) = 4 lines
     let file_list_start = 4;
     let file_list_end = popup_height.saturating_sub(3); // -1 border, -2 footer area
-    
+
     if relative_row >= file_list_start && relative_row < file_list_end {
         // Calculate which file was clicked
         let file_index = (relative_row - file_list_start) as usize + state.file_changes_scroll;
-        
+
         // Get filtered files
         let query = state.file_changes_search.to_lowercase();
         let binding = state.changeset.files_in_order();
@@ -781,10 +820,13 @@ pub fn handle_file_changes_popup_mouse_click(state: &mut AppState, col: u16, row
             .iter()
             .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
             .collect();
-        
+
         if file_index < filtered_files.len() {
-            // Set the pending editor open for this file
-            state.pending_editor_open = Some(filtered_files[file_index].path.clone());
+            let file = filtered_files[file_index];
+            if file.state != crate::services::changeset::FileState::Deleted {
+                // Set the pending editor open for this file
+                state.pending_editor_open = Some(file.path.clone());
+            }
         }
     }
 }

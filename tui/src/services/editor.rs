@@ -6,30 +6,27 @@
 use crossterm::{
     cursor::{Hide, Show},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::Terminal;
 use std::io::stdout;
 use std::process::Command;
 
-/// Configuration for the external editor
-
-
 /// Detect available editor on the system
-/// 
+///
 /// Priority order:
 /// 1. Preferred editor (if specified)
 /// 2. vim
 /// 3. nvim
 /// 4. nano
-/// 
+///
 /// Returns None if no editor is found
 pub fn detect_editor(preferred: Option<String>) -> Option<String> {
     // If preferred editor is specified, check if it exists
-    if let Some(editor) = preferred {
-        if is_editor_available(&editor) {
-            return Some(editor);
-        }
+    if let Some(editor) = preferred
+        && is_editor_available(&editor)
+    {
+        return Some(editor);
     }
 
     // Try editors in order of preference
@@ -52,13 +49,13 @@ fn is_editor_available(editor: &str) -> bool {
 }
 
 /// Open a file in an external editor
-/// 
+///
 /// This function:
 /// 1. Suspends the TUI (leaves alternate screen, disables raw mode)
 /// 2. Spawns the editor with full terminal control
 /// 3. Waits for the editor to close
 /// 4. Restores the TUI (enters alternate screen, enables raw mode, clears)
-/// 
+///
 /// # Arguments
 /// * `terminal` - The ratatui terminal instance
 /// * `editor` - The editor command to use
@@ -71,7 +68,8 @@ pub fn open_in_editor<B: ratatui::backend::Backend>(
     line_number: Option<usize>,
 ) -> Result<(), String> {
     // Suspend TUI and show cursor for the editor
-    execute!(stdout(), LeaveAlternateScreen, Show).map_err(|e| format!("Failed to leave alternate screen: {}", e))?;
+    execute!(stdout(), LeaveAlternateScreen, Show)
+        .map_err(|e| format!("Failed to leave alternate screen: {}", e))?;
     disable_raw_mode().map_err(|e| format!("Failed to disable raw mode: {}", e))?;
 
     // Build editor command
@@ -102,9 +100,12 @@ pub fn open_in_editor<B: ratatui::backend::Backend>(
 
 /// Restore TUI state after external editor closes
 fn restore_tui<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<(), String> {
-    execute!(stdout(), EnterAlternateScreen, Hide).map_err(|e| format!("Failed to enter alternate screen: {}", e))?;
+    execute!(stdout(), EnterAlternateScreen, Hide)
+        .map_err(|e| format!("Failed to enter alternate screen: {}", e))?;
     enable_raw_mode().map_err(|e| format!("Failed to enable raw mode: {}", e))?;
-    terminal.clear().map_err(|e| format!("Failed to clear terminal: {}", e))?;
+    terminal
+        .clear()
+        .map_err(|e| format!("Failed to clear terminal: {}", e))?;
     Ok(())
 }
 
@@ -124,7 +125,7 @@ mod tests {
         // 'ls' should always be available on Unix systems
         #[cfg(unix)]
         assert!(is_editor_available("ls"));
-        
+
         // 'nonexistent_editor_xyz' should not be available
         assert!(!is_editor_available("nonexistent_editor_xyz"));
     }

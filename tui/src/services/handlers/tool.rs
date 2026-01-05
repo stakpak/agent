@@ -7,7 +7,7 @@ use crate::services::commands::{CommandAction, CommandContext, execute_command, 
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress,
+    ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -264,8 +264,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 
 /// Update session tool calls queue
 pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
-    if tool_call_result.status
-        == stakpak_shared::models::integrations::openai::ToolCallResultStatus::Error
+    if tool_call_result.status == ToolCallResultStatus::Error
         && let Some(failed_idx) = state
             .tool_call_execution_order
             .iter()
@@ -333,23 +332,11 @@ pub fn execute_command_palette_selection(
 /// Handle completed tool result event
 pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
     use crate::services::changeset::FileEdit;
-    use stakpak_shared::models::integrations::openai::ToolCallResultStatus;
-
-    // Debug log to check if handler is reached
-    state.messages.push(Message::info(
-        format!(
-            "DEBUG: handle_tool_result called for {}",
-            result.call.function.name
-        ),
-        None,
-    ));
 
     // Only process successful tool calls
-    if result.status != ToolCallResultStatus::Success {
-        state.messages.push(Message::info(
-            "DEBUG: Tool call failed, skipping changeset update",
-            None,
-        ));
+    if !matches!(result.status, ToolCallResultStatus::Success)
+        || result.result.contains("TOOL_CALL_REJECTED")
+    {
         return;
     }
 
@@ -359,19 +346,8 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
     // Parse arguments
     let args: serde_json::Value = match serde_json::from_str(args_str) {
         Ok(v) => v,
-        Err(e) => {
-            state.messages.push(Message::info(
-                format!("DEBUG: Failed to parse args for {}: {}", function_name, e),
-                None,
-            ));
-            return;
-        } // Should not happen if tool call was successful
+        Err(_) => return, // Should not happen if tool call was successful
     };
-
-    state.messages.push(Message::info(
-        format!("DEBUG: Processing function: {}", function_name),
-        None,
-    ));
 
     // Normalize/Strip tool name for checking
     let tool_name_stripped = crate::utils::strip_tool_name(function_name);
@@ -383,20 +359,27 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 .or(args.get("path"))
                 .and_then(|v| v.as_str())
             {
-                state.messages.push(Message::info(
-                    format!("DEBUG: write_to_file tracking path: {}", path),
-                    None,
-                ));
                 let code_content = args
                     .get("CodeContent")
                     .or(args.get("content"))
+                    .or(args.get("file_content"))
+                    .or(args.get("body"))
+                    .or(args.get("text"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let is_overwrite = args
                     .get("Overwrite")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let line_count = code_content.lines().count();
+
+                // If no content in args but file exists, read from disk to count lines
+                let line_count = if code_content.is_empty() {
+                    std::fs::read_to_string(path)
+                        .map(|content| content.lines().count().max(1)) // At least 1 line for non-empty files
+                        .unwrap_or(0)
+                } else {
+                    code_content.lines().count()
+                };
 
                 let summary = if is_overwrite {
                     "Overwrote file"
@@ -408,15 +391,12 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     .with_stats(line_count, 0)
                     .with_tool_call(result.call.clone());
 
-                // Only track if file still exists (important for resumed sessions)
-                if std::path::Path::new(path).exists() {
-                    state.changeset.track_file(path, edit);
+                state.changeset.track_file(path, edit);
+
+                // If file does not exist, mark it as Deleted immediately
+                if !std::path::Path::new(path).exists() {
+                    state.changeset.mark_removed(path, None);
                 }
-            } else {
-                state.messages.push(Message::info(
-                    "DEBUG: write_to_file missing TargetFile/path",
-                    None,
-                ));
             }
         }
         "replace_file_content" | "multi_replace_file_content" | "str_replace" | "edit_file" => {
@@ -425,16 +405,6 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 .or(args.get("path"))
                 .and_then(|v| v.as_str())
             {
-                state.messages.push(Message::info(
-                    format!("DEBUG: {} tracking path: {}", function_name, path),
-                    None,
-                ));
-
-                // Only track if file still exists (important for resumed sessions)
-                if !std::path::Path::new(path).exists() {
-                    return;
-                }
-
                 // For str_replace, check if the changes are still present in the file
                 // This prevents tracking reverted or manually edited files
                 if tool_name_stripped == "str_replace"
@@ -443,10 +413,6 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                     && !current_content.contains(new_str)
                 {
                     // File was reverted or manually edited, don't track it
-                    state.messages.push(Message::info(
-                        format!("DEBUG: Skipping {} - changes not present in file", path),
-                        None,
-                    ));
                     return;
                 }
 
@@ -473,39 +439,41 @@ pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
                 }
 
                 state.changeset.track_file(path, edit);
-            } else {
-                state.messages.push(Message::info(
-                    format!("DEBUG: {} missing TargetFile/path", function_name),
-                    None,
-                ));
+
+                // If file does not exist, mark it as Deleted immediately
+                if !std::path::Path::new(path).exists() {
+                    state.changeset.mark_removed(path, None);
+                }
             }
         }
-        "remove_file" | "delete_file" => {
+        "remove_file" | "delete_file" | "stakpak__remove" | "remove" => {
             // Assuming remove_file takes "path" or "TargetFile"
             if let Some(path) = args
                 .get("path")
                 .or(args.get("TargetFile"))
                 .and_then(|v| v.as_str())
             {
-                state.messages.push(Message::info(
-                    format!("DEBUG: remove_file tracking path: {}", path),
-                    None,
-                ));
-                // For removal, we don't know lines removed without reading, just mark as deleted
-                state.changeset.mark_deleted(path, None);
-            } else {
-                state
-                    .messages
-                    .push(Message::info("DEBUG: remove_file missing path", None));
+                // Extract backup path from result.result if available
+                let backup_path = extract_backup_path(&result.result);
+
+                state.changeset.mark_removed(path, backup_path);
             }
         }
-        _ => {
-            state.messages.push(Message::info(
-                format!("DEBUG: Unhandled function: {}", function_name),
-                None,
-            ));
+        _ => {}
+    }
+}
+
+/// Extract backup path from the XML output
+fn extract_backup_path(result: &str) -> Option<String> {
+    // Look for backup_path="..." in the result string
+    // Format: backup_path="/path/to/backup/file"
+    if let Some(start_idx) = result.find("backup_path=\"") {
+        let after_start = &result[start_idx + "backup_path=\"".len()..];
+        if let Some(end_idx) = after_start.find('"') {
+            return Some(after_start[..end_idx].to_string());
         }
     }
+    None
 }
 
 /// Parse added/removed lines from a diff string

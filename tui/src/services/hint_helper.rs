@@ -99,29 +99,27 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
             let right_text_content = {
                 let mut s = String::new();
-                
+
                 // Add model info
                 s.push_str("model ");
                 s.push_str(&state.agent_model.to_string());
-                
+
                 // Add profile info only if side panel is hidden
                 if !state.show_side_panel {
                     s.push_str(" | profile ");
                     s.push_str(&state.current_profile_name);
                 }
-                
+
                 // Add rulebooks info
                 s.push_str(" | ctrl+k rulebooks");
                 s.push_str(" | ctrl+k rulebooks");
                 s
             };
-            
+
             let right_style = Style::default().fg(Color::DarkGray);
 
             // Left side content
-            let left_spans = vec![
-                Span::styled(left_text, Style::default().fg(Color::Cyan)),
-            ];
+            let left_spans = vec![Span::styled(left_text, Style::default().fg(Color::Cyan))];
 
             // Right side content
             let mut right_spans = vec![];
@@ -135,7 +133,8 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         right_spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
                     }
                     AgentModel::Eco => {
-                        right_spans.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
+                        right_spans
+                            .push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
                     }
                     AgentModel::Recovery => {
                         right_spans.push(Span::styled(
@@ -144,7 +143,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         ));
                     }
                 }
-                
+
                 // Show profile info only if side panel is hidden
                 if !state.show_side_panel {
                     right_spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
@@ -157,7 +156,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         Style::default().fg(Color::Reset),
                     ));
                 }
-                
+
                 right_spans.push(Span::styled(
                     " | ctrl+k rulebooks",
                     Style::default().fg(Color::DarkGray),
@@ -165,9 +164,11 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             }
 
             // Render both aligned to opposite sides
-            let left_widget = Paragraph::new(Line::from(left_spans)).alignment(ratatui::layout::Alignment::Left);
-            let right_widget = Paragraph::new(Line::from(right_spans)).alignment(ratatui::layout::Alignment::Right);
-            
+            let left_widget =
+                Paragraph::new(Line::from(left_spans)).alignment(ratatui::layout::Alignment::Left);
+            let right_widget = Paragraph::new(Line::from(right_spans))
+                .alignment(ratatui::layout::Alignment::Right);
+
             f.render_widget(left_widget, area);
             f.render_widget(right_widget, area);
 
@@ -178,7 +179,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 // We need to create a new area or just rely on Paragraph handling?
                 // Actually, if we use the same area but with a newline in content, it works.
                 // But left_widget uses `Line::from(left_spans)`.
-                
+
                 // Let's create a NEW paragraph for the second line and render it.
                 // We'll calculate a sub-area for the second line.
                 if area.height > 1 {
@@ -188,15 +189,12 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                         width: area.width,
                         height: 1, // Only 1 line
                     };
-                    
-                     let select_hint_widget = Paragraph::new(Span::styled(
-                        select_hint,
-                        Style::default().fg(Color::Cyan),
-                    ));
+
+                    let select_hint_widget =
+                        Paragraph::new(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
                     f.render_widget(select_hint_widget, second_line_area);
                 }
             }
-
         }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         // Show auto-approve status
