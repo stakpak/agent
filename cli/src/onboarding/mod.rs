@@ -241,10 +241,7 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
 
 /// Handle Anthropic provider selection (subscription vs API key)
 /// Returns true if completed, false if cancelled/back
-async fn handle_anthropic_provider_selection(
-    config: &mut AppConfig,
-    profile_name: &str,
-) -> bool {
+async fn handle_anthropic_provider_selection(config: &mut AppConfig, profile_name: &str) -> bool {
     // Clear previous step content
     print!("\x1b[u");
     print!("\x1b[0J");
