@@ -885,7 +885,11 @@ SECURITY FEATURES:
         let length = length.unwrap_or(15);
         let include_symbols = include_symbols.unwrap_or(true);
 
-        let redaction_map = self.get_secret_manager().load_session_redaction_map();
+        let redaction_map = self
+            .get_secret_manager()
+            .get_redaction_map()
+            .await
+            .unwrap_or_default();
 
         let password =
             stakpak_shared::utils::generate_password(length, include_symbols, &redaction_map)
@@ -905,7 +909,7 @@ SECURITY FEATURES:
 
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(password)
+            .redact_and_store_password(password.expose_secret())
             .await
             .map_err(|e| {
                 McpError::internal_error(format!("Failed to redact password: {}", e), None)

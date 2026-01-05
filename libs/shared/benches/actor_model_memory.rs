@@ -181,17 +181,11 @@ mod async_operations {
         let rt = Runtime::new().unwrap();
         let _guard = rt.enter();
         let handle = secret_manager::launch_secret_manager(true, false, None);
-        let content = "Login with password supersecretpassword123 and continue";
         let password = "supersecretpassword123";
 
         bencher.bench(|| {
             rt.block_on(async {
-                divan::black_box(
-                    handle
-                        .redact_and_store_password(content, password)
-                        .await
-                        .unwrap(),
-                )
+                divan::black_box(handle.redact_and_store_password(password).await.unwrap())
             })
         });
     }
