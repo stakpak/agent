@@ -31,7 +31,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
         let hint = Paragraph::new(Span::styled(
-            "Shell mode is on     '$' to undo shell mode",
+            "Shell mode is on   Esc to exit",
             Style::default().fg(AdaptiveColors::dark_magenta()),
         ));
         f.render_widget(hint, area);

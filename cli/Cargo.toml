@@ -2,14 +2,19 @@
 name = "stakpak"
 version = { workspace = true }
 edition = "2024"
+description = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+readme = "../README.md"
 
 [dependencies]
-stakpak-api = { path = "../libs/api" }
-stakpak-mcp-server = { path = "../libs/mcp/server" }
-stakpak-mcp-client = { path = "../libs/mcp/client" }
-stakpak-mcp-proxy = { path = "../libs/mcp/proxy" }
-stakpak-tui = { path = "../tui" }
-stakpak-shared = { path = "../libs/shared" }
+stakpak-api = { workspace = true }
+stakpak-mcp-server = { workspace = true }
+stakpak-mcp-client = { workspace = true }
+stakpak-mcp-proxy = { workspace = true }
+stakpak-tui = { workspace = true }
+stakpak-shared = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }

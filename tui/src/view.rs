@@ -8,6 +8,7 @@ use crate::services::message::{
 };
 use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
+use crate::services::shell_popup;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Rect},
@@ -57,7 +58,17 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
     let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
-    // Layout: [messages][loading_line][dialog_margin][dialog][input][dropdown][hint]
+    // Calculate shell popup height (goes above input)
+    let shell_popup_height = shell_popup::calculate_popup_height(state, f.area().height);
+
+    // Hide input when shell popup is expanded (takes over input)
+    let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
+        0 // Hide input when popup is expanded
+    } else {
+        input_height
+    };
+
+    // Layout: [messages][loading_line][dialog_margin][dialog][shell_popup][input][dropdown][hint]
     let mut constraints = vec![
         Constraint::Min(1),    // messages
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
@@ -65,7 +76,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         Constraint::Length(dialog_height),
     ];
     if !state.show_sessions_dialog {
-        constraints.push(Constraint::Length(input_height));
+        constraints.push(Constraint::Length(shell_popup_height)); // shell popup (0 if hidden)
+        constraints.push(Constraint::Length(effective_input_height));
         constraints.push(Constraint::Length(dropdown_height));
     }
     constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
@@ -97,11 +109,18 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         width: 0,
         height: 0,
     };
+    let mut shell_popup_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
     let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
-        input_area = chunks[4]; // Updated index due to loading line
-        dropdown_area = chunks.get(5).copied().unwrap_or(input_area);
+        shell_popup_area = chunks[4]; // Shell popup between dialog and input
+        input_area = chunks[5]; // Input after shell popup
+        dropdown_area = chunks.get(6).copied().unwrap_or(input_area);
     }
 
     let message_area_width = padded_message_area.width as usize;
@@ -115,13 +134,23 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
+    // Render shell popup above input area (if visible)
+    if state.shell_popup_visible && !state.show_sessions_dialog {
+        let padded_shell_popup_area = Rect {
+            x: shell_popup_area.x + 1,
+            y: shell_popup_area.y,
+            width: shell_popup_area.width.saturating_sub(2),
+            height: shell_popup_area.height,
+        };
+        shell_popup::render_shell_popup(f, state, padded_shell_popup_area);
+    }
+
     let padded_loading_area = Rect {
         x: loading_area.x + 1,
         y: loading_area.y,
         width: loading_area.width.saturating_sub(2),
         height: loading_area.height,
     };
-    // Render loading indicator in dedicated area
     render_loading_indicator(f, state, padded_loading_area);
 
     if state.show_collapsed_messages {
@@ -129,6 +158,8 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.show_sessions_dialog {
         render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
+    } else if state.shell_popup_visible && state.shell_popup_expanded {
+        // Don't render input when popup is expanded - popup takes over input
     } else {
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
@@ -328,13 +359,20 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
 
 fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
             Style::default().fg(AdaptiveColors::dark_magenta())
         } else {
             Style::default().fg(Color::DarkGray)
         });
+
+    if !state.show_shell_mode && !state.loading {
+        block = block.title(Span::styled(
+            "'$' for Shell mode",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
 
     // Create content area inside the block
     let content_area = Rect {
