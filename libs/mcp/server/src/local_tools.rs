@@ -5,7 +5,6 @@ use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
 use stakpak_shared::models::password::Password;
-use stakpak_shared::models::password::PasswordGenerationError;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -885,34 +884,13 @@ SECURITY FEATURES:
         let length = length.unwrap_or(15);
         let include_symbols = include_symbols.unwrap_or(true);
 
-        let redaction_map = self
-            .get_secret_manager()
-            .get_redaction_map()
-            .await
-            .unwrap_or_default();
-
-        let password =
-            stakpak_shared::utils::generate_password(length, include_symbols, &redaction_map)
-                .map_err(|err| match err {
-                    PasswordGenerationError::TooShort => McpError::invalid_params(
-                        err.to_string(),
-                        Some(json!({"length": length, "minimum": 8})),
-                    ),
-                    PasswordGenerationError::Conflict => {
-                        McpError::internal_error(err.to_string(), Some(json!({"length": length})))
-                    }
-                    PasswordGenerationError::NonUTF8(err) => McpError::internal_error(
-                        err.to_string(),
-                        Some(json!({"error": err.to_string()})),
-                    ),
-                })?;
-
+        // Delegate generation and redaction to the SecretManager actor
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(password.expose_secret())
+            .generate_password(length, include_symbols)
             .await
             .map_err(|e| {
-                McpError::internal_error(format!("Failed to redact password: {}", e), None)
+                McpError::internal_error(format!("Failed to generate password: {}", e), None)
             })?;
 
         Ok(CallToolResult::success(vec![Content::text(

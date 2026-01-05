@@ -1,5 +1,5 @@
 use crate::local_store::LocalStore;
-use crate::models::password::Password;
+use crate::models::password::{Password, PasswordGenerationError};
 use crate::secrets::{redact_password, redact_secrets, restore_secrets};
 use serde_json;
 use std::collections::HashMap;
@@ -29,6 +29,9 @@ pub enum SecretManagerError {
 
     #[error("I/O error: {0}")]
     IoError(String),
+
+    #[error("Password generation failed: {0}")]
+    PasswordGeneration(#[from] PasswordGenerationError),
 }
 
 impl<T> From<SendError<T>> for SecretManagerError {
@@ -60,8 +63,10 @@ enum SecretMessage {
         input: String,
         resp: oneshot::Sender<String>,
     },
-    GetRedactionMap {
-        resp: oneshot::Sender<HashMap<String, String>>,
+    GeneratePassword {
+        length: usize,
+        include_symbols: bool,
+        resp: oneshot::Sender<Result<String, PasswordGenerationError>>,
     },
 }
 
@@ -145,8 +150,24 @@ impl SecretManager {
                 let result = restore_secrets(&input, &self.redaction_map);
                 let _ = resp.send(result);
             }
-            SecretMessage::GetRedactionMap { resp } => {
-                let _ = resp.send(self.redaction_map.clone());
+            SecretMessage::GeneratePassword {
+                length,
+                include_symbols,
+                resp,
+            } => {
+                // Generate password using local map (actor state)
+                let result = match crate::utils::generate_password(
+                    length,
+                    include_symbols,
+                    &self.redaction_map,
+                ) {
+                    Ok(password) => {
+                        // If successful, redact and store it immediately
+                        Ok(self.redact_and_store_password_impl(password).await)
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = resp.send(result);
             }
         }
     }
@@ -343,20 +364,25 @@ impl SecretManagerHandle {
         Self::await_response(resp_rx).await
     }
 
-    pub async fn get_redaction_map(&self) -> Result<HashMap<String, String>, SecretManagerError> {
+    pub async fn generate_password(
+        &self,
+        length: usize,
+        include_symbols: bool,
+    ) -> Result<String, SecretManagerError> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        let msg = SecretMessage::GetRedactionMap { resp: resp_tx };
+        let msg = SecretMessage::GeneratePassword {
+            length,
+            include_symbols,
+            resp: resp_tx,
+        };
 
         self.tx.send(msg).await?;
 
-        // await_response expects String, but we return HashMap.
-        // We need specialized await logic or make await_response generic.
-        // Since await_response is private and specific to String, let's just inline the await logic here for now or update await_response.
-
-        // Inline logic:
+        // Logic for handling Result<Result<...>> across channel
         let timeout_duration = Duration::from_secs(DEFAULT_OPERATION_TIMEOUT_SECS);
         match tokio::time::timeout(timeout_duration, resp_rx).await {
-            Ok(Ok(result)) => Ok(result),
+            Ok(Ok(Ok(result))) => Ok(result),
+            Ok(Ok(Err(e))) => Err(SecretManagerError::PasswordGeneration(e)),
             Ok(Err(_)) => Err(SecretManagerError::ActorDropped),
             Err(_) => Err(SecretManagerError::Timeout(DEFAULT_OPERATION_TIMEOUT_SECS)),
         }
