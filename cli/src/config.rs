@@ -845,6 +845,72 @@ impl AppConfig {
 
         None
     }
+
+    /// Get auth display info for the TUI
+    ///
+    /// Returns a tuple of (config_provider, auth_provider, subscription_name) where:
+    /// - config_provider: The provider type from config.toml ("Local" or None for Remote)
+    /// - auth_provider: "Anthropic", "OpenAI", "Gemini", etc. from auth.toml
+    /// - subscription_name: "Claude Pro", "Claude Max", etc. from auth.toml's name field
+    ///
+    /// For Stakpak API users (ProviderType::Remote), returns (None, None, None)
+    pub fn get_auth_display_info(&self) -> (Option<String>, Option<String>, Option<String>) {
+        // Stakpak API users don't need auth display info
+        if matches!(self.provider, ProviderType::Remote) {
+            return (None, None, None);
+        }
+
+        // Config provider is "Local" for local provider type
+        let config_provider = Some("Local".to_string());
+
+        // Check which provider is configured in auth.toml
+        let providers = ["anthropic", "openai", "gemini"];
+
+        for provider in providers {
+            if let Some(auth) = self.resolve_provider_auth(provider) {
+                let base_name = match provider {
+                    "anthropic" => "Anthropic",
+                    "openai" => "OpenAI",
+                    "gemini" => "Gemini",
+                    _ => provider,
+                };
+
+                // Check if provider has a custom api_endpoint (BYOM - Bring Your Own Model)
+                let has_custom_endpoint = match provider {
+                    "anthropic" => self
+                        .anthropic
+                        .as_ref()
+                        .and_then(|c| c.api_endpoint.as_ref())
+                        .is_some(),
+                    "openai" => self
+                        .openai
+                        .as_ref()
+                        .and_then(|c| c.api_endpoint.as_ref())
+                        .is_some(),
+                    "gemini" => self
+                        .gemini
+                        .as_ref()
+                        .and_then(|c| c.api_endpoint.as_ref())
+                        .is_some(),
+                    _ => false,
+                };
+
+                let auth_provider = if has_custom_endpoint {
+                    format!("{} BYOM", base_name)
+                } else {
+                    base_name.to_string()
+                };
+
+                // Get subscription name from OAuth auth if available
+                let subscription_name = auth.subscription_name().map(|s| s.to_string());
+
+                return (config_provider, Some(auth_provider), subscription_name);
+            }
+        }
+
+        // Local provider but no auth found
+        (config_provider, None, None)
+    }
 }
 
 impl RulebookConfig {

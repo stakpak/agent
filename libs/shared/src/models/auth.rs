@@ -24,6 +24,9 @@ pub enum ProviderAuth {
         refresh: String,
         /// Expiration timestamp in milliseconds since Unix epoch
         expires: i64,
+        /// Optional name for the subscription (e.g. "Claude Pro", "Claude Max")
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
     },
 }
 
@@ -39,6 +42,22 @@ impl ProviderAuth {
             access: access.into(),
             refresh: refresh.into(),
             expires,
+            name: None,
+        }
+    }
+
+    /// Create a new OAuth authentication with subscription name
+    pub fn oauth_with_name(
+        access: impl Into<String>,
+        refresh: impl Into<String>,
+        expires: i64,
+        name: impl Into<String>,
+    ) -> Self {
+        Self::OAuth {
+            access: access.into(),
+            refresh: refresh.into(),
+            expires,
+            name: Some(name.into()),
         }
     }
 
@@ -101,6 +120,14 @@ impl ProviderAuth {
         match self {
             Self::Api { .. } => "api_key",
             Self::OAuth { .. } => "oauth",
+        }
+    }
+
+    /// Get the subscription name if this is an OAuth auth with a name
+    pub fn subscription_name(&self) -> Option<&str> {
+        match self {
+            Self::OAuth { name, .. } => name.as_deref(),
+            Self::Api { .. } => None,
         }
     }
 }
