@@ -223,13 +223,9 @@ pub enum GeminiMediaResolution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GeminiModality {
-    #[serde(rename = "MODALITY_UNSPECIFIED")]
     ModalityUnspecified,
-    #[serde(rename = "TEXT")]
     Text,
-    #[serde(rename = "IMAGE")]
     Image,
-    #[serde(rename = "AUDIO")]
     Audio,
 }
 
