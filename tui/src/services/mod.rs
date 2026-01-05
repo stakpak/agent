@@ -6,6 +6,7 @@ pub mod clipboard_paste;
 pub mod commands;
 pub mod context_popup;
 pub mod detect_term;
+pub mod editor;
 pub mod file_changes_popup;
 pub mod file_diff;
 pub mod file_search;

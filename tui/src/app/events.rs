@@ -77,6 +77,7 @@ pub enum InputEvent {
     ToggleContextPopup,
     EmergencyClearTerminal,
     ToggleMouseCapture,
+    OpenFileInEditor,
     // Approval popup events
     ApprovalPopupNextTab,
     ApprovalPopupPrevTab,

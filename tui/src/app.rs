@@ -206,6 +206,12 @@ pub struct AppState {
 
     pub todos: Vec<TodoItem>,
     pub session_start_time: std::time::Instant,
+    
+    /// External editor command (vim, nvim, or nano)
+    pub editor_command: String,
+    
+    /// Pending file to open in editor (set by handler, consumed by event loop)
+    pub pending_editor_open: Option<String>,
 }
 
 pub struct AppStateOptions<'a> {
@@ -217,6 +223,7 @@ pub struct AppStateOptions<'a> {
     pub allowed_tools: Option<&'a Vec<String>>,
     pub input_tx: Option<mpsc::Sender<InputEvent>>,
     pub agent_model: AgentModel,
+    pub editor_command: Option<String>,
 }
 
 impl AppState {
@@ -256,6 +263,7 @@ impl AppState {
             allowed_tools,
             input_tx,
             agent_model,
+            editor_command,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -348,7 +356,7 @@ impl AppState {
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
             pending_pastes: Vec::new(),
-            mouse_capture_enabled: true, // Enable mouse capture by default for side panel interaction
+            mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
@@ -432,6 +440,9 @@ impl AppState {
             todos: Vec::new(),
             session_start_time: std::time::Instant::now(),
             session_id: String::new(), // Will be set when session starts
+            editor_command: crate::services::editor::detect_editor(editor_command)
+                .unwrap_or_else(|| "nano".to_string()),
+            pending_editor_open: None,
         }
     }
 

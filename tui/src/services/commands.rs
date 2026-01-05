@@ -237,7 +237,11 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/issue",
-            description: "Submit issue on GitHub repo",
+            description: "Report an issue or bug",
+        },
+        HelperCommand {
+            command: "/editor",
+            description: "Open selected file in external editor (vim/nvim/nano)",
         },
         HelperCommand {
             command: "/support",
@@ -412,6 +416,54 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ToggleMouseCapture);
+            Ok(())
+        }
+        "/editor" => {
+            // Parse path argument if provided: /editor <path>
+            let input = ctx.state.input().trim();
+            let path_arg = if input.starts_with("/editor ") {
+                Some(input[8..].trim().to_string())
+            } else {
+                None
+            };
+            
+            if let Some(path) = path_arg {
+                // User provided a path, open it directly
+                if std::path::Path::new(&path).exists() {
+                    ctx.state.pending_editor_open = Some(path);
+                } else {
+                    push_error_message(ctx.state, &format!("File not found: {}", path), None);
+                }
+            } else {
+                // No path provided, use selected file from changeset
+                // Open file changes popup if not already open
+                if !ctx.state.show_file_changes_popup && ctx.state.changeset.file_count() > 0 {
+                    ctx.state.show_file_changes_popup = true;
+                    ctx.state.file_changes_selected = 0;
+                    ctx.state.file_changes_search.clear();
+                }
+                
+                // If popup is open and there are files, open the selected one
+                if ctx.state.show_file_changes_popup {
+                    let query = ctx.state.file_changes_search.to_lowercase();
+                    let binding = ctx.state.changeset.files_in_order();
+                    let filtered_files: Vec<_> = binding
+                        .iter()
+                        .filter(|f| query.is_empty() || f.display_name().to_lowercase().contains(&query))
+                        .collect();
+
+                    if let Some(file) = filtered_files.get(ctx.state.file_changes_selected) {
+                        ctx.state.pending_editor_open = Some(file.path.clone());
+                    } else {
+                        push_error_message(ctx.state, "No file selected in changeset", None);
+                    }
+                } else {
+                    push_error_message(ctx.state, "No files in changeset. Make some changes first, or use /editor <path>", None);
+                }
+            }
+            
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
             Ok(())
         }
         "/shortcuts" => {

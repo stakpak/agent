@@ -90,9 +90,17 @@ pub fn update(
                 popup::handle_file_changes_popup_backspace(state);
                 return;
             }
+            InputEvent::OpenFileInEditor => {
+                popup::handle_file_changes_popup_open_editor(state);
+                return;
+            }
             InputEvent::InputSubmitted => {
                 // Enter triggers revert on selected file
                 popup::handle_file_changes_popup_revert(state);
+                return;
+            }
+            InputEvent::MouseClick(col, row) => {
+                popup::handle_file_changes_popup_mouse_click(state, col, row);
                 return;
             }
             _ => {
@@ -544,6 +552,10 @@ pub fn update(
         InputEvent::ToggleMouseCapture => {
             misc::handle_toggle_mouse_capture(state);
         }
+        InputEvent::OpenFileInEditor => {
+            // Handled in file changes popup context above
+            // This match arm exists to satisfy exhaustive pattern matching
+        }
         InputEvent::EmergencyClearTerminal => {
             // EmergencyClearTerminal is handled in event loop
         }
@@ -571,7 +583,12 @@ pub fn update(
         }
         InputEvent::ApprovalPopupSubmit => {}
         InputEvent::MouseClick(col, row) => {
-            popup::handle_side_panel_mouse_click(state, col, row);
+            // Check if click is on file changes popup first
+            if state.show_file_changes_popup {
+                popup::handle_file_changes_popup_mouse_click(state, col, row);
+            } else {
+                popup::handle_side_panel_mouse_click(state, col, row);
+            }
         }
     }
 

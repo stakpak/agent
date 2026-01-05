@@ -118,6 +118,7 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+        let editor_command = ctx.editor.clone();
 
         let model_clone = model.clone();
         let tui_handle = tokio::spawn(async move {
@@ -136,6 +137,7 @@ pub async fn run_interactive(
                 current_profile_for_tui,
                 rulebook_config_for_tui,
                 model_clone,
+                editor_command,
             )
             .await
             .map_err(|e| e.to_string())

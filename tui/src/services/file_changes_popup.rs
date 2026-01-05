@@ -280,10 +280,6 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
         Span::raw(": Revert All  "),
         Span::styled("Esc", Style::default().fg(Color::Red)),
         Span::raw(": Close  "),
-        Span::styled(
-            "[Revert All]",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
     ];
 
     let footer =
