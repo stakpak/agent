@@ -100,6 +100,18 @@ pub struct Usage {
     pub total_tokens: u32,
 }
 
+#[cfg(test)]
+impl Usage {
+    /// Create a new usage with the given prompt and completion tokens
+    pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        }
+    }
+}
+
 /// Why generation finished
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
