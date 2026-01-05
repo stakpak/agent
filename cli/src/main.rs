@@ -30,6 +30,7 @@ use commands::{
 };
 use config::{AppConfig, ProviderType};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utils::agents_md::discover_agents_md;
 use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
@@ -104,6 +105,10 @@ struct Cli {
     /// Subagent configuration file subagents.toml
     #[arg(long = "subagent-config")]
     subagent_config_path: Option<String>,
+
+    /// Ignore AGENTS.md files (skip discovery and injection)
+    #[arg(long = "ignore-agents-md", default_value_t = false)]
+    ignore_agents_md: bool,
 
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
@@ -246,6 +251,14 @@ async fn main() {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
+
+                    let agents_md = if cli.ignore_agents_md {
+                        None
+                    } else {
+                        std::env::current_dir()
+                            .ok()
+                            .and_then(|cwd| discover_agents_md(&cwd))
+                    };
 
                     let client: Arc<dyn AgentProvider> = match config.provider {
                         ProviderType::Remote => {
@@ -441,6 +454,7 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: cli.model.unwrap_or(AgentModel::Smart),
+                                agents_md: agents_md.clone(),
                             },
                         )
                         .await
@@ -472,6 +486,7 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: cli.model.unwrap_or(AgentModel::Smart),
+                                agents_md,
                             },
                         )
                         .await

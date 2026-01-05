@@ -3,12 +3,13 @@ use crate::commands::agent::run::checkpoint::{
     extract_checkpoint_id_from_messages, get_checkpoint_messages,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, tool_result, user_message,
+    add_agents_md, add_local_context, add_rulebooks, add_subagents, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::{AppConfig, ProviderType};
+use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
 use stakpak_api::{
     AgentProvider,
@@ -39,6 +40,7 @@ pub struct RunAsyncConfig {
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: AgentModel,
+    pub agents_md: Option<AgentsMdInfo>,
 }
 
 // All print functions have been moved to the renderer module and are no longer needed here
@@ -160,6 +162,16 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
         let (user_input, _subagents_text) =
             add_subagents(&chat_messages, &user_input, &config.subagent_configs);
+
+        let user_input = if chat_messages.is_empty()
+            && let Some(agents_md) = &config.agents_md
+        {
+            let (user_input, _agents_md_text) = add_agents_md(&user_input, agents_md);
+            user_input
+        } else {
+            user_input
+        };
+
         chat_messages.push(user_message(user_input));
     }
 
