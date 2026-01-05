@@ -228,7 +228,7 @@ pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateRespon
         parse_stop_reason(&resp.stop_reason)
     };
 
-    // Calculate cache tokens following Vercel AI SDK structure
+    // Calculate cache tokens
     // Anthropic: cache_creation_input_tokens -> cacheWrite, cache_read_input_tokens -> cacheRead
     let cache_creation = resp.usage.cache_creation_input_tokens.unwrap_or(0);
     let cache_read = resp.usage.cache_read_input_tokens.unwrap_or(0);
