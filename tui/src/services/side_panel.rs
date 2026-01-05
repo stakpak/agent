@@ -44,7 +44,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Calculate section heights
     let context_height = 5; // Fixed height for context
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 4; // For STAKPAK+profile, cwd (with wrapping)
+    let footer_height = 6; // For STAKPAK+profile, cwd, empty, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
     let todos_collapsed = state
@@ -264,7 +264,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
     let header = Line::from(Span::styled(
         format!(
-            "{}{} Changeset{}",
+            "{}{} Modified files{}",
             LEFT_PADDING, collapse_indicator, count_label
         ),
         header_style,
@@ -437,6 +437,34 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
             Style::default().fg(Color::Reset),
         ),
         Span::styled(&cwd, Style::default().fg(Color::DarkGray)),
+    ]));
+
+    // Empty line after CWD
+    lines.push(Line::from(""));
+
+    // Shortcuts split into lines with colors:
+    // Tab: Select (Cyan)
+    // Enter: toggle (LightMagenta)
+    // Ctrl+b: On/Off (Yellow)
+    
+    let left_padding_span = Span::styled(
+        format!("{}", LEFT_PADDING),
+        Style::default().fg(Color::DarkGray),
+    );
+
+    lines.push(Line::from(vec![
+        left_padding_span.clone(),
+        Span::styled("Tab:", Style::default().fg(Color::Cyan)),
+        Span::styled(" Select", Style::default().fg(Color::Reset)),
+        Span::raw("  "),
+        Span::styled("Enter:", Style::default().fg(Color::LightMagenta)),
+        Span::styled(" toggle", Style::default().fg(Color::Reset)),
+    ]));
+    
+    lines.push(Line::from(vec![
+        left_padding_span,
+        Span::styled("Ctrl+b: ", Style::default().fg(Color::Yellow)),
+        Span::styled("On/Off", Style::default().fg(Color::Reset)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });

@@ -207,6 +207,9 @@ pub struct AppState {
     pub todos: Vec<TodoItem>,
     pub session_start_time: std::time::Instant,
     
+    // Auto-show side panel tracking
+    pub side_panel_auto_shown: bool,
+    
     /// External editor command (vim, nvim, or nano)
     pub editor_command: String,
     
@@ -439,6 +442,7 @@ impl AppState {
             changeset: Changeset::new(),
             todos: Vec::new(),
             session_start_time: std::time::Instant::now(),
+            side_panel_auto_shown: false,
             session_id: String::new(), // Will be set when session starts
             editor_command: crate::services::editor::detect_editor(editor_command)
                 .unwrap_or_else(|| "nano".to_string()),
@@ -579,6 +583,19 @@ impl AppState {
                 self.show_helper_dropdown = (input_text.trim().starts_with('/'))
                     || (!self.filtered_helpers.is_empty() && input_text.starts_with('/'))
                     || (has_at_trigger && !self.waiting_for_shell_input);
+            }
+        }
+    }
+    pub fn auto_show_side_panel(&mut self) {
+        if !self.side_panel_auto_shown && !self.show_side_panel {
+            self.show_side_panel = true;
+            self.side_panel_auto_shown = true;
+            
+            // Also enable mouse capture
+            #[cfg(unix)]
+            if !self.mouse_capture_enabled {
+                let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
+                self.mouse_capture_enabled = true;
             }
         }
     }

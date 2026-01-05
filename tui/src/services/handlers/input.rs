@@ -661,6 +661,7 @@ fn handle_input_submitted(
             }
 
             state.messages.push(Message::user(final_input, None));
+
             // Add spacing after user message
             state.messages.push(Message::plain_text(""));
             state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(Color::Yellow))));

@@ -569,6 +569,12 @@ pub fn handle_show_file_changes_popup(state: &mut AppState) {
     {
         return;
     }
+
+    // Don't open if there are no changes
+    if state.changeset.file_count() == 0 {
+        return;
+    }
+
     state.show_file_changes_popup = true;
     state.file_changes_selected = 0;
     state.file_changes_scroll = 0;

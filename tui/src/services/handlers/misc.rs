@@ -279,6 +279,9 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     state.messages.push(Message::assistant(None, msg, None));
+
+    // Auto-show side panel on first message (assistant)
+    state.auto_show_side_panel();
 }
 
 /// Handle get status event
