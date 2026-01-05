@@ -223,9 +223,13 @@ pub enum GeminiMediaResolution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GeminiModality {
+    #[serde(rename = "MODALITY_UNSPECIFIED")]
     ModalityUnspecified,
+    #[serde(rename = "TEXT")]
     Text,
+    #[serde(rename = "IMAGE")]
     Image,
+    #[serde(rename = "AUDIO")]
     Audio,
 }
 
@@ -311,7 +315,7 @@ pub enum GeminiHarmProbability {
 }
 
 /// Gemini usage metadata
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiUsageMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -334,7 +338,7 @@ pub struct GeminiUsageMetadata {
 }
 
 /// Gemini token detail
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiTokenDetail {
     pub modality: GeminiModality,

@@ -207,13 +207,19 @@ pub fn from_stakai_usage(usage: &Usage) -> LLMTokenUsage {
 }
 
 /// Convert StakAI FinishReason to string
-pub fn finish_reason_to_string(reason: FinishReason) -> String {
-    match reason {
-        FinishReason::Stop => "stop".to_string(),
-        FinishReason::Length => "length".to_string(),
-        FinishReason::ContentFilter => "content_filter".to_string(),
-        FinishReason::ToolCalls => "tool_calls".to_string(),
-        FinishReason::Other => "other".to_string(),
+pub fn finish_reason_to_string(reason: &FinishReason) -> String {
+    // If raw value is available, use it; otherwise use the unified reason
+    if let Some(raw) = &reason.raw {
+        raw.clone()
+    } else {
+        match reason.unified {
+            stakai::FinishReasonKind::Stop => "stop".to_string(),
+            stakai::FinishReasonKind::Length => "length".to_string(),
+            stakai::FinishReasonKind::ContentFilter => "content_filter".to_string(),
+            stakai::FinishReasonKind::ToolCalls => "tool_calls".to_string(),
+            stakai::FinishReasonKind::Error => "error".to_string(),
+            stakai::FinishReasonKind::Other => "other".to_string(),
+        }
     }
 }
 
@@ -345,7 +351,7 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
         model: model.to_string(),
         object: "chat.completion".to_string(),
         choices: vec![LLMChoice {
-            finish_reason: Some(finish_reason_to_string(response.finish_reason)),
+            finish_reason: Some(finish_reason_to_string(&response.finish_reason)),
             index: 0,
             message: LLMMessage {
                 role: "assistant".to_string(),
@@ -569,7 +575,7 @@ impl StakAIClient {
 
                     // Check for finish
                     if let StreamEvent::Finish { reason, usage } = event {
-                        finish_reason = finish_reason_to_string(reason);
+                        finish_reason = finish_reason_to_string(&reason);
                         final_usage = from_stakai_usage(&usage);
                     }
                 }
@@ -1033,12 +1039,8 @@ mod tests {
     #[test]
     fn test_stream_event_finish() {
         let event = StreamEvent::Finish {
-            usage: Usage {
-                prompt_tokens: 100,
-                completion_tokens: 50,
-                total_tokens: 150,
-            },
-            reason: FinishReason::Stop,
+            usage: Usage::new(100, 50),
+            reason: FinishReason::stop(),
         };
 
         let delta = from_stakai_stream_event(&event);
@@ -1077,11 +1079,7 @@ mod tests {
 
     #[test]
     fn test_usage_conversion() {
-        let usage = Usage {
-            prompt_tokens: 500,
-            completion_tokens: 200,
-            total_tokens: 700,
-        };
+        let usage = Usage::new(500, 200);
 
         let llm_usage = from_stakai_usage(&usage);
         assert_eq!(llm_usage.prompt_tokens, 500);
@@ -1094,17 +1092,23 @@ mod tests {
 
     #[test]
     fn test_finish_reason_conversion() {
-        assert_eq!(finish_reason_to_string(FinishReason::Stop), "stop");
-        assert_eq!(finish_reason_to_string(FinishReason::Length), "length");
+        assert_eq!(finish_reason_to_string(&FinishReason::stop()), "stop");
+        assert_eq!(finish_reason_to_string(&FinishReason::length()), "length");
         assert_eq!(
-            finish_reason_to_string(FinishReason::ContentFilter),
+            finish_reason_to_string(&FinishReason::content_filter()),
             "content_filter"
         );
         assert_eq!(
-            finish_reason_to_string(FinishReason::ToolCalls),
+            finish_reason_to_string(&FinishReason::tool_calls()),
             "tool_calls"
         );
-        assert_eq!(finish_reason_to_string(FinishReason::Other), "other");
+        assert_eq!(finish_reason_to_string(&FinishReason::other()), "other");
+        assert_eq!(finish_reason_to_string(&FinishReason::error()), "error");
+
+        // Test with raw values - should return the raw value
+        use stakai::FinishReasonKind;
+        let reason = FinishReason::with_raw(FinishReasonKind::Stop, "end_turn");
+        assert_eq!(finish_reason_to_string(&reason), "end_turn");
     }
 
     // ==================== Model String Tests ====================
@@ -1148,12 +1152,8 @@ mod tests {
             content: vec![stakai::ResponseContent::Text {
                 text: "Hello, how can I help?".to_string(),
             }],
-            usage: Usage {
-                prompt_tokens: 10,
-                completion_tokens: 5,
-                total_tokens: 15,
-            },
-            finish_reason: FinishReason::Stop,
+            usage: Usage::new(10, 5),
+            finish_reason: FinishReason::stop(),
             metadata: None,
         };
 
@@ -1192,12 +1192,8 @@ mod tests {
                     arguments: serde_json::json!({"location": "NYC"}),
                 }),
             ],
-            usage: Usage {
-                prompt_tokens: 20,
-                completion_tokens: 15,
-                total_tokens: 35,
-            },
-            finish_reason: FinishReason::ToolCalls,
+            usage: Usage::new(20, 15),
+            finish_reason: FinishReason::tool_calls(),
             metadata: None,
         };
 

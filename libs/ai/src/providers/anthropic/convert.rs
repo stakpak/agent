@@ -1,14 +1,14 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
-    AnthropicResponse, AnthropicSource, AnthropicThinkingConfig as AnthropicThinking,
-    infer_max_tokens,
+    infer_max_tokens, AnthropicContent, AnthropicMessage, AnthropicMessageContent,
+    AnthropicRequest, AnthropicResponse, AnthropicSource,
+    AnthropicThinkingConfig as AnthropicThinking,
 };
 use crate::error::{Error, Result};
 use crate::types::{
-    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ResponseContent, Role,
-    Usage,
+    ContentPart, FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse,
+    InputTokenDetails, Message, OutputTokenDetails, ResponseContent, Role, Usage,
 };
 use serde_json::json;
 
@@ -223,34 +223,67 @@ pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateRespon
         .iter()
         .any(|c| matches!(c, ResponseContent::ToolCall(_)))
     {
-        FinishReason::ToolCalls
+        FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_use")
     } else {
-        parse_stop_reason(&resp.stop_reason).unwrap_or(FinishReason::Other)
+        parse_stop_reason(&resp.stop_reason)
     };
+
+    // Calculate cache tokens following Vercel AI SDK structure
+    // Anthropic: cache_creation_input_tokens -> cacheWrite, cache_read_input_tokens -> cacheRead
+    let cache_creation = resp.usage.cache_creation_input_tokens.unwrap_or(0);
+    let cache_read = resp.usage.cache_read_input_tokens.unwrap_or(0);
+    let input_tokens = resp.usage.input_tokens;
+    let output_tokens = resp.usage.output_tokens;
+
+    let total_input = input_tokens + cache_creation + cache_read;
+
+    let usage = Usage::with_details(
+        InputTokenDetails {
+            total: Some(total_input),
+            no_cache: Some(input_tokens),
+            cache_read: if cache_read > 0 {
+                Some(cache_read)
+            } else {
+                None
+            },
+            cache_write: if cache_creation > 0 {
+                Some(cache_creation)
+            } else {
+                None
+            },
+        },
+        OutputTokenDetails {
+            total: Some(output_tokens),
+            text: None,      // Anthropic doesn't break down output tokens
+            reasoning: None, // Will be populated if extended thinking is used
+        },
+        Some(serde_json::to_value(&resp.usage).unwrap_or_default()),
+    );
 
     Ok(GenerateResponse {
         content,
-        usage: Usage {
-            prompt_tokens: resp.usage.input_tokens,
-            completion_tokens: resp.usage.output_tokens,
-            total_tokens: resp.usage.input_tokens + resp.usage.output_tokens,
-        },
+        usage,
         finish_reason,
         metadata: Some(json!({
             "id": resp.id,
             "model": resp.model,
+            "cache_creation_input_tokens": resp.usage.cache_creation_input_tokens,
+            "cache_read_input_tokens": resp.usage.cache_read_input_tokens,
+            "stop_reason": resp.stop_reason,
         })),
     })
 }
 
 /// Parse Anthropic stop reason to unified finish reason
-fn parse_stop_reason(reason: &Option<String>) -> Option<FinishReason> {
-    reason.as_ref().and_then(|r| match r.as_str() {
-        "end_turn" => Some(FinishReason::Stop),
-        "max_tokens" => Some(FinishReason::Length),
-        "stop_sequence" => Some(FinishReason::Stop),
-        _ => None,
-    })
+fn parse_stop_reason(reason: &Option<String>) -> FinishReason {
+    match reason.as_deref() {
+        Some("end_turn") => FinishReason::with_raw(FinishReasonKind::Stop, "end_turn"),
+        Some("max_tokens") => FinishReason::with_raw(FinishReasonKind::Length, "max_tokens"),
+        Some("stop_sequence") => FinishReason::with_raw(FinishReasonKind::Stop, "stop_sequence"),
+        Some("tool_use") => FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_use"),
+        Some(raw) => FinishReason::with_raw(FinishReasonKind::Other, raw),
+        None => FinishReason::other(),
+    }
 }
 
 #[cfg(test)]

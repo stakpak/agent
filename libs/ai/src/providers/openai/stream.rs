@@ -7,7 +7,7 @@
 
 use super::types::ChatCompletionChunk;
 use crate::error::{Error, Result};
-use crate::types::{FinishReason, GenerateStream, StreamEvent, Usage};
+use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 
@@ -69,11 +69,10 @@ fn parse_chunk(
 
     // Capture usage if present (OpenAI sends this in the final chunk when stream_options.include_usage is true)
     if let Some(chat_usage) = &chunk.usage {
-        *accumulated_usage = Some(Usage {
-            prompt_tokens: chat_usage.prompt_tokens,
-            completion_tokens: chat_usage.completion_tokens,
-            total_tokens: chat_usage.total_tokens,
-        });
+        *accumulated_usage = Some(Usage::new(
+            chat_usage.prompt_tokens,
+            chat_usage.completion_tokens,
+        ));
     }
 
     let choice = match chunk.choices.first() {
@@ -125,15 +124,15 @@ fn parse_chunk(
     // Handle finish reason
     if let Some(reason) = &choice.finish_reason {
         let finish_reason = match reason.as_str() {
-            "stop" => FinishReason::Stop,
-            "length" => FinishReason::Length,
-            "content_filter" => FinishReason::ContentFilter,
-            "tool_calls" => FinishReason::ToolCalls,
-            _ => FinishReason::Other,
+            "stop" => FinishReason::with_raw(FinishReasonKind::Stop, "stop"),
+            "length" => FinishReason::with_raw(FinishReasonKind::Length, "length"),
+            "content_filter" => FinishReason::with_raw(FinishReasonKind::ContentFilter, "content_filter"),
+            "tool_calls" => FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_calls"),
+            raw => FinishReason::with_raw(FinishReasonKind::Other, raw),
         };
 
         // Emit ToolCallEnd for all accumulated tool calls
-        if finish_reason == FinishReason::ToolCalls {
+        if finish_reason.unified == FinishReasonKind::ToolCalls {
             // Sort by index to maintain order
             let mut sorted_indices: Vec<_> = tool_calls.keys().cloned().collect();
             sorted_indices.sort();
@@ -294,6 +293,8 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 20,
                 total_tokens: 30,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
             }),
         );
 
@@ -314,7 +315,7 @@ mod tests {
         }
 
         if let StreamEvent::Finish { reason, usage: u } = &events[1] {
-            assert!(matches!(reason, FinishReason::ToolCalls));
+            assert!(matches!(reason.unified, FinishReasonKind::ToolCalls));
             assert_eq!(u.prompt_tokens, 10);
         } else {
             panic!("Expected Finish");
@@ -430,6 +431,8 @@ mod tests {
                 prompt_tokens: 5,
                 completion_tokens: 10,
                 total_tokens: 15,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
             }),
         );
 
@@ -437,7 +440,7 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         if let StreamEvent::Finish { reason, usage: u } = &events[0] {
-            assert!(matches!(reason, FinishReason::Stop));
+            assert!(matches!(reason.unified, FinishReasonKind::Stop));
             assert_eq!(u.total_tokens, 15);
         } else {
             panic!("Expected Finish event");
