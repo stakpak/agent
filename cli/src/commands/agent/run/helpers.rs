@@ -1,3 +1,4 @@
+use crate::utils::agents_md::{AgentsMdInfo, format_agents_md_for_context};
 use crate::utils::local_context::LocalContext;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{
@@ -178,4 +179,10 @@ pub fn tool_call_history_string(tool_calls: &[ToolCallResult]) -> Option<String>
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!("Here's my shell history:\n{}", history))
+}
+
+pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, String) {
+    let agents_text = format_agents_md_for_context(agents_md);
+    let formatted_input = format!("{}\n<agents_md>\n{}\n</agents_md>", user_input, agents_text);
+    (formatted_input, agents_text)
 }

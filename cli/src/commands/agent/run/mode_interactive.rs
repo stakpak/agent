@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
+    add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
@@ -14,6 +14,7 @@ use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
 use crate::config::{AppConfig, ProviderType};
+use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
@@ -62,6 +63,7 @@ pub struct RunInteractiveConfig {
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: AgentModel,
+    pub agents_md: Option<AgentsMdInfo>,
 }
 
 pub async fn run_interactive(
@@ -92,6 +94,7 @@ pub async fn run_interactive(
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let subagent_configs = config.subagent_configs.clone();
+        let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
@@ -322,6 +325,15 @@ pub async fn run_interactive(
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
+
+                        let user_input = if messages.is_empty()
+                            && let Some(agents_md_info) = &agents_md
+                        {
+                            let (user_input, _) = add_agents_md(&user_input, agents_md_info);
+                            user_input
+                        } else {
+                            user_input
+                        };
 
                         // Create message with ContentParts from TUI
                         let user_msg = if image_parts.is_empty() {
