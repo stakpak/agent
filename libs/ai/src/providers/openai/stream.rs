@@ -126,7 +126,9 @@ fn parse_chunk(
         let finish_reason = match reason.as_str() {
             "stop" => FinishReason::with_raw(FinishReasonKind::Stop, "stop"),
             "length" => FinishReason::with_raw(FinishReasonKind::Length, "length"),
-            "content_filter" => FinishReason::with_raw(FinishReasonKind::ContentFilter, "content_filter"),
+            "content_filter" => {
+                FinishReason::with_raw(FinishReasonKind::ContentFilter, "content_filter")
+            }
             "tool_calls" => FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_calls"),
             raw => FinishReason::with_raw(FinishReasonKind::Other, raw),
         };

@@ -568,7 +568,10 @@ mod tests {
             assert_eq!(u.prompt_tokens, 10);
             assert_eq!(u.completion_tokens, 20);
             assert_eq!(u.total_tokens, 30);
-            assert!(matches!(reason.unified, crate::types::FinishReasonKind::Stop));
+            assert!(matches!(
+                reason.unified,
+                crate::types::FinishReasonKind::Stop
+            ));
         } else {
             panic!("Expected Finish event");
         }

@@ -1,9 +1,9 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    infer_max_tokens, AnthropicContent, AnthropicMessage, AnthropicMessageContent,
-    AnthropicRequest, AnthropicResponse, AnthropicSource,
-    AnthropicThinkingConfig as AnthropicThinking,
+    AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
+    AnthropicResponse, AnthropicSource, AnthropicThinkingConfig as AnthropicThinking,
+    infer_max_tokens,
 };
 use crate::error::{Error, Result};
 use crate::types::{
@@ -267,9 +267,6 @@ pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateRespon
         metadata: Some(json!({
             "id": resp.id,
             "model": resp.model,
-            "cache_creation_input_tokens": resp.usage.cache_creation_input_tokens,
-            "cache_read_input_tokens": resp.usage.cache_read_input_tokens,
-            "stop_reason": resp.stop_reason,
         })),
     })
 }
