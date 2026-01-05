@@ -2,52 +2,9 @@
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
-use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
-use stakpak_shared::models::integrations::openai::{OpenAIConfig, OpenAIModel};
-
-/// Generate OpenAI configuration template
-pub fn generate_openai_config(api_key: String) -> ProfileConfig {
-    ProfileConfig {
-        provider: Some(ProviderType::Local),
-        smart_model: Some(OpenAIModel::default_smart_model()),
-        eco_model: Some(OpenAIModel::default_eco_model()),
-        openai: Some(OpenAIConfig {
-            api_key: Some(api_key),
-            api_endpoint: None,
-        }),
-        ..ProfileConfig::default()
-    }
-}
-
-/// Generate Gemini configuration template
-pub fn generate_gemini_config(api_key: String) -> ProfileConfig {
-    ProfileConfig {
-        provider: Some(ProviderType::Local),
-        smart_model: Some(GeminiModel::default_smart_model()),
-        eco_model: Some(GeminiModel::default_eco_model()),
-        gemini: Some(GeminiConfig {
-            api_key: Some(api_key),
-            api_endpoint: None,
-        }),
-        ..ProfileConfig::default()
-    }
-}
-
-/// Generate Anthropic configuration template
-pub fn generate_anthropic_config(api_key: String) -> ProfileConfig {
-    ProfileConfig {
-        provider: Some(ProviderType::Local),
-        smart_model: Some(AnthropicModel::default_smart_model()),
-        eco_model: Some(AnthropicModel::default_eco_model()),
-        anthropic: Some(AnthropicConfig {
-            api_key: Some(api_key),
-            api_endpoint: None,
-            access_token: None,
-        }),
-        ..ProfileConfig::default()
-    }
-}
+use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
+use stakpak_shared::models::integrations::gemini::GeminiConfig;
+use stakpak_shared::models::integrations::openai::OpenAIConfig;
 
 /// Generate BYOM (Bring Your Own Model) single model configuration
 pub fn generate_byom_single_config(
