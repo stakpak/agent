@@ -18,7 +18,8 @@ use crate::apikey_auth::prompt_for_api_key;
 use crate::config::AppConfig;
 use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
-    HybridModelConfig, config_to_toml_preview, generate_hybrid_config,
+    HybridModelConfig, config_to_toml_preview, generate_anthropic_profile, generate_gemini_profile,
+    generate_hybrid_config, generate_openai_profile,
 };
 use crate::onboarding::menu::{
     prompt_password, prompt_profile_name, select_option, select_option_no_header,
@@ -421,18 +422,8 @@ async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: 
         return false;
     }
 
-    // Generate profile config with Anthropic models (no API key needed, auth.toml handles it)
-    let profile = crate::config::ProfileConfig {
-        provider: Some(crate::config::ProviderType::Local),
-        smart_model: Some(AnthropicModel::DEFAULT_SMART_MODEL.to_string()),
-        eco_model: Some(AnthropicModel::DEFAULT_ECO_MODEL.to_string()),
-        anthropic: Some(stakpak_shared::models::integrations::anthropic::AnthropicConfig {
-            api_key: None, // OAuth tokens are in auth.toml
-            api_endpoint: None,
-            access_token: None,
-        }),
-        ..crate::config::ProfileConfig::default()
-    };
+    // Generate profile config (credentials are in auth.toml)
+    let profile = generate_anthropic_profile();
 
     // Save profile config
     let config_path = get_config_path_string(config);
@@ -518,17 +509,8 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 return false;
             }
 
-            // Generate profile config without API key (it's in auth.toml now)
-            let profile = crate::config::ProfileConfig {
-                provider: Some(crate::config::ProviderType::Local),
-                smart_model: Some(OpenAIModel::DEFAULT_SMART_MODEL.to_string()),
-                eco_model: Some(OpenAIModel::DEFAULT_ECO_MODEL.to_string()),
-                openai: Some(stakpak_shared::models::integrations::openai::OpenAIConfig {
-                    api_key: None, // API key is in auth.toml
-                    api_endpoint: None,
-                }),
-                ..crate::config::ProfileConfig::default()
-            };
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_openai_profile();
 
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
@@ -627,17 +609,8 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                 return false;
             }
 
-            // Generate profile config without API key (it's in auth.toml now)
-            let profile = crate::config::ProfileConfig {
-                provider: Some(crate::config::ProviderType::Local),
-                smart_model: Some(GeminiModel::DEFAULT_SMART_MODEL.to_string()),
-                eco_model: Some(GeminiModel::DEFAULT_ECO_MODEL.to_string()),
-                gemini: Some(stakpak_shared::models::integrations::gemini::GeminiConfig {
-                    api_key: None, // API key is in auth.toml
-                    api_endpoint: None,
-                }),
-                ..crate::config::ProfileConfig::default()
-            };
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_gemini_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
@@ -739,18 +712,8 @@ async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &s
                 return false;
             }
 
-            // Generate profile config without API key (it's in auth.toml now)
-            let profile = crate::config::ProfileConfig {
-                provider: Some(crate::config::ProviderType::Local),
-                smart_model: Some(AnthropicModel::DEFAULT_SMART_MODEL.to_string()),
-                eco_model: Some(AnthropicModel::DEFAULT_ECO_MODEL.to_string()),
-                anthropic: Some(stakpak_shared::models::integrations::anthropic::AnthropicConfig {
-                    api_key: None, // API key is in auth.toml
-                    api_endpoint: None,
-                    access_token: None,
-                }),
-                ..crate::config::ProfileConfig::default()
-            };
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_anthropic_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(

@@ -2,9 +2,52 @@
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
-use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
-use stakpak_shared::models::integrations::gemini::GeminiConfig;
-use stakpak_shared::models::integrations::openai::OpenAIConfig;
+use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
+use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
+use stakpak_shared::models::integrations::openai::{OpenAIConfig, OpenAIModel};
+
+/// Generate OpenAI profile configuration (credentials stored separately in auth.toml)
+pub fn generate_openai_profile() -> ProfileConfig {
+    ProfileConfig {
+        provider: Some(ProviderType::Local),
+        smart_model: Some(OpenAIModel::default_smart_model()),
+        eco_model: Some(OpenAIModel::default_eco_model()),
+        openai: Some(OpenAIConfig {
+            api_key: None,
+            api_endpoint: None,
+        }),
+        ..ProfileConfig::default()
+    }
+}
+
+/// Generate Gemini profile configuration (credentials stored separately in auth.toml)
+pub fn generate_gemini_profile() -> ProfileConfig {
+    ProfileConfig {
+        provider: Some(ProviderType::Local),
+        smart_model: Some(GeminiModel::default_smart_model()),
+        eco_model: Some(GeminiModel::default_eco_model()),
+        gemini: Some(GeminiConfig {
+            api_key: None,
+            api_endpoint: None,
+        }),
+        ..ProfileConfig::default()
+    }
+}
+
+/// Generate Anthropic profile configuration (credentials stored separately in auth.toml)
+pub fn generate_anthropic_profile() -> ProfileConfig {
+    ProfileConfig {
+        provider: Some(ProviderType::Local),
+        smart_model: Some(AnthropicModel::default_smart_model()),
+        eco_model: Some(AnthropicModel::default_eco_model()),
+        anthropic: Some(AnthropicConfig {
+            api_key: None,
+            api_endpoint: None,
+            access_token: None,
+        }),
+        ..ProfileConfig::default()
+    }
+}
 
 /// Generate BYOM (Bring Your Own Model) single model configuration
 pub fn generate_byom_single_config(
