@@ -20,7 +20,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use stakpak_shared::cert_utils::{CertificateChain, CertificateStrategy};
-use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::secret_manager::{SecretManagerHandle, launch_secret_manager};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -54,17 +54,19 @@ pub struct ProxyServer {
     // Track if upstream clients have been initialized
     clients_initialized: Arc<Mutex<bool>>,
     // Secret manager for redacting secrets in tool responses
-    secret_manager: SecretManager,
+    secret_manager: Arc<SecretManagerHandle>,
 }
 
 impl ProxyServer {
     pub fn new(config: ClientPoolConfig, redact_secrets: bool, privacy_mode: bool) -> Self {
+        let secret_manager_handle = launch_secret_manager(redact_secrets, privacy_mode, None);
+
         Self {
             pool: Arc::new(ClientPool::new()),
             request_id_to_client: Arc::new(Mutex::new(HashMap::new())),
             client_config: Arc::new(Mutex::new(Some(config))),
             clients_initialized: Arc::new(Mutex::new(false)),
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            secret_manager: secret_manager_handle,
         }
     }
 
@@ -172,7 +174,7 @@ impl ProxyServer {
     }
 
     /// Prepare tool parameters, restoring any redacted secrets
-    fn prepare_tool_params(
+    async fn prepare_tool_params(
         &self,
         params: &CallToolRequestParam,
         tool_name: &str,
@@ -183,11 +185,14 @@ impl ProxyServer {
         if let Some(arguments) = &tool_params.arguments
             && let Ok(arguments_str) = serde_json::to_string(arguments)
         {
-            let restored = self
+            if let Ok(restored) = self
                 .secret_manager
-                .restore_secrets_in_string(&arguments_str);
-            if let Ok(restored_arguments) = serde_json::from_str(&restored) {
-                tool_params.arguments = Some(restored_arguments);
+                .restore_secrets_in_string(&arguments_str)
+                .await
+            {
+                if let Ok(restored_arguments) = serde_json::from_str(&restored) {
+                    tool_params.arguments = Some(restored_arguments);
+                }
             }
         }
 
@@ -223,20 +228,21 @@ impl ProxyServer {
     }
 
     /// Redact secrets in content items
-    fn redact_content(&self, content: Vec<Content>) -> Vec<Content> {
-        content
-            .into_iter()
-            .map(|item| {
-                if let Some(text_content) = item.raw.as_text() {
-                    let redacted = self
-                        .secret_manager
-                        .redact_and_store_secrets(&text_content.text, None);
-                    Content::text(&redacted)
-                } else {
-                    item
-                }
-            })
-            .collect()
+    async fn redact_content(&self, content: Vec<Content>) -> Vec<Content> {
+        let mut result = Vec::with_capacity(content.len());
+        for item in content {
+            if let Some(text_content) = item.raw.as_text() {
+                let redacted = self
+                    .secret_manager
+                    .redact_and_store_secrets(&text_content.text, None)
+                    .await
+                    .unwrap_or_else(|_| text_content.text.clone());
+                result.push(Content::text(&redacted));
+            } else {
+                result.push(item);
+            }
+        }
+        result
     }
 
     /// Initialize a single upstream client from server configuration
@@ -495,7 +501,7 @@ impl ServerHandler for ProxyServer {
             .await;
 
         // Prepare and execute the tool call
-        let tool_params = self.prepare_tool_params(&params, &tool_name);
+        let tool_params = self.prepare_tool_params(&params, &tool_name).await;
         let result = self
             .execute_with_cancellation(&ctx, &client_peer, tool_params)
             .await;
@@ -514,7 +520,7 @@ impl ServerHandler for ProxyServer {
             )
         })?;
 
-        result.content = self.redact_content(result.content);
+        result.content = self.redact_content(result.content).await;
         Ok(result)
     }
 
