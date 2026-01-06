@@ -1,5 +1,6 @@
 //! Message types for AI conversations
 
+use super::cache::CacheControl;
 use serde::{Deserialize, Serialize};
 
 /// A message in a conversation
@@ -13,6 +14,36 @@ pub struct Message {
     /// Optional name for the message sender
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Provider-specific options (e.g., cache control for Anthropic)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<MessageProviderOptions>,
+}
+
+/// Provider-specific options for a message
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MessageProviderOptions {
+    /// Anthropic-specific message options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<AnthropicMessageOptions>,
+}
+
+impl MessageProviderOptions {
+    /// Create Anthropic-specific options with cache control
+    pub fn anthropic_cache(cache_control: CacheControl) -> Self {
+        Self {
+            anthropic: Some(AnthropicMessageOptions {
+                cache_control: Some(cache_control),
+            }),
+        }
+    }
+}
+
+/// Anthropic-specific message options
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnthropicMessageOptions {
+    /// Cache control for this message (Anthropic prompt caching)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 /// Message content can be either a simple string or structured parts
@@ -40,7 +71,7 @@ impl MessageContent {
             MessageContent::Parts(parts) => parts
                 .iter()
                 .filter_map(|part| match part {
-                    ContentPart::Text { text } => Some(text.clone()),
+                    ContentPart::Text { text, .. } => Some(text.clone()),
                     _ => None,
                 })
                 .reduce(|mut acc, text| {
@@ -92,6 +123,7 @@ impl Message {
             role,
             content: content.into(),
             name: None,
+            provider_options: None,
         }
     }
 
@@ -103,6 +135,41 @@ impl Message {
     /// Get all content parts
     pub fn parts(&self) -> Vec<ContentPart> {
         self.content.parts()
+    }
+
+    /// Set the message sender name
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Add Anthropic cache control to this message
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{Message, Role, CacheControl};
+    ///
+    /// let msg = Message::new(Role::System, "System prompt...")
+    ///     .with_cache_control(CacheControl::ephemeral());
+    /// ```
+    pub fn with_cache_control(mut self, cache_control: CacheControl) -> Self {
+        self.provider_options = Some(MessageProviderOptions::anthropic_cache(cache_control));
+        self
+    }
+
+    /// Add provider-specific options to this message
+    pub fn with_provider_options(mut self, options: MessageProviderOptions) -> Self {
+        self.provider_options = Some(options);
+        self
+    }
+
+    /// Get the cache control from provider options (if set for Anthropic)
+    pub fn cache_control(&self) -> Option<&CacheControl> {
+        self.provider_options
+            .as_ref()
+            .and_then(|opts| opts.anthropic.as_ref())
+            .and_then(|anthropic| anthropic.cache_control.as_ref())
     }
 }
 
@@ -139,6 +206,33 @@ pub enum Role {
     Tool,
 }
 
+/// Provider-specific options for content parts
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContentPartProviderOptions {
+    /// Anthropic-specific content part options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<AnthropicContentPartOptions>,
+}
+
+impl ContentPartProviderOptions {
+    /// Create Anthropic-specific options with cache control
+    pub fn anthropic_cache(cache_control: CacheControl) -> Self {
+        Self {
+            anthropic: Some(AnthropicContentPartOptions {
+                cache_control: Some(cache_control),
+            }),
+        }
+    }
+}
+
+/// Anthropic-specific content part options
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnthropicContentPartOptions {
+    /// Cache control for this content part (Anthropic prompt caching)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
+}
+
 /// A part of message content (text, image, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -147,6 +241,9 @@ pub enum ContentPart {
     Text {
         /// The text content
         text: String,
+        /// Provider-specific options (e.g., cache control)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider_options: Option<ContentPartProviderOptions>,
     },
     /// Image content
     Image {
@@ -155,6 +252,9 @@ pub enum ContentPart {
         /// Optional detail level for image processing
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<ImageDetail>,
+        /// Provider-specific options (e.g., cache control)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider_options: Option<ContentPartProviderOptions>,
     },
     /// Tool/function call (for assistant messages in conversation history)
     ToolCall {
@@ -164,6 +264,9 @@ pub enum ContentPart {
         name: String,
         /// Arguments as JSON
         arguments: serde_json::Value,
+        /// Provider-specific options (e.g., cache control)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider_options: Option<ContentPartProviderOptions>,
     },
     /// Tool/function call result
     ToolResult {
@@ -171,13 +274,19 @@ pub enum ContentPart {
         tool_call_id: String,
         /// Result content (can be text or JSON)
         content: serde_json::Value,
+        /// Provider-specific options (e.g., cache control)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider_options: Option<ContentPartProviderOptions>,
     },
 }
 
 impl ContentPart {
     /// Create a text content part
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text { text: text.into() }
+        Self::Text {
+            text: text.into(),
+            provider_options: None,
+        }
     }
 
     /// Create an image content part from URL
@@ -185,6 +294,7 @@ impl ContentPart {
         Self::Image {
             url: url.into(),
             detail: None,
+            provider_options: None,
         }
     }
 
@@ -193,6 +303,7 @@ impl ContentPart {
         Self::Image {
             url: url.into(),
             detail: Some(detail),
+            provider_options: None,
         }
     }
 
@@ -206,6 +317,7 @@ impl ContentPart {
             id: id.into(),
             name: name.into(),
             arguments,
+            provider_options: None,
         }
     }
 
@@ -214,7 +326,116 @@ impl ContentPart {
         Self::ToolResult {
             tool_call_id: tool_call_id.into(),
             content,
+            provider_options: None,
         }
+    }
+
+    /// Add Anthropic cache control to this content part
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{ContentPart, CacheControl};
+    ///
+    /// let part = ContentPart::text("Large context...")
+    ///     .with_cache_control(CacheControl::ephemeral());
+    /// ```
+    pub fn with_cache_control(self, cache_control: CacheControl) -> Self {
+        let provider_options = Some(ContentPartProviderOptions::anthropic_cache(cache_control));
+
+        match self {
+            Self::Text { text, .. } => Self::Text {
+                text,
+                provider_options,
+            },
+            Self::Image { url, detail, .. } => Self::Image {
+                url,
+                detail,
+                provider_options,
+            },
+            Self::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => Self::ToolCall {
+                id,
+                name,
+                arguments,
+                provider_options,
+            },
+            Self::ToolResult {
+                tool_call_id,
+                content,
+                ..
+            } => Self::ToolResult {
+                tool_call_id,
+                content,
+                provider_options,
+            },
+        }
+    }
+
+    /// Add provider-specific options to this content part
+    pub fn with_provider_options(self, options: ContentPartProviderOptions) -> Self {
+        let provider_options = Some(options);
+
+        match self {
+            Self::Text { text, .. } => Self::Text {
+                text,
+                provider_options,
+            },
+            Self::Image { url, detail, .. } => Self::Image {
+                url,
+                detail,
+                provider_options,
+            },
+            Self::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => Self::ToolCall {
+                id,
+                name,
+                arguments,
+                provider_options,
+            },
+            Self::ToolResult {
+                tool_call_id,
+                content,
+                ..
+            } => Self::ToolResult {
+                tool_call_id,
+                content,
+                provider_options,
+            },
+        }
+    }
+
+    /// Get the provider options from this content part
+    pub fn provider_options(&self) -> Option<&ContentPartProviderOptions> {
+        match self {
+            Self::Text {
+                provider_options, ..
+            } => provider_options.as_ref(),
+            Self::Image {
+                provider_options, ..
+            } => provider_options.as_ref(),
+            Self::ToolCall {
+                provider_options, ..
+            } => provider_options.as_ref(),
+            Self::ToolResult {
+                provider_options, ..
+            } => provider_options.as_ref(),
+        }
+    }
+
+    /// Get the cache control from provider options (if set for Anthropic)
+    pub fn cache_control(&self) -> Option<&CacheControl> {
+        self.provider_options()
+            .and_then(|opts| opts.anthropic.as_ref())
+            .and_then(|anthropic| anthropic.cache_control.as_ref())
     }
 }
 

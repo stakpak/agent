@@ -44,11 +44,20 @@ pub mod types;
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
 pub use types::{
-    AnthropicOptions, ContentPart, FinishReason, FinishReasonKind, GenerateOptions,
-    GenerateRequest, GenerateResponse, GenerateStream, GoogleOptions, Headers, InputTokenDetails,
-    Message, MessageContent, OpenAIOptions, OutputTokenDetails, ProviderOptions, ReasoningEffort,
-    ReasoningSummary, ResponseContent, Role, StreamEvent, ThinkingOptions, Tool, ToolCall,
-    ToolChoice, ToolFunction, Usage,
+    // Cache control types
+    CacheContext, CacheControl, CacheControlValidator, CacheWarning, CacheWarningType,
+    PromptCacheRetention,
+    // Message types
+    AnthropicContentPartOptions, AnthropicMessageOptions, ContentPart, ContentPartProviderOptions,
+    ImageDetail, Message, MessageContent, MessageProviderOptions, Role,
+    // Options types
+    AnthropicToolOptions, GenerateOptions, Tool, ToolChoice, ToolFunction, ToolProviderOptions,
+    // Request types
+    AnthropicOptions, GenerateRequest, GoogleOptions, Headers, OpenAIOptions, ProviderOptions,
+    ReasoningEffort, ReasoningSummary, SystemMessageMode, ThinkingOptions,
+    // Response types
+    FinishReason, FinishReasonKind, GenerateResponse, GenerateStream, InputTokenDetails,
+    OutputTokenDetails, ResponseContent, ResponseWarning, StreamEvent, ToolCall, Usage,
 };
 
 /// Prelude module for convenient imports

@@ -79,6 +79,9 @@ pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
         })
     });
 
+    // Extract cached_content from Google options
+    let cached_content = google_opts.and_then(|opts| opts.cached_content.clone());
+
     Ok(GeminiRequest {
         contents,
         generation_config,
@@ -86,6 +89,7 @@ pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
         tools,
         system_instruction,
         tool_config,
+        cached_content,
     })
 }
 
@@ -137,13 +141,13 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
     let parts: Vec<GeminiPart> = content_parts
         .iter()
         .map(|part| match part {
-            ContentPart::Text { text } => GeminiPart {
+            ContentPart::Text { text, .. } => GeminiPart {
                 text: Some(text.clone()),
                 inline_data: None,
                 function_call: None,
                 function_response: None,
             },
-            ContentPart::Image { url, detail: _ } => {
+            ContentPart::Image { url, .. } => {
                 // Parse image data
                 match parse_image_data(url) {
                     Ok(inline_data) => GeminiPart {
@@ -164,6 +168,7 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
                 id,
                 name,
                 arguments,
+                ..
             } => {
                 // Gemini function call
                 GeminiPart {
@@ -180,6 +185,7 @@ fn to_gemini_content(msg: &Message) -> Result<GeminiContent> {
             ContentPart::ToolResult {
                 tool_call_id,
                 content,
+                ..
             } => {
                 // Gemini function response
                 // We'll extract the function name from the content if possible,
@@ -326,6 +332,7 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
             "model_version": resp.model_version,
             "response_id": resp.response_id,
         })),
+        warnings: None, // Gemini doesn't have SDK-level cache validation warnings
     })
 }
 
@@ -353,8 +360,10 @@ mod tests {
             content: crate::types::MessageContent::Parts(vec![ContentPart::ToolResult {
                 tool_call_id: "call_123".to_string(),
                 content: serde_json::json!({"temp": 22, "name": "get_weather"}),
+                provider_options: None,
             }]),
             name: None,
+            provider_options: None,
         };
 
         let result = to_gemini_content(&msg).unwrap();

@@ -124,6 +124,7 @@ fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option
                 id,
                 name,
                 arguments,
+                ..
             } => Some(OpenAIToolCall {
                 id: id.clone(),
                 type_: "function".to_string(),
@@ -145,8 +146,8 @@ fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option
     let content = if parts.len() == 1 {
         // Single content part - use string format
         match &parts[0] {
-            ContentPart::Text { text } => Some(json!(text)),
-            ContentPart::Image { url, detail } => Some(json!([{
+            ContentPart::Text { text, .. } => Some(json!(text)),
+            ContentPart::Image { url, detail, .. } => Some(json!([{
                 "type": "image_url",
                 "image_url": {
                     "url": url,
@@ -166,11 +167,11 @@ fn to_openai_message_with_mode(msg: &Message, mode: SystemMessageMode) -> Option
             parts
                 .iter()
                 .filter_map(|part| match part {
-                    ContentPart::Text { text } => Some(json!({
+                    ContentPart::Text { text, .. } => Some(json!({
                         "type": "text",
                         "text": text
                     })),
-                    ContentPart::Image { url, detail } => Some(json!({
+                    ContentPart::Image { url, detail, .. } => Some(json!({
                         "type": "image_url",
                         "image_url": {
                             "url": url,
@@ -254,6 +255,7 @@ pub fn from_openai_response(resp: ChatCompletionResponse) -> Result<GenerateResp
             "created": resp.created,
             "object": resp.object,
         })),
+        warnings: None, // OpenAI caching is automatic, no SDK-level validation warnings
     })
 }
 

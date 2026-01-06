@@ -35,6 +35,7 @@ impl Default for GeminiConfig {
 
 /// Gemini generate content request
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,6 +48,9 @@ pub struct GeminiRequest {
     pub system_instruction: Option<GeminiSystemInstruction>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<serde_json::Value>,
+    /// Name of cached content to use (format: cachedContents/{id})
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_content: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

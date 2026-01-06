@@ -1,5 +1,6 @@
 //! Anthropic-specific types
 
+use crate::types::CacheControl;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for Anthropic provider
@@ -64,6 +65,86 @@ impl Default for AnthropicConfig {
     }
 }
 
+/// Anthropic cache control (for prompt caching)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicCacheControl {
+    /// Cache type (currently only "ephemeral")
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// Optional TTL (e.g., "1h")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<String>,
+}
+
+impl From<&CacheControl> for AnthropicCacheControl {
+    fn from(cache: &CacheControl) -> Self {
+        match cache {
+            CacheControl::Ephemeral { ttl } => Self {
+                type_: "ephemeral".to_string(),
+                ttl: ttl.clone(),
+            },
+        }
+    }
+}
+
+impl AnthropicCacheControl {
+    /// Create ephemeral cache control
+    pub fn ephemeral() -> Self {
+        Self {
+            type_: "ephemeral".to_string(),
+            ttl: None,
+        }
+    }
+
+    /// Create ephemeral cache control with TTL
+    pub fn ephemeral_with_ttl(ttl: impl Into<String>) -> Self {
+        Self {
+            type_: "ephemeral".to_string(),
+            ttl: Some(ttl.into()),
+        }
+    }
+}
+
+/// Anthropic system content block (with cache control support)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicSystemBlock {
+    /// Type (always "text" for system messages)
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// The text content
+    pub text: String,
+    /// Optional cache control
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<AnthropicCacheControl>,
+}
+
+impl AnthropicSystemBlock {
+    /// Create a new system block with text
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            type_: "text".to_string(),
+            text: text.into(),
+            cache_control: None,
+        }
+    }
+
+    /// Add cache control to this block
+    pub fn with_cache_control(mut self, cache_control: AnthropicCacheControl) -> Self {
+        self.cache_control = Some(cache_control);
+        self
+    }
+}
+
+/// Anthropic system content (can be string or array of blocks)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AnthropicSystemContent {
+    /// Simple string (no cache control)
+    String(String),
+    /// Array of blocks (supports cache control)
+    Blocks(Vec<AnthropicSystemBlock>),
+}
+
 /// Anthropic messages request
 #[derive(Debug, Serialize)]
 pub struct AnthropicRequest {
@@ -71,7 +152,7 @@ pub struct AnthropicRequest {
     pub messages: Vec<AnthropicMessage>,
     pub max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<AnthropicMessageContent>,
+    pub system: Option<AnthropicSystemContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,27 +201,35 @@ pub struct AnthropicResponse {
     pub usage: AnthropicUsage,
 }
 
-/// Anthropic content block
+/// Anthropic content block (with cache control support)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AnthropicContent {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<AnthropicCacheControl>,
     },
     Image {
         source: AnthropicSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<AnthropicCacheControl>,
     },
     Thinking {
         thinking: String,
         signature: String,
+        // Note: thinking blocks cannot have cache_control directly
     },
     RedactedThinking {
         data: String,
+        // Note: redacted thinking blocks cannot have cache_control directly
     },
     ToolUse {
         id: String,
         name: String,
         input: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<AnthropicCacheControl>,
     },
     ToolResult {
         tool_use_id: String,
@@ -148,6 +237,8 @@ pub enum AnthropicContent {
         content: Option<AnthropicMessageContent>,
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<AnthropicCacheControl>,
     },
 }
 
