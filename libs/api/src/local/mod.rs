@@ -204,6 +204,13 @@ impl AgentProvider for LocalClient {
         })
     }
 
+    async fn get_billing_info(
+        &self,
+        _account_username: &str,
+    ) -> Result<stakpak_shared::models::billing::BillingResponse, String> {
+        Err("Billing info not supported in local mode".to_string())
+    }
+
     async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String> {
         if self.stakpak_base_url.is_none() {
             return Ok(vec![]);
@@ -262,9 +269,9 @@ impl AgentProvider for LocalClient {
 
         match serde_json::from_value::<RuleBook>(value.clone()) {
             Ok(response) => Ok(response),
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
+            Err(_) => {
+                // eprintln!("Failed to deserialize response: {}", e);
+                // eprintln!("Raw response: {}", value);
                 Err("Failed to deserialize response:".into())
             }
         }

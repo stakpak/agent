@@ -215,6 +215,9 @@ pub struct AppState {
 
     /// Pending file to open in editor (set by handler, consumed by event loop)
     pub pending_editor_open: Option<String>,
+
+    /// Billing info for the side panel
+    pub billing_info: Option<stakpak_shared::models::billing::BillingResponse>,
 }
 
 pub struct AppStateOptions<'a> {
@@ -434,6 +437,7 @@ impl AppState {
             side_panel_section_collapsed: {
                 let mut collapsed = std::collections::HashMap::new();
                 collapsed.insert(SidePanelSection::Context, false); // Always expanded
+                collapsed.insert(SidePanelSection::Billing, false); // Expanded by default
                 collapsed.insert(SidePanelSection::Todos, false); // Expanded by default
                 collapsed.insert(SidePanelSection::Changeset, false); // Expanded by default
                 collapsed
@@ -447,6 +451,7 @@ impl AppState {
             editor_command: crate::services::editor::detect_editor(editor_command)
                 .unwrap_or_else(|| "nano".to_string()),
             pending_editor_open: None,
+            billing_info: None,
         }
     }
 

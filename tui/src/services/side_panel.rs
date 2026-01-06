@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap},
 };
 use stakpak_shared::models::model_pricing::ContextAware;
 
@@ -25,20 +25,18 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Clear the area first
     f.render_widget(ratatui::widgets::Clear, area);
 
-    // Create a block for the side panel with a subtle border
-    let block = Block::default()
-        .borders(Borders::LEFT)
-        .border_style(Style::default().fg(Color::DarkGray));
+    // Create a block for the side panel with a subtle border and background
+    let block = Block::default().style(Style::default().bg(Color::Indexed(234)));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    // Use inner area directly - LEFT_PADDING constant in content provides the spacing
+    // Add padding: 1 space on top, bottom, and right (left uses LEFT_PADDING in content)
     let padded_area = Rect {
         x: inner_area.x,
-        y: inner_area.y,
-        width: inner_area.width,
-        height: inner_area.height,
+        y: inner_area.y.saturating_add(1),
+        width: inner_area.width.saturating_sub(1),
+        height: inner_area.height.saturating_sub(2),
     };
 
     // Calculate section heights
@@ -47,6 +45,11 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
+    let billing_collapsed = state
+        .side_panel_section_collapsed
+        .get(&SidePanelSection::Billing)
+        .copied()
+        .unwrap_or(false);
     let todos_collapsed = state
         .side_panel_section_collapsed
         .get(&SidePanelSection::Todos)
@@ -57,6 +60,15 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .get(&SidePanelSection::Changeset)
         .copied()
         .unwrap_or(false);
+
+    // Billing section is hidden when billing_info is None (local mode)
+    let billing_height = if state.billing_info.is_none() {
+        0
+    } else if billing_collapsed {
+        collapsed_height
+    } else {
+        4 // Header + Plan + Credits
+    };
 
     let todos_height = if todos_collapsed {
         collapsed_height
@@ -75,6 +87,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(context_height),
+            Constraint::Length(billing_height),
             Constraint::Length(todos_height),
             Constraint::Length(changeset_height),
             Constraint::Min(0),                // Remaining space
@@ -89,15 +102,19 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .insert(SidePanelSection::Context, chunks[0]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Todos, chunks[1]);
+        .insert(SidePanelSection::Billing, chunks[1]);
     state
         .side_panel_areas
-        .insert(SidePanelSection::Changeset, chunks[2]);
+        .insert(SidePanelSection::Todos, chunks[2]);
+    state
+        .side_panel_areas
+        .insert(SidePanelSection::Changeset, chunks[3]);
 
     render_context_section(f, state, chunks[0]);
-    render_todos_section(f, state, chunks[1], todos_collapsed);
-    render_changeset_section(f, state, chunks[2], changeset_collapsed);
-    render_footer_section(f, state, chunks[4]);
+    render_billing_section(f, state, chunks[1], billing_collapsed);
+    render_todos_section(f, state, chunks[2], todos_collapsed);
+    render_changeset_section(f, state, chunks[3], changeset_collapsed);
+    render_footer_section(f, state, chunks[5]);
 }
 
 /// Render the Context section (always visible)
@@ -172,6 +189,78 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect) {
     let truncated_model = truncate_string(&model_name, avail_for_model);
 
     lines.push(make_row("Model", truncated_model, Color::Cyan));
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, area);
+}
+
+/// Render the Billing section
+fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
+    let focused = state.side_panel_focus == SidePanelSection::Billing;
+    let header_style = section_header_style(focused);
+
+    let collapse_indicator = if collapsed { "▸" } else { "▾" };
+
+    let header = Line::from(Span::styled(
+        format!("{}{} Billing", LEFT_PADDING, collapse_indicator),
+        header_style,
+    ));
+
+    if collapsed {
+        let paragraph = Paragraph::new(vec![header]);
+        f.render_widget(paragraph, area);
+        return;
+    }
+
+    let mut lines = vec![header];
+
+    // Helper for right-aligned value row
+    let make_row = |label: &str, value: String, value_color: Color| -> Line {
+        let label_span = Span::styled(
+            format!("{}  {} ", LEFT_PADDING, label),
+            Style::default().fg(Color::DarkGray),
+        );
+        let label_len = 3 + label.len() + 1;
+        let value_len = value.len();
+        let available_width = area.width as usize;
+        let spacing = available_width.saturating_sub(label_len + value_len);
+
+        Line::from(vec![
+            label_span,
+            Span::raw(" ".repeat(spacing)),
+            Span::styled(value, Style::default().fg(value_color)),
+        ])
+    };
+
+    if let Some(info) = &state.billing_info {
+        // Get plan name from first active product
+        let plan_name = info
+            .products
+            .iter()
+            .find(|p| p.status == "active")
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "-".to_string());
+        lines.push(make_row("Plan", plan_name, Color::Cyan));
+
+        let credits = info.features.get("credits");
+        if let Some(credit_feature) = credits {
+            let balance = credit_feature.balance.unwrap_or(0.0);
+            lines.push(make_row(
+                "Balance",
+                format!("${:.2}", balance),
+                Color::Green,
+            ));
+        } else {
+            lines.push(make_row("Balance", "-".to_string(), Color::DarkGray));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!("{}  Loading...", LEFT_PADDING),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);

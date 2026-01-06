@@ -422,6 +422,7 @@ impl TodoItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SidePanelSection {
     Context,
+    Billing,
     Todos,
     Changeset,
 }
@@ -430,6 +431,7 @@ impl SidePanelSection {
     pub fn title(&self) -> &'static str {
         match self {
             SidePanelSection::Context => "Context",
+            SidePanelSection::Billing => "Billing",
             SidePanelSection::Todos => "Todos",
             SidePanelSection::Changeset => "Changeset",
         }
@@ -437,7 +439,8 @@ impl SidePanelSection {
 
     pub fn next(&self) -> Self {
         match self {
-            SidePanelSection::Context => SidePanelSection::Todos,
+            SidePanelSection::Context => SidePanelSection::Billing,
+            SidePanelSection::Billing => SidePanelSection::Todos,
             SidePanelSection::Todos => SidePanelSection::Changeset,
             SidePanelSection::Changeset => SidePanelSection::Context,
         }
@@ -446,7 +449,8 @@ impl SidePanelSection {
     pub fn prev(&self) -> Self {
         match self {
             SidePanelSection::Context => SidePanelSection::Changeset,
-            SidePanelSection::Todos => SidePanelSection::Context,
+            SidePanelSection::Billing => SidePanelSection::Context,
+            SidePanelSection::Todos => SidePanelSection::Billing,
             SidePanelSection::Changeset => SidePanelSection::Todos,
         }
     }

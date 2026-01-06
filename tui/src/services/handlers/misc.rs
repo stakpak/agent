@@ -302,3 +302,11 @@ pub fn handle_get_status(state: &mut AppState, account_info: String) {
 pub fn handle_stream_model(state: &mut AppState, model: LLMModel) {
     state.llm_model = Some(model);
 }
+
+/// Handle billing info loaded event
+pub fn handle_billing_info_loaded(
+    state: &mut AppState,
+    billing_info: stakpak_shared::models::billing::BillingResponse,
+) {
+    state.billing_info = Some(billing_info);
+}

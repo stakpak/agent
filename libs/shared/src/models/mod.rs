@@ -1,3 +1,4 @@
+pub mod billing;
 pub mod error;
 pub mod indexing;
 pub mod integrations;

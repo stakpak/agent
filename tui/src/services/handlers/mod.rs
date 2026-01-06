@@ -590,6 +590,9 @@ pub fn update(
         InputEvent::StreamModel(model) => {
             misc::handle_stream_model(state, model);
         }
+        InputEvent::BillingInfoLoaded(billing_info) => {
+            misc::handle_billing_info_loaded(state, billing_info);
+        }
         InputEvent::RunToolCall(_) => {}
         InputEvent::ToolResult(_) => {
             // NOTE: handle_tool_result is called in event_loop.rs before routing here,

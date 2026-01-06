@@ -17,6 +17,10 @@ pub mod remote;
 pub trait AgentProvider: Send + Sync {
     // Account
     async fn get_my_account(&self) -> Result<GetMyAccountResponse, String>;
+    async fn get_billing_info(
+        &self,
+        account_username: &str,
+    ) -> Result<stakpak_shared::models::billing::BillingResponse, String>;
 
     // Rulebooks
     async fn list_rulebooks(&self) -> Result<Vec<ListRuleBook>, String>;

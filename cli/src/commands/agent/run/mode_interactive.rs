@@ -219,6 +219,26 @@ pub async fn run_interactive(
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+
+            // Fetch billing info (only for remote provider)
+            if matches!(provider_type, ProviderType::Remote) {
+                match client.get_billing_info(&data.username).await {
+                    Ok(billing_info) => {
+                        let _ = send_input_event(
+                            &input_tx,
+                            InputEvent::BillingInfoLoaded(billing_info),
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        let _ = send_input_event(
+                            &input_tx,
+                            InputEvent::Error(format!("Failed to fetch billing info: {}", e)),
+                        )
+                        .await;
+                    }
+                }
+            }
             // Load available profiles and send to TUI
             let profiles_config_path = ctx_clone.config_path.clone();
             let current_profile_name = ctx_clone.profile_name.clone();

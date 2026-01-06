@@ -24,6 +24,7 @@ pub enum InputEvent {
     /// Spawn the user's shell and then execute a command in it (for interactive stall recovery)
     RunShellWithCommand(String),
     GetStatus(String),
+    BillingInfoLoaded(stakpak_shared::models::billing::BillingResponse),
     Error(String),
     SetSessions(Vec<SessionInfo>),
     InputBackspace,
