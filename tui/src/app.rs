@@ -175,6 +175,8 @@ pub struct AppState {
     pub allowed_tools: Option<Vec<String>>,
     pub agent_model: AgentModel,
     pub llm_model: Option<LLMModel>,
+    /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
+    pub auth_display_info: (Option<String>, Option<String>, Option<String>),
 
     // ========== Misc State ==========
     pub ctrl_c_pressed_once: bool,
@@ -197,6 +199,8 @@ pub struct AppStateOptions<'a> {
     pub allowed_tools: Option<&'a Vec<String>>,
     pub input_tx: Option<mpsc::Sender<InputEvent>>,
     pub agent_model: AgentModel,
+    /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
+    pub auth_display_info: (Option<String>, Option<String>, Option<String>),
 }
 
 impl AppState {
@@ -236,6 +240,7 @@ impl AppState {
             allowed_tools,
             input_tx,
             agent_model,
+            auth_display_info,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -391,6 +396,7 @@ impl AppState {
             context_usage_percent: 0,
             agent_model,
             llm_model: None,
+            auth_display_info,
         }
     }
 

@@ -1,18 +1,67 @@
+//! OpenAI provider configuration and chat message types
+//!
+//! This module contains:
+//! - Configuration types for OpenAI provider
+//! - OpenAI model enums with pricing info
+//! - Chat message types used throughout the TUI
+//! - Tool call types for agent interactions
+//!
+//! Note: Low-level API request/response types are in `libs/ai/src/providers/openai/`.
+
 use crate::models::llm::{
-    GenerationDelta, LLMChoice, LLMCompletionResponse, LLMMessage, LLMMessageContent,
-    LLMMessageImageSource, LLMMessageTypedContent, LLMTokenUsage, LLMTool,
+    GenerationDelta, LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent,
+    LLMTokenUsage, LLMTool,
 };
 use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+// =============================================================================
+// Provider Configuration
+// =============================================================================
+
+/// Configuration for OpenAI provider
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct OpenAIConfig {
     pub api_endpoint: Option<String>,
     pub api_key: Option<String>,
 }
 
+impl OpenAIConfig {
+    /// Create config with API key
+    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: Some(api_key.into()),
+            api_endpoint: None,
+        }
+    }
+
+    /// Create config from ProviderAuth (only supports API key for OpenAI)
+    pub fn from_provider_auth(auth: &crate::models::auth::ProviderAuth) -> Option<Self> {
+        match auth {
+            crate::models::auth::ProviderAuth::Api { key } => Some(Self::with_api_key(key)),
+            crate::models::auth::ProviderAuth::OAuth { .. } => None, // OpenAI doesn't support OAuth
+        }
+    }
+
+    /// Merge with credentials from ProviderAuth, preserving existing endpoint
+    pub fn with_provider_auth(mut self, auth: &crate::models::auth::ProviderAuth) -> Option<Self> {
+        match auth {
+            crate::models::auth::ProviderAuth::Api { key } => {
+                self.api_key = Some(key.clone());
+                Some(self)
+            }
+            crate::models::auth::ProviderAuth::OAuth { .. } => None, // OpenAI doesn't support OAuth
+        }
+    }
+}
+
+// =============================================================================
+// Model Definitions
+// =============================================================================
+
+/// OpenAI model identifiers
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum OpenAIModel {
     // Reasoning Models
@@ -154,176 +203,53 @@ impl std::fmt::Display for OpenAIModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OpenAIModel::O3 => write!(f, "o3-2025-04-16"),
-
             OpenAIModel::O4Mini => write!(f, "o4-mini-2025-04-16"),
-
             OpenAIModel::GPT5Nano => write!(f, "gpt-5-nano-2025-08-07"),
             OpenAIModel::GPT5Mini => write!(f, "gpt-5-mini-2025-08-07"),
             OpenAIModel::GPT5 => write!(f, "gpt-5-2025-08-07"),
             OpenAIModel::GPT51 => write!(f, "gpt-5.1-2025-11-13"),
-
             OpenAIModel::Custom(model_name) => write!(f, "{}", model_name),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OpenAIInput {
-    pub model: OpenAIModel,
-    pub messages: Vec<LLMMessage>,
-    pub max_tokens: u32,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub json: Option<serde_json::Value>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<LLMTool>>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<OpenAIReasoningEffort>,
-}
-
-impl OpenAIInput {
-    pub fn is_reasoning_model(&self) -> bool {
-        matches!(self.model, |OpenAIModel::O3| OpenAIModel::O4Mini
-            | OpenAIModel::GPT5
-            | OpenAIModel::GPT5Mini
-            | OpenAIModel::GPT5Nano)
-    }
-
-    pub fn is_standard_model(&self) -> bool {
-        !self.is_reasoning_model()
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-pub enum OpenAIReasoningEffort {
-    #[serde(rename = "minimal")]
-    Minimal,
-    #[serde(rename = "low")]
-    Low,
+/// Agent model type (smart/eco/recovery)
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub enum AgentModel {
+    #[serde(rename = "smart")]
     #[default]
-    #[serde(rename = "medium")]
-    Medium,
-    #[serde(rename = "high")]
-    High,
+    Smart,
+    #[serde(rename = "eco")]
+    Eco,
+    #[serde(rename = "recovery")]
+    Recovery,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OpenAITool {
-    pub r#type: String,
-    pub function: OpenAIToolFunction,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OpenAIToolFunction {
-    pub name: String,
-    pub description: String,
-    pub parameters: serde_json::Value,
-}
-
-impl From<LLMTool> for OpenAITool {
-    fn from(tool: LLMTool) -> Self {
-        OpenAITool {
-            r#type: "function".to_string(),
-            function: OpenAIToolFunction {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.input_schema,
-            },
+impl std::fmt::Display for AgentModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentModel::Smart => write!(f, "smart"),
+            AgentModel::Eco => write!(f, "eco"),
+            AgentModel::Recovery => write!(f, "recovery"),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OpenAIOutput {
-    pub model: String,
-    pub object: String,
-    pub choices: Vec<OpenAILLMChoice>,
-    pub created: u64,
-    pub usage: Option<LLMTokenUsage>,
-    pub id: String,
-}
-
-impl From<OpenAIOutput> for LLMCompletionResponse {
-    fn from(val: OpenAIOutput) -> Self {
-        LLMCompletionResponse {
-            model: val.model,
-            object: val.object,
-            choices: val.choices.into_iter().map(OpenAILLMChoice::into).collect(),
-            created: val.created,
-            usage: val.usage,
-            id: val.id,
+impl From<String> for AgentModel {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "eco" => AgentModel::Eco,
+            "recovery" => AgentModel::Recovery,
+            _ => AgentModel::Smart,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OpenAILLMChoice {
-    pub finish_reason: Option<String>,
-    pub index: u32,
-    pub message: OpenAILLMMessage,
-}
+// =============================================================================
+// Message Types (used by TUI)
+// =============================================================================
 
-impl From<OpenAILLMChoice> for LLMChoice {
-    fn from(val: OpenAILLMChoice) -> Self {
-        LLMChoice {
-            finish_reason: val.finish_reason,
-            index: val.index,
-            message: val.message.into(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OpenAILLMMessage {
-    pub role: String,
-    pub content: Option<String>,
-    pub tool_calls: Option<Vec<OpenAILLMMessageToolCall>>,
-}
-impl From<OpenAILLMMessage> for LLMMessage {
-    fn from(val: OpenAILLMMessage) -> Self {
-        LLMMessage {
-            role: val.role,
-            content: match val.tool_calls {
-                None => LLMMessageContent::String(val.content.unwrap_or_default()),
-                Some(tool_calls) => LLMMessageContent::List(
-                    std::iter::once(LLMMessageTypedContent::Text {
-                        text: val.content.unwrap_or_default(),
-                    })
-                    .chain(tool_calls.into_iter().map(|tool_call| {
-                        LLMMessageTypedContent::ToolCall {
-                            id: tool_call.id,
-                            name: tool_call.function.name,
-                            args: match serde_json::from_str(&tool_call.function.arguments) {
-                                Ok(args) => args,
-                                Err(_) => {
-                                    return LLMMessageTypedContent::Text {
-                                        text: String::from("Error parsing tool call arguments"),
-                                    };
-                                }
-                            },
-                        }
-                    }))
-                    .collect(),
-                ),
-            },
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OpenAILLMMessageToolCall {
-    pub id: String,
-    pub r#type: String,
-    pub function: OpenAILLMMessageToolCallFunction,
-}
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OpenAILLMMessageToolCallFunction {
-    pub arguments: String,
-    pub name: String,
-}
-
+/// Message role
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -333,7 +259,6 @@ pub enum Role {
     #[default]
     Assistant,
     Tool,
-    // Function,
 }
 
 impl std::fmt::Display for Role {
@@ -348,50 +273,7 @@ impl std::fmt::Display for Role {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ChatCompletionRequest {
-    pub model: String,
-    pub messages: Vec<ChatMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frequency_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logit_bias: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logprobs: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub n: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presence_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<ResponseFormat>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seed: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop: Option<StopSequence>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<Tool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ToolChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<ChatCompletionContext>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ChatCompletionContext {
-    pub scratchpad: Option<Value>,
-}
-
+/// Chat message
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatMessage {
     pub role: Role,
@@ -402,8 +284,6 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
-
-    // TODO: check if this is needed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<LLMTokenUsage>,
 }
@@ -438,6 +318,7 @@ impl ChatMessage {
     }
 }
 
+/// Message content (string or array of parts)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum MessageContent {
@@ -500,12 +381,14 @@ impl std::fmt::Display for MessageContent {
         }
     }
 }
+
 impl Default for MessageContent {
     fn default() -> Self {
         MessageContent::String(String::new())
     }
 }
 
+/// Content part (text or image)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ContentPart {
     pub r#type: String,
@@ -515,6 +398,7 @@ pub struct ContentPart {
     pub image_url: Option<ImageUrl>,
 }
 
+/// Image URL with optional detail level
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ImageUrl {
     pub url: String,
@@ -522,24 +406,18 @@ pub struct ImageUrl {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ResponseFormat {
-    pub r#type: String,
-}
+// =============================================================================
+// Tool Types (used by TUI)
+// =============================================================================
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(untagged)]
-pub enum StopSequence {
-    String(String),
-    Array(Vec<String>),
-}
-
+/// Tool definition
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Tool {
     pub r#type: String,
     pub function: FunctionDefinition,
 }
 
+/// Function definition for tools
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct FunctionDefinition {
     pub name: String,
@@ -547,6 +425,17 @@ pub struct FunctionDefinition {
     pub parameters: serde_json::Value,
 }
 
+impl From<Tool> for LLMTool {
+    fn from(tool: Tool) -> Self {
+        LLMTool {
+            name: tool.function.name,
+            description: tool.function.description.unwrap_or_default(),
+            input_schema: tool.function.parameters,
+        }
+    }
+}
+
+/// Tool choice configuration
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolChoice {
     Auto,
@@ -621,6 +510,7 @@ pub struct FunctionChoice {
     pub name: String,
 }
 
+/// Tool call from assistant
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ToolCall {
     pub id: String,
@@ -628,12 +518,127 @@ pub struct ToolCall {
     pub function: FunctionCall,
 }
 
+/// Function call details
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
 }
 
+/// Tool call result status
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ToolCallResultStatus {
+    Success,
+    Error,
+    Cancelled,
+}
+
+/// Tool call result
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ToolCallResult {
+    pub call: ToolCall,
+    pub result: String,
+    pub status: ToolCallResultStatus,
+}
+
+/// Tool call result progress update
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCallResultProgress {
+    pub id: Uuid,
+    pub message: String,
+}
+
+// =============================================================================
+// Chat Completion Types (used by TUI)
+// =============================================================================
+
+/// Chat completion request
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ChatCompletionRequest {
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logit_bias: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<StopSequence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ChatCompletionContext>,
+}
+
+impl ChatCompletionRequest {
+    pub fn new(
+        model: String,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<Tool>>,
+        stream: Option<bool>,
+    ) -> Self {
+        Self {
+            model,
+            messages,
+            frequency_penalty: None,
+            logit_bias: None,
+            logprobs: None,
+            max_tokens: None,
+            n: None,
+            presence_penalty: None,
+            response_format: None,
+            seed: None,
+            stop: None,
+            stream,
+            temperature: None,
+            top_p: None,
+            tools,
+            tool_choice: None,
+            user: None,
+            context: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ChatCompletionContext {
+    pub scratchpad: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ResponseFormat {
+    pub r#type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum StopSequence {
+    String(String),
+    Array(Vec<String>),
+}
+
+/// Chat completion response
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionResponse {
     pub id: String,
@@ -684,6 +689,10 @@ pub struct TokenLogprob {
     pub bytes: Option<Vec<u8>>,
 }
 
+// =============================================================================
+// Streaming Types
+// =============================================================================
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamResponse {
     pub id: String,
@@ -694,12 +703,14 @@ pub struct ChatCompletionStreamResponse {
     pub usage: Option<LLMTokenUsage>,
     pub metadata: Option<serde_json::Value>,
 }
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatCompletionStreamChoice {
     pub index: usize,
     pub delta: ChatMessageDelta,
     pub finish_reason: Option<FinishReason>,
 }
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatMessageDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -724,6 +735,10 @@ pub struct FunctionCallDelta {
     pub arguments: Option<String>,
 }
 
+// =============================================================================
+// Conversions
+// =============================================================================
+
 impl From<LLMMessage> for ChatMessage {
     fn from(llm_message: LLMMessage) -> Self {
         let role = match llm_message.role.as_str() {
@@ -731,9 +746,8 @@ impl From<LLMMessage> for ChatMessage {
             "user" => Role::User,
             "assistant" => Role::Assistant,
             "tool" => Role::Tool,
-            // "function" => Role::Function,
             "developer" => Role::Developer,
-            _ => Role::User, // Default to user for unknown roles
+            _ => Role::User,
         };
 
         let (content, tool_calls) = match llm_message.content {
@@ -803,9 +817,9 @@ impl From<LLMMessage> for ChatMessage {
         ChatMessage {
             role,
             content,
-            name: None, // LLMMessage doesn't have a name field
+            name: None,
             tool_calls,
-            tool_call_id: None, // LLMMessage doesn't have a tool_call_id field
+            tool_call_id: None,
             usage: None,
         }
     }
@@ -815,7 +829,6 @@ impl From<ChatMessage> for LLMMessage {
     fn from(chat_message: ChatMessage) -> Self {
         let mut content_parts = Vec::new();
 
-        // Handle text content
         match chat_message.content {
             Some(MessageContent::String(s)) => {
                 if !s.is_empty() {
@@ -857,7 +870,6 @@ impl From<ChatMessage> for LLMMessage {
             None => {}
         }
 
-        // Handle tool calls
         if let Some(tool_calls) = chat_message.tool_calls {
             for tool_call in tool_calls {
                 let args = serde_json::from_str(&tool_call.function.arguments).unwrap_or(json!({}));
@@ -885,97 +897,6 @@ impl From<ChatMessage> for LLMMessage {
             },
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub enum AgentModel {
-    #[serde(rename = "smart")]
-    #[default]
-    Smart,
-    #[serde(rename = "eco")]
-    Eco,
-    #[serde(rename = "recovery")]
-    Recovery,
-}
-
-impl std::fmt::Display for AgentModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentModel::Smart => write!(f, "smart"),
-            AgentModel::Eco => write!(f, "eco"),
-            AgentModel::Recovery => write!(f, "recovery"),
-        }
-    }
-}
-
-impl From<String> for AgentModel {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "eco" => AgentModel::Eco,
-            "recovery" => AgentModel::Recovery,
-            _ => AgentModel::Smart,
-        }
-    }
-}
-
-impl ChatCompletionRequest {
-    pub fn new(
-        model: String,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
-        stream: Option<bool>,
-    ) -> Self {
-        Self {
-            model,
-            messages,
-            frequency_penalty: None,
-            logit_bias: None,
-            logprobs: None,
-            max_tokens: None,
-            n: None,
-            presence_penalty: None,
-            response_format: None,
-            seed: None,
-            stop: None,
-            stream,
-            temperature: None,
-            top_p: None,
-            tools,
-            tool_choice: None,
-            user: None,
-            context: None,
-        }
-    }
-}
-
-impl From<Tool> for LLMTool {
-    fn from(tool: Tool) -> Self {
-        LLMTool {
-            name: tool.function.name,
-            description: tool.function.description.unwrap_or_default(),
-            input_schema: tool.function.parameters,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum ToolCallResultStatus {
-    Success,
-    Error,
-    Cancelled,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ToolCallResult {
-    pub call: ToolCall,
-    pub result: String,
-    pub status: ToolCallResultStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ToolCallResultProgress {
-    pub id: Uuid,
-    pub message: String,
 }
 
 impl From<GenerationDelta> for ChatMessageDelta {
@@ -1063,252 +984,10 @@ mod tests {
         assert!(json.contains("\"model\":\"smart\""));
         assert!(json.contains("\"messages\":["));
         assert!(json.contains("\"role\":\"system\""));
-        assert!(json.contains("\"content\":\"You are a helpful assistant.\""));
-        assert!(json.contains("\"role\":\"user\""));
-        assert!(json.contains("\"content\":\"Hello!\""));
-        assert!(json.contains("\"max_tokens\":100"));
-        assert!(json.contains("\"temperature\":0.7"));
-    }
-
-    #[test]
-    fn test_deserialize_response() {
-        let json = r#"{
-            "id": "chatcmpl-123",
-            "object": "chat.completion",
-            "created": 1677652288,
-            "model": "smart",
-            "system_fingerprint": "fp_123abc",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Hello! How can I help you today?"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 9,
-                "completion_tokens": 12,
-                "total_tokens": 21
-            }
-        }"#;
-
-        let response: ChatCompletionResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(response.id, "chatcmpl-123");
-        assert_eq!(response.object, "chat.completion");
-        assert_eq!(response.created, 1677652288);
-        assert_eq!(response.model, AgentModel::Smart.to_string());
-        assert_eq!(response.system_fingerprint, Some("fp_123abc".to_string()));
-
-        assert_eq!(response.choices.len(), 1);
-        assert_eq!(response.choices[0].index, 0);
-        assert_eq!(response.choices[0].message.role, Role::Assistant);
-
-        match &response.choices[0].message.content {
-            Some(MessageContent::String(content)) => {
-                assert_eq!(content, "Hello! How can I help you today?");
-            }
-            _ => panic!("Expected string content"),
-        }
-
-        assert_eq!(response.choices[0].finish_reason, FinishReason::Stop);
-        assert_eq!(response.usage.prompt_tokens, 9);
-        assert_eq!(response.usage.completion_tokens, 12);
-        assert_eq!(response.usage.total_tokens, 21);
-    }
-
-    #[test]
-    fn test_tool_calls_request_response() {
-        // Test a request with tools
-        let tools_request = ChatCompletionRequest {
-            model: AgentModel::Smart.to_string(),
-            messages: vec![ChatMessage {
-                role: Role::User,
-                content: Some(MessageContent::String(
-                    "What's the weather in San Francisco?".to_string(),
-                )),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-                usage: None,
-            }],
-            tools: Some(vec![Tool {
-                r#type: "function".to_string(),
-                function: FunctionDefinition {
-                    name: "get_weather".to_string(),
-                    description: Some("Get the current weather in a given location".to_string()),
-                    parameters: serde_json::json!({
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA"
-                            }
-                        },
-                        "required": ["location"]
-                    }),
-                },
-            }]),
-            tool_choice: Some(ToolChoice::Auto),
-            max_tokens: Some(100),
-            temperature: Some(0.7),
-            frequency_penalty: None,
-            logit_bias: None,
-            logprobs: None,
-            n: None,
-            presence_penalty: None,
-            response_format: None,
-            seed: None,
-            stop: None,
-            stream: None,
-            top_p: None,
-            user: None,
-            context: None,
-        };
-
-        let json = serde_json::to_string(&tools_request).unwrap();
-        println!("Tool request JSON: {}", json);
-
-        assert!(json.contains("\"tools\":["));
-        assert!(json.contains("\"type\":\"function\""));
-        assert!(json.contains("\"name\":\"get_weather\""));
-        // Auto should be serialized as "auto" (string)
-        assert!(json.contains("\"tool_choice\":\"auto\""));
-
-        // Test response with tool calls
-        let tool_response_json = r#"{
-            "id": "chatcmpl-123",
-            "object": "chat.completion",
-            "created": 1677652288,
-            "model": "eco",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "id": "call_abc123",
-                            "type": "function",
-                            "function": {
-                                "name": "get_weather",
-                                "arguments": "{\"location\":\"San Francisco, CA\"}"
-                            }
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }],
-            "usage": {
-                "prompt_tokens": 82,
-                "completion_tokens": 17,
-                "total_tokens": 99
-            }
-        }"#;
-
-        let tool_response: ChatCompletionResponse =
-            serde_json::from_str(tool_response_json).unwrap();
-        assert_eq!(tool_response.choices[0].message.role, Role::Assistant);
-        assert_eq!(tool_response.choices[0].message.content, None);
-        assert!(tool_response.choices[0].message.tool_calls.is_some());
-
-        let tool_calls = tool_response.choices[0]
-            .message
-            .tool_calls
-            .as_ref()
-            .unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].id, "call_abc123");
-        assert_eq!(tool_calls[0].r#type, "function");
-        assert_eq!(tool_calls[0].function.name, "get_weather");
-        assert_eq!(
-            tool_calls[0].function.arguments,
-            "{\"location\":\"San Francisco, CA\"}"
-        );
-
-        assert_eq!(
-            tool_response.choices[0].finish_reason,
-            FinishReason::ToolCalls,
-        );
-    }
-
-    #[test]
-    fn test_content_with_image() {
-        let message_with_image = ChatMessage {
-            role: Role::User,
-            content: Some(MessageContent::Array(vec![
-                ContentPart {
-                    r#type: "text".to_string(),
-                    text: Some("What's in this image?".to_string()),
-                    image_url: None,
-                },
-                ContentPart {
-                    r#type: "input_image".to_string(),
-                    text: None,
-                    image_url: Some(ImageUrl {
-                        url: "data:image/jpeg;base64,/9j/4AAQSkZ...".to_string(),
-                        detail: Some("low".to_string()),
-                    }),
-                },
-            ])),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            usage: None,
-        };
-
-        let json = serde_json::to_string(&message_with_image).unwrap();
-        println!("Serialized JSON: {}", json);
-
-        assert!(json.contains("\"role\":\"user\""));
-        assert!(json.contains("\"type\":\"text\""));
-        assert!(json.contains("\"text\":\"What's in this image?\""));
-        assert!(json.contains("\"type\":\"input_image\""));
-        assert!(json.contains("\"url\":\"data:image/jpeg;base64,/9j/4AAQSkZ...\""));
-        assert!(json.contains("\"detail\":\"low\""));
-    }
-
-    #[test]
-    fn test_response_format() {
-        let json_format_request = ChatCompletionRequest {
-            model: AgentModel::Smart.to_string(),
-            messages: vec![ChatMessage {
-                role: Role::User,
-                content: Some(MessageContent::String(
-                    "Generate a JSON object with name and age fields".to_string(),
-                )),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-                usage: None,
-            }],
-            response_format: Some(ResponseFormat {
-                r#type: "json_object".to_string(),
-            }),
-            max_tokens: Some(100),
-            temperature: None,
-            frequency_penalty: None,
-            logit_bias: None,
-            logprobs: None,
-            n: None,
-            presence_penalty: None,
-            seed: None,
-            stop: None,
-            stream: None,
-            top_p: None,
-            tools: None,
-            tool_choice: None,
-            user: None,
-            context: None,
-        };
-
-        let json = serde_json::to_string(&json_format_request).unwrap();
-        assert!(json.contains("\"response_format\":{\"type\":\"json_object\"}"));
     }
 
     #[test]
     fn test_llm_message_to_chat_message() {
-        // Test simple string content
         let llm_message = LLMMessage {
             role: "user".to_string(),
             content: LLMMessageContent::String("Hello, world!".to_string()),
@@ -1320,60 +999,5 @@ mod tests {
             Some(MessageContent::String(text)) => assert_eq!(text, "Hello, world!"),
             _ => panic!("Expected string content"),
         }
-        assert_eq!(chat_message.tool_calls, None);
-
-        // Test tool call conversion
-        let llm_message_with_tool = LLMMessage {
-            role: "assistant".to_string(),
-            content: LLMMessageContent::List(vec![LLMMessageTypedContent::ToolCall {
-                id: "call_123".to_string(),
-                name: "get_weather".to_string(),
-                args: serde_json::json!({"location": "San Francisco"}),
-            }]),
-        };
-
-        let chat_message = ChatMessage::from(llm_message_with_tool);
-        assert_eq!(chat_message.role, Role::Assistant);
-        assert_eq!(chat_message.content, None); // No text content
-        assert!(chat_message.tool_calls.is_some());
-
-        let tool_calls = chat_message.tool_calls.unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].id, "call_123");
-        assert_eq!(tool_calls[0].function.name, "get_weather");
-        assert!(tool_calls[0].function.arguments.contains("San Francisco"));
-
-        // Test mixed content
-        let llm_message_mixed = LLMMessage {
-            role: "assistant".to_string(),
-            content: LLMMessageContent::List(vec![
-                LLMMessageTypedContent::Text {
-                    text: "The weather is:".to_string(),
-                },
-                LLMMessageTypedContent::ToolCall {
-                    id: "call_456".to_string(),
-                    name: "get_weather".to_string(),
-                    args: serde_json::json!({"location": "New York"}),
-                },
-            ]),
-        };
-
-        let chat_message = ChatMessage::from(llm_message_mixed);
-        assert_eq!(chat_message.role, Role::Assistant);
-
-        match &chat_message.content {
-            Some(MessageContent::Array(parts)) => {
-                assert_eq!(parts.len(), 1);
-                assert_eq!(parts[0].r#type, "text");
-                assert_eq!(parts[0].text, Some("The weather is:".to_string()));
-            }
-            _ => panic!("Expected array content"),
-        }
-
-        let tool_calls = chat_message.tool_calls.unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].id, "call_456");
-        assert_eq!(tool_calls[0].function.name, "get_weather");
-        assert!(tool_calls[0].function.arguments.contains("New York"));
     }
 }

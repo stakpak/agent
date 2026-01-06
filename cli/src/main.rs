@@ -30,6 +30,7 @@ use commands::{
 };
 use config::{AppConfig, ProviderType};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utils::agents_md::discover_agents_md;
 use utils::check_update::{auto_update, check_update};
 use utils::gitignore;
 use utils::local_context::analyze_local_context;
@@ -104,6 +105,10 @@ struct Cli {
     /// Subagent configuration file subagents.toml
     #[arg(long = "subagent-config")]
     subagent_config_path: Option<String>,
+
+    /// Ignore AGENTS.md files (skip discovery and injection)
+    #[arg(long = "ignore-agents-md", default_value_t = false)]
+    ignore_agents_md: bool,
 
     /// Allow only the specified tool in the agent's context
     #[arg(short = 't', long = "tool", action = clap::ArgAction::Append)]
@@ -226,7 +231,8 @@ async fn main() {
             match cli.command {
                 Some(command) => {
                     // check_update is only run in interactive mode (when no command is specified)
-                    if config.api_key.is_none() && command.requires_auth() {
+                    // Use get_stakpak_api_key() to check auth.toml fallback chain
+                    if config.get_stakpak_api_key().is_none() && command.requires_auth() {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
 
@@ -242,10 +248,21 @@ async fn main() {
                     }
                 }
                 None => {
-                    if config.api_key.is_none() && config.provider == ProviderType::Remote {
+                    // Use get_stakpak_api_key() to check auth.toml fallback chain
+                    if config.get_stakpak_api_key().is_none()
+                        && config.provider == ProviderType::Remote
+                    {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
+
+                    let agents_md = if cli.ignore_agents_md {
+                        None
+                    } else {
+                        std::env::current_dir()
+                            .ok()
+                            .and_then(|cwd| discover_agents_md(&cwd))
+                    };
 
                     let client: Arc<dyn AgentProvider> = match config.provider {
                         ProviderType::Remote => {
@@ -257,12 +274,20 @@ async fn main() {
                             Arc::new(client)
                         }
                         ProviderType::Local => {
+                            // Use credential resolution with auth.toml fallback chain
+                            // Refresh OAuth tokens in parallel to minimize startup delay
+                            let (anthropic_config, openai_config, gemini_config) = tokio::join!(
+                                config.get_anthropic_config_with_auth_async(),
+                                config.get_openai_config_with_auth_async(),
+                                config.get_gemini_config_with_auth_async()
+                            );
+
                             let client = LocalClient::new(LocalClientConfig {
                                 store_path: None,
                                 stakpak_base_url: Some(config.api_endpoint.clone()),
-                                anthropic_config: config.anthropic.clone(),
-                                openai_config: config.openai.clone(),
-                                gemini_config: config.gemini.clone(),
+                                anthropic_config,
+                                openai_config,
+                                gemini_config,
                                 eco_model: config.eco_model.clone(),
                                 recovery_model: config.recovery_model.clone(),
                                 smart_model: config.smart_model.clone(),
@@ -441,6 +466,7 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: cli.model.unwrap_or(AgentModel::Smart),
+                                agents_md: agents_md.clone(),
                             },
                         )
                         .await
@@ -472,6 +498,7 @@ async fn main() {
                                     slack: cli.enable_slack_tools,
                                 },
                                 model: cli.model.unwrap_or(AgentModel::Smart),
+                                agents_md,
                             },
                         )
                         .await

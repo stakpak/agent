@@ -82,12 +82,13 @@ impl StakpakAcpAgent {
                 }
             }
             ProviderType::Local => {
+                // Use credential resolution with auth.toml fallback chain
                 let client = LocalClient::new(LocalClientConfig {
                     stakpak_base_url: Some(config.api_endpoint.clone()),
                     store_path: None,
-                    anthropic_config: config.anthropic.clone(),
-                    openai_config: config.openai.clone(),
-                    gemini_config: config.gemini.clone(),
+                    anthropic_config: config.get_anthropic_config_with_auth(),
+                    openai_config: config.get_openai_config_with_auth(),
+                    gemini_config: config.get_gemini_config_with_auth(),
                     eco_model: config.eco_model.clone(),
                     recovery_model: config.recovery_model.clone(),
                     smart_model: config.smart_model.clone(),

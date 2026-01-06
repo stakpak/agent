@@ -1,9 +1,10 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    infer_max_tokens, AnthropicCacheControl, AnthropicContent, AnthropicMessage,
+    infer_max_tokens, AnthropicAuth, AnthropicCacheControl, AnthropicContent, AnthropicMessage,
     AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSource,
     AnthropicSystemBlock, AnthropicSystemContent, AnthropicThinkingConfig as AnthropicThinking,
+    CLAUDE_CODE_SYSTEM_PREFIX,
 };
 use crate::error::{Error, Result};
 use crate::types::{
@@ -26,12 +27,13 @@ pub struct AnthropicConversionResult {
 /// Convert unified request to Anthropic request with cache control validation
 pub fn to_anthropic_request(
     req: &GenerateRequest,
+    auth: &AnthropicAuth,
     stream: bool,
 ) -> Result<AnthropicConversionResult> {
     let mut validator = CacheControlValidator::new();
 
-    // Extract and convert system messages with cache control
-    let system = build_system_content(&req.messages, &mut validator)?;
+    // Extract and convert system messages with cache control and auth handling
+    let system = build_system_content(&req.messages, auth, &mut validator)?;
 
     // Convert non-system messages with cache control
     let messages: Vec<AnthropicMessage> = req
@@ -96,23 +98,61 @@ pub fn to_anthropic_request(
     })
 }
 
-/// Build system content with cache control support
+/// Build system content with cache control support and OAuth handling
 fn build_system_content(
     messages: &[Message],
+    auth: &AnthropicAuth,
     validator: &mut CacheControlValidator,
 ) -> Result<Option<AnthropicSystemContent>> {
     let system_messages: Vec<&Message> =
         messages.iter().filter(|m| m.role == Role::System).collect();
 
-    if system_messages.is_empty() {
+    // For OAuth, we need the Claude Code prefix
+    let is_oauth = matches!(auth, AnthropicAuth::OAuth { .. });
+
+    if system_messages.is_empty() && !is_oauth {
         return Ok(None);
     }
 
     // Check if any system message has cache control
     let has_cache_control = system_messages.iter().any(|m| m.cache_control().is_some());
 
+    // For OAuth, always use blocks format with Claude Code prefix
+    if is_oauth {
+        let mut blocks = vec![];
+
+        // Add Claude Code prefix with ephemeral cache
+        blocks.push(AnthropicSystemBlock {
+            type_: "text".to_string(),
+            text: CLAUDE_CODE_SYSTEM_PREFIX.to_string(),
+            cache_control: Some(AnthropicCacheControl::ephemeral()),
+        });
+        // Count this as a cache breakpoint
+        validator.validate(
+            Some(&crate::types::CacheControl::ephemeral()),
+            CacheContext::system_message(),
+        );
+
+        // Add user system messages
+        for msg in &system_messages {
+            if let Some(text) = msg.text() {
+                let cache_control = msg.cache_control();
+                let validated_cache =
+                    validator.validate(cache_control, CacheContext::system_message());
+
+                blocks.push(AnthropicSystemBlock {
+                    type_: "text".to_string(),
+                    text,
+                    cache_control: validated_cache.map(|c| AnthropicCacheControl::from(&c)),
+                });
+            }
+        }
+
+        return Ok(Some(AnthropicSystemContent::Blocks(blocks)));
+    }
+
+    // For API key auth without cache control, use simple string format
     if !has_cache_control {
-        // Simple case: no cache control, combine into single string
         let combined = system_messages
             .iter()
             .filter_map(|m| m.text())

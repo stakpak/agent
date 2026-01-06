@@ -25,7 +25,7 @@ impl AnthropicProvider {
 
     /// Create a new Anthropic provider
     pub fn new(config: AnthropicConfig) -> Result<Self> {
-        if config.api_key.is_empty() {
+        if config.auth.is_empty() {
             return Err(Error::MissingApiKey("anthropic".to_string()));
         }
 
@@ -39,6 +39,11 @@ impl AnthropicProvider {
             .map_err(|_| Error::MissingApiKey("anthropic".to_string()))?;
 
         Self::new(AnthropicConfig::new(api_key))
+    }
+
+    /// Create provider with OAuth access token
+    pub fn with_oauth(access_token: impl Into<String>) -> Result<Self> {
+        Self::new(AnthropicConfig::with_oauth(access_token))
     }
 }
 
@@ -54,7 +59,7 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, false)?;
+        let conversion_result = to_anthropic_request(&request, &self.config.auth, false)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
@@ -84,7 +89,7 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, true)?;
+        let conversion_result = to_anthropic_request(&request, &self.config.auth, true)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
@@ -115,8 +120,10 @@ impl AnthropicProvider {
     ) -> Headers {
         let mut headers = Headers::new();
 
-        // Anthropic uses x-api-key header
-        headers.insert("x-api-key", &self.config.api_key);
+        // Apply authentication (works for both API key and OAuth)
+        let (auth_header, auth_value) = self.config.auth.to_header();
+        headers.insert(auth_header, auth_value);
+
         headers.insert("anthropic-version", &self.config.anthropic_version);
         headers.insert("Content-Type", "application/json");
 
