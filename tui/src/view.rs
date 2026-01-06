@@ -28,7 +28,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(1), Constraint::Length(panel_width)])
             .split(f.area());
-        (horizontal_chunks[0], Some(horizontal_chunks[1]))
+        // Add 1 char right margin to main area for symmetric spacing around the side panel divider
+        let main_with_margin = Rect {
+            x: horizontal_chunks[0].x,
+            y: horizontal_chunks[0].y,
+            width: horizontal_chunks[0].width.saturating_sub(1),
+            height: horizontal_chunks[0].height,
+        };
+        (main_with_margin, Some(horizontal_chunks[1]))
     } else {
         (f.area(), None)
     };

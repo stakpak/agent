@@ -42,9 +42,9 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Calculate section heights
-    let context_height = 5; // Fixed height for context
+    let context_height = 4; // Fixed height for context (header, tokens, model)
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 6; // For STAKPAK+profile, cwd, empty, shortcuts (2 lines)
+    let footer_height = 6; // For version+profile, cwd, empty line, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
     let todos_collapsed = state
@@ -157,16 +157,6 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect) {
             max_tokens / 1000,
             percentage
         ),
-        Color::White,
-    ));
-
-    // Session duration
-    let duration = state.session_start_time.elapsed();
-    let mins = duration.as_secs() / 60;
-    let secs = duration.as_secs() % 60;
-    lines.push(make_row(
-        "Session",
-        format!("{}m {}s", mins, secs),
         Color::White,
     ));
 
@@ -293,7 +283,11 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
         // The file_count() filter might need adjustment if we want to hide them totally
         // But for "Removed" files we definitely want to show them
 
-        for (i, file) in state.changeset.files_in_order().iter().enumerate() {
+        let files = state.changeset.files_in_order();
+        let total_files = files.len();
+        let max_display = 5;
+
+        for (i, file) in files.iter().take(max_display).enumerate() {
             let is_selected = i == state.changeset.selected_index && focused;
             // Prefix: "  ▸ " (4 chars)
             let prefix = if file.is_expanded { "▾" } else { "▸" };
@@ -413,6 +407,14 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                 }
             }
         }
+
+        // Show hint if there are more files than displayed
+        if total_files > max_display {
+            lines.push(Line::from(Span::styled(
+                format!("{}  Ctrl+e to show all files", LEFT_PADDING),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 
     let paragraph = Paragraph::new(lines);
@@ -428,52 +430,42 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Line 1: STAKPAK label + Version (left) and Profile (right) on same line
-    let stakpak_label = "STAKPAK";
     let version = env!("CARGO_PKG_VERSION");
     let profile = &state.current_profile_name;
-
-    // Calculate spacing to push profile to the right
-    // left_part visual spacing approximation
-    let left_combined = format!("{}{} v{}", LEFT_PADDING, stakpak_label, version);
-    let right_part = format!("profile {}", profile);
-    let total_content = left_combined.len() + right_part.len();
     let available_width = area.width as usize;
-    let spacing = if available_width > total_content {
-        available_width - total_content
-    } else {
-        1
-    };
+
+    // Line 1: Version (left) and Profile (right)
+    let left_part = format!("{}v{}", LEFT_PADDING, version);
+    let right_part = format!("profile {}", profile);
+    let total_content = left_part.len() + right_part.len();
+    let spacing = available_width.saturating_sub(total_content).max(1);
 
     lines.push(Line::from(vec![
         Span::styled(
-            format!("{}{}", LEFT_PADDING, stakpak_label),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" v{}", version),
+            format!("{}v{}", LEFT_PADDING, version),
             Style::default().fg(Color::DarkGray),
         ),
         Span::raw(" ".repeat(spacing)),
-        Span::styled("profile ", Style::default().fg(Color::Reset)),
-        Span::styled(profile, Style::default().fg(Color::DarkGray)),
+        Span::styled("profile ", Style::default().fg(Color::DarkGray)),
+        Span::styled(profile, Style::default().fg(Color::Cyan)),
     ]));
 
-    // Line 2+: CWD without label, wrapping
+    // Line 2: CWD - truncated to fit width
+    let cwd_prefix = LEFT_PADDING.to_string();
+    let max_cwd_len = available_width.saturating_sub(cwd_prefix.len());
+    let truncated_cwd = truncate_string(&cwd, max_cwd_len);
     lines.push(Line::from(vec![
-        Span::styled(LEFT_PADDING.to_string(), Style::default().fg(Color::Reset)),
-        Span::styled(&cwd, Style::default().fg(Color::DarkGray)),
+        Span::styled(cwd_prefix, Style::default()),
+        Span::styled(truncated_cwd, Style::default().fg(Color::DarkGray)),
     ]));
 
-    // Empty line after CWD
+    // Empty line between CWD and shortcuts
     lines.push(Line::from(""));
 
     // Shortcuts split into lines with colors:
     // Tab: Select (Cyan)
     // Enter: toggle (LightMagenta)
-    // Ctrl+b: On/Off (Yellow)
+    // Ctrl+b: Hide (Yellow)
 
     let left_padding_span = Span::styled(
         LEFT_PADDING.to_string(),
@@ -491,19 +483,22 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
 
     lines.push(Line::from(vec![
         left_padding_span,
-        Span::styled("Ctrl+b: ", Style::default().fg(Color::Yellow)),
-        Span::styled("On/Off", Style::default().fg(Color::Reset)),
+        Span::styled("Ctrl+y:", Style::default().fg(Color::Yellow)),
+        Span::styled(" Hide", Style::default().fg(Color::Reset)),
+        Span::raw("  "),
+        Span::styled("Ctrl+e:", Style::default().fg(Color::Green)),
+        Span::styled(" Changes", Style::default().fg(Color::Reset)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
 
-/// Get the style for a section header - Reset color
+/// Get the style for a section header - magenta when focused for better visibility
 fn section_header_style(focused: bool) -> Style {
     if focused {
         Style::default()
-            .fg(Color::Reset)
+            .fg(Color::Magenta)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Reset)

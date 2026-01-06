@@ -50,6 +50,18 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ToggleContextPopup)
                 }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ShowFileChangesPopup)
+                }
+                KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesRevertFile)
+                }
+                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesRevertAll)
+                }
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesOpenEditor)
+                }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RulebookSwitcherDeselectAll)
                 }
@@ -66,6 +78,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::InputCursorStart)
                 }
                 KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ToggleSidePanel)
+                }
+                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::AutoApproveCurrentTool)
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -78,7 +93,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::ShowProfileSwitcher)
                 }
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ToggleSidePanel)
+                    Some(InputEvent::CursorLeft)
                 }
                 KeyCode::Char('<') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorPrevWord)

@@ -590,14 +590,6 @@ impl AppState {
         if !self.side_panel_auto_shown && !self.show_side_panel {
             self.show_side_panel = true;
             self.side_panel_auto_shown = true;
-
-            // Also enable mouse capture
-            #[cfg(unix)]
-            if !self.mouse_capture_enabled {
-                let _ =
-                    crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
-                self.mouse_capture_enabled = true;
-            }
         }
     }
 }

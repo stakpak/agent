@@ -69,9 +69,19 @@ pub fn update(
                 popup::handle_file_changes_popup_cancel(state);
                 return;
             }
-            InputEvent::RetryLastToolCall => {
-                // Map Ctrl+R to Revert All
+            InputEvent::FileChangesRevertAll => {
+                // Ctrl+Z to Revert All
                 popup::handle_file_changes_popup_revert_all(state);
+                return;
+            }
+            InputEvent::FileChangesRevertFile => {
+                // Ctrl+X to Revert single file
+                popup::handle_file_changes_popup_revert(state);
+                return;
+            }
+            InputEvent::FileChangesOpenEditor => {
+                // Ctrl+N to open in editor
+                popup::handle_file_changes_popup_open_editor(state);
                 return;
             }
             InputEvent::Up | InputEvent::ScrollUp => {
@@ -88,15 +98,6 @@ pub fn update(
             }
             InputEvent::InputBackspace => {
                 popup::handle_file_changes_popup_backspace(state);
-                return;
-            }
-            InputEvent::OpenFileInEditor => {
-                popup::handle_file_changes_popup_open_editor(state);
-                return;
-            }
-            InputEvent::InputSubmitted => {
-                // Enter triggers revert on selected file
-                popup::handle_file_changes_popup_revert(state);
                 return;
             }
             InputEvent::MouseClick(col, row) => {
@@ -486,6 +487,9 @@ pub fn update(
         InputEvent::ToggleContextPopup => {
             popup::handle_toggle_context_popup(state);
         }
+        InputEvent::ShowFileChangesPopup => {
+            popup::handle_show_file_changes_popup(state);
+        }
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
         }
@@ -555,6 +559,15 @@ pub fn update(
         InputEvent::OpenFileInEditor => {
             // Handled in file changes popup context above
             // This match arm exists to satisfy exhaustive pattern matching
+        }
+        InputEvent::FileChangesRevertFile => {
+            // Handled in file changes popup context above
+        }
+        InputEvent::FileChangesRevertAll => {
+            // Handled in file changes popup context above
+        }
+        InputEvent::FileChangesOpenEditor => {
+            // Handled in file changes popup context above
         }
         InputEvent::EmergencyClearTerminal => {
             // EmergencyClearTerminal is handled in event loop

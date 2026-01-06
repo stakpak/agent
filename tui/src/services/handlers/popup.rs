@@ -453,21 +453,7 @@ pub fn handle_toggle_context_popup(state: &mut AppState) {
 /// Handle toggle side panel event
 pub fn handle_toggle_side_panel(state: &mut AppState) {
     state.show_side_panel = !state.show_side_panel;
-
-    // Toggle mouse capture along with side panel
-    if state.show_side_panel {
-        // Enable mouse capture when opening side panel
-        if !state.mouse_capture_enabled {
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
-            state.mouse_capture_enabled = true;
-        }
-    } else {
-        // Disable mouse capture when closing side panel
-        if state.mouse_capture_enabled {
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-            state.mouse_capture_enabled = false;
-        }
-    }
+    // Note: Mouse capture toggle logic removed - mouse clicks still work when enabled elsewhere
 }
 
 /// Handle side panel section navigation

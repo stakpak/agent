@@ -284,23 +284,19 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     f.render_widget(Paragraph::new(visible_lines), chunks[2]);
 
     // Render Footer
-    // "↑/↓: Navigate  Ctrl+r: Revert All  Esc: Close"
-    // "start from the far left but add a space"
-    // "Enter: Revert make Enter word in green"
-    // "make ctrl+r into magenta"
-    // "make Esc into red"
-    // Left aligned
-
+    // Updated shortcuts: Ctrl+X revert single, Ctrl+Z revert all, Ctrl+N open editor
     let footer_text = vec![
         Span::raw(" "),
         Span::styled("↑/↓", Style::default().fg(Color::Yellow)),
         Span::raw(": Navigate  "),
-        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::styled("Ctrl+x", Style::default().fg(Color::Green)),
         Span::raw(": Revert  "),
-        Span::styled("Ctrl+r", Style::default().fg(Color::Magenta)),
+        Span::styled("Ctrl+z", Style::default().fg(Color::Magenta)),
         Span::raw(": Revert All  "),
+        Span::styled("Ctrl+n", Style::default().fg(Color::Blue)),
+        Span::raw(": Edit  "),
         Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Close  "),
+        Span::raw(": Close"),
     ];
 
     let footer =

@@ -152,7 +152,7 @@ pub fn handle_input_submitted_event(
         // Let handle_input_submitted process it
     }
     // If side panel is visible and input is empty, Enter toggles the focused section
-    // BUT only if no other popup is open (sessions dialog, etc.)
+    // This is safe because empty input has nothing to submit anyway
     else if state.show_side_panel && state.text_area.text().is_empty() {
         use crate::services::changeset::SidePanelSection;
         // Context section cannot be collapsed
