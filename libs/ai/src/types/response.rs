@@ -1,5 +1,6 @@
 //! Response types from AI providers
 
+use super::cache::CacheWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -15,6 +16,40 @@ pub struct GenerateResponse {
     /// Provider-specific metadata as raw JSON
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+    /// Warnings generated during request processing (e.g., cache validation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<ResponseWarning>>,
+}
+
+/// Warning generated during request processing
+///
+/// Warnings are non-fatal issues that occurred during request processing.
+/// The request was still sent, but some settings may have been ignored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseWarning {
+    /// Type of warning (e.g., "cache_validation")
+    pub warning_type: String,
+    /// Human-readable warning message
+    pub message: String,
+}
+
+impl ResponseWarning {
+    /// Create a new response warning
+    pub fn new(warning_type: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            warning_type: warning_type.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<CacheWarning> for ResponseWarning {
+    fn from(warning: CacheWarning) -> Self {
+        Self {
+            warning_type: warning.warning_type.to_string(),
+            message: warning.message,
+        }
+    }
 }
 
 impl GenerateResponse {
@@ -57,6 +92,19 @@ impl GenerateResponse {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Check if there are any warnings
+    pub fn has_warnings(&self) -> bool {
+        self.warnings
+            .as_ref()
+            .map(|w| !w.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Get warnings as a slice
+    pub fn warnings(&self) -> &[ResponseWarning] {
+        self.warnings.as_deref().unwrap_or(&[])
     }
 }
 

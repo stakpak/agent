@@ -22,6 +22,7 @@ async fn test_anthropic_generate() {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);
@@ -50,11 +51,13 @@ async fn test_anthropic_generate_with_system_message() {
                 role: Role::System,
                 content: "You are a pirate. Respond in pirate speak.".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "Say hello".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -81,6 +84,7 @@ async fn test_anthropic_explicit_provider_prefix() {
             role: Role::User,
             content: "Say 'test'".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.max_tokens = Some(10);
@@ -109,6 +113,7 @@ async fn test_anthropic_streaming() {
             role: Role::User,
             content: "Count from 1 to 5".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);
@@ -159,11 +164,13 @@ async fn test_anthropic_streaming_with_system_message() {
                 role: Role::System,
                 content: "You respond in exactly 3 words.".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What is rust?".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -218,6 +225,7 @@ async fn test_anthropic_tool_calling() {
             role: Role::User,
             content: "What's the weather in Tokyo?".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.tools = Some(vec![weather_tool]);
@@ -269,6 +277,7 @@ async fn test_anthropic_tool_calling_streaming() {
             role: Role::User,
             content: "What is 123 * 456?".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.tools = Some(vec![calculator_tool]);
@@ -335,6 +344,7 @@ async fn test_anthropic_custom_base_url_with_messages_suffix() {
             role: Role::User,
             content: "Say 'URL test passed'".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.max_tokens = Some(20);
@@ -368,6 +378,7 @@ async fn test_anthropic_custom_base_url_without_trailing_slash() {
             role: Role::User,
             content: "Say 'slash test passed'".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.max_tokens = Some(20);
@@ -397,6 +408,7 @@ async fn test_anthropic_invalid_model_error() {
             role: Role::User,
             content: "Test".into(),
             name: None,
+            provider_options: None,
         }],
     );
 
@@ -418,6 +430,7 @@ async fn test_anthropic_streaming_invalid_model_error() {
             role: Role::User,
             content: "Test".into(),
             name: None,
+            provider_options: None,
         }],
     );
 
@@ -465,6 +478,7 @@ async fn test_anthropic_missing_api_key_error() {
                 role: Role::User,
                 content: "Test".into(),
                 name: None,
+                provider_options: None,
             }],
         );
 
@@ -497,16 +511,19 @@ async fn test_anthropic_multi_turn_conversation() {
                 role: Role::User,
                 content: "My name is Alice.".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::Assistant,
                 content: "Hello Alice! Nice to meet you.".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What is my name?".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -544,6 +561,7 @@ async fn test_anthropic_streaming_long_response() {
                 "Write a short paragraph (about 100 words) about the Rust programming language."
                     .into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.7);

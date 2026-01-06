@@ -61,11 +61,13 @@ fn test_request_creation() {
                 role: Role::System,
                 content: "You are helpful".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "Hello".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -85,6 +87,7 @@ fn test_request_with_model() {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         }],
     );
 
@@ -99,11 +102,13 @@ fn test_request_multiple_messages() {
             role: Role::System,
             content: "You are helpful".into(),
             name: None,
+            provider_options: None,
         },
         Message {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         },
     ];
 

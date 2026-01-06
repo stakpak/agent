@@ -81,7 +81,7 @@ pub fn from_stakai_message(msg: &Message) -> LLMMessage {
 /// Convert StakAI ContentPart to CLI LLMMessageTypedContent
 fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
     match part {
-        ContentPart::Text { text } => LLMMessageTypedContent::Text { text: text.clone() },
+        ContentPart::Text { text, .. } => LLMMessageTypedContent::Text { text: text.clone() },
         ContentPart::Image { url, .. } => {
             // Parse data URI back to base64
             let (media_type, data) = if url.starts_with("data:") {
@@ -112,6 +112,7 @@ fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
             id,
             name,
             arguments,
+            ..
         } => LLMMessageTypedContent::ToolCall {
             id: id.clone(),
             name: name.clone(),
@@ -120,6 +121,7 @@ fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
         ContentPart::ToolResult {
             tool_call_id,
             content,
+            ..
         } => LLMMessageTypedContent::ToolResult {
             tool_use_id: tool_call_id.clone(),
             content: match content {
@@ -139,6 +141,7 @@ pub fn to_stakai_tool(tool: &LLMTool) -> Tool {
             description: tool.description.clone(),
             parameters: tool.input_schema.clone(),
         },
+        provider_options: None,
     }
 }
 
@@ -263,6 +266,8 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
+                    prompt_cache_key: None,
+                    prompt_cache_retention: None,
                 }))
             } else {
                 None
@@ -271,6 +276,7 @@ pub fn to_stakai_provider_options(
         LLMModel::Gemini(_) => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
                 thinking_budget: google.thinking_budget,
+                cached_content: None,
             })
         }),
         LLMModel::Custom(_) => {
@@ -299,11 +305,14 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
+                    prompt_cache_key: None,
+                    prompt_cache_retention: None,
                 }))
             } else {
                 opts.google.as_ref().map(|google| {
                     ProviderOptions::Google(GoogleOptions {
                         thinking_budget: google.thinking_budget,
+                        cached_content: None,
                     })
                 })
             }
@@ -1175,6 +1184,7 @@ mod tests {
             usage: Usage::new(10, 5),
             finish_reason: FinishReason::stop(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "gpt-4");
@@ -1215,6 +1225,7 @@ mod tests {
             usage: Usage::new(20, 15),
             finish_reason: FinishReason::tool_calls(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "claude-3");
