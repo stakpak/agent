@@ -105,12 +105,14 @@ pub fn render_profile_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(Color::Yellow)),
-        Span::raw(": Navigate  "),
-        Span::styled("↵", Style::default().fg(Color::Cyan)),
-        Span::raw(": Switch  "),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Cancel"),
+        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("↵", Style::default().fg(Color::DarkGray)),
+        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
     ]));
 
     let help_area = Rect {

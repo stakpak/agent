@@ -300,10 +300,11 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
 
     // Help text (clean, without scroll indicators)
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::Yellow)),
-        Span::raw(": Scroll  "),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Close"),
+        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" close", Style::default().fg(Color::Cyan)),
     ]));
 
     f.render_widget(help, chunks[3]);

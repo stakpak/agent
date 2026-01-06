@@ -422,21 +422,23 @@ impl PopupService {
                 is_unsupported_terminal(&terminal_info.emulator)
             })
             .styled_footer(Some(vec![Line::from(vec![
-                Span::styled("Enter", Style::default().fg(Color::Green)),
-                Span::styled(" submit  ", Style::default().fg(Color::Indexed(254))),
-                Span::styled("←→", Style::default().fg(Color::Yellow)),
-                Span::styled(" select  ", Style::default().fg(Color::Indexed(254))),
-                Span::styled("Space", Style::default().fg(Color::Cyan)),
-                Span::styled(
-                    " approve/reject  ",
-                    Style::default().fg(Color::Indexed(254)),
-                ),
-                Span::styled("Ctrl+T", Style::default().fg(Color::Blue)),
-                Span::styled(" max/min  ", Style::default().fg(Color::Indexed(254))),
-                Span::styled("↑↓", Style::default().fg(Color::Magenta)),
-                Span::styled(" scroll  ", Style::default().fg(Color::Indexed(254))),
-                Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::styled(" exit", Style::default().fg(Color::Indexed(254))),
+                Span::styled("enter", Style::default().fg(Color::DarkGray)),
+                Span::styled(" submit", Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled("←→", Style::default().fg(Color::DarkGray)),
+                Span::styled(" select", Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled("space", Style::default().fg(Color::DarkGray)),
+                Span::styled(" approve/reject", Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled("ctrl+t", Style::default().fg(Color::DarkGray)),
+                Span::styled(" max/min", Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled("↑↓", Style::default().fg(Color::DarkGray)),
+                Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled("esc", Style::default().fg(Color::DarkGray)),
+                Span::styled(" exit", Style::default().fg(Color::Cyan)),
             ])]))
             .footer_style(Some(Style::default().fg(Color::Gray)))
             .position(PopupPosition::Responsive {

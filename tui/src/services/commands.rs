@@ -841,12 +841,14 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", Style::default().fg(Color::Yellow)),
-        Span::raw(": Navigate  "),
-        Span::styled("Enter", Style::default().fg(Color::Green)),
-        Span::raw(": Select  "),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Close"),
+        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("enter", Style::default().fg(Color::DarkGray)),
+        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" close", Style::default().fg(Color::Cyan)),
     ]));
 
     f.render_widget(help, chunks[4]);
