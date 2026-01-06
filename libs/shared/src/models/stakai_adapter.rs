@@ -1184,6 +1184,7 @@ mod tests {
             usage: Usage::new(10, 5),
             finish_reason: FinishReason::stop(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "gpt-4");
@@ -1224,6 +1225,7 @@ mod tests {
             usage: Usage::new(20, 15),
             finish_reason: FinishReason::tool_calls(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "claude-3");

@@ -376,11 +376,6 @@ fn parse_image_source(url: &str) -> Result<AnthropicSource> {
     }
 }
 
-/// Convert Anthropic response to unified response
-pub fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateResponse> {
-    from_anthropic_response_with_warnings(resp, vec![])
-}
-
 /// Convert Anthropic response to unified response with warnings from conversion
 pub fn from_anthropic_response_with_warnings(
     resp: AnthropicResponse,
@@ -424,7 +419,11 @@ pub fn from_anthropic_response_with_warnings(
     };
 
     // Calculate cache tokens
-    // Anthropic: cache_creation_input_tokens -> cacheWrite, cache_read_input_tokens -> cacheRead
+    // Anthropic token breakdown (per official API docs):
+    // - input_tokens: tokens NOT read from or written to cache (non-cached input)
+    // - cache_creation_input_tokens: tokens written to cache (cache miss, creating entry)
+    // - cache_read_input_tokens: tokens read from cache (cache hit)
+    // Total input = non-cached + cache-write + cache-read
     let cache_creation = resp.usage.cache_creation_input_tokens.unwrap_or(0);
     let cache_read = resp.usage.cache_read_input_tokens.unwrap_or(0);
     let input_tokens = resp.usage.input_tokens;

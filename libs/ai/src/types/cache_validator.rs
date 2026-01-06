@@ -202,16 +202,17 @@ impl CacheControlValidator {
             return None;
         }
 
-        // Check breakpoint limit
-        self.breakpoint_count += 1;
-        if self.breakpoint_count > Self::MAX_BREAKPOINTS {
+        // Check breakpoint limit before incrementing
+        if self.breakpoint_count >= Self::MAX_BREAKPOINTS {
             self.warnings.push(CacheWarning::breakpoint_limit_exceeded(
-                self.breakpoint_count,
+                self.breakpoint_count + 1,
                 Self::MAX_BREAKPOINTS,
             ));
             return None;
         }
 
+        // Only increment after validation passes
+        self.breakpoint_count += 1;
         Some(cache_control.clone())
     }
 
@@ -368,10 +369,11 @@ mod tests {
         let cache = CacheControl::ephemeral();
 
         // Add some breakpoints and a warning
+        // First 4 succeed, 5th is rejected (counter stays at 4)
         for _ in 0..5 {
             validator.validate(Some(&cache), CacheContext::user_message());
         }
-        assert_eq!(validator.breakpoint_count(), 5);
+        assert_eq!(validator.breakpoint_count(), 4); // Only valid breakpoints counted
         assert!(validator.has_warnings());
 
         // Reset

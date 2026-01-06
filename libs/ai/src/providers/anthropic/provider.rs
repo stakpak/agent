@@ -57,6 +57,44 @@ impl Provider for AnthropicProvider {
         self.build_headers_with_cache(custom_headers, false)
     }
 
+    async fn list_models(&self) -> Result<Vec<String>> {
+        let url = format!("{}models", self.config.base_url);
+        let headers = self.build_headers(None);
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(headers.to_reqwest_headers())
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(Error::provider_error(format!(
+                "Anthropic API error {}: {}",
+                status, error_text
+            )));
+        }
+
+        let resp: serde_json::Value = response.json().await?;
+
+        // Extract model IDs from the response
+        // Response format: { "data": [{ "id": "model-id", ... }, ...] }
+        let models = resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(models)
+    }
+
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
         let conversion_result = to_anthropic_request(&request, &self.config.auth, false)?;
@@ -147,17 +185,5 @@ impl AnthropicProvider {
         }
 
         headers
-    }
-
-    /// List available Anthropic models
-    pub async fn list_models(&self) -> Result<Vec<String>> {
-        // Anthropic doesn't have a models endpoint, return known models
-        Ok(vec![
-            "claude-3-5-sonnet-20241022".to_string(),
-            "claude-3-5-haiku-20241022".to_string(),
-            "claude-3-opus-20240229".to_string(),
-            "claude-3-sonnet-20240229".to_string(),
-            "claude-3-haiku-20240307".to_string(),
-        ])
     }
 }
