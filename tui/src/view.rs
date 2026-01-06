@@ -17,7 +17,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // First, handle the horizontal split for the side panel
@@ -504,70 +503,13 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Reset utilization warnings before calculating
     state.context_usage_percent = 0;
-
-    // Right side: total tokens (if > 0) - hide when sessions dialog is open
-    let used_context = &state.current_message_usage;
     let total_width = area.width as usize;
     let mut final_spans = Vec::new();
 
     if !state.show_sessions_dialog {
-        if used_context.total_tokens > 0 {
-            // Get context info from model
-            let context_info = state
-                .llm_model
-                .as_ref()
-                .map(|model| model.context_info())
-                .unwrap_or_default();
-            let max_tokens = context_info.max_tokens as u32;
-
-            let capped_tokens = used_context.total_tokens.min(max_tokens);
-            let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
-            let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
-            let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
-            let tokens_text = format!(
-                "consumed {} tokens",
-                crate::services::helper_block::format_number_with_separator(
-                    state.total_session_usage.total_tokens,
-                )
-            );
-
-            // Calculate high utilization threshold (e.g. 90%)
-            let high_util_threshold = (max_tokens as f64 * 0.9) as u32;
-            let high_utilization = capped_tokens >= high_util_threshold;
-
-            state.context_usage_percent = ctx_percentage;
-
-            // Calculate spacing to push tokens to the absolute right edge
-            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-            let total_adjusted_width = if state.loading {
-                total_width + 4
-            } else {
-                total_width
-            };
-            let total_text_len = tokens_text.len() + 3 + percentage_text.len();
-            let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
-
-            // Add left content first
-            final_spans.extend(left_spans);
-
-            // Add spacing to push tokens to absolute right
-            if spacing > 0 {
-                final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
-            }
-
-            // Add tokens at the absolute right edge - all in gray
-            let token_style = if high_utilization {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-
-            final_spans.push(Span::styled(tokens_text, token_style));
-            final_spans.push(Span::styled(" · ", token_style));
-            final_spans.push(Span::styled(percentage_text, token_style));
-        } else if !state.show_side_panel {
+        if !state.show_side_panel {
             // No tokens and side panel is closed, show hint to open side panel
-            let hint_text = "Ctrl+y: side panel";
+            let hint_text = "Ctrl+y side panel";
             let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
             let total_adjusted_width = if state.loading {
                 total_width + 4

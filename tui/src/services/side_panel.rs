@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 use stakpak_shared::models::model_pricing::ContextAware;
 
@@ -25,17 +25,19 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Clear the area first
     f.render_widget(ratatui::widgets::Clear, area);
 
-    // Create a block for the side panel with a subtle border and background
-    let block = Block::default().style(Style::default().bg(Color::Indexed(234)));
+    // Create a block for the side panel with a subtle border
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(Color::DarkGray));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    // Add padding: 1 space on top, bottom, and right (left uses LEFT_PADDING in content)
+    // Add padding: 1 line on top and bottom (left uses LEFT_PADDING in content)
     let padded_area = Rect {
         x: inner_area.x,
         y: inner_area.y.saturating_add(1),
-        width: inner_area.width.saturating_sub(1),
+        width: inner_area.width,
         height: inner_area.height.saturating_sub(2),
     };
 
@@ -245,11 +247,7 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         let credits = info.features.get("credits");
         if let Some(credit_feature) = credits {
             let balance = credit_feature.balance.unwrap_or(0.0);
-            lines.push(make_row(
-                "Balance",
-                format!("${:.2}", balance),
-                Color::Green,
-            ));
+            lines.push(make_row("Balance", format!("${:.2}", balance), Color::Cyan));
         } else {
             lines.push(make_row("Balance", "-".to_string(), Color::DarkGray));
         }
@@ -531,7 +529,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
         ),
         Span::raw(" ".repeat(spacing)),
         Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-        Span::styled(profile, Style::default().fg(Color::Cyan)),
+        Span::styled(profile, Style::default().fg(Color::Reset)),
     ]));
 
     // Empty line between version/profile and shortcuts
@@ -549,20 +547,20 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
 
     lines.push(Line::from(vec![
         left_padding_span.clone(),
-        Span::styled("Tab:", Style::default().fg(Color::Cyan)),
-        Span::styled(" Select", Style::default().fg(Color::Reset)),
+        Span::styled("tab:", Style::default().fg(Color::DarkGray)),
+        Span::styled(" select", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("Enter:", Style::default().fg(Color::LightMagenta)),
-        Span::styled(" toggle", Style::default().fg(Color::Reset)),
+        Span::styled("enter:", Style::default().fg(Color::DarkGray)),
+        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
     ]));
 
     lines.push(Line::from(vec![
         left_padding_span,
-        Span::styled("Ctrl+y:", Style::default().fg(Color::Yellow)),
-        Span::styled(" Hide", Style::default().fg(Color::Reset)),
+        Span::styled("ctrl+y:", Style::default().fg(Color::DarkGray)),
+        Span::styled(" hide", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("Ctrl+e:", Style::default().fg(Color::Green)),
-        Span::styled(" Changes", Style::default().fg(Color::Reset)),
+        Span::styled("ctrl+e:", Style::default().fg(Color::DarkGray)),
+        Span::styled(" changes", Style::default().fg(Color::Cyan)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
