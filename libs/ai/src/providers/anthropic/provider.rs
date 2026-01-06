@@ -25,7 +25,7 @@ impl AnthropicProvider {
 
     /// Create a new Anthropic provider
     pub fn new(config: AnthropicConfig) -> Result<Self> {
-        if config.api_key.is_empty() {
+        if config.auth.is_empty() {
             return Err(Error::MissingApiKey("anthropic".to_string()));
         }
 
@@ -40,6 +40,11 @@ impl AnthropicProvider {
 
         Self::new(AnthropicConfig::new(api_key))
     }
+
+    /// Create provider with OAuth access token
+    pub fn with_oauth(access_token: impl Into<String>) -> Result<Self> {
+        Self::new(AnthropicConfig::with_oauth(access_token))
+    }
 }
 
 #[async_trait]
@@ -51,8 +56,10 @@ impl Provider for AnthropicProvider {
     fn build_headers(&self, custom_headers: Option<&Headers>) -> Headers {
         let mut headers = Headers::new();
 
-        // Anthropic uses x-api-key header
-        headers.insert("x-api-key", &self.config.api_key);
+        // Apply authentication
+        let (auth_header, auth_value) = self.config.auth.to_header();
+        headers.insert(auth_header, auth_value);
+
         headers.insert("anthropic-version", &self.config.anthropic_version);
         headers.insert("Content-Type", "application/json");
 
@@ -71,7 +78,7 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let anthropic_req = to_anthropic_request(&request, false)?;
+        let anthropic_req = to_anthropic_request(&request, &self.config.auth, false)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
 
@@ -98,7 +105,7 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let anthropic_req = to_anthropic_request(&request, true)?;
+        let anthropic_req = to_anthropic_request(&request, &self.config.auth, true)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
 

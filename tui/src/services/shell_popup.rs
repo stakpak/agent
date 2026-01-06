@@ -214,7 +214,7 @@ pub fn update_cursor_blink(state: &mut AppState) {
     state.shell_cursor_blink_timer = state.shell_cursor_blink_timer.wrapping_add(1);
 
     // Toggle every 5 frames (~500ms at 10fps / 100ms interval)
-    if state.shell_cursor_blink_timer % 5 == 0 {
+    if state.shell_cursor_blink_timer.is_multiple_of(5) {
         state.shell_cursor_visible = !state.shell_cursor_visible;
     }
 }

@@ -1,7 +1,7 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
+    AnthropicAuth, AnthropicContent, AnthropicMessage, AnthropicMessageContent, AnthropicRequest,
     AnthropicResponse, AnthropicSource, AnthropicThinkingConfig as AnthropicThinking,
     infer_max_tokens,
 };
@@ -13,22 +13,29 @@ use crate::types::{
 use serde_json::json;
 
 /// Convert unified request to Anthropic request
-pub fn to_anthropic_request(req: &GenerateRequest, stream: bool) -> Result<AnthropicRequest> {
-    // Extract system messages and combine them
-    let system_messages: Vec<String> = req
-        .messages
-        .iter()
-        .filter(|m| m.role == Role::System)
-        .filter_map(|m| m.text())
-        .collect();
+pub fn to_anthropic_request(
+    req: &GenerateRequest,
+    auth: &AnthropicAuth,
+    stream: bool,
+) -> Result<AnthropicRequest> {
+    // Extract and combine system messages
+    let user_system: Option<String> = {
+        let messages: Vec<String> = req
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .filter_map(|m| m.text())
+            .collect();
 
-    let system = if system_messages.is_empty() {
-        None
-    } else {
-        Some(AnthropicMessageContent::String(
-            system_messages.join("\n\n"),
-        ))
+        if messages.is_empty() {
+            None
+        } else {
+            Some(messages.join("\n\n"))
+        }
     };
+
+    // Build system content based on auth type (OAuth needs Claude Code prefix)
+    let system = AnthropicMessageContent::build_system(auth, user_system);
 
     // Convert non-system messages
     let messages: Vec<AnthropicMessage> = req

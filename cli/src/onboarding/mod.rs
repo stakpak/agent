@@ -18,8 +18,8 @@ use crate::apikey_auth::prompt_for_api_key;
 use crate::config::AppConfig;
 use crate::onboarding::byom::configure_byom;
 use crate::onboarding::config_templates::{
-    HybridModelConfig, config_to_toml_preview, generate_anthropic_config, generate_gemini_config,
-    generate_hybrid_config, generate_openai_config,
+    HybridModelConfig, config_to_toml_preview, generate_anthropic_profile, generate_gemini_profile,
+    generate_hybrid_config, generate_openai_profile,
 };
 use crate::onboarding::menu::{
     prompt_password, prompt_profile_name, select_option, select_option_no_header,
@@ -27,10 +27,12 @@ use crate::onboarding::menu::{
 use crate::onboarding::navigation::NavResult;
 use crate::onboarding::save_config::{preview_and_save_to_profile, save_to_profile};
 use crate::onboarding::styled_output::{StepStatus, render_profile_name};
+use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::integrations::anthropic::AnthropicModel;
 use stakpak_shared::models::integrations::gemini::GeminiModel;
 use stakpak_shared::models::integrations::openai::OpenAIModel;
 use stakpak_shared::models::model_pricing::ContextAware;
+use stakpak_shared::oauth::{OAuthFlow, ProviderRegistry};
 use std::io::{self, Write};
 
 fn get_config_path_string(config: &AppConfig) -> String {
@@ -122,7 +124,11 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
                     "Use Stakpak API (recommended)",
                     true,
                 ),
-                (InitialChoice::OwnKeys, "Use my own Model/API Key", false),
+                (
+                    InitialChoice::OwnKeys,
+                    "Use my own Model/API Key (or Claude Pro/Max Subscription)",
+                    false,
+                ),
             ],
             0,
             2,
@@ -203,11 +209,11 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
         );
 
         let completed = match provider_choice {
+            NavResult::Forward(ProviderChoice::Anthropic) => {
+                handle_anthropic_provider_selection(config, profile_name).await
+            }
             NavResult::Forward(ProviderChoice::OpenAI) => {
                 handle_openai_setup(config, profile_name).await
-            }
-            NavResult::Forward(ProviderChoice::Anthropic) => {
-                handle_anthropic_setup(config, profile_name).await
             }
             NavResult::Forward(ProviderChoice::Google) => {
                 handle_gemini_setup(config, profile_name).await
@@ -235,6 +241,221 @@ async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> boo
             return true;
         }
     }
+}
+
+/// Handle Anthropic provider selection (subscription vs API key)
+/// Returns true if completed, false if cancelled/back
+async fn handle_anthropic_provider_selection(config: &mut AppConfig, profile_name: &str) -> bool {
+    // Clear previous step content
+    print!("\x1b[u");
+    print!("\x1b[0J");
+    print!("\x1b[K");
+    let _ = io::stdout().flush();
+    print!("\x1b[s");
+
+    // Show sub-menu for Anthropic auth method
+    let auth_choice = select_option(
+        "Choose Anthropic authentication method",
+        &[
+            (
+                AnthropicAuthChoice::ClaudeSubscription,
+                "Claude Pro/Max Subscription",
+                false,
+            ),
+            (AnthropicAuthChoice::ApiKey, "API Key", false),
+        ],
+        2,
+        4,
+        true, // Can go back
+    );
+
+    match auth_choice {
+        NavResult::Forward(AnthropicAuthChoice::ClaudeSubscription) => {
+            handle_claude_subscription_setup(config, profile_name).await
+        }
+        NavResult::Forward(AnthropicAuthChoice::ApiKey) => {
+            handle_anthropic_api_key_setup(config, profile_name).await
+        }
+        NavResult::Back => {
+            // Go back to provider selection
+            print!("\x1b[u");
+            print!("\x1b[0J");
+            print!("\x1b[K");
+            let _ = io::stdout().flush();
+            false
+        }
+        NavResult::Cancel => false,
+    }
+}
+
+/// Handle Claude Pro/Max Subscription setup via OAuth
+/// Returns true if completed, false if cancelled/back
+async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: &str) -> bool {
+    // Clear previous step content WITHOUT touching welcome message
+    print!("\x1b[u");
+    print!("\x1b[0J"); // Clear from cursor to end of screen
+    print!("\x1b[K"); // Clear current line
+    let _ = io::stdout().flush();
+
+    // Render step 3 - start immediately after welcome message (no extra newline)
+    crate::onboarding::styled_output::render_title("Claude Pro/Max Subscription");
+    print!("\r\n");
+
+    // Show step indicators on one line
+    let steps = vec![
+        ("Step 1".to_string(), StepStatus::Completed),
+        ("Step 2".to_string(), StepStatus::Completed),
+        ("Step 3".to_string(), StepStatus::Active),
+    ];
+    crate::onboarding::styled_output::render_steps(&steps);
+    print!("\r\n");
+
+    // Show info about Claude subscription
+    crate::onboarding::styled_output::render_info(
+        "Use your existing Claude Pro or Max subscription to access Claude models.",
+    );
+    print!("\r\n");
+
+    // Show default models
+    crate::onboarding::styled_output::render_default_models(
+        &AnthropicModel::DEFAULT_SMART_MODEL.model_name(),
+        &AnthropicModel::DEFAULT_ECO_MODEL.model_name(),
+    );
+
+    // Get OAuth provider and config
+    let registry = ProviderRegistry::new();
+    let provider = match registry.get("anthropic") {
+        Some(p) => p,
+        None => {
+            crate::onboarding::styled_output::render_error("Anthropic provider not found");
+            return false;
+        }
+    };
+
+    let oauth_config = match provider.oauth_config("claude-max") {
+        Some(c) => c,
+        None => {
+            crate::onboarding::styled_output::render_error("OAuth not supported for this method");
+            return false;
+        }
+    };
+
+    // Start OAuth flow
+    let mut flow = OAuthFlow::new(oauth_config);
+    let auth_url = flow.generate_auth_url();
+
+    print!("\r\n");
+    crate::onboarding::styled_output::render_info("Opening browser for authentication...");
+    print!("\r\n");
+    println!("If browser doesn't open, visit:");
+    // Use OSC 8 escape sequence to make the URL clickable in supported terminals
+    println!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", auth_url, auth_url);
+    print!("\r\n");
+
+    // Try to open browser
+    let _ = open::that(&auth_url);
+
+    // Prompt for authorization code
+    print!("Paste the authorization code: ");
+    io::stdout().flush().ok();
+
+    let mut code = String::new();
+    if io::stdin().read_line(&mut code).is_err() {
+        crate::onboarding::styled_output::render_error("Failed to read input");
+        return false;
+    }
+    let code = code.trim();
+
+    if code.is_empty() {
+        crate::onboarding::styled_output::render_warning("Authentication cancelled.");
+        return false;
+    }
+
+    print!("\r\n");
+    crate::onboarding::styled_output::render_info("Exchanging code for tokens...");
+
+    // Exchange code for tokens
+    let tokens = match flow.exchange_code(code).await {
+        Ok(t) => t,
+        Err(e) => {
+            print!("\r\n");
+            crate::onboarding::styled_output::render_error(&format!(
+                "Token exchange failed: {}",
+                e
+            ));
+            return false;
+        }
+    };
+
+    // Post-authorize to get final auth
+    let auth = match provider.post_authorize("claude-max", &tokens).await {
+        Ok(a) => a,
+        Err(e) => {
+            print!("\r\n");
+            crate::onboarding::styled_output::render_error(&format!(
+                "Post-authorization failed: {}",
+                e
+            ));
+            return false;
+        }
+    };
+
+    // Get config directory
+    let config_dir = config.get_config_dir();
+
+    // Save credentials to auth.toml
+    let mut auth_manager = match AuthManager::new(&config_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            crate::onboarding::styled_output::render_error(&format!(
+                "Failed to load auth manager: {}",
+                e
+            ));
+            return false;
+        }
+    };
+
+    if let Err(e) = auth_manager.set(profile_name, "anthropic", auth) {
+        crate::onboarding::styled_output::render_error(&format!(
+            "Failed to save credentials: {}",
+            e
+        ));
+        return false;
+    }
+
+    // Generate profile config (credentials are in auth.toml)
+    let profile = generate_anthropic_profile();
+
+    // Save profile config
+    let config_path = get_config_path_string(config);
+    let telemetry = match save_to_profile(&config_path, profile_name, profile.clone()) {
+        Ok(t) => t,
+        Err(e) => {
+            crate::onboarding::styled_output::render_error(&format!(
+                "Failed to save configuration: {}",
+                e
+            ));
+            std::process::exit(1);
+        }
+    };
+
+    print!("\r\n");
+    crate::onboarding::styled_output::render_success("Successfully logged in to Claude!");
+    print!("\r\n");
+    crate::onboarding::styled_output::render_success("Configuration saved successfully");
+    print!("\r\n");
+
+    // Update AppConfig with saved values so we can use them immediately
+    config.provider = profile
+        .provider
+        .unwrap_or(crate::config::ProviderType::Local);
+    config.anthropic = profile.anthropic.clone();
+    config.smart_model = profile.smart_model.clone();
+    config.eco_model = profile.eco_model.clone();
+    config.anonymous_id = telemetry.anonymous_id;
+    config.collect_telemetry = telemetry.collect_telemetry;
+
+    true
 }
 
 /// Handle OpenAI setup
@@ -267,7 +488,30 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     match prompt_password("Enter your OpenAI API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            let profile = generate_openai_config(api_key);
+            // Save API key to auth.toml
+            let config_dir = config.get_config_dir();
+            let mut auth_manager = match AuthManager::new(&config_dir) {
+                Ok(m) => m,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to load auth manager: {}",
+                        e
+                    ));
+                    return false;
+                }
+            };
+
+            let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
+            if let Err(e) = auth_manager.set(profile_name, "openai", auth) {
+                crate::onboarding::styled_output::render_error(&format!(
+                    "Failed to save credentials: {}",
+                    e
+                ));
+                return false;
+            }
+
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_openai_profile();
 
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
                 &profile,
@@ -301,9 +545,6 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.openai = profile.openai.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    if let Some(key) = &profile.api_key {
-                        config.api_key = Some(key.clone());
-                    }
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -347,7 +588,30 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
 
     match prompt_password("Enter your Gemini API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            let profile = generate_gemini_config(api_key);
+            // Save API key to auth.toml
+            let config_dir = config.get_config_dir();
+            let mut auth_manager = match AuthManager::new(&config_dir) {
+                Ok(m) => m,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to load auth manager: {}",
+                        e
+                    ));
+                    return false;
+                }
+            };
+
+            let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
+            if let Err(e) = auth_manager.set(profile_name, "gemini", auth) {
+                crate::onboarding::styled_output::render_error(&format!(
+                    "Failed to save credentials: {}",
+                    e
+                ));
+                return false;
+            }
+
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_gemini_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
@@ -383,9 +647,6 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.gemini = profile.gemini.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    if let Some(key) = &profile.api_key {
-                        config.api_key = Some(key.clone());
-                    }
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -399,24 +660,25 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
     }
 }
 
-/// Handle Anthropic setup
+/// Handle Anthropic API key setup
 /// Returns true if completed, false if cancelled/back
-async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> bool {
+async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     // Clear previous step content WITHOUT touching welcome message
     print!("\x1b[u");
     print!("\x1b[0J"); // Clear from cursor to end of screen
     print!("\x1b[K"); // Clear current line
     let _ = io::stdout().flush();
 
-    // Render step 3 - start immediately after welcome message (no extra newline)
-    crate::onboarding::styled_output::render_title("Anthropic Configuration");
+    // Render step 4 - API key configuration
+    crate::onboarding::styled_output::render_title("Anthropic API Key Configuration");
     print!("\r\n");
 
     // Show step indicators on one line
     let steps = vec![
         ("Step 1".to_string(), StepStatus::Completed),
         ("Step 2".to_string(), StepStatus::Completed),
-        ("Step 3".to_string(), StepStatus::Active),
+        ("Step 3".to_string(), StepStatus::Completed),
+        ("Step 4".to_string(), StepStatus::Active),
     ];
     crate::onboarding::styled_output::render_steps(&steps);
     print!("\r\n");
@@ -429,7 +691,30 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
 
     match prompt_password("Enter your Anthropic API key", true) {
         NavResult::Forward(Some(api_key)) => {
-            let profile = generate_anthropic_config(api_key);
+            // Save API key to auth.toml
+            let config_dir = config.get_config_dir();
+            let mut auth_manager = match AuthManager::new(&config_dir) {
+                Ok(m) => m,
+                Err(e) => {
+                    crate::onboarding::styled_output::render_error(&format!(
+                        "Failed to load auth manager: {}",
+                        e
+                    ));
+                    return false;
+                }
+            };
+
+            let auth = stakpak_shared::models::auth::ProviderAuth::api_key(&api_key);
+            if let Err(e) = auth_manager.set(profile_name, "anthropic", auth) {
+                crate::onboarding::styled_output::render_error(&format!(
+                    "Failed to save credentials: {}",
+                    e
+                ));
+                return false;
+            }
+
+            // Generate profile config (credentials are in auth.toml)
+            let profile = generate_anthropic_profile();
 
             // Show confirmation
             crate::onboarding::styled_output::render_config_preview(&config_to_toml_preview(
@@ -465,9 +750,6 @@ async fn handle_anthropic_setup(config: &mut AppConfig, profile_name: &str) -> b
                     config.anthropic = profile.anthropic.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
-                    if let Some(key) = &profile.api_key {
-                        config.api_key = Some(key.clone());
-                    }
                     config.anonymous_id = telemetry.anonymous_id;
                     config.collect_telemetry = telemetry.collect_telemetry;
 
@@ -786,4 +1068,11 @@ enum ProviderChoice {
     Google,
     Hybrid,
     Byom,
+}
+
+/// Anthropic auth method choice
+#[derive(Clone, Copy, PartialEq)]
+enum AnthropicAuthChoice {
+    ClaudeSubscription,
+    ApiKey,
 }
