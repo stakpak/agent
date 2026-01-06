@@ -7,9 +7,10 @@ use super::types::{
 };
 use crate::error::{Error, Result};
 use crate::types::{
-    ContentPart, FinishReason, GenerateRequest, GenerateResponse, Message, ProviderOptions,
-    ResponseContent, Role, Usage,
+    ContentPart, FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse,
+    InputTokenDetails, Message, OutputTokenDetails, ProviderOptions, ResponseContent, Role, Usage,
 };
+use serde_json::json;
 
 /// Convert unified request to Gemini request
 pub fn to_gemini_request(req: &GenerateRequest) -> Result<GeminiRequest> {
@@ -279,39 +280,64 @@ pub fn from_gemini_response(resp: GeminiResponse) -> Result<GenerateResponse> {
         });
     }
 
+    // Gemini: cachedContentTokenCount -> cacheRead (Gemini doesn't report cacheWrite)
     let usage = resp
         .usage_metadata
-        .map(|u| Usage {
-            prompt_tokens: u.prompt_token_count.unwrap_or(0),
-            completion_tokens: u.candidates_token_count.unwrap_or(0),
-            total_tokens: u.total_token_count.unwrap_or(0),
+        .map(|u| {
+            let prompt_tokens = u.prompt_token_count.unwrap_or(0);
+            let completion_tokens = u.candidates_token_count.unwrap_or(0);
+            let cached_tokens = u.cached_content_token_count.unwrap_or(0);
+
+            Usage::with_details(
+                InputTokenDetails {
+                    total: Some(prompt_tokens),
+                    no_cache: Some(prompt_tokens.saturating_sub(cached_tokens)),
+                    cache_read: if cached_tokens > 0 {
+                        Some(cached_tokens)
+                    } else {
+                        None
+                    },
+                    cache_write: None, // Gemini doesn't report cache writes
+                },
+                OutputTokenDetails {
+                    total: Some(completion_tokens),
+                    text: None,      // Gemini doesn't break down by type
+                    reasoning: None, // Gemini doesn't report reasoning tokens separately
+                },
+                Some(serde_json::to_value(&u).unwrap_or_default()),
+            )
         })
         .unwrap_or_default();
 
     let finish_reason = if has_tool_calls {
-        FinishReason::ToolCalls
+        FinishReason::with_raw(FinishReasonKind::ToolCalls, "TOOL_CALLS")
     } else {
         candidate
             .and_then(|c| c.finish_reason.as_deref())
-            .and_then(parse_finish_reason)
-            .unwrap_or(FinishReason::Other)
+            .map(parse_finish_reason)
+            .unwrap_or_else(FinishReason::other)
     };
 
     Ok(GenerateResponse {
         content,
         usage,
         finish_reason,
-        metadata: None,
+        metadata: Some(json!({
+            "model_version": resp.model_version,
+            "response_id": resp.response_id,
+        })),
     })
 }
 
 /// Parse Gemini finish reason to unified finish reason
-pub(super) fn parse_finish_reason(reason: &str) -> Option<FinishReason> {
+pub(super) fn parse_finish_reason(reason: &str) -> FinishReason {
     match reason {
-        "STOP" => Some(FinishReason::Stop),
-        "MAX_TOKENS" => Some(FinishReason::Length),
-        "SAFETY" => Some(FinishReason::ContentFilter),
-        _ => None,
+        "STOP" => FinishReason::with_raw(FinishReasonKind::Stop, "STOP"),
+        "MAX_TOKENS" => FinishReason::with_raw(FinishReasonKind::Length, "MAX_TOKENS"),
+        "SAFETY" => FinishReason::with_raw(FinishReasonKind::ContentFilter, "SAFETY"),
+        "RECITATION" => FinishReason::with_raw(FinishReasonKind::ContentFilter, "RECITATION"),
+        "OTHER" => FinishReason::with_raw(FinishReasonKind::Other, "OTHER"),
+        raw => FinishReason::with_raw(FinishReasonKind::Other, raw),
     }
 }
 

@@ -51,6 +51,7 @@ pub async fn run_tui(
     rulebook_config: Option<RulebookConfig>,
     agent_model: AgentModel,
     editor_command: Option<String>,
+    auth_display_info: (Option<String>, Option<String>, Option<String>),
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -92,6 +93,7 @@ pub async fn run_tui(
         input_tx: Some(internal_tx.clone()),
         agent_model,
         editor_command,
+        auth_display_info,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)

@@ -1,3 +1,4 @@
+pub mod agents_md;
 pub mod check_update;
 pub mod gitignore;
 pub mod local_context;

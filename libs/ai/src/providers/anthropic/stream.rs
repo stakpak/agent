@@ -7,7 +7,7 @@
 
 use super::types::{AnthropicContent, AnthropicStreamEvent};
 use crate::error::{Error, Result};
-use crate::types::{GenerateStream, StreamEvent, Usage};
+use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::stream::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 
@@ -195,7 +195,7 @@ fn process_anthropic_event(
             // Message finished - emit final usage
             vec![StreamEvent::finish(
                 accumulated_usage.clone(),
-                crate::types::FinishReason::Stop,
+                FinishReason::with_raw(FinishReasonKind::Stop, "message_stop"),
             )]
         }
         "error" => {
@@ -568,7 +568,10 @@ mod tests {
             assert_eq!(u.prompt_tokens, 10);
             assert_eq!(u.completion_tokens, 20);
             assert_eq!(u.total_tokens, 30);
-            assert!(matches!(reason, crate::types::FinishReason::Stop));
+            assert!(matches!(
+                reason.unified,
+                crate::types::FinishReasonKind::Stop
+            ));
         } else {
             panic!("Expected Finish event");
         }

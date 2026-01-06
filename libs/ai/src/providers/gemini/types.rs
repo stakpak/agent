@@ -311,7 +311,7 @@ pub enum GeminiHarmProbability {
 }
 
 /// Gemini usage metadata
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiUsageMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -334,7 +334,7 @@ pub struct GeminiUsageMetadata {
 }
 
 /// Gemini token detail
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiTokenDetail {
     pub modality: GeminiModality,

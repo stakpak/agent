@@ -4,7 +4,7 @@ use crate::commands::agent::run::checkpoint::{
     get_checkpoint_messages, resume_session_from_checkpoint,
 };
 use crate::commands::agent::run::helpers::{
-    add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
+    add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
     tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
@@ -14,6 +14,7 @@ use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
 use crate::config::{AppConfig, ProviderType};
+use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
@@ -62,6 +63,7 @@ pub struct RunInteractiveConfig {
     pub auto_approve: Option<Vec<String>>,
     pub enabled_tools: EnabledToolsConfig,
     pub model: AgentModel,
+    pub agents_md: Option<AgentsMdInfo>,
 }
 
 pub async fn run_interactive(
@@ -92,6 +94,7 @@ pub async fn run_interactive(
         let mut all_available_rulebooks: Option<Vec<ListRuleBook>> = None;
         let system_prompt = config.system_prompt.clone();
         let subagent_configs = config.subagent_configs.clone();
+        let agents_md = config.agents_md.clone();
         let checkpoint_id = config.checkpoint_id.clone();
         let allowed_tools = config.allowed_tools.clone();
         let auto_approve = config.auto_approve.clone();
@@ -121,6 +124,7 @@ pub async fn run_interactive(
         let editor_command = ctx.editor.clone();
 
         let model_clone = model.clone();
+        let auth_display_info_for_tui = ctx.get_auth_display_info();
         let tui_handle = tokio::spawn(async move {
             let latest_version = get_latest_cli_version().await;
             stakpak_tui::run_tui(
@@ -138,6 +142,7 @@ pub async fn run_interactive(
                 rulebook_config_for_tui,
                 model_clone,
                 editor_command,
+                auth_display_info_for_tui,
             )
             .await
             .map_err(|e| e.to_string())
@@ -168,12 +173,13 @@ pub async fn run_interactive(
                     Arc::new(client)
                 }
                 ProviderType::Local => {
+                    // Use credential resolution with auth.toml fallback chain
                     let client = LocalClient::new(LocalClientConfig {
                         stakpak_base_url: Some(api_endpoint_for_client.clone()),
                         store_path: None,
-                        anthropic_config: ctx_clone.anthropic.clone(),
-                        openai_config: ctx_clone.openai.clone(),
-                        gemini_config: ctx_clone.gemini.clone(),
+                        anthropic_config: ctx_clone.get_anthropic_config_with_auth(),
+                        openai_config: ctx_clone.get_openai_config_with_auth(),
+                        gemini_config: ctx_clone.get_gemini_config_with_auth(),
                         eco_model: ctx_clone.eco_model.clone(),
                         recovery_model: ctx_clone.recovery_model.clone(),
                         smart_model: ctx_clone.smart_model.clone(),
@@ -344,6 +350,15 @@ pub async fn run_interactive(
 
                         let (user_input, _) =
                             add_subagents(&messages, &user_input, &subagent_configs);
+
+                        let user_input = if messages.is_empty()
+                            && let Some(agents_md_info) = &agents_md
+                        {
+                            let (user_input, _) = add_agents_md(&user_input, agents_md_info);
+                            user_input
+                        } else {
+                            user_input
+                        };
 
                         // Create message with ContentParts from TUI
                         let user_msg = if image_parts.is_empty() {
@@ -1056,12 +1071,13 @@ pub async fn run_interactive(
                     Box::new(client)
                 }
                 ProviderType::Local => {
+                    // Use credential resolution with auth.toml fallback chain
                     let client = LocalClient::new(LocalClientConfig {
                         store_path: None,
                         stakpak_base_url: Some(new_config.api_endpoint.clone()),
-                        anthropic_config: new_config.anthropic.clone(),
-                        openai_config: new_config.openai.clone(),
-                        gemini_config: new_config.gemini.clone(),
+                        anthropic_config: new_config.get_anthropic_config_with_auth(),
+                        openai_config: new_config.get_openai_config_with_auth(),
+                        gemini_config: new_config.get_gemini_config_with_auth(),
                         eco_model: new_config.eco_model.clone(),
                         recovery_model: new_config.recovery_model.clone(),
                         smart_model: new_config.smart_model.clone(),
@@ -1130,12 +1146,13 @@ pub async fn run_interactive(
                 Box::new(client)
             }
             ProviderType::Local => {
+                // Use credential resolution with auth.toml fallback chain
                 let client = LocalClient::new(LocalClientConfig {
                     store_path: None,
                     stakpak_base_url: Some(final_api_endpoint.clone()),
-                    anthropic_config: ctx.anthropic.clone(),
-                    openai_config: ctx.openai.clone(),
-                    gemini_config: ctx.gemini.clone(),
+                    anthropic_config: ctx.get_anthropic_config_with_auth(),
+                    openai_config: ctx.get_openai_config_with_auth(),
+                    gemini_config: ctx.get_gemini_config_with_auth(),
                     eco_model: ctx.eco_model.clone(),
                     recovery_model: ctx.recovery_model.clone(),
                     smart_model: ctx.smart_model.clone(),

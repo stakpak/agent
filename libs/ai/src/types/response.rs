@@ -12,7 +12,7 @@ pub struct GenerateResponse {
     pub usage: Usage,
     /// Why generation finished
     pub finish_reason: FinishReason,
-    /// Provider-specific metadata
+    /// Provider-specific metadata as raw JSON
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
 }
@@ -89,18 +89,56 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
-/// Token usage statistics
+/// Input token details with cache information
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Usage {
-    /// Tokens in the prompt
-    pub prompt_tokens: u32,
-    /// Tokens in the completion
-    pub completion_tokens: u32,
-    /// Total tokens used
-    pub total_tokens: u32,
+pub struct InputTokenDetails {
+    /// Total input tokens (including cache tokens)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    /// Tokens not from cache (regular input tokens)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_cache: Option<u32>,
+    /// Tokens read from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read: Option<u32>,
+    /// Tokens written to cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write: Option<u32>,
 }
 
-#[cfg(test)]
+/// Output token details
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OutputTokenDetails {
+    /// Total output tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    /// Text tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<u32>,
+    /// Reasoning tokens (extended thinking for Anthropic, reasoning for OpenAI)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Usage {
+    /// Total input tokens (for backward compatibility)
+    pub prompt_tokens: u32,
+    /// Total completion tokens (for backward compatibility)
+    pub completion_tokens: u32,
+    /// Total tokens used (for backward compatibility)
+    pub total_tokens: u32,
+    /// Detailed input token breakdown
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_token_details: Option<InputTokenDetails>,
+    /// Detailed output token breakdown
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_token_details: Option<OutputTokenDetails>,
+    /// Raw provider-specific usage data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Value>,
+}
+
 impl Usage {
     /// Create a new usage with the given prompt and completion tokens
     pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
@@ -108,22 +146,124 @@ impl Usage {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            input_token_details: None,
+            output_token_details: None,
+            raw: None,
         }
+    }
+
+    pub fn with_details(
+        input_tokens: InputTokenDetails,
+        output_tokens: OutputTokenDetails,
+        raw: Option<Value>,
+    ) -> Self {
+        let prompt_tokens = input_tokens.total.unwrap_or(0);
+        let completion_tokens = output_tokens.total.unwrap_or(0);
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+            input_token_details: Some(input_tokens),
+            output_token_details: Some(output_tokens),
+            raw,
+        }
+    }
+
+    /// Get cache read tokens (convenience method)
+    pub fn cache_read_tokens(&self) -> Option<u32> {
+        self.input_token_details.as_ref().and_then(|d| d.cache_read)
+    }
+
+    /// Get cache write tokens (convenience method)
+    pub fn cache_write_tokens(&self) -> Option<u32> {
+        self.input_token_details
+            .as_ref()
+            .and_then(|d| d.cache_write)
+    }
+
+    /// Get reasoning tokens (convenience method)
+    pub fn reasoning_tokens(&self) -> Option<u32> {
+        self.output_token_details.as_ref().and_then(|d| d.reasoning)
     }
 }
 
-/// Why generation finished
+/// Unified finish reason for cross-provider consistency
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FinishReason {
-    /// Natural stop point
+pub enum FinishReasonKind {
+    /// Model generated stop sequence
     Stop,
-    /// Hit token limit
+    /// Model generated maximum number of tokens
     Length,
-    /// Content filtered
+    /// Content filter violation stopped the model
     ContentFilter,
-    /// Tool call requested
+    /// Model triggered tool calls
     ToolCalls,
-    /// Unknown/other reason
+    /// Model stopped because of an error
+    Error,
+    /// Model stopped for other reasons
     Other,
+}
+
+/// Why generation finished - includes both unified and raw reason
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FinishReason {
+    /// Unified finish reason for cross-provider consistency
+    pub unified: FinishReasonKind,
+    /// Raw finish reason from the provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
+}
+
+impl FinishReason {
+    /// Create a new finish reason with only unified value
+    pub fn new(unified: FinishReasonKind) -> Self {
+        Self { unified, raw: None }
+    }
+
+    /// Create a new finish reason with both unified and raw values
+    pub fn with_raw(unified: FinishReasonKind, raw: impl Into<String>) -> Self {
+        Self {
+            unified,
+            raw: Some(raw.into()),
+        }
+    }
+
+    /// Convenience constructors
+    pub fn stop() -> Self {
+        Self::new(FinishReasonKind::Stop)
+    }
+
+    pub fn length() -> Self {
+        Self::new(FinishReasonKind::Length)
+    }
+
+    pub fn content_filter() -> Self {
+        Self::new(FinishReasonKind::ContentFilter)
+    }
+
+    pub fn tool_calls() -> Self {
+        Self::new(FinishReasonKind::ToolCalls)
+    }
+
+    pub fn error() -> Self {
+        Self::new(FinishReasonKind::Error)
+    }
+
+    pub fn other() -> Self {
+        Self::new(FinishReasonKind::Other)
+    }
+}
+
+impl Default for FinishReason {
+    fn default() -> Self {
+        Self::new(FinishReasonKind::Other)
+    }
+}
+
+// Allow comparing FinishReason with FinishReasonKind directly
+impl PartialEq<FinishReasonKind> for FinishReason {
+    fn eq(&self, other: &FinishReasonKind) -> bool {
+        self.unified == *other
+    }
 }

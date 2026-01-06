@@ -405,10 +405,48 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
         });
 
     if !state.show_shell_mode && !state.loading {
-        block = block.title(Span::styled(
-            "'$' for Shell mode",
-            Style::default().fg(Color::DarkGray),
-        ));
+        block = block.title(
+            Line::from(Span::styled(
+                "'$' for Shell mode",
+                Style::default().fg(Color::DarkGray),
+            ))
+            .left_aligned(),
+        );
+    }
+
+    // Display auth info on the right: subscription name if available, otherwise auth provider
+    match &state.auth_display_info {
+        (_, Some(_auth_provider), Some(subscription)) => {
+            // Show subscription name (e.g., "Claude Pro", "Claude Max")
+            block = block.title(
+                Line::from(Span::styled(
+                    subscription.as_str(),
+                    Style::default().fg(Color::Reset),
+                ))
+                .right_aligned(),
+            );
+        }
+        (_, Some(auth_provider), None) => {
+            // Show auth provider name if no subscription (e.g., "Anthropic")
+            block = block.title(
+                Line::from(Span::styled(
+                    auth_provider.as_str(),
+                    Style::default().fg(Color::Reset),
+                ))
+                .right_aligned(),
+            );
+        }
+        (Some(config_provider), None, None) => {
+            // Show config provider if no auth (e.g., "Local")
+            block = block.title(
+                Line::from(Span::styled(
+                    config_provider.as_str(),
+                    Style::default().fg(Color::DarkGray),
+                ))
+                .right_aligned(),
+            );
+        }
+        _ => {}
     }
 
     // Create content area inside the block
