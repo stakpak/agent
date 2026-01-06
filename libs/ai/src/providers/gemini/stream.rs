@@ -2,7 +2,7 @@
 
 use super::types::GeminiResponse;
 use crate::error::{Error, Result};
-use crate::types::{FinishReason, GenerateStream, StreamEvent, Usage};
+use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
 use futures::stream::StreamExt;
 use reqwest::Response;
 
@@ -129,7 +129,7 @@ pub async fn create_stream(response: Response) -> Result<GenerateStream> {
 
         // Emit final finish event if we haven't yet
         if !finished_emitted {
-            yield Ok(StreamEvent::finish(accumulated_usage, FinishReason::Stop));
+            yield Ok(StreamEvent::finish(accumulated_usage, FinishReason::stop()));
         }
     };
 
@@ -208,10 +208,10 @@ fn process_gemini_response(
 
     if let Some(finish_reason) = &candidate.finish_reason {
         let reason = match finish_reason.as_str() {
-            "STOP" => FinishReason::Stop,
-            "MAX_TOKENS" => FinishReason::Length,
-            "SAFETY" => FinishReason::ContentFilter,
-            _ => FinishReason::Other,
+            "STOP" => FinishReason::with_raw(FinishReasonKind::Stop, "STOP"),
+            "MAX_TOKENS" => FinishReason::with_raw(FinishReasonKind::Length, "MAX_TOKENS"),
+            "SAFETY" => FinishReason::with_raw(FinishReasonKind::ContentFilter, "SAFETY"),
+            raw => FinishReason::with_raw(FinishReasonKind::Other, raw),
         };
         events.push(StreamEvent::finish(accumulated_usage.clone(), reason));
     }
@@ -313,7 +313,7 @@ mod tests {
         }
 
         if let StreamEvent::Finish { reason, .. } = &result[3] {
-            assert!(matches!(reason, FinishReason::Stop));
+            assert!(matches!(reason.unified, FinishReasonKind::Stop));
         } else {
             panic!("Expected Finish");
         }

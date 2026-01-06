@@ -14,5 +14,8 @@ pub use request::{
     AnthropicOptions, GenerateRequest, GoogleOptions, OpenAIOptions, ProviderOptions,
     ReasoningEffort, ReasoningSummary, SystemMessageMode, ThinkingOptions,
 };
-pub use response::{FinishReason, GenerateResponse, ResponseContent, ToolCall, Usage};
+pub use response::{
+    FinishReason, FinishReasonKind, GenerateResponse, InputTokenDetails, OutputTokenDetails,
+    ResponseContent, ToolCall, Usage,
+};
 pub use stream::{GenerateStream, StreamEvent};

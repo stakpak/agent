@@ -144,13 +144,19 @@ fn test_usage_default() {
 fn test_finish_reason_serialization() {
     use serde_json;
 
-    let reason = FinishReason::Stop;
+    let reason = FinishReason::stop();
     let json = serde_json::to_string(&reason).unwrap();
-    assert_eq!(json, "\"stop\"");
+    assert!(json.contains("\"unified\":\"stop\""));
 
-    let reason = FinishReason::Length;
+    let reason = FinishReason::length();
     let json = serde_json::to_string(&reason).unwrap();
-    assert_eq!(json, "\"length\"");
+    assert!(json.contains("\"unified\":\"length\""));
+
+    // Test with raw value
+    let reason = FinishReason::with_raw(FinishReasonKind::Stop, "end_turn");
+    let json = serde_json::to_string(&reason).unwrap();
+    assert!(json.contains("\"unified\":\"stop\""));
+    assert!(json.contains("\"raw\":\"end_turn\""));
 }
 
 #[test]
@@ -165,7 +171,7 @@ fn test_response_text_extraction() {
             },
         ],
         usage: Usage::default(),
-        finish_reason: FinishReason::Stop,
+        finish_reason: FinishReason::stop(),
         metadata: None,
     };
 

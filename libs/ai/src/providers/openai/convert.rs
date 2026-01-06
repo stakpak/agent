@@ -2,7 +2,11 @@
 
 use super::types::*;
 use crate::error::{Error, Result};
-use crate::types::*;
+use crate::types::{
+    ContentPart, FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, ImageDetail,
+    InputTokenDetails, Message, OutputTokenDetails, ProviderOptions, ResponseContent, Role,
+    SystemMessageMode, ToolCall, Usage,
+};
 use serde_json::json;
 
 /// Check if a model is a reasoning model (o1, o3, o4, gpt-5)
@@ -202,28 +206,72 @@ pub fn from_openai_response(resp: ChatCompletionResponse) -> Result<GenerateResp
 
     let content = parse_message_content(&choice.message)?;
 
-    let finish_reason = match choice.finish_reason.as_deref() {
-        Some("stop") => FinishReason::Stop,
-        Some("length") => FinishReason::Length,
-        Some("content_filter") => FinishReason::ContentFilter,
-        Some("tool_calls") => FinishReason::ToolCalls,
-        _ => FinishReason::Other,
-    };
+    let finish_reason = parse_openai_finish_reason(choice.finish_reason.as_deref());
+
+    // OpenAI: prompt_tokens_details.cached_tokens -> cacheRead (OpenAI doesn't report cacheWrite)
+    let prompt_tokens = resp.usage.prompt_tokens;
+    let completion_tokens = resp.usage.completion_tokens;
+
+    let cached_tokens = resp
+        .usage
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|d| d.cached_tokens)
+        .unwrap_or(0);
+
+    let reasoning_tokens = resp
+        .usage
+        .completion_tokens_details
+        .as_ref()
+        .and_then(|d| d.reasoning_tokens);
+
+    let usage = Usage::with_details(
+        InputTokenDetails {
+            total: Some(prompt_tokens),
+            no_cache: Some(prompt_tokens.saturating_sub(cached_tokens)),
+            cache_read: if cached_tokens > 0 {
+                Some(cached_tokens)
+            } else {
+                None
+            },
+            cache_write: None, // OpenAI doesn't report cache writes
+        },
+        OutputTokenDetails {
+            total: Some(completion_tokens),
+            text: reasoning_tokens.map(|r| completion_tokens.saturating_sub(r)),
+            reasoning: reasoning_tokens,
+        },
+        Some(serde_json::to_value(&resp.usage).unwrap_or_default()),
+    );
 
     Ok(GenerateResponse {
         content,
-        usage: Usage {
-            prompt_tokens: resp.usage.prompt_tokens,
-            completion_tokens: resp.usage.completion_tokens,
-            total_tokens: resp.usage.total_tokens,
-        },
+        usage,
         finish_reason,
         metadata: Some(json!({
             "id": resp.id,
             "model": resp.model,
             "created": resp.created,
+            "object": resp.object,
         })),
     })
+}
+
+/// Parse OpenAI finish reason to unified finish reason
+fn parse_openai_finish_reason(reason: Option<&str>) -> FinishReason {
+    match reason {
+        Some("stop") => FinishReason::with_raw(FinishReasonKind::Stop, "stop"),
+        Some("length") => FinishReason::with_raw(FinishReasonKind::Length, "length"),
+        Some("content_filter") => {
+            FinishReason::with_raw(FinishReasonKind::ContentFilter, "content_filter")
+        }
+        Some("tool_calls") => FinishReason::with_raw(FinishReasonKind::ToolCalls, "tool_calls"),
+        Some("function_call") => {
+            FinishReason::with_raw(FinishReasonKind::ToolCalls, "function_call")
+        }
+        Some(raw) => FinishReason::with_raw(FinishReasonKind::Other, raw),
+        None => FinishReason::other(),
+    }
 }
 
 /// Parse message content from OpenAI format
