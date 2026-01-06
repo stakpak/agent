@@ -33,18 +33,18 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    // Add horizontal padding - shift content right by 1 char
+    // Use inner area directly - LEFT_PADDING constant in content provides the spacing
     let padded_area = Rect {
-        x: inner_area.x + 1,
+        x: inner_area.x,
         y: inner_area.y,
-        width: inner_area.width.saturating_sub(1),
+        width: inner_area.width,
         height: inner_area.height,
     };
 
     // Calculate section heights
     let context_height = 4; // Fixed height for context (header, tokens, model)
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 6; // For version+profile, cwd, empty line, shortcuts (2 lines)
+    let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
     let todos_collapsed = state
@@ -247,7 +247,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
     // Header remains same
     let count_label = if count > 0 {
-        format!(" {} files", count)
+        format!(" ({})", count)
     } else {
         String::new()
     };
@@ -421,14 +421,9 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer section with version, profile, and cwd
+/// Render the footer section with version and profile
 fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     let mut lines = Vec::new();
-
-    // Get current working directory
-    let cwd = std::env::current_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
 
     let version = env!("CARGO_PKG_VERSION");
     let profile = &state.current_profile_name;
@@ -450,16 +445,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
         Span::styled(profile, Style::default().fg(Color::Cyan)),
     ]));
 
-    // Line 2: CWD - truncated to fit width
-    let cwd_prefix = LEFT_PADDING.to_string();
-    let max_cwd_len = available_width.saturating_sub(cwd_prefix.len());
-    let truncated_cwd = truncate_string(&cwd, max_cwd_len);
-    lines.push(Line::from(vec![
-        Span::styled(cwd_prefix, Style::default()),
-        Span::styled(truncated_cwd, Style::default().fg(Color::DarkGray)),
-    ]));
-
-    // Empty line between CWD and shortcuts
+    // Empty line between version/profile and shortcuts
     lines.push(Line::from(""));
 
     // Shortcuts split into lines with colors:

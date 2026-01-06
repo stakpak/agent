@@ -527,9 +527,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
             final_spans.push(Span::styled(tokens_text, token_style));
             final_spans.push(Span::styled(" · ", token_style));
             final_spans.push(Span::styled(percentage_text, token_style));
-        } else {
-            // No tokens, show hint in the same right-aligned slot
-            let hint_text = "prompt to see ctx stats";
+        } else if !state.show_side_panel {
+            // No tokens and side panel is closed, show hint to open side panel
+            let hint_text = "Ctrl+y: side panel";
             let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
             let total_adjusted_width = if state.loading {
                 total_width + 4
@@ -548,6 +548,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
             ));
+        } else {
+            // Side panel is open, no hint needed - just extend with left content
+            final_spans.extend(left_spans);
         }
     } else {
         // Sessions dialog is open - just show left content
