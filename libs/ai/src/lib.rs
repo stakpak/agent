@@ -20,15 +20,15 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Inference::new();
-//!     
+//!
 //!     let request = GenerateRequest::new(
 //!         "gpt-4",
 //!         vec![Message::new(Role::User, "What is Rust?")]
 //!     );
-//!     
+//!
 //!     let response = client.generate(&request).await?;
 //!     println!("Response: {}", response.text());
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -44,20 +44,53 @@ pub mod types;
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
 pub use types::{
-    // Cache control types
-    CacheContext, CacheControl, CacheControlValidator, CacheWarning, CacheWarningType,
-    PromptCacheRetention,
     // Message types
-    AnthropicContentPartOptions, AnthropicMessageOptions, ContentPart, ContentPartProviderOptions,
-    ImageDetail, Message, MessageContent, MessageProviderOptions, Role,
-    // Options types
-    AnthropicToolOptions, GenerateOptions, Tool, ToolChoice, ToolFunction, ToolProviderOptions,
+    AnthropicContentPartOptions,
+    AnthropicMessageOptions,
     // Request types
-    AnthropicOptions, GenerateRequest, GoogleOptions, Headers, OpenAIOptions, ProviderOptions,
-    ReasoningEffort, ReasoningSummary, SystemMessageMode, ThinkingOptions,
+    AnthropicOptions,
+    // Options types
+    AnthropicToolOptions,
+    // Cache control types
+    CacheContext,
+    CacheControl,
+    CacheControlValidator,
+    CacheWarning,
+    CacheWarningType,
+    ContentPart,
+    ContentPartProviderOptions,
     // Response types
-    FinishReason, FinishReasonKind, GenerateResponse, GenerateStream, InputTokenDetails,
-    OutputTokenDetails, ResponseContent, ResponseWarning, StreamEvent, ToolCall, Usage,
+    FinishReason,
+    FinishReasonKind,
+    GenerateOptions,
+    GenerateRequest,
+    GenerateResponse,
+    GenerateStream,
+    GoogleOptions,
+    Headers,
+    ImageDetail,
+    InputTokenDetails,
+    Message,
+    MessageContent,
+    MessageProviderOptions,
+    OpenAIOptions,
+    OutputTokenDetails,
+    PromptCacheRetention,
+    ProviderOptions,
+    ReasoningEffort,
+    ReasoningSummary,
+    ResponseContent,
+    ResponseWarning,
+    Role,
+    StreamEvent,
+    SystemMessageMode,
+    ThinkingOptions,
+    Tool,
+    ToolCall,
+    ToolChoice,
+    ToolFunction,
+    ToolProviderOptions,
+    Usage,
 };
 
 /// Prelude module for convenient imports

@@ -85,13 +85,13 @@ async fn test_openai_with_system_message() {
                 role: Role::System,
                 content: "You are a helpful assistant that responds in one word".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What color is the sky?".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
         ],
     );

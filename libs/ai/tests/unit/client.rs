@@ -61,13 +61,13 @@ fn test_request_creation() {
                 role: Role::System,
                 content: "You are helpful".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "Hello".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
         ],
     );

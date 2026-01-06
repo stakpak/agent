@@ -51,13 +51,13 @@ async fn test_anthropic_generate_with_system_message() {
                 role: Role::System,
                 content: "You are a pirate. Respond in pirate speak.".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "Say hello".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
         ],
     );
@@ -164,13 +164,13 @@ async fn test_anthropic_streaming_with_system_message() {
                 role: Role::System,
                 content: "You respond in exactly 3 words.".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What is rust?".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
         ],
     );
@@ -478,7 +478,7 @@ async fn test_anthropic_missing_api_key_error() {
                 role: Role::User,
                 content: "Test".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             }],
         );
 
@@ -511,19 +511,19 @@ async fn test_anthropic_multi_turn_conversation() {
                 role: Role::User,
                 content: "My name is Alice.".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::Assistant,
                 content: "Hello Alice! Nice to meet you.".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What is my name?".into(),
                 name: None,
-            provider_options: None,
+                provider_options: None,
             },
         ],
     );
