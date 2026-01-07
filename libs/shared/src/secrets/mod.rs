@@ -1,8 +1,13 @@
 pub mod gitleaks;
+#[cfg(test)]
+pub mod test_utils;
+
 use crate::helper::generate_simple_id;
+use crate::models::password::Password;
 /// Re-export the gitleaks initialization function for external access
-pub use gitleaks::initialize_gitleaks_config;
+pub use gitleaks::create_gitleaks_config;
 use gitleaks::{DetectedSecret, detect_secrets};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -31,26 +36,27 @@ impl fmt::Display for RedactionResult {
 }
 
 /// Redacts secrets from the input string and returns both the redacted string and redaction mapping
+/// Note: Returns only NEW mappings; caller already has the old redaction map and uses `.extend()` to merge
 ///
-/// When privacy_mode is enabled, also detects and redacts private data like IP addresses and AWS account IDs
+/// `config` The gitleaks configuration to use for detection.
+/// The config can include privacy rules for detecting and redacting private data like IP addresses and AWS account IDs.
 pub fn redact_secrets(
     content: &str,
     path: Option<&str>,
     old_redaction_map: &HashMap<String, String>,
-    privacy_mode: bool,
+    config: &gitleaks::GitleaksConfig,
 ) -> RedactionResult {
+    let mut secrets = detect_secrets(content, path, config);
     // Skip redaction if content already contains redacted secrets (avoid double redaction)
     if content.contains("[REDACTED_SECRET:") {
         return RedactionResult::new(content.to_string(), HashMap::new());
     }
 
-    let mut secrets = detect_secrets(content, path, privacy_mode);
-
-    let mut redaction_map = old_redaction_map.clone();
+    // Track only NEW mappings to return (not the full old map)
+    let mut new_redaction_map: HashMap<String, String> = HashMap::new();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
-        .clone()
-        .into_iter()
-        .map(|(k, v)| (v, k))
+        .iter()
+        .map(|(k, v)| (v.clone(), k.clone()))
         .collect();
 
     for (original_secret, redaction_key) in &reverse_redaction_map {
@@ -132,8 +138,8 @@ pub fn redact_secrets(
             existing_key.clone()
         } else {
             let key = generate_redaction_key(&secret.rule_id);
-            // Store the mapping (only once per unique secret value)
-            redaction_map.insert(key.clone(), secret.value.clone());
+            // Store the NEW mapping
+            new_redaction_map.insert(key.clone(), secret.value.clone());
             reverse_redaction_map.insert(secret.value, key.clone());
             key
         };
@@ -142,7 +148,7 @@ pub fn redact_secrets(
         redacted_string.replace_range(secret.start_pos..secret.end_pos, &redaction_key);
     }
 
-    RedactionResult::new(redacted_string, redaction_map)
+    RedactionResult::new(redacted_string, new_redaction_map)
 }
 
 /// Restores secrets in a redacted string using the provided redaction map
@@ -156,44 +162,32 @@ pub fn restore_secrets(redacted_string: &str, redaction_map: &HashMap<String, St
     restored
 }
 
-/// Redacts a specific password value from the content without running secret detection
+/// Redacts a specific password value without running secret detection
+/// Note: Returns only NEW mappings; caller already has the old redaction map and uses `.extend()` to merge
 pub fn redact_password(
-    content: &str,
-    password: &str,
+    password: &Password,
     old_redaction_map: &HashMap<String, String>,
 ) -> RedactionResult {
-    if password.is_empty() {
-        return RedactionResult::new(content.to_string(), HashMap::new());
-    }
-
-    // Skip redaction if content already contains redacted secrets (avoid double redaction)
-    if content.contains("[REDACTED_SECRET:") {
-        return RedactionResult::new(content.to_string(), HashMap::new());
-    }
-
-    let mut redacted_string = content.to_string();
-    let mut redaction_map = old_redaction_map.clone();
+    // Track only NEW mappings to return (not the full old map)
+    let mut new_redaction_map: HashMap<String, String> = HashMap::new();
     let mut reverse_redaction_map: HashMap<String, String> = old_redaction_map
-        .clone()
-        .into_iter()
-        .map(|(k, v)| (v, k))
+        .iter()
+        .map(|(k, v)| (v.clone(), k.clone()))
         .collect();
 
     // Check if we already have a redaction key for this password
-    let redaction_key = if let Some(existing_key) = reverse_redaction_map.get(password) {
-        existing_key.clone()
-    } else {
-        let key = generate_redaction_key("password");
-        // Store the mapping
-        redaction_map.insert(key.clone(), password.to_string());
-        reverse_redaction_map.insert(password.to_string(), key.clone());
-        key
-    };
+    let redaction_key: Cow<str> =
+        if let Some(existing_key) = reverse_redaction_map.get(password.expose_secret()) {
+            Cow::Borrowed(existing_key)
+        } else {
+            let key = generate_redaction_key("password");
+            // Store the NEW mapping
+            new_redaction_map.insert(key.clone(), password.expose_secret().to_string());
+            reverse_redaction_map.insert(password.expose_secret().to_string(), key.clone());
+            Cow::Owned(key)
+        };
 
-    // Replace all occurrences of the password
-    redacted_string = redacted_string.replace(password, &redaction_key);
-
-    RedactionResult::new(redacted_string, redaction_map)
+    RedactionResult::new(redaction_key.into_owned(), new_redaction_map)
 }
 
 /// Generates a random redaction key
@@ -207,9 +201,10 @@ mod tests {
     use regex::Regex;
 
     use crate::secrets::gitleaks::{
-        GITLEAKS_CONFIG, calculate_entropy, contains_any_keyword, create_simple_api_key_regex,
+        calculate_entropy, contains_any_keyword, create_simple_api_key_regex,
         is_allowed_by_rule_allowlist, should_allow_match,
     };
+    use crate::secrets::test_utils::TEST_GITLEAKS_CONFIG;
 
     use super::*;
 
@@ -230,8 +225,20 @@ mod tests {
 
     #[test]
     fn test_empty_input() {
-        let result = redact_secrets("", None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets("", None, &HashMap::new(), &config);
         assert_eq!(result.redacted_string, "");
+        assert!(result.redaction_map.is_empty());
+    }
+
+    #[test]
+    fn test_redaction_map_preserved_with_empty_content() {
+        let existing_map =
+            HashMap::from([("[REDACTED_abc123]".to_string(), "secret123".to_string())]);
+
+        let result = redact_secrets("", None, &existing_map, &*TEST_GITLEAKS_CONFIG);
+        assert_eq!(result.redacted_string, "");
+        // Early return now returns empty map since we only return NEW mappings
         assert!(result.redaction_map.is_empty());
     }
 
@@ -258,9 +265,10 @@ mod tests {
 
     #[test]
     fn test_redact_secrets_with_api_key() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         // Use a pattern that matches the generic-api-key rule
         let input = "export API_KEY=abc123def456ghi789jkl012mno345pqr678";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         // Should detect the API key and redact it
         assert!(!result.redaction_map.is_empty());
@@ -272,8 +280,9 @@ mod tests {
 
     #[test]
     fn test_redact_secrets_with_aws_key() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         let input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         // Should detect the AWS access key
         assert!(!result.redaction_map.is_empty());
@@ -284,33 +293,37 @@ mod tests {
 
     #[test]
     fn test_redaction_identical_secrets() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         let input = r#"
         export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE
         export AWS_ACCESS_KEY_ID_2=AKIAIOSFODNN7EX23PLE
         "#;
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         assert_eq!(result.redaction_map.len(), 1);
     }
 
     #[test]
     fn test_redaction_identical_secrets_different_contexts() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         let input_1 = r#"
         export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EX23PLE
         "#;
         let input_2 = r#"
         export SOME_OTHER_SECRET=AKIAIOSFODNN7EX23PLE
         "#;
-        let result_1 = redact_secrets(input_1, None, &HashMap::new(), false);
-        let result_2 = redact_secrets(input_2, None, &result_1.redaction_map, false);
+        let result_1 = redact_secrets(input_1, None, &HashMap::new(), &config);
+        let result_2 = redact_secrets(input_2, None, &result_1.redaction_map, &config);
 
-        assert_eq!(result_1.redaction_map, result_2.redaction_map);
+        // Second call should return empty map (reuses existing secret mapping)
+        assert_eq!(result_2.redaction_map.len(), 0);
     }
 
     #[test]
     fn test_redact_secrets_with_github_token() {
+        let config = &*TEST_GITLEAKS_CONFIG;
         let input = "GITHUB_TOKEN=ghp_1234567890abcdef1234567890abcdef12345678";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         // Should detect the GitHub PAT
         assert!(!result.redaction_map.is_empty());
@@ -322,16 +335,28 @@ mod tests {
     #[test]
     fn test_no_secrets() {
         let input = "This is just a normal string with no secrets";
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         // Should not detect any secrets
         assert_eq!(result.redaction_map.len(), 0);
+        assert_eq!(result.redacted_string, input);
+
+        // Test that existing redaction_map is preserved when no secrets in content
+        let existing_map = HashMap::from([(
+            "[REDACTED_SECRET:api:abc]".to_string(),
+            "api_key_value".to_string(),
+        )]);
+        let result = redact_secrets(input, None, &existing_map, &*TEST_GITLEAKS_CONFIG);
+
+        // Early return now returns empty map since we only return NEW mappings
+        assert!(result.redaction_map.is_empty());
         assert_eq!(result.redacted_string, input);
     }
 
     #[test]
     fn test_debug_generic_api_key() {
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
 
         // Find the generic-api-key rule
         let generic_rule = config.rules.iter().find(|r| r.id == "generic-api-key");
@@ -381,7 +406,8 @@ mod tests {
 
             for input in test_inputs {
                 println!("\nTesting input: {}", input);
-                let result = redact_secrets(input, None, &HashMap::new(), false);
+                let config = &*TEST_GITLEAKS_CONFIG;
+                let result = redact_secrets(input, None, &HashMap::new(), &config);
                 println!("  Detected secrets: {}", result.redaction_map.len());
                 if !result.redaction_map.is_empty() {
                     println!("  Redacted: {}", result.redacted_string);
@@ -398,7 +424,7 @@ mod tests {
         let input = "key=abcdefghijklmnop";
         println!("Testing simple input: {}", input);
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -437,7 +463,8 @@ mod tests {
         }
 
         // Also test the full redact_secrets function
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
         println!(
             "Full function result: {} secrets detected",
             result.redaction_map.len()
@@ -446,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_regex_breakdown() {
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -531,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_working_api_key_patterns() {
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -589,7 +616,8 @@ mod tests {
             }
 
             // Test the full redact_secrets function
-            let result = redact_secrets(input, None, &HashMap::new(), false);
+            let config = &*TEST_GITLEAKS_CONFIG;
+            let result = redact_secrets(input, None, &HashMap::new(), &config);
             println!(
                 "  Full function detected: {} secrets",
                 result.redaction_map.len()
@@ -645,7 +673,7 @@ mod tests {
         }
 
         // Test if there's an issue with the actual gitleaks regex compilation
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -688,7 +716,8 @@ export PORT=3000
 
         println!("Original input:\n{}", input);
 
-        let result = redact_secrets(input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(input, None, &HashMap::new(), &config);
 
         println!("Redacted output:\n{}", result.redacted_string);
         println!("\nDetected {} secrets:", result.redaction_map.len());
@@ -719,7 +748,7 @@ export PORT=3000
 
     // Helper function for keyword validation tests
     fn count_rules_that_would_process(input: &str) -> Vec<String> {
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let mut rules = Vec::new();
 
         for rule in &config.rules {
@@ -735,7 +764,7 @@ export PORT=3000
     fn test_keyword_filtering() {
         println!("=== TESTING KEYWORD FILTERING ===");
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
 
         // Find a rule that has keywords (like generic-api-key)
         let generic_rule = config
@@ -747,7 +776,8 @@ export PORT=3000
 
         // Test 1: Input with keywords should be processed
         let input_with_keywords = "export API_KEY=abc123def456ghi789jklmnop";
-        let result1 = redact_secrets(input_with_keywords, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result1 = redact_secrets(input_with_keywords, None, &HashMap::new(), &config);
         println!("\nTest 1 - Input WITH keywords:");
         println!("  Input: {}", input_with_keywords);
         println!(
@@ -758,7 +788,7 @@ export PORT=3000
 
         // Test 2: Input without any keywords should NOT be processed for that rule
         let input_without_keywords = "export DATABASE_URL=postgresql://user:pass@localhost/db";
-        let result2 = redact_secrets(input_without_keywords, None, &HashMap::new(), false);
+        let result2 = redact_secrets(input_without_keywords, None, &HashMap::new(), &config);
         println!("\nTest 2 - Input WITHOUT generic-api-key keywords:");
         println!("  Input: {}", input_without_keywords);
         println!(
@@ -774,7 +804,7 @@ export PORT=3000
             .find(|r| r.id == "aws-access-token")
             .unwrap();
         let aws_input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
-        let result3 = redact_secrets(aws_input, None, &HashMap::new(), false);
+        let result3 = redact_secrets(aws_input, None, &HashMap::new(), &config);
         println!("\nTest 3 - AWS input:");
         println!("  Input: {}", aws_input);
         println!("  AWS rule keywords: {:?}", aws_rule.keywords);
@@ -803,7 +833,7 @@ export PORT=3000
     fn test_keyword_optimization_performance() {
         println!("=== TESTING KEYWORD OPTIMIZATION PERFORMANCE ===");
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
 
         // Test case 1: Input with NO keywords for any rule should be very fast
         let no_keywords_input = "export DATABASE_CONNECTION=some_long_connection_string_that_has_no_common_secret_keywords";
@@ -823,7 +853,8 @@ export PORT=3000
             config.rules.len()
         );
 
-        let result = redact_secrets(no_keywords_input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(no_keywords_input, None, &HashMap::new(), &config);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 2: Input with specific keywords should only process relevant rules
@@ -839,7 +870,7 @@ export PORT=3000
         }
         println!("  Rules that would be processed: {:?}", matching_rules);
 
-        let result = redact_secrets(specific_keywords_input, None, &HashMap::new(), false);
+        let result = redact_secrets(specific_keywords_input, None, &HashMap::new(), &config);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Test case 3: Verify that rules without keywords are always processed
@@ -878,7 +909,7 @@ export PORT=3000
     fn test_keyword_filtering_efficiency() {
         println!("=== KEYWORD FILTERING EFFICIENCY TEST ===");
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         println!("Total rules in config: {}", config.rules.len());
 
         // Test with input that has NO matching keywords
@@ -907,7 +938,8 @@ export PORT=3000
         );
 
         // Verify no secrets are detected
-        let result = redact_secrets(non_secret_input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(non_secret_input, None, &HashMap::new(), &config);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Now test with input that has relevant keywords
@@ -925,7 +957,8 @@ export PORT=3000
 
         println!("  Rules that match keywords: {}", rules_with_keywords);
 
-        let result = redact_secrets(secret_input, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(secret_input, None, &HashMap::new(), &config);
         println!("  Secrets detected: {}", result.redaction_map.len());
 
         // Assertions
@@ -947,7 +980,7 @@ export PORT=3000
     fn test_keyword_validation_summary() {
         println!("=== KEYWORD VALIDATION SUMMARY ===");
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let total_rules = config.rules.len();
         println!("Total rules in gitleaks config: {}", total_rules);
 
@@ -964,7 +997,8 @@ export PORT=3000
         );
         println!("  Rules: {:?}", no_keyword_rules);
 
-        let no_keyword_secrets = detect_secrets(no_keyword_input, None, false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let no_keyword_secrets = detect_secrets(no_keyword_input, None, &config);
         println!(
             "Secrets detected: {} (expected: 0)",
             no_keyword_secrets.len()
@@ -985,7 +1019,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", api_rules);
 
-        let api_secrets = detect_secrets(api_input, None, false);
+        let api_secrets = detect_secrets(api_input, None, &config);
         println!("Secrets detected: {} (expected: 1)", api_secrets.len());
         assert!(!api_secrets.is_empty(), "Should detect at least 1 secrets");
         println!("✅ Test passed");
@@ -1004,7 +1038,7 @@ export PORT=3000
         );
         println!("  Rules: {:?}", aws_rules);
 
-        let aws_secrets = detect_secrets(aws_input, None, false);
+        let aws_secrets = detect_secrets(aws_input, None, &config);
         println!("Secrets detected: {} (expected: 1)", aws_secrets.len());
 
         // Should detect AWS key
@@ -1055,7 +1089,7 @@ export PORT=3000
                         }
 
                         // Test allowlist checking
-                        let config = &*GITLEAKS_CONFIG;
+                        let config = &*TEST_GITLEAKS_CONFIG;
                         let generic_rule = config
                             .rules
                             .iter()
@@ -1083,7 +1117,8 @@ export PORT=3000
             }
 
             // Test full detection
-            let result = redact_secrets(input, None, &HashMap::new(), false);
+            let config = &*TEST_GITLEAKS_CONFIG;
+            let result = redact_secrets(input, None, &HashMap::new(), &config);
             println!(
                 "  Full detection result: {} secrets",
                 result.redaction_map.len()
@@ -1100,7 +1135,7 @@ export PORT=3000
             "PASSWORD=supersecretpassword123456",
         ];
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -1186,7 +1221,7 @@ export PORT=3000
             "API_KEY=example_key",  // Should be filtered
         ];
 
-        let config = &*GITLEAKS_CONFIG;
+        let config = &*TEST_GITLEAKS_CONFIG;
         let generic_rule = config
             .rules
             .iter()
@@ -1253,75 +1288,37 @@ export PORT=3000
 
     #[test]
     fn test_redact_password_basic() {
-        let content = "User password is supersecret123 and should be hidden";
-        let password = "supersecret123";
-        let result = redact_password(content, password, &HashMap::new());
+        let password = Password::new("supersecret123").unwrap();
+        let result = redact_password(&password, &HashMap::new());
 
-        // Should redact the password
-        assert!(!result.redacted_string.contains(password));
+        // Should return a redaction key
         assert!(
             result
                 .redacted_string
-                .contains("[REDACTED_SECRET:password:")
+                .starts_with("[REDACTED_SECRET:password:")
         );
         assert_eq!(result.redaction_map.len(), 1);
 
         // The redaction map should contain our password
         let redacted_password = result.redaction_map.values().next().unwrap();
-        assert_eq!(redacted_password, password);
-    }
-
-    #[test]
-    fn test_redact_password_empty() {
-        let content = "Some content without password";
-        let password = "";
-        let result = redact_password(content, password, &HashMap::new());
-
-        // Should not change anything
-        assert_eq!(result.redacted_string, content);
-        assert!(result.redaction_map.is_empty());
-    }
-
-    #[test]
-    fn test_redact_password_multiple_occurrences() {
-        let content = "Password is mypass123 and again mypass123 appears here";
-        let password = "mypass123";
-        let result = redact_password(content, password, &HashMap::new());
-
-        // Should redact both occurrences with the same key
-        assert!(!result.redacted_string.contains(password));
-        assert_eq!(result.redaction_map.len(), 1);
-
-        // Count redaction keys in the result
-        let redaction_key = result.redaction_map.keys().next().unwrap();
-        let count = result.redacted_string.matches(redaction_key).count();
-        assert_eq!(count, 2);
+        assert_eq!(redacted_password, "supersecret123");
     }
 
     #[test]
     fn test_redact_password_reuse_existing_key() {
-        // Start with an existing redaction map
-        let mut existing_map = HashMap::new();
-        existing_map.insert(
-            "[REDACTED_SECRET:password:abc123]".to_string(),
+        let existing_map = HashMap::from([(
+            "[REDACTED_SECRET:password:abc123456]".to_string(),
             "mypassword".to_string(),
-        );
+        )]);
 
-        let content = "The password mypassword should use existing key";
-        let password = "mypassword";
-        let result = redact_password(content, password, &existing_map);
+        let password = Password::new("mypassword").unwrap();
+        let result = redact_password(&password, &existing_map);
 
-        // Should reuse the existing key
-        assert_eq!(result.redaction_map.len(), 1);
-        assert!(
-            result
-                .redaction_map
-                .contains_key("[REDACTED_SECRET:password:abc123]")
-        );
-        assert!(
-            result
-                .redacted_string
-                .contains("[REDACTED_SECRET:password:abc123]")
+        // Should reuse the existing key, so no NEW mappings returned
+        assert_eq!(result.redaction_map.len(), 0);
+        assert_eq!(
+            result.redacted_string,
+            "[REDACTED_SECRET:password:abc123456]"
         );
     }
 
@@ -1334,64 +1331,36 @@ export PORT=3000
             "some_api_key".to_string(),
         );
 
-        let content = "API key is some_api_key and password is newpassword123";
-        let password = "newpassword123";
-        let result = redact_password(content, password, &existing_map);
+        let password = Password::new("newpassword123").unwrap();
+        let result = redact_password(&password, &existing_map);
 
-        // Should preserve existing mapping and add new one
-        assert_eq!(result.redaction_map.len(), 2);
+        // Should return only the NEW password mapping, not the existing api-key
+        assert_eq!(result.redaction_map.len(), 1);
         assert!(
-            result
+            !result
                 .redaction_map
                 .contains_key("[REDACTED_SECRET:api-key:xyz789]")
         );
-        assert!(
-            result
-                .redaction_map
-                .get("[REDACTED_SECRET:api-key:xyz789]")
-                .unwrap()
-                == "some_api_key"
-        );
-
-        // Should add new password mapping
-        let new_keys: Vec<_> = result
-            .redaction_map
-            .keys()
-            .filter(|k| k.contains("password"))
-            .collect();
-        assert_eq!(new_keys.len(), 1);
-        let password_key = new_keys[0];
-        assert_eq!(
-            result.redaction_map.get(password_key).unwrap(),
-            "newpassword123"
-        );
-    }
-
-    #[test]
-    fn test_redact_password_no_match() {
-        let content = "This content has no matching password";
-        let password = "notfound";
-        let result = redact_password(content, password, &HashMap::new());
-
-        // Should still create a redaction key but content unchanged
-        assert_eq!(result.redacted_string, content);
-        assert_eq!(result.redaction_map.len(), 1);
-        assert_eq!(result.redaction_map.values().next().unwrap(), "notfound");
+        // The new password mapping should be present
+        assert!(result.redaction_map.values().any(|v| v == "newpassword123"));
     }
 
     #[test]
     fn test_redact_password_integration_with_restore() {
-        let content = "Login with username admin and password secret456";
-        let password = "secret456";
-        let result = redact_password(content, password, &HashMap::new());
+        let password = Password::new("secret456").unwrap();
+        let result = redact_password(&password, &HashMap::new());
 
         // Redact the password
-        assert!(!result.redacted_string.contains(password));
-        assert!(result.redacted_string.contains("username admin"));
+        assert!(
+            result
+                .redacted_string
+                .starts_with("[REDACTED_SECRET:password:")
+        );
+        assert!(!result.redacted_string.contains("secret456"));
 
         // Restore should bring back the original
         let restored = restore_secrets(&result.redacted_string, &result.redaction_map);
-        assert_eq!(restored, content);
+        assert_eq!(restored, "secret456");
     }
 
     #[test]
@@ -1400,7 +1369,8 @@ export PORT=3000
         let content = "The secret value is mysecretvalue123 and another is anothersecret456";
 
         // First, test with empty map to prove the secret wouldn't normally be redacted
-        let result_empty = redact_secrets(content, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result_empty = redact_secrets(content, None, &HashMap::new(), &config);
 
         // Verify that mysecretvalue123 is NOT redacted when using empty map
         assert!(result_empty.redacted_string.contains("mysecretvalue123"));
@@ -1411,7 +1381,7 @@ export PORT=3000
             "mysecretvalue123".to_string(),
         );
 
-        let result = redact_secrets(content, None, &existing_redaction_map, false);
+        let result = redact_secrets(content, None, &existing_redaction_map, &config);
 
         // The secret from the existing map should be redacted
         assert!(
@@ -1421,26 +1391,16 @@ export PORT=3000
         );
         assert!(!result.redacted_string.contains("mysecretvalue123"));
 
-        // The redaction map should contain the existing mapping
-        assert!(
-            result
-                .redaction_map
-                .contains_key("[REDACTED_SECRET:manual:abc123]")
-        );
-        assert_eq!(
-            result
-                .redaction_map
-                .get("[REDACTED_SECRET:manual:abc123]")
-                .unwrap(),
-            "mysecretvalue123"
-        );
+        // The redaction map should be EMPTY (reusing existing mapping, no new secrets)
+        assert_eq!(result.redaction_map.len(), 0);
     }
 
     #[test]
     fn test_redact_secrets_skip_already_redacted() {
         // Content that already contains redacted secrets should not be double-redacted
         let content = "The password is [REDACTED_SECRET:password:abc123] and API key is [REDACTED_SECRET:api-key:xyz789]";
-        let result = redact_secrets(content, None, &HashMap::new(), false);
+        let config = &*TEST_GITLEAKS_CONFIG;
+        let result = redact_secrets(content, None, &HashMap::new(), config);
 
         // Should return content unchanged
         assert_eq!(result.redacted_string, content);
@@ -1449,25 +1409,29 @@ export PORT=3000
     }
 
     #[test]
-    fn test_redact_password_skip_already_redacted() {
-        // Content that already contains redacted secrets should not be double-redacted
-        let content = "[REDACTED_SECRET:password:existing123]";
-        let password = "newpassword";
-        let result = redact_password(content, password, &HashMap::new());
+    fn test_redact_password_idempotency() {
+        let password = Password::new("newpassword".to_string()).unwrap();
 
-        // Should return content unchanged
-        assert_eq!(result.redacted_string, content);
-        // Should not add any new redactions
-        assert!(result.redaction_map.is_empty());
+        // First redaction
+        let first_result = redact_password(&password, &HashMap::new());
+        assert!(
+            first_result
+                .redacted_string
+                .starts_with("[REDACTED_SECRET:password:")
+        );
+
+        // Second redaction with the same password should reuse the key
+        let second_result = redact_password(&password, &first_result.redaction_map);
+        assert_eq!(second_result.redacted_string, first_result.redacted_string);
     }
 
     #[test]
     fn test_redact_secrets_skip_nested_redaction() {
         // Simulate what happens when local_tools redacts and proxy tries to redact again
-        let original_password = "MySecureP@ssw0rd!";
+        let original_password = Password::new("MySecureP@ssw0rd!".to_string()).unwrap();
 
         // First redaction (simulating local_tools)
-        let first_result = redact_password(original_password, original_password, &HashMap::new());
+        let first_result = redact_password(&original_password, &HashMap::new());
         assert!(
             first_result
                 .redacted_string
@@ -1475,11 +1439,26 @@ export PORT=3000
         );
 
         // Second redaction attempt (simulating proxy) - should be skipped
+        let config = &*TEST_GITLEAKS_CONFIG;
         let second_result =
-            redact_secrets(&first_result.redacted_string, None, &HashMap::new(), false);
+            redact_secrets(&first_result.redacted_string, None, &HashMap::new(), config);
 
         // Should return the already-redacted content unchanged
         assert_eq!(second_result.redacted_string, first_result.redacted_string);
         assert!(second_result.redaction_map.is_empty());
+    }
+
+    #[test]
+    fn test_redact_secrets_preserves_map_on_early_return() {
+        let mut old_map = HashMap::new();
+        old_map.insert("key".to_string(), "value".to_string());
+
+        // Input containing REDACTED_SECRET should trigger early return
+        let content = "Some content with [REDACTED_SECRET:test:123]";
+        let result = redact_secrets(content, None, &old_map, &*TEST_GITLEAKS_CONFIG);
+
+        assert_eq!(result.redacted_string, content);
+        // Early return now returns empty map since we only return NEW mappings
+        assert!(result.redaction_map.is_empty());
     }
 }

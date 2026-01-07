@@ -22,8 +22,9 @@ use ratatui::layout::Size;
 use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
 use stakpak_shared::models::integrations::openai::{AgentModel, ToolCall, ToolCallResult};
-use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::secret_manager::{SecretManagerHandle, launch_secret_manager};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -168,7 +169,7 @@ pub struct AppState {
     pub context_usage_percent: u64,
 
     // ========== Configuration State ==========
-    pub secret_manager: SecretManager,
+    pub secret_manager: Arc<SecretManagerHandle>,
     pub latest_version: Option<String>,
     pub is_git_repo: bool,
     pub auto_approve_manager: AutoApproveManager,
@@ -303,7 +304,7 @@ impl AppState {
             pending_path_start: None,
             dialog_message_id: None,
             file_search: FileSearch::default(),
-            secret_manager: SecretManager::new(redact_secrets, privacy_mode),
+            secret_manager: launch_secret_manager(redact_secrets, privacy_mode, None),
             latest_version: latest_version.clone(),
             ctrl_c_pressed_once: false,
             ctrl_c_timer: None,

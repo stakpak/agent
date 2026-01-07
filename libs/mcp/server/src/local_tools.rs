@@ -4,6 +4,7 @@ use rmcp::{ErrorData as McpError, handler::server::wrapper::Parameters, model::*
 use rmcp::{RoleServer, tool_router};
 use serde::Deserialize;
 use stakpak_shared::file_backup_manager::FileBackupManager;
+use stakpak_shared::models::password::Password;
 use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
@@ -42,7 +43,7 @@ pub struct RunCommandRequest {
     )]
     pub remote: Option<String>,
     #[schemars(description = "Optional password for remote connection")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(description = "Optional path to private key for remote connection")]
     pub private_key_path: Option<String>,
 }
@@ -90,7 +91,7 @@ pub struct ViewRequest {
     )]
     pub view_range: Option<[i32; 2]>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -118,7 +119,7 @@ pub struct StrReplaceRequest {
     )]
     pub replace_all: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -136,7 +137,7 @@ pub struct CreateRequest {
     )]
     pub file_text: String,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -145,10 +146,13 @@ pub struct CreateRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GeneratePasswordRequest {
-    #[schemars(description = "The length of the password to generate")]
+    #[schemars(
+        description = "The length of the password to generate (minimum: 8 characters, default: 15)",
+        range(min = 8)
+    )]
     pub length: Option<usize>,
-    #[schemars(description = "Whether to disallow symbols in the password (default: false)")]
-    pub no_symbols: Option<bool>,
+    #[schemars(description = "Whether to include symbols in the password (default: true)")]
+    pub include_symbols: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -162,7 +166,7 @@ pub struct RemoveRequest {
     )]
     pub recursive: Option<bool>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
-    pub password: Option<String>,
+    pub password: Option<Password>,
     #[schemars(
         description = "Optional path to private key for remote connection (if path is remote)"
     )]
@@ -289,11 +293,6 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             private_key_path,
         }): Parameters<RunCommandRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Restore secrets in the command before execution
-        let actual_command = self
-            .get_secret_manager()
-            .restore_secrets_in_string(&command);
-
         let timeout_duration = timeout.map(std::time::Duration::from_secs);
 
         // Handle both local and remote async commands using TaskManager
@@ -306,12 +305,12 @@ Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to 
             };
 
             self.get_task_manager()
-                .start_task(actual_command, timeout_duration, Some(remote_connection))
+                .start_task(command, timeout_duration, Some(remote_connection))
                 .await
         } else {
             // Local async command (existing logic)
             self.get_task_manager()
-                .start_task(actual_command, timeout_duration, None)
+                .start_task(command, timeout_duration, None)
                 .await
         };
 
@@ -382,12 +381,6 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         "N/A".to_string()
                     };
 
-                    let output_str = if let Some(ref out) = task.output {
-                        out.clone()
-                    } else {
-                        "No output yet".to_string()
-                    };
-
                     let escaped_command = task
                         .command
                         .chars()
@@ -395,7 +388,10 @@ Use the full Task ID from this output with cancel_task to cancel specific tasks.
                         .collect::<String>()
                         .replace('|', "\\|")
                         .replace('\n', " ");
-                    let escaped_output = output_str
+                    let escaped_output = task
+                        .output
+                        .as_deref()
+                        .unwrap_or("No output yet")
                         .chars()
                         .take(100)
                         .collect::<String>()
@@ -548,7 +544,7 @@ Use this tool to check the progress and results of long-running background tasks
                     "N/A".to_string()
                 };
 
-                let output_str = if let Some(ref output) = task_info.output {
+                let task_output = if let Some(ref output) = task_info.output {
                     match handle_large_output(output, "task.output", 300, false) {
                         Ok(result) => result,
                         Err(e) => {
@@ -570,7 +566,7 @@ Use this tool to check the progress and results of long-running background tasks
                     task_info.start_time.format("%Y-%m-%d %H:%M:%S UTC"),
                     duration_str,
                     task_info.command,
-                    output_str
+                    task_output
                 );
 
                 Ok(CallToolResult::success(vec![Content::text(output)]))
@@ -701,7 +697,6 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
         } else {
             // Handle local file replacement
             self.str_replace_local(&path, &old_str, &new_str, replace_all)
-                .await
         }
     }
 
@@ -755,13 +750,13 @@ SECRET HANDLING:
         description = "Generate a cryptographically secure password with the specified constraints. The generated password will be automatically redacted in the response for security.
 
 PARAMETERS:
-- length: The length of the password to generate (default: 15 characters)
-- no_symbols: Whether to exclude symbols from the password (default: false, includes symbols)
+- length: The length of the password to generate (minimum: 8 characters, default: 15)
+- include_symbols: Whether to include symbols in the password (default: true)
 
 CHARACTER SETS:
 - Letters: A-Z, a-z (always included)
-- Numbers: 0-9 (always included)
-- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless no_symbols=true)
+- Numbers: 0-9 (always included)  
+- Symbols: !@#$%^&*()_+-=[]{}|;:,.<>? (included unless include_symbols=false)
 
 SECURITY FEATURES:
 - Uses cryptographically secure random number generation
@@ -771,18 +766,22 @@ SECURITY FEATURES:
     )]
     pub async fn generate_password(
         &self,
-        Parameters(GeneratePasswordRequest { length, no_symbols }): Parameters<
-            GeneratePasswordRequest,
-        >,
+        Parameters(GeneratePasswordRequest {
+            length,
+            include_symbols,
+        }): Parameters<GeneratePasswordRequest>,
     ) -> Result<CallToolResult, McpError> {
         let length = length.unwrap_or(15);
-        let no_symbols = no_symbols.unwrap_or(false);
+        let include_symbols = include_symbols.unwrap_or(true);
 
-        let password = stakpak_shared::utils::generate_password(length, no_symbols);
-
+        // Delegate generation and redaction to the SecretManager actor
         let redacted_password = self
             .get_secret_manager()
-            .redact_and_store_password(&password, &password);
+            .generate_password(length, include_symbols)
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to generate password: {}", e), None)
+            })?;
 
         Ok(CallToolResult::success(vec![Content::text(
             &redacted_password,
@@ -955,7 +954,7 @@ SAFETY NOTES:
     async fn get_remote_connection(
         &self,
         path: &str,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
     ) -> Result<(Arc<RemoteConnection>, String), CallToolResult> {
         let path_location = PathLocation::parse(path).map_err(|e| {
@@ -1012,12 +1011,10 @@ SAFETY NOTES:
         command: &str,
         timeout: Option<u64>,
         remote: Option<String>,
-        password: Option<String>,
+        password: Option<Password>,
         private_key_path: Option<String>,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
-        let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
-
         if let Some(remote_str) = &remote {
             // Remote execution
             let connection_info = RemoteConnectionInfo {
@@ -1040,7 +1037,7 @@ SAFETY NOTES:
 
             let timeout_duration = timeout.map(std::time::Duration::from_secs);
             let (output, exit_code) = connection
-                .execute_command(&actual_command, timeout_duration, Some(ctx))
+                .execute_command(command, timeout_duration, Some(ctx))
                 .await
                 .map_err(|e| {
                     error!("Failed to execute remote command: {}", e);
@@ -1061,8 +1058,7 @@ SAFETY NOTES:
             })
         } else {
             // Local execution - existing logic
-            self.execute_local_command(&actual_command, timeout, ctx)
-                .await
+            self.execute_local_command(command, timeout, ctx).await
         }
     }
 
@@ -1514,10 +1510,7 @@ SAFETY NOTES:
         new_str: &str,
         replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
-        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
-
-        if actual_old_str == actual_new_str {
+        if old_str == new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
                 Content::text(
@@ -1537,7 +1530,7 @@ SAFETY NOTES:
             }
         };
 
-        if !content.contains(&actual_old_str) {
+        if !content.contains(old_str) {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
@@ -1545,14 +1538,14 @@ SAFETY NOTES:
         }
 
         let new_content = if replace_all.unwrap_or(false) {
-            content.replace(&actual_old_str, &actual_new_str)
+            content.replace(old_str, new_str)
         } else {
-            content.replacen(&actual_old_str, &actual_new_str, 1)
+            content.replacen(old_str, new_str, 1)
         };
 
         let replaced_count = if replace_all.unwrap_or(false) {
-            content.matches(&actual_old_str).count()
-        } else if content.contains(&actual_old_str) {
+            content.matches(old_str).count()
+        } else if content.contains(old_str) {
             1
         } else {
             0
@@ -1574,21 +1567,18 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
-        Ok(CallToolResult::success(vec![Content::text(&output)]))
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     /// Replace a specific string in a local file
-    async fn str_replace_local(
+    fn str_replace_local(
         &self,
         path: &str,
         old_str: &str,
         new_str: &str,
         replace_all: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
-        let actual_old_str = self.get_secret_manager().restore_secrets_in_string(old_str);
-        let actual_new_str = self.get_secret_manager().restore_secrets_in_string(new_str);
-
-        if actual_old_str == actual_new_str {
+        if old_str == new_str {
             return Ok(CallToolResult::error(vec![
                 Content::text("OLD_STR_NEW_STR_IDENTICAL"),
                 Content::text(
@@ -1608,7 +1598,7 @@ SAFETY NOTES:
             }
         };
 
-        if !original_content.contains(&actual_old_str) {
+        if !original_content.contains(old_str) {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
@@ -1616,14 +1606,14 @@ SAFETY NOTES:
         }
 
         let new_content = if replace_all.unwrap_or(false) {
-            original_content.replace(&actual_old_str, &actual_new_str)
+            original_content.replace(old_str, new_str)
         } else {
-            original_content.replacen(&actual_old_str, &actual_new_str, 1)
+            original_content.replacen(old_str, new_str, 1)
         };
 
         let replaced_count = if replace_all.unwrap_or(false) {
-            original_content.matches(&actual_old_str).count()
-        } else if original_content.contains(&actual_old_str) {
+            original_content.matches(old_str).count()
+        } else if original_content.contains(old_str) {
             1
         } else {
             0
@@ -1644,7 +1634,7 @@ SAFETY NOTES:
             replaced_count, unified_diff
         );
 
-        Ok(CallToolResult::success(vec![Content::text(&output)]))
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     /// Create a remote file with the specified content
@@ -1683,16 +1673,8 @@ SAFETY NOTES:
             }
         }
 
-        // Restore secrets in the file content before writing
-        let actual_file_text = self
-            .get_secret_manager()
-            .restore_secrets_in_string(file_text);
-
         // Create the file using the correct SFTP method
-        if let Err(e) = conn
-            .create_file(remote_path, actual_file_text.as_bytes())
-            .await
-        {
+        if let Err(e) = conn.create_file(remote_path, file_text.as_bytes()).await {
             error!("Failed to create remote file '{}': {}", remote_path, e);
             return Ok(CallToolResult::error(vec![
                 Content::text("CREATE_ERROR"),
@@ -1703,7 +1685,7 @@ SAFETY NOTES:
             ]));
         }
 
-        let lines = actual_file_text.lines().count();
+        let lines = file_text.lines().count();
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Successfully created remote file {} with {} lines",
             original_path, lines
@@ -1732,16 +1714,9 @@ SAFETY NOTES:
             ]));
         }
 
-        // Restore secrets in the file content before writing
-        let actual_file_text = self
-            .get_secret_manager()
-            .restore_secrets_in_string(file_text);
-
-        match fs::write(path, actual_file_text) {
+        match fs::write(path, file_text) {
             Ok(_) => {
-                let lines = fs::read_to_string(path)
-                    .map(|content| content.lines().count())
-                    .unwrap_or(0);
+                let lines = file_text.lines().count();
                 Ok(CallToolResult::success(vec![Content::text(format!(
                     "Successfully created file {} with {} lines",
                     path, lines

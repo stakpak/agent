@@ -16,10 +16,13 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 toml = { workspace = true }
 rand = { workspace = true }
+schemars = { workspace = true }
+secrecy = { version = "0.10.3", features = ["serde"] }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
 notify = { workspace = true }
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 rcgen = { workspace = true }
 time = { workspace = true }
 regex = { workspace = true }
@@ -51,3 +54,12 @@ tower = "0.4"
 hyper = "1.0"
 tokio-test = "0.4"
 axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+divan = "0.1"
+
+[[bench]]
+name = "actor_model_memory"
+harness = false
+
+[[bench]]
+name = "gitleaks_memory"
+harness = false

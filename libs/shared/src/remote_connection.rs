@@ -1,9 +1,10 @@
+use crate::models::password::Password;
 use crate::utils::{DirectoryEntry, FileSystemProvider};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use russh::client::{self, Handler};
 use russh_sftp::client::SftpSession;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
@@ -30,10 +31,10 @@ pub struct CommandOptions {
     pub simple: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RemoteConnectionInfo {
     pub connection_string: String, // format: user@host:port
-    pub password: Option<String>,
+    pub password: Option<Password>,
     pub private_key_path: Option<String>,
 }
 
@@ -123,7 +124,7 @@ impl RemoteConnection {
         if let Some(password) = &connection_info.password {
             debug!("Authenticating with password");
             let auth_result = session
-                .authenticate_password(username, password)
+                .authenticate_password(username, password.expose_secret())
                 .await
                 .map_err(|e| Self::map_ssh_error(e, "password authentication"))?;
             Self::map_auth_error(auth_result, "Password")?;

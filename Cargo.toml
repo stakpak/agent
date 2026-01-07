@@ -9,12 +9,13 @@ members = [
     "libs/mcp/client",
     "libs/mcp/server",
     "libs/mcp/proxy",
+    "examples/mcp-clients/rust-client"
 ]
 default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.11"
+version = "0.3.12-beta.1"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -23,14 +24,14 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.11" }
-stakpak-api = { path = "libs/api", version = "0.3.11" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.11" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.11" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.11" }
-stakpak-tui = { path = "tui", version = "0.3.11" }
-stakpak-shared = { path = "libs/shared", version = "0.3.11" }
-popup-widget = { package = "stakpak-popup-widget", path = "libs/popup-widget", version = "0.3.11" }
+stakai = { path = "libs/ai", version = "0.3.12-beta.1" }
+stakpak-api = { path = "libs/api", version = "0.3.12-beta.1" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.12-beta.1" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.12-beta.1" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.12-beta.1" }
+stakpak-tui = { path = "tui", version = "0.3.12-beta.1" }
+stakpak-shared = { path = "libs/shared", version = "0.3.12-beta.1" }
+popup-widget = { package = "stakpak-popup-widget", path = "libs/popup-widget", version = "0.3.12-beta.1" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
@@ -56,7 +57,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 regex = "1.11.1"
 chrono = { version = "0.4.38", features = ["serde"] }
-reqwest = { version = "=0.12.15", features = [
+reqwest = { version = "0.12.26", features = [
     "json",
     "stream",
     "rustls-tls",
@@ -82,7 +83,7 @@ rustls-platform-verifier = "0.5"
 crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
-schemars = { version = "1.1.0", features = ["chrono"] }
+schemars = { version = "1.1.0", features = ["chrono04"] }
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
