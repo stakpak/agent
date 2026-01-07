@@ -28,5 +28,6 @@ pub mod shortcuts_popup;
 pub mod side_panel;
 pub mod syntax_highlighter;
 pub mod textarea;
+pub mod todo_extractor;
 pub mod update;
 pub mod wrapping;

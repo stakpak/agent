@@ -49,7 +49,7 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
         Shortcut::new("Backspace", "Delete previous character", "Text Input"),
         // Tool Management
         Shortcut::new("Ctrl+O", "Toggle auto-approve mode", "Tool Management"),
-        Shortcut::new("Ctrl+Y", "Auto-approve current tool", "Tool Management"),
+        Shortcut::new("Ctrl+Y", "Toggle side panel", "Tool Management"),
         Shortcut::new("Ctrl+R", "Retry last tool call", "Tool Management"),
         // UI Controls
         Shortcut::new("Ctrl+C", "Quit (double press)", "UI Controls"),

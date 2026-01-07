@@ -25,6 +25,12 @@ pub fn handle_stream_message(
         }
         if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
+
+            // Extract todos from the accumulated message content
+            let extracted_todos = crate::services::todo_extractor::extract_todos(text);
+            if !extracted_todos.is_empty() {
+                state.todos = extracted_todos;
+            }
         }
         invalidate_message_lines_cache(state);
 

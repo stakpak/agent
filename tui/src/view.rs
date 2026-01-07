@@ -21,8 +21,8 @@ use ratatui::{
 pub fn view(f: &mut Frame, state: &mut AppState) {
     // First, handle the horizontal split for the side panel
     let (main_area, side_panel_area) = if state.show_side_panel {
-        // Fixed width of 35 characters for side panel
-        let panel_width = 37u16;
+        // Fixed width of 32 characters for side panel
+        let panel_width = 32u16;
         let horizontal_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(1), Constraint::Length(panel_width)])
@@ -509,7 +509,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
     if !state.show_sessions_dialog {
         if !state.show_side_panel {
             // No tokens and side panel is closed, show hint to open side panel
-            let hint_text = "Ctrl+y side panel";
+            let hint_text = "ctrl+y side panel";
             let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
             let total_adjusted_width = if state.loading {
                 total_width + 4

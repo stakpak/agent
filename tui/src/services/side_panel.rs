@@ -18,7 +18,7 @@ use ratatui::{
 use stakpak_shared::models::model_pricing::ContextAware;
 
 /// Left padding for content inside the side panel
-const LEFT_PADDING: &str = " ";
+const LEFT_PADDING: &str = "  ";
 
 /// Render the complete side panel
 pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -42,11 +42,15 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Calculate section heights
-    let context_height = 4; // Fixed height for context (header, tokens, model)
     let collapsed_height = 1; // Height when collapsed (just header)
     let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
 
     // All sections are expanded by default (no collapsing)
+    let context_collapsed = state
+        .side_panel_section_collapsed
+        .get(&SidePanelSection::Context)
+        .copied()
+        .unwrap_or(false);
     let billing_collapsed = state
         .side_panel_section_collapsed
         .get(&SidePanelSection::Billing)
@@ -63,6 +67,12 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .copied()
         .unwrap_or(false);
 
+    let context_height = if context_collapsed {
+        collapsed_height
+    } else {
+        4 // Header + Tokens + Model
+    };
+
     // Billing section is hidden when billing_info is None (local mode)
     let billing_height = if state.billing_info.is_none() {
         0
@@ -74,8 +84,11 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let todos_height = if todos_collapsed {
         collapsed_height
+    } else if state.todos.is_empty() {
+        3 // Header + "No tasks" + blank line
     } else {
-        (state.todos.len().max(1) + 2).min(8) as u16 // +2 for header, max 8
+        // +1 for header, +1 for blank line spacing, max 10
+        (state.todos.len() + 2).min(10) as u16
     };
 
     let changeset_height = if changeset_collapsed {
@@ -112,23 +125,30 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .side_panel_areas
         .insert(SidePanelSection::Changeset, chunks[3]);
 
-    render_context_section(f, state, chunks[0]);
+    render_context_section(f, state, chunks[0], context_collapsed);
     render_billing_section(f, state, chunks[1], billing_collapsed);
     render_todos_section(f, state, chunks[2], todos_collapsed);
     render_changeset_section(f, state, chunks[3], changeset_collapsed);
     render_footer_section(f, state, chunks[5]);
 }
 
-/// Render the Context section (always visible)
-fn render_context_section(f: &mut Frame, state: &AppState, area: Rect) {
+/// Render the Context section
+fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: bool) {
     let focused = state.side_panel_focus == SidePanelSection::Context;
     let header_style = section_header_style(focused);
 
-    // Header with caret like other sections
+    let collapse_indicator = if collapsed { "▸" } else { "▾" };
+
     let header = Line::from(Span::styled(
-        format!("{}▾ Context", LEFT_PADDING),
+        format!("{}{} Context", LEFT_PADDING, collapse_indicator),
         header_style,
     ));
+
+    if collapsed {
+        let paragraph = Paragraph::new(vec![header]);
+        f.render_widget(paragraph, area);
+        return;
+    }
 
     let mut lines = vec![header];
 
@@ -140,12 +160,13 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect) {
             format!("{}  {} ", LEFT_PADDING, label),
             Style::default().fg(Color::DarkGray),
         );
-        // "   " (3 chars) + label + ":"
-        let label_len = 3 + label.len() + 1;
+        // LEFT_PADDING (2) + "  " (2 indent) + label
+        let label_len = LEFT_PADDING.len() + 2 + label.len();
         let value_len = value.len();
+        let right_padding = 2; // Reserve space at right edge
 
         let available_width = area.width as usize;
-        let spacing = available_width.saturating_sub(label_len + value_len);
+        let spacing = available_width.saturating_sub(label_len + value_len + right_padding);
 
         Line::from(vec![
             label_span,
@@ -222,10 +243,13 @@ fn render_billing_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
             format!("{}  {} ", LEFT_PADDING, label),
             Style::default().fg(Color::DarkGray),
         );
-        let label_len = 3 + label.len() + 1;
+        // LEFT_PADDING (2) + "  " (2 indent) + label
+        let label_len = LEFT_PADDING.len() + 2 + label.len();
         let value_len = value.len();
+        let right_padding = 2; // Reserve space at right edge
+
         let available_width = area.width as usize;
-        let spacing = available_width.saturating_sub(label_len + value_len);
+        let spacing = available_width.saturating_sub(label_len + value_len + right_padding);
 
         Line::from(vec![
             label_span,
@@ -298,23 +322,25 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
         )));
     } else {
         for todo in &state.todos {
-            let (symbol, color) = match todo.status {
-                TodoStatus::Done => ("[x]", Color::Green),
-                TodoStatus::InProgress => ("[/]", Color::Yellow),
-                TodoStatus::Pending => ("[ ]", Color::DarkGray),
+            let (symbol, symbol_color, text_color) = match todo.status {
+                TodoStatus::Done => ("[x]", Color::Green, Color::Reset),
+                TodoStatus::InProgress => ("[/]", Color::Yellow, Color::Reset),
+                TodoStatus::Pending => ("[ ]", Color::DarkGray, Color::DarkGray),
             };
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{}  {} ", LEFT_PADDING, symbol),
-                    Style::default().fg(color),
+                    Style::default().fg(symbol_color),
                 ),
                 Span::styled(
                     truncate_string(&todo.text, area.width as usize - 10),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(text_color),
                 ),
             ]));
         }
     }
+    // Add blank line for spacing before Changeset section
+    lines.push(Line::from(""));
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);
@@ -518,7 +544,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
 
     // Line 1: Version (left) and Profile (right)
     let left_part = format!("{}v{}", LEFT_PADDING, version);
-    let right_part = format!("profile {}", profile);
+    let right_part = format!("profile {} ", profile);
     let total_content = left_part.len() + right_part.len();
     let spacing = available_width.saturating_sub(total_content).max(1);
 
@@ -547,19 +573,19 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
 
     lines.push(Line::from(vec![
         left_padding_span.clone(),
-        Span::styled("tab:", Style::default().fg(Color::DarkGray)),
+        Span::styled("tab", Style::default().fg(Color::DarkGray)),
         Span::styled(" select", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("enter:", Style::default().fg(Color::DarkGray)),
+        Span::styled("enter", Style::default().fg(Color::DarkGray)),
         Span::styled(" toggle", Style::default().fg(Color::Cyan)),
     ]));
 
     lines.push(Line::from(vec![
         left_padding_span,
-        Span::styled("ctrl+y:", Style::default().fg(Color::DarkGray)),
+        Span::styled("ctrl+y", Style::default().fg(Color::DarkGray)),
         Span::styled(" hide", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("ctrl+e:", Style::default().fg(Color::DarkGray)),
+        Span::styled("ctrl+e", Style::default().fg(Color::DarkGray)),
         Span::styled(" changes", Style::default().fg(Color::Cyan)),
     ]));
 

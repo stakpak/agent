@@ -466,17 +466,14 @@ pub fn handle_side_panel_next_section(state: &mut AppState) {
 /// Handle side panel section toggle collapse
 pub fn handle_side_panel_toggle_section(state: &mut AppState) {
     if state.show_side_panel {
-        // Context section cannot be collapsed
-        if state.side_panel_focus != crate::services::changeset::SidePanelSection::Context {
-            let current = state
-                .side_panel_section_collapsed
-                .get(&state.side_panel_focus)
-                .copied()
-                .unwrap_or(false);
-            state
-                .side_panel_section_collapsed
-                .insert(state.side_panel_focus, !current);
-        }
+        let current = state
+            .side_panel_section_collapsed
+            .get(&state.side_panel_focus)
+            .copied()
+            .unwrap_or(false);
+        state
+            .side_panel_section_collapsed
+            .insert(state.side_panel_focus, !current);
     }
 }
 
@@ -535,7 +532,7 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
                     handle_show_file_changes_popup(state);
                 }
             }
-        } else if section != crate::services::changeset::SidePanelSection::Context {
+        } else {
             let current = state
                 .side_panel_section_collapsed
                 .get(&section)
