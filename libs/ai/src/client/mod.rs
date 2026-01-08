@@ -10,6 +10,12 @@ use crate::error::{Error, Result};
 use crate::registry::ProviderRegistry;
 use crate::types::{GenerateRequest, GenerateResponse, GenerateStream};
 
+#[cfg(feature = "tracing")]
+use tracing::Instrument;
+
+#[cfg(feature = "tracing")]
+use crate::tracing as gen_ai_tracing;
+
 /// High-level inference client for AI generation
 pub struct Inference {
     registry: ProviderRegistry,
@@ -55,6 +61,9 @@ impl Inference {
 
     /// Generate a response
     ///
+    /// When the `tracing` feature is enabled, this operation is automatically
+    /// traced with [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/).
+    ///
     /// # Arguments
     ///
     /// * `request` - Generation request with model identifier (e.g., "gpt-4" or "openai:gpt-4")
@@ -73,7 +82,97 @@ impl Inference {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Tracing
+    ///
+    /// When the `tracing` feature is enabled, spans are automatically emitted with:
+    /// - `gen_ai.operation.name`: "chat"
+    /// - `gen_ai.provider.name`: provider name (e.g., "openai", "anthropic")
+    /// - `gen_ai.request.model`: model identifier
+    /// - `gen_ai.input.messages`: JSON array of input messages (opt-in)
+    /// - `gen_ai.output.messages`: JSON array of output messages (opt-in)
+    /// - `gen_ai.usage.input_tokens`: prompt tokens used
+    /// - `gen_ai.usage.output_tokens`: completion tokens used
+    /// - `gen_ai.response.finish_reasons`: array of finish reasons
     pub async fn generate(&self, request: &GenerateRequest) -> Result<GenerateResponse> {
+        #[cfg(feature = "tracing")]
+        {
+            let (provider_id, _) = self.parse_model(&request.model)?;
+            let span = tracing::info_span!(
+                "chat",
+                "gen_ai.operation.name" = "chat",
+                "gen_ai.provider.name" = %provider_id,
+                "gen_ai.request.model" = %request.model,
+                "gen_ai.request.temperature" = tracing::field::Empty,
+                "gen_ai.request.max_tokens" = tracing::field::Empty,
+                "gen_ai.request.top_p" = tracing::field::Empty,
+                "gen_ai.request.frequency_penalty" = tracing::field::Empty,
+                "gen_ai.request.presence_penalty" = tracing::field::Empty,
+                "gen_ai.input.messages" = tracing::field::Empty,
+                "gen_ai.output.messages" = tracing::field::Empty,
+                "gen_ai.usage.input_tokens" = tracing::field::Empty,
+                "gen_ai.usage.output_tokens" = tracing::field::Empty,
+                "gen_ai.response.finish_reasons" = tracing::field::Empty,
+            );
+
+            // Record optional request parameters
+            if let Some(t) = request.options.temperature {
+                span.record("gen_ai.request.temperature", t);
+            }
+            if let Some(m) = request.options.max_tokens {
+                span.record("gen_ai.request.max_tokens", m as i64);
+            }
+            if let Some(p) = request.options.top_p {
+                span.record("gen_ai.request.top_p", p);
+            }
+            if let Some(fp) = request.options.frequency_penalty {
+                span.record("gen_ai.request.frequency_penalty", fp);
+            }
+            if let Some(pp) = request.options.presence_penalty {
+                span.record("gen_ai.request.presence_penalty", pp);
+            }
+
+            // Clone data needed inside the async block
+            let messages = request.messages.clone();
+
+            return async {
+                // Record input messages as span attribute
+                gen_ai_tracing::record_input_messages(&messages);
+
+                let response = self.generate_internal(request).await?;
+
+                // Record response attributes
+                tracing::Span::current().record(
+                    "gen_ai.usage.input_tokens",
+                    response.usage.prompt_tokens as i64,
+                );
+                tracing::Span::current().record(
+                    "gen_ai.usage.output_tokens",
+                    response.usage.completion_tokens as i64,
+                );
+
+                // finish_reasons is an array per OTel spec
+                let finish_reason = format!("{:?}", response.finish_reason.unified);
+                let finish_reasons_json =
+                    serde_json::to_string(&vec![&finish_reason]).unwrap_or_default();
+                tracing::Span::current()
+                    .record("gen_ai.response.finish_reasons", finish_reasons_json.as_str());
+
+                // Record response content as span attribute
+                gen_ai_tracing::record_response_content(&response, &finish_reason);
+
+                Ok(response)
+            }
+            .instrument(span)
+            .await;
+        }
+
+        #[cfg(not(feature = "tracing"))]
+        self.generate_internal(request).await
+    }
+
+    /// Internal generate implementation
+    async fn generate_internal(&self, request: &GenerateRequest) -> Result<GenerateResponse> {
         let (provider_id, model_id) = self.parse_model(&request.model)?;
         let provider = self.registry.get_provider(&provider_id)?;
 
@@ -83,6 +182,10 @@ impl Inference {
     }
 
     /// Generate a streaming response
+    ///
+    /// When the `tracing` feature is enabled, the stream is automatically
+    /// traced with [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/).
+    /// Token usage is recorded when the stream completes (on the `Finish` event).
     ///
     /// # Arguments
     ///
@@ -110,7 +213,74 @@ impl Inference {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Tracing
+    ///
+    /// When the `tracing` feature is enabled, spans are automatically emitted with:
+    /// - `gen_ai.operation.name`: "chat" (streaming is still a chat operation)
+    /// - `gen_ai.provider.name`: provider name (e.g., "openai", "anthropic")
+    /// - `gen_ai.request.model`: model identifier
+    /// - `gen_ai.input.messages`: JSON array of input messages (opt-in)
+    /// - `gen_ai.output.messages`: JSON array of output messages (opt-in, recorded on finish)
+    /// - `gen_ai.usage.input_tokens`: prompt tokens (recorded on stream finish)
+    /// - `gen_ai.usage.output_tokens`: completion tokens (recorded on stream finish)
+    /// - `gen_ai.response.finish_reasons`: array of finish reasons (recorded on stream finish)
     pub async fn stream(&self, request: &GenerateRequest) -> Result<GenerateStream> {
+        #[cfg(feature = "tracing")]
+        {
+            let (provider_id, _) = self.parse_model(&request.model)?;
+            let span = tracing::info_span!(
+                "chat",
+                "gen_ai.operation.name" = "chat",
+                "gen_ai.provider.name" = %provider_id,
+                "gen_ai.request.model" = %request.model,
+                "gen_ai.request.temperature" = tracing::field::Empty,
+                "gen_ai.request.max_tokens" = tracing::field::Empty,
+                "gen_ai.request.top_p" = tracing::field::Empty,
+                "gen_ai.request.frequency_penalty" = tracing::field::Empty,
+                "gen_ai.request.presence_penalty" = tracing::field::Empty,
+                "gen_ai.input.messages" = tracing::field::Empty,
+                "gen_ai.output.messages" = tracing::field::Empty,
+                "gen_ai.usage.input_tokens" = tracing::field::Empty,
+                "gen_ai.usage.output_tokens" = tracing::field::Empty,
+                "gen_ai.response.finish_reasons" = tracing::field::Empty,
+            );
+
+            // Record optional request parameters
+            if let Some(t) = request.options.temperature {
+                span.record("gen_ai.request.temperature", t);
+            }
+            if let Some(m) = request.options.max_tokens {
+                span.record("gen_ai.request.max_tokens", m as i64);
+            }
+            if let Some(p) = request.options.top_p {
+                span.record("gen_ai.request.top_p", p);
+            }
+            if let Some(fp) = request.options.frequency_penalty {
+                span.record("gen_ai.request.frequency_penalty", fp);
+            }
+            if let Some(pp) = request.options.presence_penalty {
+                span.record("gen_ai.request.presence_penalty", pp);
+            }
+
+            // Record input messages as span attribute
+            let _guard = span.enter();
+            gen_ai_tracing::record_input_messages(&request.messages);
+            drop(_guard);
+
+            // Create the inner stream, then wrap it with our span
+            let inner_stream = self.stream_internal(request).await?;
+
+            // Return a stream that will record usage and completion when it finishes
+            return Ok(GenerateStream::with_span(Box::pin(inner_stream), span));
+        }
+
+        #[cfg(not(feature = "tracing"))]
+        self.stream_internal(request).await
+    }
+
+    /// Internal stream implementation
+    async fn stream_internal(&self, request: &GenerateRequest) -> Result<GenerateStream> {
         let (provider_id, model_id) = self.parse_model(&request.model)?;
         let provider = self.registry.get_provider(&provider_id)?;
 

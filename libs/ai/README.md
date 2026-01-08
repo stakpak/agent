@@ -17,6 +17,7 @@ Built by [Stakpak](https://stakpak.dev) 🚀
 - 🎯 **Ergonomic API**: Builder patterns and intuitive interfaces
 - 🔧 **Custom headers**: Full control over HTTP headers for all providers
 - 🔄 **Auto-registration**: Providers automatically registered from environment variables
+- 📊 **OpenTelemetry**: Built-in observability with GenAI semantic conventions
 
 ## Quick Start
 
@@ -273,6 +274,96 @@ cargo run --example gemini_stream
 cargo run --example custom_headers
 cargo run --example multi_provider
 cargo run --example provider_config
+
+# With telemetry feature
+cargo run --example telemetry_basic --features telemetry
+```
+
+## OpenTelemetry Instrumentation
+
+StakAI includes optional OpenTelemetry instrumentation following GenAI semantic conventions.
+
+### Enabling Telemetry
+
+Add the `telemetry` feature to your `Cargo.toml`:
+
+```toml
+[dependencies]
+stakai = { version = "0.1", features = ["telemetry"] }
+```
+
+### Basic Usage
+
+```rust
+use stakai::{Inference, GenerateRequest, Message, Role};
+use stakai::telemetry::TelemetrySettings;
+
+let client = Inference::new();
+
+// Enable telemetry
+let telemetry = TelemetrySettings::enabled()
+    .with_function_id("my-chat-handler");
+
+let request = GenerateRequest::new(
+    "gpt-4",
+    vec![Message::new(Role::User, "Hello!")],
+);
+
+// Generate with telemetry
+let response = client.generate_with_telemetry(&request, &telemetry).await?;
+```
+
+### With Axiom Adapter
+
+```rust
+use stakai::telemetry::{TelemetrySettings, adapters::AxiomAdapter};
+
+let telemetry = TelemetrySettings::enabled()
+    .with_function_id("support-handler")
+    .with_metadata("user_id", "user-123")
+    .with_adapter(
+        AxiomAdapter::new()
+            .with_capability("customer_support")
+            .with_step("initial_response")
+    );
+
+let response = client.generate_with_telemetry(&request, &telemetry).await?;
+```
+
+### Span Attributes
+
+The telemetry follows OpenTelemetry GenAI semantic conventions:
+
+| Attribute | Description |
+|-----------|-------------|
+| `gen_ai.operation.name` | Operation type ("chat") |
+| `gen_ai.system` | Provider ("openai", "anthropic", etc.) |
+| `gen_ai.request.model` | Requested model |
+| `gen_ai.usage.input_tokens` | Input token count |
+| `gen_ai.usage.output_tokens` | Output token count |
+| `gen_ai.response.finish_reasons` | Why generation stopped |
+| `gen_ai.input.messages` | Input messages (JSON) |
+| `gen_ai.output.messages` | Output content (JSON) |
+
+See the [OpenTelemetry GenAI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/) for full details.
+
+### Custom Adapters
+
+Implement `TelemetryAdapter` to add custom attributes for your observability backend:
+
+```rust
+use stakai::telemetry::TelemetryAdapter;
+use opentelemetry::KeyValue;
+
+struct MyAdapter {
+    env: String,
+}
+
+impl TelemetryAdapter for MyAdapter {
+    fn enrich_attributes(&self, attributes: &mut Vec<KeyValue>) {
+        attributes.push(KeyValue::new("deployment.environment", self.env.clone()));
+    }
+}
 ```
 
 ## Architecture
@@ -304,6 +395,8 @@ Client API → Provider Registry → Provider Trait → OpenAI/Anthropic/etc.
 - [x] Auto-registration from environment
 - [x] Unified error handling
 - [x] Provider-specific configurations
+- [x] OpenTelemetry instrumentation (GenAI semantic conventions)
+- [x] Extensible telemetry adapters (Axiom)
 
 ### Planned 📋
 
