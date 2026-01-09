@@ -155,8 +155,10 @@ impl Inference {
                 let finish_reason = format!("{:?}", response.finish_reason.unified);
                 let finish_reasons_json =
                     serde_json::to_string(&vec![&finish_reason]).unwrap_or_default();
-                tracing::Span::current()
-                    .record("gen_ai.response.finish_reasons", finish_reasons_json.as_str());
+                tracing::Span::current().record(
+                    "gen_ai.response.finish_reasons",
+                    finish_reasons_json.as_str(),
+                );
 
                 // Record response content as span attribute
                 gen_ai_tracing::record_response_content(&response, &finish_reason);

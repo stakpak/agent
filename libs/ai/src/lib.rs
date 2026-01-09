@@ -96,8 +96,6 @@ pub use types::{
     Usage,
 };
 
-
-
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::client::Inference;
