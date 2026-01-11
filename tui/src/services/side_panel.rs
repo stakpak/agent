@@ -183,35 +183,42 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         .map(|m| m.context_info())
         .unwrap_or_default();
     let max_tokens = context_info.max_tokens as u32;
-    let percentage = if max_tokens > 0 {
-        ((tokens as f64 / max_tokens as f64) * 100.0).round() as u32
+
+    // Show N/A when no content yet (tokens == 0)
+    if tokens == 0 {
+        lines.push(make_row("Tokens", "N/A".to_string(), Color::DarkGray));
+        lines.push(make_row("Model", "N/A".to_string(), Color::DarkGray));
     } else {
-        0
-    };
+        let percentage = if max_tokens > 0 {
+            ((tokens as f64 / max_tokens as f64) * 100.0).round() as u32
+        } else {
+            0
+        };
 
-    lines.push(make_row(
-        "Tokens",
-        format!(
-            "{} / {}K ({}%)",
-            format_tokens(tokens),
-            max_tokens / 1000,
-            percentage
-        ),
-        Color::White,
-    ));
+        lines.push(make_row(
+            "Tokens",
+            format!(
+                "{} / {}K ({}%)",
+                format_tokens(tokens),
+                max_tokens / 1000,
+                percentage
+            ),
+            Color::White,
+        ));
 
-    // Model name
-    let model_name = state
-        .llm_model
-        .as_ref()
-        .map(|m| m.model_name())
-        .unwrap_or_else(|| state.agent_model.to_string());
+        // Model name
+        let model_name = state
+            .llm_model
+            .as_ref()
+            .map(|m| m.model_name())
+            .unwrap_or_else(|| state.agent_model.to_string());
 
-    // Truncate model name if needed, assuming label len ~10 ("   Model:")
-    let avail_for_model = area.width as usize - 10;
-    let truncated_model = truncate_string(&model_name, avail_for_model);
+        // Truncate model name if needed, assuming label len ~10 ("   Model:")
+        let avail_for_model = area.width as usize - 10;
+        let truncated_model = truncate_string(&model_name, avail_for_model);
 
-    lines.push(make_row("Model", truncated_model, Color::Cyan));
+        lines.push(make_row("Model", truncated_model, Color::Cyan));
+    }
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);

@@ -522,19 +522,33 @@ pub struct ToolsCallResponse {
     pub content: Vec<Content>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct APIKeyScope {
+    pub r#type: String,
+    pub name: String,
+}
+
+impl std::fmt::Display for APIKeyScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.name, self.r#type)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GetMyAccountResponse {
     pub username: String,
     pub id: String,
     pub first_name: String,
     pub last_name: String,
+    pub email: String,
+    pub scope: Option<APIKeyScope>,
 }
 
 impl GetMyAccountResponse {
     pub fn to_text(&self) -> String {
         format!(
-            "ID: {}\nUsername: {}\nName: {} {}",
-            self.id, self.username, self.first_name, self.last_name
+            "ID: {}\nUsername: {}\nName: {} {}\nEmail: {}",
+            self.id, self.username, self.first_name, self.last_name, self.email
         )
     }
 }

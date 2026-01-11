@@ -201,6 +201,8 @@ impl AgentProvider for LocalClient {
             id: "local".to_string(),
             first_name: "local".to_string(),
             last_name: "local".to_string(),
+            email: "local@stakpak.dev".to_string(),
+            scope: None,
         })
     }
 

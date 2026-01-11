@@ -228,7 +228,13 @@ pub async fn run_interactive(
 
             // Fetch billing info (only for remote provider)
             if matches!(provider_type, ProviderType::Remote) {
-                match client.get_billing_info(&data.username).await {
+                let billing_username = data
+                    .scope
+                    .as_ref()
+                    .map(|s| s.name.as_str())
+                    .unwrap_or(&data.username);
+
+                match client.get_billing_info(billing_username).await {
                     Ok(billing_info) => {
                         let _ = send_input_event(
                             &input_tx,
