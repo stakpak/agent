@@ -101,7 +101,7 @@ impl Default for FileSearch {
 
 impl FileSearch {
     /// Load all files from current directory using parallel walking with ignore crate
-    pub fn load_files_from_directory(&mut self, dir: &Path) {
+    pub fn scan_directory(&mut self, dir: &Path) {
         let dir_str = dir.to_string_lossy().to_string();
 
         // Only reload if directory changed or files are empty
@@ -246,7 +246,7 @@ impl FileSearch {
     /// Force reload files from directory (useful when files are created/deleted)
     pub fn force_reload_files(&mut self, dir: &Path) {
         self.clear_caches();
-        self.load_files_from_directory(dir);
+        self.scan_directory(dir);
     }
 }
 
@@ -310,7 +310,7 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     if state.file_search.file_suggestions.is_empty()
         && let Ok(current_dir) = std::env::current_dir()
     {
-        state.file_search.load_files_from_directory(&current_dir);
+        state.file_search.scan_directory(&current_dir);
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
@@ -331,7 +331,7 @@ pub fn handle_at_trigger(input: &str, cursor_pos: usize, file_search: &mut FileS
     if file_search.file_suggestions.is_empty()
         && let Ok(current_dir) = std::env::current_dir()
     {
-        file_search.load_files_from_directory(&current_dir);
+        file_search.scan_directory(&current_dir);
     }
     let current_word = get_current_word(input, cursor_pos, Some('@'));
     file_search.filter_files(&current_word);
