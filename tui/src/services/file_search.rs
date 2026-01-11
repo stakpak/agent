@@ -100,7 +100,7 @@ impl Default for FileSearch {
 }
 
 impl FileSearch {
-    /// Load all files from current directory using parallel walking with ignore crate
+    /// Load all files and directories from current directory using parallel walking with ignore crate
     pub fn scan_directory(&mut self, dir: &Path) {
         let dir_str = dir.to_string_lossy().to_string();
 
