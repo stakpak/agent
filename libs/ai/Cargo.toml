@@ -19,6 +19,7 @@ path = "src/lib.rs"
 [features]
 default = ["openai"]
 openai = []
+tracing = ["dep:tracing"]
 
 [dependencies]
 # Async runtime
@@ -42,6 +43,9 @@ thiserror = { workspace = true }
 bytes = "1"
 pin-project = "1"
 uuid = { workspace = true }
+
+# Tracing (optional, feature-gated)
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

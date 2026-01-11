@@ -40,6 +40,9 @@ pub mod providers;
 pub mod registry;
 pub mod types;
 
+#[cfg(feature = "tracing")]
+pub mod tracing;
+
 // Re-export commonly used types
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
