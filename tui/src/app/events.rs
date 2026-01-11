@@ -24,6 +24,7 @@ pub enum InputEvent {
     /// Spawn the user's shell and then execute a command in it (for interactive stall recovery)
     RunShellWithCommand(String),
     GetStatus(String),
+    BillingInfoLoaded(stakpak_shared::models::billing::BillingResponse),
     Error(String),
     SetSessions(Vec<SessionInfo>),
     InputBackspace,
@@ -75,8 +76,13 @@ pub enum InputEvent {
     AttemptQuit,
     ToggleCollapsedMessages,
     ToggleContextPopup,
+    ShowFileChangesPopup,
+    FileChangesRevertFile,
+    FileChangesRevertAll,
+    FileChangesOpenEditor,
     EmergencyClearTerminal,
     ToggleMouseCapture,
+    OpenFileInEditor,
     // Approval popup events
     ApprovalPopupNextTab,
     ApprovalPopupPrevTab,
@@ -121,6 +127,12 @@ pub enum InputEvent {
 
     // Model events
     StreamModel(LLMModel),
+
+    // Side panel events
+    ToggleSidePanel,
+    SidePanelNextSection,
+    SidePanelToggleSection,
+    MouseClick(u16, u16),
 }
 
 #[derive(Debug)]

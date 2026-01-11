@@ -74,6 +74,8 @@ pub struct Settings {
     #[serde(alias = "user_id")]
     pub anonymous_id: Option<String>,
     pub collect_telemetry: Option<bool>,
+    /// Preferred external editor (e.g. vim, nano, code)
+    pub editor: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -109,6 +111,7 @@ pub struct AppConfig {
     pub recovery_model: Option<String>,
     pub anonymous_id: Option<String>,
     pub collect_telemetry: Option<bool>,
+    pub editor: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -145,6 +148,7 @@ impl From<AppConfig> for Settings {
             auto_append_gitignore: config.auto_append_gitignore,
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
+            editor: config.editor,
         }
     }
 }
@@ -156,6 +160,7 @@ impl From<OldAppConfig> for Settings {
             auto_append_gitignore: old_config.auto_append_gitignore,
             anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
             collect_telemetry: Some(true),
+            editor: Some("nano".to_string()),
         }
     }
 }
@@ -216,6 +221,7 @@ impl Default for ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -233,6 +239,7 @@ impl ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -268,11 +275,14 @@ impl ConfigFile {
         let existing_anonymous_id = self.settings.anonymous_id.clone();
         let existing_collect_telemetry = self.settings.collect_telemetry;
 
+        let existing_editor = self.settings.editor.clone();
+
         self.settings = Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
+            editor: config.editor.or(existing_editor),
         };
     }
 
@@ -504,6 +514,7 @@ impl AppConfig {
             recovery_model: profile_config.recovery_model,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
+            editor: settings.editor,
         }
     }
 
@@ -1041,6 +1052,7 @@ auto_append_gitignore = true
             recovery_model: None,
             anonymous_id: Some("test-user-id".into()),
             collect_telemetry: Some(true),
+            editor: None,
         }
     }
 
@@ -1127,6 +1139,7 @@ auto_append_gitignore = true
         assert!(config.profile_config("default").is_none());
         assert_eq!(config.settings.machine_name, None);
         assert_eq!(config.settings.auto_append_gitignore, Some(true));
+        assert_eq!(config.settings.editor, Some("nano".to_string()));
     }
 
     #[test]
@@ -1159,6 +1172,7 @@ auto_append_gitignore = true
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some("test-user-id".into()),
                 collect_telemetry: Some(true),
+                editor: None,
             },
         };
 
@@ -1407,6 +1421,7 @@ auto_append_gitignore = true
             recovery_model: None,
             anonymous_id: Some("test-user-id".into()),
             collect_telemetry: Some(true),
+            editor: None,
         };
 
         config.save().unwrap();

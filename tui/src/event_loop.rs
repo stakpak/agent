@@ -6,7 +6,7 @@ use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
 use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::handlers::tool::{
-    clear_streaming_tool_results, update_session_tool_calls_queue,
+    clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
 };
 use crate::services::message::Message;
 use crate::view::view;
@@ -17,8 +17,11 @@ use crossterm::{execute, terminal::EnterAlternateScreen};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use stakpak_shared::models::integrations::openai::{AgentModel, ToolCallResultStatus};
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::time::{Duration, interval};
+use tokio::time::interval;
 
 use crate::app::ToolCallStatus;
 use crate::terminal::TerminalGuard;
@@ -47,6 +50,7 @@ pub async fn run_tui(
     current_profile_name: String,
     rulebook_config: Option<RulebookConfig>,
     agent_model: AgentModel,
+    editor_command: Option<String>,
     auth_display_info: (Option<String>, Option<String>, Option<String>),
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
@@ -88,8 +92,19 @@ pub async fn run_tui(
         allowed_tools,
         input_tx: Some(internal_tx.clone()),
         agent_model,
+        editor_command,
         auth_display_info,
     });
+
+    // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
+    #[cfg(unix)]
+    {
+        state.mouse_capture_enabled = enable_mouse_capture;
+    }
+    #[cfg(not(unix))]
+    {
+        state.mouse_capture_enabled = false;
+    }
 
     // Set the current profile name and rulebook config
     state.current_profile_name = current_profile_name;
@@ -100,9 +115,24 @@ pub async fn run_tui(
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
     state.messages.extend(welcome_msg);
     let internal_tx_thread = internal_tx.clone();
+    // Create atomic pause flag for input thread
+    let input_paused = Arc::new(AtomicBool::new(false));
+    let input_paused_thread = input_paused.clone();
+
+    // Spawn input handling thread
+    // This thread reads from crossterm and converts to internal events
+    // It must be pausable when we yield terminal control to external programs (like nano/vim)
     std::thread::spawn(move || {
         loop {
-            if let Ok(event) = crossterm::event::read()
+            // Check if we should pause input reading
+            if input_paused_thread.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+
+            // Use poll with timeout instead of blocking read to allow checking pause flag
+            if let Ok(true) = crossterm::event::poll(Duration::from_millis(50))
+                && let Ok(event) = crossterm::event::read()
                 && let Some(event) = crate::event::map_crossterm_event_to_input_event(event)
                 && internal_tx_thread.blocking_send(event).is_err()
             {
@@ -160,6 +190,8 @@ pub async fn run_tui(
 
                        }
                        render_collapsed_result_block(tool_call_result, &mut state);
+                       // Handle file changes for the Changeset
+                       handle_tool_result(&mut state, tool_call_result.clone());
 
                        state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                    }
@@ -197,8 +229,41 @@ pub async fn run_tui(
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width as usize;
                        let message_area_height = outer_chunks[0].height as usize;
-                       crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                       state.poll_file_search_results();
+                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                        state.poll_file_search_results();
+                       // Handle pending editor open request
+                       if let Some(file_path) = state.pending_editor_open.take() {
+                           // Disable mouse capture before opening editor to prevent weird input
+                           let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                           if was_mouse_capture_enabled {
+                               let _ = execute!(std::io::stdout(), DisableMouseCapture);
+                               state.mouse_capture_enabled = false;
+                           }
+
+                           match crate::services::editor::open_in_editor(
+                               &mut terminal,
+                               &state.editor_command,
+                               &file_path,
+                               None,
+                           ) {
+                               Ok(()) => {
+                                   // Editor closed successfully
+                               }
+                               Err(error) => {
+                                   // Show error message
+                                   state.messages.push(Message::info(
+                                       format!("Failed to open editor: {}", error),
+                                       Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
+                                   ));
+                               }
+                           }
+
+                           // Restore mouse capture if it was enabled before
+                           if was_mouse_capture_enabled {
+                               let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                               state.mouse_capture_enabled = true;
+                           }
+                       }
                    }
                }
                event = internal_rx.recv() => {
@@ -246,11 +311,54 @@ pub async fn run_tui(
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                       crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                       state.poll_file_search_results();
-                       state.update_session_empty_status();
-                   }
-               }
+                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                        state.poll_file_search_results();
+
+                        // Handle pending editor open request
+                         if let Some(file_path) = state.pending_editor_open.take() {
+                             // Pause input thread to avoid stealing input from editor
+                             input_paused.store(true, Ordering::Relaxed);
+                             // Small delay to ensure input thread cycle completes
+                             std::thread::sleep(Duration::from_millis(10));
+
+                             // Disable mouse capture before opening editor to prevent weird input
+                             let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                             if was_mouse_capture_enabled {
+                                 let _ = execute!(std::io::stdout(), DisableMouseCapture);
+                                 state.mouse_capture_enabled = false;
+                             }
+
+                             match crate::services::editor::open_in_editor(
+                                 &mut terminal,
+                                 &state.editor_command,
+                                 &file_path,
+                                 None,
+                             ) {
+                                 Ok(()) => {
+                                     // Editor closed successfully
+                                 }
+                                 Err(error) => {
+                                     // Show error message
+                                     state.messages.push(Message::info(
+                                         format!("Failed to open editor: {}", error),
+                                         Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
+                                     ));
+                                 }
+                             }
+
+                             // Restore mouse capture if it was enabled before
+                             if was_mouse_capture_enabled {
+                                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                 state.mouse_capture_enabled = true;
+                             }
+
+                             // Resume input thread
+                             input_paused.store(false, Ordering::Relaxed);
+                         }
+
+                        state.update_session_empty_status();
+                    }
+                }
                _ = spinner_interval.tick() => {
                    // Also check double Ctrl+C timer expiry on every tick
                    if state.ctrl_c_pressed_once

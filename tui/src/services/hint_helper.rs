@@ -96,74 +96,105 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             let left_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
 
             // Calculate spacing to align profile info to the right
-            let total_width = area.width as usize;
-            let left_len = left_text.len();
-            let (right_text, right_style) = {
-                let profile_text = format!(
-                    "model {} | profile {}",
-                    state.agent_model, state.current_profile_name
-                );
-                let rulebooks_text = " | ctrl+k: rulebooks";
-                (
-                    format!("{}{}", profile_text, rulebooks_text),
-                    Style::default().fg(Color::DarkGray),
-                )
-            };
-            let right_len = right_text.len();
-            let spacing = total_width.saturating_sub(left_len + right_len);
 
-            let mut spans = vec![
-                Span::styled(left_text, Style::default().fg(Color::Cyan)),
-                Span::styled(" ".repeat(spacing), Style::default()),
-            ];
+            let right_text_content = {
+                let mut s = String::new();
+
+                // Add model info
+                s.push_str("model ");
+                s.push_str(&state.agent_model.to_string());
+
+                // Add profile info only if side panel is hidden
+                if !state.show_side_panel {
+                    s.push_str(" | profile ");
+                    s.push_str(&state.current_profile_name);
+                }
+
+                // Add rulebooks info
+                s.push_str(" | ctrl+k rulebooks");
+                s.push_str(" | ctrl+k rulebooks");
+                s
+            };
+
+            let right_style = Style::default().fg(Color::DarkGray);
+
+            // Left side content
+            let left_spans = vec![Span::styled(left_text, Style::default().fg(Color::Cyan))];
+
+            // Right side content
+            let mut right_spans = vec![];
 
             if high_cost_warning || approaching_max {
-                spans.push(Span::styled(right_text, right_style));
+                right_spans.push(Span::styled(right_text_content, right_style));
             } else {
-                spans.push(Span::styled("model ", Style::default().fg(Color::DarkGray)));
+                right_spans.push(Span::styled("model ", Style::default().fg(Color::DarkGray)));
                 match state.agent_model {
                     AgentModel::Smart => {
-                        spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
+                        right_spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
                     }
                     AgentModel::Eco => {
-                        spans.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
+                        right_spans
+                            .push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
                     }
                     AgentModel::Recovery => {
-                        spans.push(Span::styled(
+                        right_spans.push(Span::styled(
                             "recovery",
                             Style::default().fg(Color::LightBlue),
                         ));
                     }
                 }
-                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(
-                    "profile ",
-                    Style::default().fg(Color::DarkGray),
-                ));
-                spans.push(Span::styled(
-                    state.current_profile_name.clone(),
-                    Style::default().fg(Color::Reset),
-                ));
-                spans.push(Span::styled(
+
+                // Show profile info only if side panel is hidden
+                if !state.show_side_panel {
+                    right_spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+                    right_spans.push(Span::styled(
+                        "profile ",
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                    right_spans.push(Span::styled(
+                        state.current_profile_name.clone(),
+                        Style::default().fg(Color::Reset),
+                    ));
+                }
+
+                right_spans.push(Span::styled(
                     " | ctrl+k rulebooks",
                     Style::default().fg(Color::DarkGray),
                 ));
             }
 
-            // Create lines - first line with shortcuts and profile info
-            let mut lines = vec![Line::from(spans)];
+            // Render both aligned to opposite sides
+            let left_widget =
+                Paragraph::new(Line::from(left_spans)).alignment(ratatui::layout::Alignment::Left);
+            let right_widget = Paragraph::new(Line::from(right_spans))
+                .alignment(ratatui::layout::Alignment::Right);
+
+            f.render_widget(left_widget, area);
+            f.render_widget(right_widget, area);
 
             // Add second line with select hint if available (Unix only)
             #[cfg(unix)]
             if !select_hint.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    select_hint,
-                    Style::default().fg(Color::Cyan),
-                )));
-            }
+                // Render on next line (assuming area height > 1)
+                // We need to create a new area or just rely on Paragraph handling?
+                // Actually, if we use the same area but with a newline in content, it works.
+                // But left_widget uses `Line::from(left_spans)`.
 
-            let hint = Paragraph::new(lines);
-            f.render_widget(hint, area);
+                // Let's create a NEW paragraph for the second line and render it.
+                // We'll calculate a sub-area for the second line.
+                if area.height > 1 {
+                    let second_line_area = Rect {
+                        x: area.x,
+                        y: area.y + 1,
+                        width: area.width,
+                        height: 1, // Only 1 line
+                    };
+
+                    let select_hint_widget =
+                        Paragraph::new(Span::styled(select_hint, Style::default().fg(Color::Cyan)));
+                    f.render_widget(select_hint_widget, second_line_area);
+                }
+            }
         }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         // Show auto-approve status

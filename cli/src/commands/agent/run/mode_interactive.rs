@@ -121,6 +121,7 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+        let editor_command = ctx.editor.clone();
 
         let model_clone = model.clone();
         let auth_display_info_for_tui = ctx.get_auth_display_info();
@@ -140,6 +141,7 @@ pub async fn run_interactive(
                 current_profile_for_tui,
                 rulebook_config_for_tui,
                 model_clone,
+                editor_command,
                 auth_display_info_for_tui,
             )
             .await
@@ -223,6 +225,32 @@ pub async fn run_interactive(
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+
+            // Fetch billing info (only for remote provider)
+            if matches!(provider_type, ProviderType::Remote) {
+                let billing_username = data
+                    .scope
+                    .as_ref()
+                    .map(|s| s.name.as_str())
+                    .unwrap_or(&data.username);
+
+                match client.get_billing_info(billing_username).await {
+                    Ok(billing_info) => {
+                        let _ = send_input_event(
+                            &input_tx,
+                            InputEvent::BillingInfoLoaded(billing_info),
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        let _ = send_input_event(
+                            &input_tx,
+                            InputEvent::Error(format!("Failed to fetch billing info: {}", e)),
+                        )
+                        .await;
+                    }
+                }
+            }
             // Load available profiles and send to TUI
             let profiles_config_path = ctx_clone.config_path.clone();
             let current_profile_name = ctx_clone.profile_name.clone();

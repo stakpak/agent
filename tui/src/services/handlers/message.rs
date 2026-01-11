@@ -25,6 +25,12 @@ pub fn handle_stream_message(
         }
         if let MessageContent::AssistantMD(text, _) = &mut message.content {
             text.push_str(&s);
+
+            // Extract todos from the accumulated message content
+            let extracted_todos = crate::services::todo_extractor::extract_todos(text);
+            if !extracted_todos.is_empty() {
+                state.todos = extracted_todos;
+            }
         }
         invalidate_message_lines_cache(state);
 
@@ -54,10 +60,12 @@ pub fn handle_stream_message(
             .push(Message::assistant(Some(id), s.clone(), None));
         state.text_area.set_text("");
 
-        // If content changed while user is scrolled up, mark it
         if !was_at_bottom {
             state.content_changed_while_scrolled_up = true;
         }
+
+        // Auto-show side panel
+        state.auto_show_side_panel();
 
         let total_lines = state.messages.len() * 2;
         let max_scroll = total_lines.saturating_sub(max_visible_lines);
