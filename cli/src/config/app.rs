@@ -632,101 +632,86 @@ impl AppConfig {
     pub fn get_llm_provider_config(&self) -> LLMProviderConfig {
         let mut config = LLMProviderConfig::new();
 
-        // Add all providers from the HashMap
+        // Add custom providers from the HashMap
         for (name, provider_config) in &self.providers {
-            // For built-in providers, resolve credentials from auth.toml
-            match name.as_str() {
-                "openai" => {
-                    if let Some(openai) = self.get_openai_config_with_auth() {
-                        config.add_provider(
-                            "openai",
-                            ProviderConfig::OpenAI {
-                                api_key: openai.api_key,
-                                api_endpoint: openai.api_endpoint,
-                            },
-                        );
-                    }
-                }
-                "anthropic" => {
-                    if let Some(anthropic) = self.get_anthropic_config_with_auth() {
-                        config.add_provider(
-                            "anthropic",
-                            ProviderConfig::Anthropic {
-                                api_key: anthropic.api_key,
-                                api_endpoint: anthropic.api_endpoint,
-                                access_token: anthropic.access_token,
-                            },
-                        );
-                    }
-                }
-                "gemini" => {
-                    if let Some(gemini) = self.get_gemini_config_with_auth() {
-                        config.add_provider(
-                            "gemini",
-                            ProviderConfig::Gemini {
-                                api_key: gemini.api_key,
-                                api_endpoint: gemini.api_endpoint,
-                            },
-                        );
-                    }
-                }
-                // Custom providers - add directly
-                _ => {
-                    config.add_provider(name, provider_config.clone());
-                }
+            if !matches!(name.as_str(), "openai" | "anthropic" | "gemini") {
+                config.add_provider(name, provider_config.clone());
             }
+        }
+
+        // Always try to add built-in providers from config + auth.toml + env vars
+        if let Some(openai) = self.get_openai_config_with_auth() {
+            config.add_provider(
+                "openai",
+                ProviderConfig::OpenAI {
+                    api_key: openai.api_key,
+                    api_endpoint: openai.api_endpoint,
+                },
+            );
+        }
+        if let Some(anthropic) = self.get_anthropic_config_with_auth() {
+            config.add_provider(
+                "anthropic",
+                ProviderConfig::Anthropic {
+                    api_key: anthropic.api_key,
+                    api_endpoint: anthropic.api_endpoint,
+                    access_token: anthropic.access_token,
+                },
+            );
+        }
+        if let Some(gemini) = self.get_gemini_config_with_auth() {
+            config.add_provider(
+                "gemini",
+                ProviderConfig::Gemini {
+                    api_key: gemini.api_key,
+                    api_endpoint: gemini.api_endpoint,
+                },
+            );
         }
 
         config
     }
 
-    /// Build LLMProviderConfig from the app configuration (async version).
+    /// Build LLMProviderConfig from the app configuration (async version with OAuth refresh).
     pub async fn get_llm_provider_config_async(&self) -> LLMProviderConfig {
         let mut config = LLMProviderConfig::new();
 
-        // Add all providers from the HashMap
+        // Add custom providers from the HashMap
         for (name, provider_config) in &self.providers {
-            // For built-in providers, resolve credentials from auth.toml (with refresh)
-            match name.as_str() {
-                "openai" => {
-                    if let Some(openai) = self.get_openai_config_with_auth_async().await {
-                        config.add_provider(
-                            "openai",
-                            ProviderConfig::OpenAI {
-                                api_key: openai.api_key,
-                                api_endpoint: openai.api_endpoint,
-                            },
-                        );
-                    }
-                }
-                "anthropic" => {
-                    if let Some(anthropic) = self.get_anthropic_config_with_auth_async().await {
-                        config.add_provider(
-                            "anthropic",
-                            ProviderConfig::Anthropic {
-                                api_key: anthropic.api_key,
-                                api_endpoint: anthropic.api_endpoint,
-                                access_token: anthropic.access_token,
-                            },
-                        );
-                    }
-                }
-                "gemini" => {
-                    if let Some(gemini) = self.get_gemini_config_with_auth_async().await {
-                        config.add_provider(
-                            "gemini",
-                            ProviderConfig::Gemini {
-                                api_key: gemini.api_key,
-                                api_endpoint: gemini.api_endpoint,
-                            },
-                        );
-                    }
-                }
-                // Custom providers - add directly
-                _ => {
-                    config.add_provider(name, provider_config.clone());
-                }
+            if !matches!(name.as_str(), "openai" | "anthropic" | "gemini") {
+                config.add_provider(name, provider_config.clone());
             }
+        }
+
+        // Always try to add built-in providers from config + auth.toml + env vars
+        // (with OAuth token refresh for anthropic)
+        if let Some(openai) = self.get_openai_config_with_auth_async().await {
+            config.add_provider(
+                "openai",
+                ProviderConfig::OpenAI {
+                    api_key: openai.api_key,
+                    api_endpoint: openai.api_endpoint,
+                },
+            );
+        }
+        if let Some(anthropic) = self.get_anthropic_config_with_auth_async().await {
+            config.add_provider(
+                "anthropic",
+                ProviderConfig::Anthropic {
+                    api_key: anthropic.api_key,
+                    api_endpoint: anthropic.api_endpoint,
+                    access_token: anthropic.access_token,
+                },
+            );
+        }
+        if let Some(gemini) = self.get_gemini_config_with_auth_async().await {
+            config.add_provider(
+                "gemini",
+                ProviderConfig::Gemini {
+                    api_key: gemini.api_key,
+                    api_endpoint: gemini.api_endpoint,
+                },
+            );
         }
 
         config
