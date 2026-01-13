@@ -115,20 +115,26 @@ impl FileSearch {
         // Build overrides to exclude .git directory
         let mut overrides_builder = OverrideBuilder::new(dir);
         overrides_builder.add("!.git/").ok();
-        let overrides = overrides_builder.build().unwrap_or_else(|_| {
-            OverrideBuilder::new(dir).build().unwrap()
-        });
+        let overrides = overrides_builder
+            .build()
+            .or_else(|_| OverrideBuilder::new(dir).build());
 
         // Use ignore crate for fast parallel directory walking
-        let walker = WalkBuilder::new(dir)
+        let mut walker_builder = WalkBuilder::new(dir);
+        walker_builder
             .threads(2) // Use 2 threads for optimal performance
             .hidden(false) // Don't skip hidden files
             .git_ignore(true) // Respect .gitignore files
             .git_global(true) // Respect global gitignore
             .git_exclude(true) // Respect .git/info/exclude
-            .overrides(overrides) // Exclude .git directory
-            .require_git(false) // Don't require git to be present
-            .build_parallel();
+            .require_git(false); // Don't require git to be present
+
+        // Only apply overrides if we successfully built them
+        if let Ok(overrides) = overrides {
+            walker_builder.overrides(overrides);
+        }
+
+        let walker = walker_builder.build_parallel();
 
         let file_suggestions = Arc::new(std::sync::Mutex::new(Vec::new()));
         let file_suggestions_clone = file_suggestions.clone();
