@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::services::bash_block::{
-    format_text_content, is_collapsed_tool_call, render_bash_block, render_file_diff,
-    render_file_diff_full, render_result_block, render_styled_block,
+    format_text_content, render_bash_block, render_file_diff, render_file_diff_full,
+    render_result_block, render_styled_block,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
@@ -227,8 +227,7 @@ impl Message {
     }
 
     pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
-        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
-            && tool_call_result.result.lines().count() > 3;
+        let is_collapsed = tool_call_result.result.lines().count() > 3;
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderResultBorderBlock(tool_call_result),
