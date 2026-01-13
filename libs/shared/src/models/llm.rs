@@ -59,10 +59,29 @@ pub enum ProviderConfig {
         api_endpoint: Option<String>,
     },
     /// Custom OpenAI-compatible provider (LiteLLM, Ollama, etc.)
+    ///
+    /// The provider key in the config becomes the model prefix.
+    /// For example, if configured as `providers.litellm`, use models as:
+    /// - `litellm/claude-opus` - passes `claude-opus` to the API
+    /// - `litellm/anthropic/claude-opus` - passes `anthropic/claude-opus` to the API
+    ///   (useful for LiteLLM which expects provider prefixes)
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.litellm]
+    /// type = "custom"
+    /// api_endpoint = "http://localhost:4000"
+    /// api_key = "sk-litellm"
+    ///
+    /// # Then use models as:
+    /// smart_model = "litellm/anthropic/claude-opus"
+    /// eco_model = "litellm/openai/gpt-4-turbo"
+    /// ```
     Custom {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         /// API endpoint URL (required for custom providers)
+        /// Use the base URL as required by your provider (e.g., "http://localhost:4000")
         api_endpoint: String,
     },
 }
@@ -145,12 +164,19 @@ pub enum LLMModel {
     Anthropic(AnthropicModel),
     Gemini(GeminiModel),
     OpenAI(OpenAIModel),
-    /// Custom provider with explicit provider name and model
+    /// Custom provider with explicit provider name and model.
+    ///
     /// Used for custom OpenAI-compatible providers like LiteLLM, Ollama, etc.
+    /// The provider name matches the key in the `providers` HashMap config.
+    ///
+    /// # Examples
+    /// - `litellm/claude-opus` → `provider: "litellm"`, `model: "claude-opus"`
+    /// - `litellm/anthropic/claude-opus` → `provider: "litellm"`, `model: "anthropic/claude-opus"`
+    /// - `ollama/llama3` → `provider: "ollama"`, `model: "llama3"`
     Custom {
-        /// Provider name (e.g., "litellm", "ollama")
+        /// Provider name matching the key in providers config (e.g., "litellm", "ollama")
         provider: String,
-        /// Model name to pass to the provider
+        /// Model name/path to pass to the provider API (can include nested prefixes)
         model: String,
     },
 }
@@ -209,19 +235,32 @@ impl LLMProviderConfig {
 }
 
 impl From<String> for LLMModel {
+    /// Parse a model string into an LLMModel.
+    ///
+    /// # Format
+    /// - `provider/model` - Explicit provider prefix
+    /// - `provider/nested/model` - Provider with nested model path (e.g., for LiteLLM)
+    /// - `model-name` - Auto-detect provider from model name
+    ///
+    /// # Examples
+    /// - `"litellm/anthropic/claude-opus"` → Custom { provider: "litellm", model: "anthropic/claude-opus" }
+    /// - `"anthropic/claude-opus-4-5"` → Anthropic(Claude45Opus) (built-in provider)
+    /// - `"claude-opus-4-5"` → Anthropic(Claude45Opus) (auto-detected)
+    /// - `"ollama/llama3"` → Custom { provider: "ollama", model: "llama3" }
     fn from(value: String) -> Self {
-        // First check for explicit provider/model format (e.g., "litellm/claude-opus-4-5")
+        // Check for explicit provider/model format (e.g., "litellm/anthropic/claude-opus")
+        // split_once takes only the first segment as provider, rest is the model path
         if let Some((provider, model)) = value.split_once('/') {
             // Check if it's a known built-in provider with explicit prefix
             match provider {
                 "anthropic" => return Self::from_model_name(model),
                 "openai" => return Self::from_model_name(model),
                 "google" | "gemini" => return Self::from_model_name(model),
-                // Unknown provider = custom provider
+                // Unknown provider = custom provider (model can contain additional slashes)
                 _ => {
                     return LLMModel::Custom {
                         provider: provider.to_string(),
-                        model: model.to_string(),
+                        model: model.to_string(), // Preserves nested paths like "anthropic/claude-opus"
                     };
                 }
             }

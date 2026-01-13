@@ -68,11 +68,23 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
 /// Model names are automatically prefixed with the provider name.
 ///
 /// # Arguments
-/// * `provider_name` - Name of the provider (e.g., "litellm", "ollama")
-/// * `api_endpoint` - API endpoint URL (e.g., "http://localhost:4000")
+/// * `provider_name` - Name of the provider (e.g., "litellm", "ollama") - becomes the model prefix
+/// * `api_endpoint` - API endpoint URL as required by the provider (e.g., "http://localhost:4000")
 /// * `api_key` - Optional API key (some providers like Ollama don't require auth)
-/// * `smart_model` - Smart model name without provider prefix (e.g., "claude-opus")
-/// * `eco_model` - Eco model name without provider prefix (e.g., "claude-haiku")
+/// * `smart_model` - Smart model name/path (e.g., "claude-opus" or "anthropic/claude-opus" for LiteLLM)
+/// * `eco_model` - Eco model name/path (e.g., "claude-haiku" or "anthropic/claude-haiku")
+///
+/// # Example
+/// For LiteLLM with Anthropic models:
+/// ```ignore
+/// generate_custom_provider_profile(
+///     "litellm".to_string(),
+///     "http://localhost:4000".to_string(),
+///     Some("sk-litellm".to_string()),
+///     "anthropic/claude-opus".to_string(),  // Will become "litellm/anthropic/claude-opus"
+///     "anthropic/claude-haiku".to_string(), // Will become "litellm/anthropic/claude-haiku"
+/// )
+/// ```
 pub fn generate_custom_provider_profile(
     provider_name: String,
     api_endpoint: String,

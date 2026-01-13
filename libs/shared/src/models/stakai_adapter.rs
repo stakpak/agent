@@ -506,7 +506,11 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 api_key,
                 api_endpoint,
             } => {
-                // Custom providers are registered as OpenAI-compatible providers
+                // Custom providers are registered as OpenAI-compatible providers.
+                // The provider is registered with the config key (e.g., "litellm") as its ID.
+                // When a model like "litellm/anthropic/claude-opus" is used:
+                // 1. "litellm" is matched to this provider
+                // 2. "anthropic/claude-opus" is sent as the model name to the API
                 let key = api_key.clone().unwrap_or_default();
                 let openai_config =
                     StakaiOpenAIConfig::new(key).with_base_url(api_endpoint.clone());
@@ -514,6 +518,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 let provider = OpenAIProvider::new(openai_config)
                     .map_err(|e| format!("Failed to create custom provider '{}': {}", name, e))?;
 
+                // Register with the config key as provider ID (e.g., "litellm", "ollama")
                 registry = registry.register(name, provider);
             }
         }

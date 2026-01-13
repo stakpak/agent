@@ -12,13 +12,17 @@ use crate::onboarding::styled_output::{self, StepStatus};
 /// Configure a custom OpenAI-compatible provider (BYOM)
 ///
 /// This function guides the user through setting up a custom provider by collecting:
-/// - Provider name (e.g., "litellm", "ollama")
-/// - API endpoint (e.g., "http://localhost:4000")
+/// - Provider name (e.g., "litellm", "ollama") - becomes the model prefix
+/// - API endpoint as required by the provider (e.g., "http://localhost:4000" or "http://localhost:11434/v1")
 /// - API key (optional)
 /// - Smart model name (without provider prefix)
 /// - Eco model name (without provider prefix, defaults to smart model)
 ///
-/// Model names are automatically prefixed with the provider name (e.g., "litellm/claude-opus").
+/// Model names are automatically prefixed with the provider name.
+/// For example, with provider "litellm" and model "anthropic/claude-opus":
+/// - Full model string: "litellm/anthropic/claude-opus"
+/// - Provider lookup: "litellm" (matches config key)
+/// - Model sent to API: "anthropic/claude-opus"
 pub fn configure_byom(current_step: usize, total_steps: usize) -> Option<ProfileConfig> {
     // Render step indicators
     let steps: Vec<_> = (0..total_steps)
@@ -53,8 +57,11 @@ pub fn configure_byom(current_step: usize, total_steps: usize) -> Option<Profile
         return None;
     }
 
-    // Step 2: API endpoint
-    let api_endpoint = match prompt_text("Enter API endpoint (e.g., http://localhost:4000)", true) {
+    // Step 2: API endpoint (user provides the full base URL as required by their provider)
+    let api_endpoint = match prompt_text(
+        "Enter API endpoint (e.g., http://localhost:4000 or http://localhost:11434/v1)",
+        true,
+    ) {
         NavResult::Forward(Some(ep)) => ep.trim().to_string(),
         NavResult::Forward(None) | NavResult::Back | NavResult::Cancel => return None,
     };
