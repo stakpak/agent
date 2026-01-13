@@ -100,19 +100,17 @@ pub fn migrate_byom_to_custom_provider(
     }
 
     // Check if this is a BYOM config (has openai.api_endpoint set)
-    let should_migrate = profile
-        .openai
-        .as_ref()
-        .map(|o| o.api_endpoint.is_some())
-        .unwrap_or(false);
-
-    if !should_migrate {
+    // Extract info from openai config if it exists and has an api_endpoint
+    let Some(mut openai) = profile.openai.take() else {
         return profile;
-    }
+    };
 
-    // Extract info from openai config
-    let openai = profile.openai.take().unwrap();
-    let api_endpoint = openai.api_endpoint.unwrap();
+    let Some(api_endpoint) = openai.api_endpoint.take() else {
+        // Not a BYOM config - restore openai and return
+        profile.openai = Some(openai);
+        return profile;
+    };
+
     let api_key = openai.api_key;
 
     // Extract provider name from smart_model (e.g., "litellm/claude" -> "litellm")
