@@ -107,10 +107,21 @@ impl ProfileConfig {
         }
     }
 
+    /// Clean an API endpoint by removing `/chat/completions` suffix if present.
+    /// This suffix is appended at runtime by the provider, not stored in config.
+    fn clean_api_endpoint(endpoint: Option<String>) -> Option<String> {
+        endpoint.map(|ep| {
+            ep.trim_end_matches("/chat/completions")
+                .trim_end_matches("/chat/completions/")
+                .to_string()
+        })
+    }
+
     /// Migrate legacy provider fields to the new unified `providers` HashMap.
     ///
     /// This converts:
     /// - `openai`, `anthropic`, `gemini` fields -> `providers["openai"]`, etc.
+    /// - Strips `/chat/completions` from endpoints (added at runtime)
     ///
     /// Returns true if any migration was performed.
     #[allow(clippy::collapsible_if)]
@@ -124,7 +135,7 @@ impl ProfileConfig {
             {
                 e.insert(ProviderConfig::OpenAI {
                     api_key: openai.api_key,
-                    api_endpoint: openai.api_endpoint,
+                    api_endpoint: Self::clean_api_endpoint(openai.api_endpoint),
                 });
                 migrated = true;
             }
@@ -137,7 +148,7 @@ impl ProfileConfig {
                     "anthropic".to_string(),
                     ProviderConfig::Anthropic {
                         api_key: anthropic.api_key,
-                        api_endpoint: anthropic.api_endpoint,
+                        api_endpoint: Self::clean_api_endpoint(anthropic.api_endpoint),
                         access_token: anthropic.access_token,
                     },
                 );
@@ -152,19 +163,85 @@ impl ProfileConfig {
                     "gemini".to_string(),
                     ProviderConfig::Gemini {
                         api_key: gemini.api_key,
-                        api_endpoint: gemini.api_endpoint,
+                        api_endpoint: Self::clean_api_endpoint(gemini.api_endpoint),
                     },
                 );
                 migrated = true;
             }
         }
 
+        // Also clean existing providers in HashMap
+        migrated = self.clean_provider_endpoints() || migrated;
+
         migrated
     }
 
-    /// Check if this profile has legacy provider fields that need migration.
+    /// Clean `/chat/completions` suffix from all provider endpoints.
+    /// Returns true if any endpoint was modified.
+    fn clean_provider_endpoints(&mut self) -> bool {
+        let mut cleaned = false;
+
+        for (_name, provider) in self.providers.iter_mut() {
+            match provider {
+                ProviderConfig::OpenAI { api_endpoint, .. } => {
+                    if let Some(ep) = api_endpoint {
+                        let clean = Self::clean_api_endpoint(Some(ep.clone()));
+                        if clean.as_ref() != Some(ep) {
+                            *api_endpoint = clean;
+                            cleaned = true;
+                        }
+                    }
+                }
+                ProviderConfig::Anthropic { api_endpoint, .. } => {
+                    if let Some(ep) = api_endpoint {
+                        let clean = Self::clean_api_endpoint(Some(ep.clone()));
+                        if clean.as_ref() != Some(ep) {
+                            *api_endpoint = clean;
+                            cleaned = true;
+                        }
+                    }
+                }
+                ProviderConfig::Gemini { api_endpoint, .. } => {
+                    if let Some(ep) = api_endpoint {
+                        let clean = Self::clean_api_endpoint(Some(ep.clone()));
+                        if clean.as_ref() != Some(ep) {
+                            *api_endpoint = clean;
+                            cleaned = true;
+                        }
+                    }
+                }
+                ProviderConfig::Custom { api_endpoint, .. } => {
+                    let clean = Self::clean_api_endpoint(Some(api_endpoint.clone()));
+                    if let Some(clean_ep) = clean {
+                        if &clean_ep != api_endpoint {
+                            *api_endpoint = clean_ep;
+                            cleaned = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        cleaned
+    }
+
+    /// Check if this profile has legacy provider fields or endpoints that need migration/cleaning.
     pub fn needs_provider_migration(&self) -> bool {
-        self.openai.is_some() || self.anthropic.is_some() || self.gemini.is_some()
+        // Check for legacy provider fields
+        if self.openai.is_some() || self.anthropic.is_some() || self.gemini.is_some() {
+            return true;
+        }
+
+        // Check for endpoints with /chat/completions that need cleaning
+        for provider in self.providers.values() {
+            if let Some(ep) = provider.api_endpoint() {
+                if ep.contains("/chat/completions") {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Merge this profile with another, using self's values if present.

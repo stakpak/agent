@@ -872,3 +872,528 @@ api_key = "sk-openai-key"
         .expect("openai provider should exist");
     assert_eq!(openai.api_key(), Some("sk-openai-key"));
 }
+
+#[test]
+fn test_legacy_migration_with_gemini() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "gemini-2.5-pro"
+
+[profiles.default.gemini]
+api_key = "gemini-api-key"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    assert!(profile.providers.contains_key("gemini"));
+    assert!(profile.gemini.is_none());
+
+    let gemini = profile.providers.get("gemini").unwrap();
+    assert_eq!(gemini.api_key(), Some("gemini-api-key"));
+}
+
+#[test]
+fn test_legacy_migration_with_custom_endpoints() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "gpt-4"
+
+[profiles.default.openai]
+api_key = "sk-openai"
+api_endpoint = "https://custom-openai.example.com/v1"
+
+[profiles.default.anthropic]
+api_key = "sk-ant"
+api_endpoint = "https://custom-anthropic.example.com"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_key(), Some("sk-openai"));
+    assert_eq!(
+        openai.api_endpoint(),
+        Some("https://custom-openai.example.com/v1")
+    );
+
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.api_key(), Some("sk-ant"));
+    assert_eq!(
+        anthropic.api_endpoint(),
+        Some("https://custom-anthropic.example.com")
+    );
+}
+
+#[test]
+fn test_legacy_migration_with_anthropic_access_token() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "claude-sonnet-4-5"
+
+[profiles.default.anthropic]
+access_token = "oauth-token-here"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.access_token(), Some("oauth-token-here"));
+    assert!(anthropic.api_key().is_none());
+}
+
+#[test]
+fn test_legacy_migration_preserves_existing_providers() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // Mixed format: new providers HashMap + old legacy field
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "gpt-4"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "new-format-key"
+
+[profiles.default.anthropic]
+api_key = "legacy-anthropic-key"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // OpenAI should keep the new format key (not overwritten)
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_key(), Some("new-format-key"));
+
+    // Anthropic should be migrated from legacy
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.api_key(), Some("legacy-anthropic-key"));
+}
+
+#[test]
+fn test_legacy_migration_does_not_overwrite_existing() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // Both new and legacy format for same provider - new should win
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "new-key"
+
+[profiles.default.openai]
+api_key = "legacy-key"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // New format should be preserved, legacy ignored
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_key(), Some("new-key"));
+}
+
+#[test]
+fn test_custom_provider_config_parsing() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "litellm/anthropic/claude-opus"
+eco_model = "litellm/openai/gpt-4-turbo"
+
+[profiles.default.providers.litellm]
+type = "custom"
+api_endpoint = "http://localhost:4000"
+api_key = "sk-litellm"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    assert!(profile.providers.contains_key("litellm"));
+
+    let litellm = profile.providers.get("litellm").unwrap();
+    assert_eq!(litellm.api_key(), Some("sk-litellm"));
+    assert_eq!(litellm.api_endpoint(), Some("http://localhost:4000"));
+    assert_eq!(litellm.provider_type(), "custom");
+
+    assert_eq!(
+        profile.smart_model,
+        Some("litellm/anthropic/claude-opus".to_string())
+    );
+    assert_eq!(
+        profile.eco_model,
+        Some("litellm/openai/gpt-4-turbo".to_string())
+    );
+}
+
+#[test]
+fn test_custom_provider_without_api_key() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "ollama/llama3"
+
+[profiles.default.providers.ollama]
+type = "custom"
+api_endpoint = "http://localhost:11434/v1"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let ollama = profile.providers.get("ollama").unwrap();
+    assert!(ollama.api_key().is_none());
+    assert_eq!(ollama.api_endpoint(), Some("http://localhost:11434/v1"));
+}
+
+#[test]
+fn test_multiple_custom_providers() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "litellm/claude-opus"
+eco_model = "ollama/llama3"
+
+[profiles.default.providers.litellm]
+type = "custom"
+api_endpoint = "http://localhost:4000"
+api_key = "sk-litellm"
+
+[profiles.default.providers.ollama]
+type = "custom"
+api_endpoint = "http://localhost:11434/v1"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    assert!(profile.providers.contains_key("litellm"));
+    assert!(profile.providers.contains_key("ollama"));
+
+    let litellm = profile.providers.get("litellm").unwrap();
+    assert_eq!(litellm.api_endpoint(), Some("http://localhost:4000"));
+
+    let ollama = profile.providers.get("ollama").unwrap();
+    assert_eq!(ollama.api_endpoint(), Some("http://localhost:11434/v1"));
+}
+
+#[test]
+fn test_mixed_builtin_and_custom_providers() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "claude-sonnet-4-5"
+eco_model = "ollama/llama3"
+
+[profiles.default.providers.anthropic]
+type = "anthropic"
+api_key = "sk-ant-key"
+
+[profiles.default.providers.ollama]
+type = "custom"
+api_endpoint = "http://localhost:11434/v1"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // Built-in provider
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.provider_type(), "anthropic");
+    assert_eq!(anthropic.api_key(), Some("sk-ant-key"));
+
+    // Custom provider
+    let ollama = profile.providers.get("ollama").unwrap();
+    assert_eq!(ollama.provider_type(), "custom");
+    assert_eq!(ollama.api_endpoint(), Some("http://localhost:11434/v1"));
+}
+
+#[test]
+fn test_legacy_migration_all_providers() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.openai]
+api_key = "sk-openai"
+
+[profiles.default.anthropic]
+api_key = "sk-ant"
+access_token = "oauth-token"
+
+[profiles.default.gemini]
+api_key = "gemini-key"
+api_endpoint = "https://custom-gemini.example.com"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // All legacy fields should be cleared
+    assert!(profile.openai.is_none());
+    assert!(profile.anthropic.is_none());
+    assert!(profile.gemini.is_none());
+
+    // All should be migrated to providers HashMap
+    assert_eq!(profile.providers.len(), 3);
+
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_key(), Some("sk-openai"));
+
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.api_key(), Some("sk-ant"));
+    assert_eq!(anthropic.access_token(), Some("oauth-token"));
+
+    let gemini = profile.providers.get("gemini").unwrap();
+    assert_eq!(gemini.api_key(), Some("gemini-key"));
+    assert_eq!(
+        gemini.api_endpoint(),
+        Some("https://custom-gemini.example.com")
+    );
+}
+
+#[test]
+fn test_legacy_migration_strips_chat_completions_from_endpoint() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // Old config format with /chat/completions in endpoint
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.openai]
+api_key = "sk-openai"
+api_endpoint = "http://localhost:4000/v1/chat/completions"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let openai = profile.providers.get("openai").unwrap();
+    // /chat/completions should be stripped during migration
+    assert_eq!(openai.api_endpoint(), Some("http://localhost:4000/v1"));
+}
+
+#[test]
+fn test_legacy_migration_strips_chat_completions_with_trailing_slash() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.anthropic]
+api_key = "sk-ant"
+api_endpoint = "http://localhost:4000/chat/completions/"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(anthropic.api_endpoint(), Some("http://localhost:4000"));
+}
+
+#[test]
+fn test_legacy_endpoint_without_chat_completions_unchanged() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let old_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.openai]
+api_key = "sk-openai"
+api_endpoint = "https://api.openai.com/v1"
+
+[profiles.default.gemini]
+api_key = "gemini-key"
+api_endpoint = "https://custom-gemini.example.com"
+"#;
+    std::fs::write(&config_path, old_config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    // Endpoints without /chat/completions should remain unchanged
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_endpoint(), Some("https://api.openai.com/v1"));
+
+    let gemini = profile.providers.get("gemini").unwrap();
+    assert_eq!(
+        gemini.api_endpoint(),
+        Some("https://custom-gemini.example.com")
+    );
+}
+
+#[test]
+fn test_new_format_strips_chat_completions_from_builtin_provider() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // New format with /chat/completions in endpoint
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "sk-openai"
+api_endpoint = "https://api.example.com/v1/chat/completions"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_endpoint(), Some("https://api.example.com/v1"));
+}
+
+#[test]
+fn test_new_format_strips_chat_completions_from_custom_provider() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.litellm]
+type = "custom"
+api_endpoint = "http://localhost:4000/chat/completions"
+api_key = "sk-litellm"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let litellm = profile.providers.get("litellm").unwrap();
+    assert_eq!(litellm.api_endpoint(), Some("http://localhost:4000"));
+}
+
+#[test]
+fn test_new_format_strips_chat_completions_from_multiple_providers() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    let config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+
+[profiles.default.providers.openai]
+type = "openai"
+api_key = "sk-openai"
+api_endpoint = "https://custom-openai.com/v1/chat/completions"
+
+[profiles.default.providers.anthropic]
+type = "anthropic"
+api_key = "sk-ant"
+api_endpoint = "https://custom-anthropic.com/chat/completions/"
+
+[profiles.default.providers.litellm]
+type = "custom"
+api_endpoint = "http://localhost:4000/v1/chat/completions"
+api_key = "sk-litellm"
+"#;
+    std::fs::write(&config_path, config).unwrap();
+
+    let config_file = AppConfig::load_config_file(&config_path).unwrap();
+    let profile = config_file.profiles.get("default").unwrap();
+
+    let openai = profile.providers.get("openai").unwrap();
+    assert_eq!(openai.api_endpoint(), Some("https://custom-openai.com/v1"));
+
+    let anthropic = profile.providers.get("anthropic").unwrap();
+    assert_eq!(
+        anthropic.api_endpoint(),
+        Some("https://custom-anthropic.com")
+    );
+
+    let litellm = profile.providers.get("litellm").unwrap();
+    assert_eq!(litellm.api_endpoint(), Some("http://localhost:4000/v1"));
+}
