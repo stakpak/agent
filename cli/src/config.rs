@@ -1,3 +1,4 @@
+use crate::onboarding::config_templates::migrate_byom_to_custom_provider;
 use config::ConfigError;
 use serde::{Deserialize, Serialize};
 use stakpak_api::{models::ListRuleBook, remote::ClientConfig};
@@ -6,6 +7,7 @@ use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
 use stakpak_shared::models::integrations::gemini::GeminiConfig;
 use stakpak_shared::models::integrations::openai::OpenAIConfig;
+use stakpak_shared::models::llm::CustomProviderConfig;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, write};
 use std::io;
@@ -41,6 +43,27 @@ pub struct WardenConfig {
     pub volumes: Vec<String>,
 }
 
+/// Configuration for a custom OpenAI-compatible provider
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CustomProvider {
+    /// Unique name for this provider (used in model strings like "litellm/claude-opus")
+    pub name: String,
+    /// API endpoint URL (e.g., "http://localhost:4000")
+    pub api_endpoint: String,
+    /// API key (optional, some providers don't require auth)
+    pub api_key: Option<String>,
+}
+
+impl From<CustomProvider> for CustomProviderConfig {
+    fn from(p: CustomProvider) -> Self {
+        CustomProviderConfig {
+            name: p.name,
+            api_endpoint: p.api_endpoint,
+            api_key: p.api_key,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
     pub api_endpoint: Option<String>,
@@ -61,6 +84,8 @@ pub struct ProfileConfig {
     pub gemini: Option<GeminiConfig>,
     /// Anthropic configuration
     pub anthropic: Option<AnthropicConfig>,
+    /// Custom OpenAI-compatible providers (e.g., LiteLLM, Ollama)
+    pub custom_providers: Option<Vec<CustomProvider>>,
     pub eco_model: Option<String>,
     pub smart_model: Option<String>,
     pub recovery_model: Option<String>,
@@ -104,6 +129,8 @@ pub struct AppConfig {
     pub openai: Option<OpenAIConfig>,
     pub anthropic: Option<AnthropicConfig>,
     pub gemini: Option<GeminiConfig>,
+    /// Custom OpenAI-compatible providers (e.g., LiteLLM, Ollama)
+    pub custom_providers: Option<Vec<CustomProvider>>,
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
@@ -187,6 +214,7 @@ impl From<AppConfig> for ProfileConfig {
             openai: config.openai,
             anthropic: config.anthropic,
             gemini: config.gemini,
+            custom_providers: config.custom_providers,
             eco_model: config.eco_model,
             smart_model: config.smart_model,
             recovery_model: config.recovery_model,
@@ -391,6 +419,10 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
+            custom_providers: self
+                .custom_providers
+                .clone()
+                .or_else(|| other.and_then(|config| config.custom_providers.clone())),
             eco_model: self
                 .eco_model
                 .clone()
@@ -500,6 +532,7 @@ impl AppConfig {
             openai: profile_config.openai,
             anthropic: profile_config.anthropic,
             gemini: profile_config.gemini,
+            custom_providers: profile_config.custom_providers,
             smart_model: profile_config.smart_model,
             eco_model: profile_config.eco_model,
             recovery_model: profile_config.recovery_model,
@@ -544,16 +577,73 @@ impl AppConfig {
 
     fn load_config_file<P: AsRef<Path>>(config_path: P) -> Result<ConfigFile, ConfigError> {
         match std::fs::read_to_string(config_path.as_ref()) {
-            Ok(content) => toml::from_str::<ConfigFile>(&content).or_else(|e| {
-                println!("Failed to parse config file in new format: {}", e);
-                Self::migrate_old_config(config_path, &content)
-            }),
+            Ok(content) => {
+                let config_file = toml::from_str::<ConfigFile>(&content).or_else(|e| {
+                    println!("Failed to parse config file in new format: {}", e);
+                    Self::migrate_old_config(config_path.as_ref(), &content)
+                })?;
+
+                // Migrate any BYOM configs to custom_providers
+                Self::migrate_byom_configs(config_path.as_ref(), config_file)
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ConfigFile::with_default_profile()),
             Err(e) => Err(ConfigError::Message(format!(
                 "Failed to read config file: {}",
                 e
             ))),
         }
+    }
+
+    /// Migrate BYOM configs (using openai.api_endpoint) to custom_providers
+    ///
+    /// This checks all profiles for old BYOM-style configs and migrates them.
+    /// If any migration occurs, the config file is saved automatically.
+    fn migrate_byom_configs<P: AsRef<Path>>(
+        config_path: P,
+        mut config_file: ConfigFile,
+    ) -> Result<ConfigFile, ConfigError> {
+        let mut any_migrated = false;
+
+        for (profile_name, profile) in config_file.profiles.iter_mut() {
+            // Check if this profile needs migration:
+            // - Has openai.api_endpoint set (BYOM indicator)
+            // - Does NOT have custom_providers yet
+            let needs_migration = profile
+                .openai
+                .as_ref()
+                .map(|o| o.api_endpoint.is_some())
+                .unwrap_or(false)
+                && profile.custom_providers.is_none();
+
+            if needs_migration {
+                let migrated = migrate_byom_to_custom_provider(profile.clone(), profile_name);
+                *profile = migrated;
+                any_migrated = true;
+            }
+        }
+
+        // Save if any profile was migrated
+        if any_migrated {
+            toml::to_string_pretty(&config_file)
+                .map_err(|e| {
+                    ConfigError::Message(format!(
+                        "Failed to serialize config after BYOM migration: {}",
+                        e
+                    ))
+                })
+                .and_then(|config_str| {
+                    write(config_path, config_str).map_err(|e| {
+                        ConfigError::Message(format!(
+                            "Failed to save config after BYOM migration: {}",
+                            e
+                        ))
+                    })
+                })?;
+
+            println!("Migrated configuration to new format.");
+        }
+
+        Ok(config_file)
     }
 
     fn validate_profile_name(profile_name: &str) -> Result<(), ConfigError> {
@@ -826,6 +916,13 @@ impl AppConfig {
         self.gemini.clone()
     }
 
+    /// Get custom providers converted to CustomProviderConfig format
+    pub fn get_custom_providers_config(&self) -> Option<Vec<CustomProviderConfig>> {
+        self.custom_providers
+            .as_ref()
+            .map(|providers| providers.iter().cloned().map(Into::into).collect())
+    }
+
     /// Get Stakpak API key with resolved credentials from auth.toml fallback chain
     ///
     /// Resolution order:
@@ -1037,6 +1134,7 @@ auto_append_gitignore = true
             openai: None,
             anthropic: None,
             gemini: None,
+            custom_providers: None,
             smart_model: None,
             eco_model: None,
             recovery_model: None,
@@ -1184,6 +1282,7 @@ auto_append_gitignore = true
                 openai: None,
                 anthropic: None,
                 gemini: None,
+                custom_providers: None,
                 smart_model: None,
                 eco_model: None,
                 recovery_model: None,
@@ -1203,6 +1302,7 @@ auto_append_gitignore = true
                 openai: None,
                 anthropic: None,
                 gemini: None,
+                custom_providers: None,
                 smart_model: None,
                 eco_model: None,
                 recovery_model: None,
@@ -1403,6 +1503,7 @@ auto_append_gitignore = true
             openai: None,
             anthropic: None,
             gemini: None,
+            custom_providers: None,
             smart_model: None,
             eco_model: None,
             recovery_model: None,
@@ -1674,5 +1775,239 @@ mod tests {
                 .iter()
                 .any(|r| r.uri == "https://rules.stakpak.dev/r3")
         );
+    }
+
+    #[test]
+    fn test_custom_providers_toml_parsing() {
+        let toml_str = r#"
+[settings]
+
+[profiles.litellm]
+provider = "local"
+eco_model = "litellm/claude-opus-4-5"
+smart_model = "litellm/claude-opus-4-5"
+
+[[profiles.litellm.custom_providers]]
+name = "litellm"
+api_endpoint = "http://localhost:4000"
+api_key = "sk-1234"
+
+[[profiles.litellm.custom_providers]]
+name = "ollama"
+api_endpoint = "http://localhost:11434/v1"
+"#;
+
+        let config: ConfigFile = toml::from_str(toml_str).expect("Failed to parse toml");
+
+        let profile = config
+            .profiles
+            .get("litellm")
+            .expect("litellm profile not found");
+        assert!(matches!(profile.provider, Some(ProviderType::Local)));
+        assert_eq!(
+            profile.eco_model.as_deref(),
+            Some("litellm/claude-opus-4-5")
+        );
+        assert_eq!(
+            profile.smart_model.as_deref(),
+            Some("litellm/claude-opus-4-5")
+        );
+
+        let custom_providers = profile
+            .custom_providers
+            .as_ref()
+            .expect("custom_providers not found");
+        assert_eq!(custom_providers.len(), 2);
+
+        assert_eq!(custom_providers[0].name, "litellm");
+        assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
+        assert_eq!(custom_providers[0].api_key, Some("sk-1234".to_string()));
+
+        assert_eq!(custom_providers[1].name, "ollama");
+        assert_eq!(
+            custom_providers[1].api_endpoint,
+            "http://localhost:11434/v1"
+        );
+        assert!(custom_providers[1].api_key.is_none());
+    }
+
+    #[test]
+    fn test_custom_provider_to_custom_provider_config() {
+        let provider = CustomProvider {
+            name: "litellm".to_string(),
+            api_endpoint: "http://localhost:4000".to_string(),
+            api_key: Some("sk-1234".to_string()),
+        };
+
+        let config: CustomProviderConfig = provider.into();
+        assert_eq!(config.name, "litellm");
+        assert_eq!(config.api_endpoint, "http://localhost:4000");
+        assert_eq!(config.api_key, Some("sk-1234".to_string()));
+    }
+
+    #[test]
+    fn test_byom_config_auto_migration_on_load() {
+        use tempfile::TempDir;
+
+        // Create a temp directory and config file with old BYOM format
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // Old BYOM config format (using openai.api_endpoint)
+        let old_byom_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "litellm/claude-opus"
+eco_model = "litellm/claude-opus"
+
+[profiles.default.openai]
+api_endpoint = "http://localhost:4000"
+api_key = "sk-byom-key"
+"#;
+        std::fs::write(&config_path, old_byom_config).unwrap();
+
+        // Load the config - this should trigger automatic migration
+        let config_file = AppConfig::load_config_file(&config_path).unwrap();
+
+        // Verify migration happened
+        let profile = config_file.profiles.get("default").unwrap();
+
+        // Should have custom_providers now
+        let custom_providers = profile
+            .custom_providers
+            .as_ref()
+            .expect("custom_providers should be set after migration");
+        assert_eq!(custom_providers.len(), 1);
+        assert_eq!(custom_providers[0].name, "litellm");
+        assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
+        assert_eq!(custom_providers[0].api_key, Some("sk-byom-key".to_string()));
+
+        // openai config should be cleared
+        assert!(profile.openai.is_none());
+
+        // Verify the file was saved with the new format
+        let saved_content = std::fs::read_to_string(&config_path).unwrap();
+        assert!(saved_content.contains("[[profiles.default.custom_providers]]"));
+        assert!(saved_content.contains("name = \"litellm\""));
+        assert!(!saved_content.contains("[profiles.default.openai]"));
+    }
+
+    #[test]
+    fn test_byom_migration_preserves_real_openai_config() {
+        use tempfile::TempDir;
+
+        // Create a temp directory and config file with real OpenAI config
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // Real OpenAI config (no api_endpoint = not BYOM)
+        let openai_config = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "gpt-4"
+eco_model = "gpt-4o-mini"
+
+[profiles.default.openai]
+api_key = "sk-openai-real-key"
+"#;
+        std::fs::write(&config_path, openai_config).unwrap();
+
+        // Load the config - this should NOT trigger migration
+        let config_file = AppConfig::load_config_file(&config_path).unwrap();
+
+        // Verify NO migration happened
+        let profile = config_file.profiles.get("default").unwrap();
+
+        // Should NOT have custom_providers
+        assert!(profile.custom_providers.is_none());
+
+        // openai config should still be present
+        let openai = profile
+            .openai
+            .as_ref()
+            .expect("openai config should remain");
+        assert_eq!(openai.api_key, Some("sk-openai-real-key".to_string()));
+        assert!(openai.api_endpoint.is_none());
+    }
+
+    #[test]
+    fn test_byom_migration_with_no_prefix_model() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // BYOM config with model that has no provider prefix
+        let old_config = r#"
+[settings]
+
+[profiles.myprofile]
+provider = "local"
+smart_model = "some-model"
+eco_model = "some-model"
+
+[profiles.myprofile.openai]
+api_endpoint = "http://localhost:8080"
+api_key = "test-key"
+"#;
+        std::fs::write(&config_path, old_config).unwrap();
+
+        let config_file = AppConfig::load_config_file(&config_path).unwrap();
+        let profile = config_file.profiles.get("myprofile").unwrap();
+
+        // Should have custom_providers with profile name as provider name
+        let custom_providers = profile.custom_providers.as_ref().unwrap();
+        assert_eq!(custom_providers[0].name, "myprofile");
+
+        // Model names should be prefixed with the profile name
+        assert_eq!(
+            profile.smart_model,
+            Some("myprofile/some-model".to_string())
+        );
+        assert_eq!(profile.eco_model, Some("myprofile/some-model".to_string()));
+    }
+
+    #[test]
+    fn test_byom_migration_skips_already_migrated() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // Config that already has custom_providers
+        let already_migrated = r#"
+[settings]
+
+[profiles.default]
+provider = "local"
+smart_model = "litellm/claude"
+eco_model = "litellm/claude"
+
+[profiles.default.openai]
+api_endpoint = "http://old-endpoint"
+api_key = "old-key"
+
+[[profiles.default.custom_providers]]
+name = "litellm"
+api_endpoint = "http://localhost:4000"
+api_key = "new-key"
+"#;
+        std::fs::write(&config_path, already_migrated).unwrap();
+
+        let config_file = AppConfig::load_config_file(&config_path).unwrap();
+        let profile = config_file.profiles.get("default").unwrap();
+
+        // Should NOT have changed the custom_providers
+        let custom_providers = profile.custom_providers.as_ref().unwrap();
+        assert_eq!(custom_providers.len(), 1);
+        assert_eq!(custom_providers[0].api_key, Some("new-key".to_string()));
+        assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
+
+        // openai should still be present (not cleared since we skipped migration)
+        assert!(profile.openai.is_some());
     }
 }

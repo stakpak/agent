@@ -89,6 +89,7 @@ impl StakpakAcpAgent {
                     anthropic_config: config.get_anthropic_config_with_auth(),
                     openai_config: config.get_openai_config_with_auth(),
                     gemini_config: config.get_gemini_config_with_auth(),
+                    custom_providers: config.get_custom_providers_config(),
                     eco_model: config.eco_model.clone(),
                     recovery_model: config.recovery_model.clone(),
                     smart_model: config.smart_model.clone(),

@@ -22,8 +22,8 @@ use stakpak_shared::models::integrations::openai::{
 };
 use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
-    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
-    LLMStreamInput,
+    CustomProviderConfig, GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel,
+    LLMProviderConfig, LLMStreamInput,
 };
 use stakpak_shared::models::stakai_adapter::StakAIClient;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
@@ -46,6 +46,7 @@ pub struct LocalClient {
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
     pub gemini_config: Option<GeminiConfig>,
+    pub custom_providers: Option<Vec<CustomProviderConfig>>,
     pub model_options: ModelOptions,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
     _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
@@ -105,6 +106,7 @@ pub struct LocalClientConfig {
     pub anthropic_config: Option<AnthropicConfig>,
     pub openai_config: Option<OpenAIConfig>,
     pub gemini_config: Option<GeminiConfig>,
+    pub custom_providers: Option<Vec<CustomProviderConfig>>,
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
@@ -186,6 +188,7 @@ impl LocalClient {
             anthropic_config: config.anthropic_config,
             gemini_config: config.gemini_config,
             openai_config: config.openai_config,
+            custom_providers: config.custom_providers,
             model_options,
             hook_registry: Some(Arc::new(hook_registry)),
             _search_services_orchestrator: Some(Arc::new(SearchServicesOrchestrator)),
@@ -651,6 +654,7 @@ impl LocalClient {
             anthropic_config: self.anthropic_config.clone(),
             openai_config: self.openai_config.clone(),
             gemini_config: self.gemini_config.clone(),
+            custom_providers: self.custom_providers.clone(),
         }
     }
 
@@ -1210,7 +1214,7 @@ fn get_search_model(
         Some(LLMModel::OpenAI(_)) => LLMModel::OpenAI(OpenAIModel::O4Mini),
         Some(LLMModel::Anthropic(_)) => LLMModel::Anthropic(AnthropicModel::Claude45Haiku),
         Some(LLMModel::Gemini(_)) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
-        Some(LLMModel::Custom(model)) => LLMModel::Custom(model),
+        Some(LLMModel::Custom { provider, model }) => LLMModel::Custom { provider, model },
         None => {
             if llm_config.openai_config.is_some() {
                 LLMModel::OpenAI(OpenAIModel::O4Mini)

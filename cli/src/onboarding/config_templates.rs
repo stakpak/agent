@@ -1,5 +1,6 @@
 //! Configuration templates for different provider setups
 
+use crate::config::CustomProvider;
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;
 use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
@@ -49,22 +50,103 @@ pub fn generate_anthropic_profile() -> ProfileConfig {
     }
 }
 
-/// Generate BYOM (Bring Your Own Model) single model configuration
-pub fn generate_byom_single_config(
-    endpoint: String,
-    model: String,
+/// Generate custom provider profile configuration
+///
+/// This creates a profile with a custom OpenAI-compatible provider (e.g., LiteLLM, Ollama).
+/// Model names are automatically prefixed with the provider name.
+///
+/// # Arguments
+/// * `provider_name` - Name of the provider (e.g., "litellm", "ollama")
+/// * `api_endpoint` - API endpoint URL (e.g., "http://localhost:4000")
+/// * `api_key` - Optional API key (some providers like Ollama don't require auth)
+/// * `smart_model` - Smart model name without provider prefix (e.g., "claude-opus")
+/// * `eco_model` - Eco model name without provider prefix (e.g., "claude-haiku")
+pub fn generate_custom_provider_profile(
+    provider_name: String,
+    api_endpoint: String,
     api_key: Option<String>,
+    smart_model: String,
+    eco_model: String,
 ) -> ProfileConfig {
     ProfileConfig {
         provider: Some(ProviderType::Local),
-        smart_model: Some(model.clone()),
-        eco_model: Some(model),
-        openai: Some(OpenAIConfig {
+        smart_model: Some(format!("{}/{}", provider_name, smart_model)),
+        eco_model: Some(format!("{}/{}", provider_name, eco_model)),
+        custom_providers: Some(vec![CustomProvider {
+            name: provider_name,
+            api_endpoint,
             api_key,
-            api_endpoint: Some(endpoint),
-        }),
+        }]),
         ..ProfileConfig::default()
     }
+}
+
+/// Migrate old BYOM configuration to use custom_providers
+///
+/// Old BYOM configs used `openai.api_endpoint` to specify a custom endpoint.
+/// This function migrates those configs to use the new `custom_providers` field.
+///
+/// Migration rules:
+/// - If `openai.api_endpoint` is set and `custom_providers` is None, migrate
+/// - If model has a "/" prefix, use that as provider name; otherwise use the profile name
+/// - Clear the openai config after migration (it was only used for BYOM, not real OpenAI)
+pub fn migrate_byom_to_custom_provider(
+    mut profile: ProfileConfig,
+    profile_name: &str,
+) -> ProfileConfig {
+    // Skip if already has custom_providers
+    if profile.custom_providers.is_some() {
+        return profile;
+    }
+
+    // Check if this is a BYOM config (has openai.api_endpoint set)
+    let should_migrate = profile
+        .openai
+        .as_ref()
+        .map(|o| o.api_endpoint.is_some())
+        .unwrap_or(false);
+
+    if !should_migrate {
+        return profile;
+    }
+
+    // Extract info from openai config
+    let openai = profile.openai.take().unwrap();
+    let api_endpoint = openai.api_endpoint.unwrap();
+    let api_key = openai.api_key;
+
+    // Extract provider name from smart_model (e.g., "litellm/claude" -> "litellm")
+    // If no "/" found, use the profile name as the provider name
+    let (provider_name, needs_model_update) = profile
+        .smart_model
+        .as_ref()
+        .and_then(|m| {
+            if m.contains('/') {
+                m.split('/').next().map(|p| (p.to_string(), false))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| (profile_name.to_string(), true));
+
+    // Update model names if they don't have provider prefix
+    if needs_model_update {
+        if let Some(ref model) = profile.smart_model {
+            profile.smart_model = Some(format!("{}/{}", provider_name, model));
+        }
+        if let Some(ref model) = profile.eco_model {
+            profile.eco_model = Some(format!("{}/{}", provider_name, model));
+        }
+    }
+
+    // Create custom provider
+    profile.custom_providers = Some(vec![CustomProvider {
+        name: provider_name,
+        api_endpoint,
+        api_key,
+    }]);
+
+    profile
 }
 
 /// Hybrid model configuration for smart or eco model
@@ -195,5 +277,234 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
         }
     }
 
+    if let Some(ref custom_providers) = profile.custom_providers {
+        for cp in custom_providers {
+            toml.push_str("\n[[profiles.default.custom_providers]]\n");
+            toml.push_str(&format!("name = \"{}\"\n", cp.name));
+            toml.push_str(&format!("api_endpoint = \"{}\"\n", cp.api_endpoint));
+            if let Some(ref key) = cp.api_key {
+                toml.push_str(&format!(
+                    "api_key = \"{}\"\n",
+                    if key.is_empty() { "" } else { "***" }
+                ));
+            }
+        }
+    }
+
     toml
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::CustomProvider;
+
+    #[test]
+    fn test_generate_custom_provider_profile() {
+        let profile = generate_custom_provider_profile(
+            "litellm".to_string(),
+            "http://localhost:4000".to_string(),
+            Some("sk-1234".to_string()),
+            "claude-opus".to_string(),
+            "claude-haiku".to_string(),
+        );
+
+        assert!(matches!(profile.provider, Some(ProviderType::Local)));
+        assert_eq!(profile.smart_model, Some("litellm/claude-opus".to_string()));
+        assert_eq!(profile.eco_model, Some("litellm/claude-haiku".to_string()));
+
+        let custom_providers = profile
+            .custom_providers
+            .expect("custom_providers should be set");
+        assert_eq!(custom_providers.len(), 1);
+        assert_eq!(custom_providers[0].name, "litellm");
+        assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
+        assert_eq!(custom_providers[0].api_key, Some("sk-1234".to_string()));
+    }
+
+    #[test]
+    fn test_generate_custom_provider_profile_without_api_key() {
+        let profile = generate_custom_provider_profile(
+            "ollama".to_string(),
+            "http://localhost:11434/v1".to_string(),
+            None,
+            "llama3".to_string(),
+            "llama3".to_string(),
+        );
+
+        assert!(matches!(profile.provider, Some(ProviderType::Local)));
+        assert_eq!(profile.smart_model, Some("ollama/llama3".to_string()));
+        assert_eq!(profile.eco_model, Some("ollama/llama3".to_string()));
+
+        let custom_providers = profile
+            .custom_providers
+            .expect("custom_providers should be set");
+        assert_eq!(custom_providers.len(), 1);
+        assert_eq!(custom_providers[0].name, "ollama");
+        assert_eq!(custom_providers[0].api_key, None);
+    }
+
+    #[test]
+    fn test_config_to_toml_preview_with_custom_providers() {
+        let profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("litellm/claude-opus".to_string()),
+            eco_model: Some("litellm/claude-haiku".to_string()),
+            custom_providers: Some(vec![CustomProvider {
+                name: "litellm".to_string(),
+                api_endpoint: "http://localhost:4000".to_string(),
+                api_key: Some("sk-1234".to_string()),
+            }]),
+            ..ProfileConfig::default()
+        };
+
+        let toml = config_to_toml_preview(&profile);
+
+        assert!(toml.contains("provider = \"local\""));
+        assert!(toml.contains("smart_model = \"litellm/claude-opus\""));
+        assert!(toml.contains("eco_model = \"litellm/claude-haiku\""));
+        assert!(toml.contains("[[profiles.default.custom_providers]]"));
+        assert!(toml.contains("name = \"litellm\""));
+        assert!(toml.contains("api_endpoint = \"http://localhost:4000\""));
+        assert!(toml.contains("api_key = \"***\"")); // Should be masked
+    }
+
+    #[test]
+    fn test_config_to_toml_preview_custom_provider_no_api_key() {
+        let profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("ollama/llama3".to_string()),
+            eco_model: Some("ollama/llama3".to_string()),
+            custom_providers: Some(vec![CustomProvider {
+                name: "ollama".to_string(),
+                api_endpoint: "http://localhost:11434/v1".to_string(),
+                api_key: None,
+            }]),
+            ..ProfileConfig::default()
+        };
+
+        let toml = config_to_toml_preview(&profile);
+
+        assert!(toml.contains("[[profiles.default.custom_providers]]"));
+        assert!(toml.contains("name = \"ollama\""));
+        assert!(toml.contains("api_endpoint = \"http://localhost:11434/v1\""));
+        assert!(!toml.contains("api_key")); // Should not have api_key line
+    }
+
+    #[test]
+    fn test_migrate_byom_to_custom_provider() {
+        // Old BYOM config using openai.api_endpoint
+        let old_byom_profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("qwen/qwen-2.5-coder-32b".to_string()),
+            eco_model: Some("qwen/qwen-2.5-coder-32b".to_string()),
+            openai: Some(OpenAIConfig {
+                api_key: Some("sk-old-key".to_string()),
+                api_endpoint: Some("http://localhost:4000".to_string()),
+            }),
+            custom_providers: None,
+            ..ProfileConfig::default()
+        };
+
+        let migrated = migrate_byom_to_custom_provider(old_byom_profile, "default");
+
+        // Should have custom_providers now
+        let custom_providers = migrated
+            .custom_providers
+            .expect("custom_providers should be set after migration");
+        assert_eq!(custom_providers.len(), 1);
+
+        // Provider name should be extracted from smart_model prefix
+        assert_eq!(custom_providers[0].name, "qwen");
+        assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
+        assert_eq!(custom_providers[0].api_key, Some("sk-old-key".to_string()));
+
+        // openai config should be cleared (endpoint was for BYOM, not actual OpenAI)
+        assert!(migrated.openai.is_none());
+    }
+
+    #[test]
+    fn test_migrate_byom_preserves_real_openai_config() {
+        // A profile with actual OpenAI config (no custom api_endpoint)
+        let openai_profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("gpt-4".to_string()),
+            eco_model: Some("gpt-4o-mini".to_string()),
+            openai: Some(OpenAIConfig {
+                api_key: Some("sk-openai-key".to_string()),
+                api_endpoint: None, // No custom endpoint = real OpenAI
+            }),
+            custom_providers: None,
+            ..ProfileConfig::default()
+        };
+
+        let migrated = migrate_byom_to_custom_provider(openai_profile.clone(), "default");
+
+        // Should NOT migrate - openai config should remain
+        assert!(migrated.openai.is_some());
+        assert!(migrated.custom_providers.is_none());
+        assert_eq!(
+            migrated.openai.unwrap().api_key,
+            Some("sk-openai-key".to_string())
+        );
+    }
+
+    #[test]
+    fn test_migrate_byom_no_provider_prefix_in_model() {
+        // BYOM config where model doesn't have a prefix (edge case)
+        // Should use the profile name as the provider name
+        let old_byom_profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("some-model".to_string()), // No "/" prefix
+            eco_model: Some("some-model".to_string()),
+            openai: Some(OpenAIConfig {
+                api_key: Some("sk-key".to_string()),
+                api_endpoint: Some("http://localhost:4000".to_string()),
+            }),
+            custom_providers: None,
+            ..ProfileConfig::default()
+        };
+
+        let migrated = migrate_byom_to_custom_provider(old_byom_profile, "myprofile");
+
+        // Should still migrate, using the profile name as provider name
+        let custom_providers = migrated
+            .custom_providers
+            .expect("custom_providers should be set");
+        assert_eq!(custom_providers[0].name, "myprofile");
+        assert_eq!(
+            migrated.smart_model,
+            Some("myprofile/some-model".to_string())
+        );
+        assert_eq!(migrated.eco_model, Some("myprofile/some-model".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_byom_already_has_custom_providers() {
+        // Profile that already has custom_providers should not be modified
+        let profile = ProfileConfig {
+            provider: Some(ProviderType::Local),
+            smart_model: Some("litellm/claude".to_string()),
+            eco_model: Some("litellm/claude".to_string()),
+            openai: Some(OpenAIConfig {
+                api_key: Some("old-key".to_string()),
+                api_endpoint: Some("http://old-endpoint".to_string()),
+            }),
+            custom_providers: Some(vec![CustomProvider {
+                name: "litellm".to_string(),
+                api_endpoint: "http://localhost:4000".to_string(),
+                api_key: Some("new-key".to_string()),
+            }]),
+            ..ProfileConfig::default()
+        };
+
+        let migrated = migrate_byom_to_custom_provider(profile.clone(), "default");
+
+        // Should not change custom_providers
+        let custom_providers = migrated
+            .custom_providers
+            .expect("custom_providers should exist");
+        assert_eq!(custom_providers.len(), 1);
+        assert_eq!(custom_providers[0].api_key, Some("new-key".to_string()));
+    }
 }

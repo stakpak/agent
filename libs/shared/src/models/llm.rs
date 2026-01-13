@@ -14,7 +14,14 @@ pub enum LLMModel {
     Anthropic(AnthropicModel),
     Gemini(GeminiModel),
     OpenAI(OpenAIModel),
-    Custom(String),
+    /// Custom provider with explicit provider name and model
+    /// Used for custom OpenAI-compatible providers like LiteLLM, Ollama, etc.
+    Custom {
+        /// Provider name (e.g., "litellm", "ollama")
+        provider: String,
+        /// Model name to pass to the provider
+        model: String,
+    },
 }
 
 impl ContextAware for LLMModel {
@@ -23,7 +30,7 @@ impl ContextAware for LLMModel {
             LLMModel::Anthropic(model) => model.context_info(),
             LLMModel::Gemini(model) => model.context_info(),
             LLMModel::OpenAI(model) => model.context_info(),
-            LLMModel::Custom(_) => ModelContextInfo::default(),
+            LLMModel::Custom { .. } => ModelContextInfo::default(),
         }
     }
 
@@ -32,9 +39,20 @@ impl ContextAware for LLMModel {
             LLMModel::Anthropic(model) => model.model_name(),
             LLMModel::Gemini(model) => model.model_name(),
             LLMModel::OpenAI(model) => model.model_name(),
-            LLMModel::Custom(model_name) => model_name.clone(),
+            LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
         }
     }
+}
+
+/// Configuration for a custom OpenAI-compatible provider
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomProviderConfig {
+    /// Unique name for this provider (used in model strings like "litellm/claude-opus")
+    pub name: String,
+    /// API endpoint URL (e.g., "http://localhost:4000")
+    pub api_endpoint: String,
+    /// API key (optional, some providers don't require auth)
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug)]
@@ -42,32 +60,82 @@ pub struct LLMProviderConfig {
     pub anthropic_config: Option<AnthropicConfig>,
     pub gemini_config: Option<GeminiConfig>,
     pub openai_config: Option<OpenAIConfig>,
+    pub custom_providers: Option<Vec<CustomProviderConfig>>,
 }
 
 impl From<String> for LLMModel {
     fn from(value: String) -> Self {
-        if value.starts_with("claude-haiku-4-5") {
+        // First check for explicit provider/model format (e.g., "litellm/claude-opus-4-5")
+        if let Some((provider, model)) = value.split_once('/') {
+            // Check if it's a known built-in provider with explicit prefix
+            match provider {
+                "anthropic" => return Self::from_model_name(model),
+                "openai" => return Self::from_model_name(model),
+                "google" | "gemini" => return Self::from_model_name(model),
+                // Unknown provider = custom provider
+                _ => {
+                    return LLMModel::Custom {
+                        provider: provider.to_string(),
+                        model: model.to_string(),
+                    };
+                }
+            }
+        }
+
+        // Fall back to auto-detection by model name prefix
+        Self::from_model_name(&value)
+    }
+}
+
+impl LLMModel {
+    /// Parse model name without provider prefix
+    fn from_model_name(model: &str) -> Self {
+        if model.starts_with("claude-haiku-4-5") {
             LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-        } else if value.starts_with("claude-sonnet-4-5") {
+        } else if model.starts_with("claude-sonnet-4-5") {
             LLMModel::Anthropic(AnthropicModel::Claude45Sonnet)
-        } else if value.starts_with("claude-opus-4-5") {
+        } else if model.starts_with("claude-opus-4-5") {
             LLMModel::Anthropic(AnthropicModel::Claude45Opus)
-        } else if value == "gemini-2.5-flash-lite" {
+        } else if model == "gemini-2.5-flash-lite" {
             LLMModel::Gemini(GeminiModel::Gemini25FlashLite)
-        } else if value.starts_with("gemini-2.5-flash") {
+        } else if model.starts_with("gemini-2.5-flash") {
             LLMModel::Gemini(GeminiModel::Gemini25Flash)
-        } else if value.starts_with("gemini-2.5-pro") {
+        } else if model.starts_with("gemini-2.5-pro") {
             LLMModel::Gemini(GeminiModel::Gemini25Pro)
-        } else if value.starts_with("gemini-3-pro-preview") {
+        } else if model.starts_with("gemini-3-pro-preview") {
             LLMModel::Gemini(GeminiModel::Gemini3Pro)
-        } else if value.starts_with("gemini-3-flash-preview") {
+        } else if model.starts_with("gemini-3-flash-preview") {
             LLMModel::Gemini(GeminiModel::Gemini3Flash)
-        } else if value.starts_with("gpt-5-mini") {
+        } else if model.starts_with("gpt-5-mini") {
             LLMModel::OpenAI(OpenAIModel::GPT5Mini)
-        } else if value.starts_with("gpt-5") {
+        } else if model.starts_with("gpt-5") {
             LLMModel::OpenAI(OpenAIModel::GPT5)
         } else {
-            LLMModel::Custom(value)
+            // Unknown model without provider prefix - treat as custom with "custom" provider
+            LLMModel::Custom {
+                provider: "custom".to_string(),
+                model: model.to_string(),
+            }
+        }
+    }
+
+    /// Get the provider name for this model
+    pub fn provider_name(&self) -> &str {
+        match self {
+            LLMModel::Anthropic(_) => "anthropic",
+            LLMModel::Gemini(_) => "google",
+            LLMModel::OpenAI(_) => "openai",
+            LLMModel::Custom { provider, .. } => provider,
+        }
+    }
+
+    /// Get just the model name without provider prefix
+    pub fn model_id(&self) -> String {
+        match self {
+            LLMModel::Anthropic(m) => m.to_string(),
+            LLMModel::Gemini(m) => m.to_string(),
+            LLMModel::OpenAI(m) => m.to_string(),
+            LLMModel::Custom { model, .. } => model.clone(),
         }
     }
 }
@@ -78,7 +146,7 @@ impl Display for LLMModel {
             LLMModel::Anthropic(model) => write!(f, "{}", model),
             LLMModel::Gemini(model) => write!(f, "{}", model),
             LLMModel::OpenAI(model) => write!(f, "{}", model),
-            LLMModel::Custom(model) => write!(f, "{}", model),
+            LLMModel::Custom { provider, model } => write!(f, "{}/{}", provider, model),
         }
     }
 }
@@ -422,4 +490,176 @@ pub struct GenerationDeltaToolUse {
     pub name: Option<String>,
     pub input: Option<String>,
     pub index: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_llm_model_from_known_anthropic_model() {
+        let model = LLMModel::from("claude-opus-4-5-20251101".to_string());
+        assert!(matches!(
+            model,
+            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
+        ));
+    }
+
+    #[test]
+    fn test_llm_model_from_known_openai_model() {
+        let model = LLMModel::from("gpt-5".to_string());
+        assert!(matches!(model, LLMModel::OpenAI(OpenAIModel::GPT5)));
+    }
+
+    #[test]
+    fn test_llm_model_from_known_gemini_model() {
+        let model = LLMModel::from("gemini-2.5-flash".to_string());
+        assert!(matches!(
+            model,
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        ));
+    }
+
+    #[test]
+    fn test_llm_model_from_custom_provider_with_slash() {
+        let model = LLMModel::from("litellm/claude-opus-4-5".to_string());
+        match model {
+            LLMModel::Custom { provider, model } => {
+                assert_eq!(provider, "litellm");
+                assert_eq!(model, "claude-opus-4-5");
+            }
+            _ => panic!("Expected Custom model"),
+        }
+    }
+
+    #[test]
+    fn test_llm_model_from_ollama_provider() {
+        let model = LLMModel::from("ollama/llama3".to_string());
+        match model {
+            LLMModel::Custom { provider, model } => {
+                assert_eq!(provider, "ollama");
+                assert_eq!(model, "llama3");
+            }
+            _ => panic!("Expected Custom model"),
+        }
+    }
+
+    #[test]
+    fn test_llm_model_explicit_anthropic_prefix() {
+        // Explicit anthropic/ prefix should still parse to Anthropic variant
+        let model = LLMModel::from("anthropic/claude-opus-4-5".to_string());
+        assert!(matches!(
+            model,
+            LLMModel::Anthropic(AnthropicModel::Claude45Opus)
+        ));
+    }
+
+    #[test]
+    fn test_llm_model_explicit_openai_prefix() {
+        let model = LLMModel::from("openai/gpt-5".to_string());
+        assert!(matches!(model, LLMModel::OpenAI(OpenAIModel::GPT5)));
+    }
+
+    #[test]
+    fn test_llm_model_explicit_google_prefix() {
+        let model = LLMModel::from("google/gemini-2.5-flash".to_string());
+        assert!(matches!(
+            model,
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        ));
+    }
+
+    #[test]
+    fn test_llm_model_explicit_gemini_prefix() {
+        // gemini/ alias should also work
+        let model = LLMModel::from("gemini/gemini-2.5-flash".to_string());
+        assert!(matches!(
+            model,
+            LLMModel::Gemini(GeminiModel::Gemini25Flash)
+        ));
+    }
+
+    #[test]
+    fn test_llm_model_unknown_model_becomes_custom() {
+        let model = LLMModel::from("some-random-model".to_string());
+        match model {
+            LLMModel::Custom { provider, model } => {
+                assert_eq!(provider, "custom");
+                assert_eq!(model, "some-random-model");
+            }
+            _ => panic!("Expected Custom model"),
+        }
+    }
+
+    #[test]
+    fn test_llm_model_display_anthropic() {
+        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let s = model.to_string();
+        assert!(s.contains("claude"));
+    }
+
+    #[test]
+    fn test_llm_model_display_custom() {
+        let model = LLMModel::Custom {
+            provider: "litellm".to_string(),
+            model: "claude-opus".to_string(),
+        };
+        assert_eq!(model.to_string(), "litellm/claude-opus");
+    }
+
+    #[test]
+    fn test_llm_model_provider_name() {
+        assert_eq!(
+            LLMModel::Anthropic(AnthropicModel::Claude45Sonnet).provider_name(),
+            "anthropic"
+        );
+        assert_eq!(
+            LLMModel::OpenAI(OpenAIModel::GPT5).provider_name(),
+            "openai"
+        );
+        assert_eq!(
+            LLMModel::Gemini(GeminiModel::Gemini25Flash).provider_name(),
+            "google"
+        );
+        assert_eq!(
+            LLMModel::Custom {
+                provider: "litellm".to_string(),
+                model: "test".to_string()
+            }
+            .provider_name(),
+            "litellm"
+        );
+    }
+
+    #[test]
+    fn test_llm_model_model_id() {
+        let model = LLMModel::Custom {
+            provider: "litellm".to_string(),
+            model: "claude-opus-4-5".to_string(),
+        };
+        assert_eq!(model.model_id(), "claude-opus-4-5");
+    }
+
+    #[test]
+    fn test_custom_provider_config_creation() {
+        let config = CustomProviderConfig {
+            name: "litellm".to_string(),
+            api_endpoint: "http://localhost:4000".to_string(),
+            api_key: Some("sk-1234".to_string()),
+        };
+        assert_eq!(config.name, "litellm");
+        assert_eq!(config.api_endpoint, "http://localhost:4000");
+        assert_eq!(config.api_key, Some("sk-1234".to_string()));
+    }
+
+    #[test]
+    fn test_custom_provider_config_without_key() {
+        let config = CustomProviderConfig {
+            name: "ollama".to_string(),
+            api_endpoint: "http://localhost:11434/v1".to_string(),
+            api_key: None,
+        };
+        assert_eq!(config.name, "ollama");
+        assert!(config.api_key.is_none());
+    }
 }

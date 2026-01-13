@@ -18,8 +18,12 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     /// Create a new OpenAI provider
+    ///
+    /// Note: API key validation is skipped when a custom base URL is configured,
+    /// as OpenAI-compatible providers like Ollama may not require authentication.
     pub fn new(config: OpenAIConfig) -> Result<Self> {
-        if config.api_key.is_empty() {
+        let is_default_url = config.base_url == "https://api.openai.com/v1";
+        if config.api_key.is_empty() && is_default_url {
             return Err(Error::MissingApiKey("openai".to_string()));
         }
 

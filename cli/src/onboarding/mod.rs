@@ -8,7 +8,7 @@
 //! - Hybrid provider configurations (mixing providers)
 
 mod byom;
-mod config_templates;
+pub mod config_templates;
 pub mod menu;
 pub mod navigation;
 mod save_config;
@@ -971,7 +971,7 @@ fn select_model_for_provider(
     }
 }
 
-/// Handle BYOM setup
+/// Handle BYOM / Custom Provider setup
 /// Returns true if completed, false if cancelled/back
 async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
     let config_path = get_config_path_string(config);
@@ -996,6 +996,7 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
         config.openai = profile.openai.clone();
         config.anthropic = profile.anthropic.clone();
         config.gemini = profile.gemini.clone();
+        config.custom_providers = profile.custom_providers.clone();
         config.smart_model = profile.smart_model.clone();
         config.eco_model = profile.eco_model.clone();
         config.recovery_model = profile.recovery_model.clone();
@@ -1007,7 +1008,9 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
 
         true
     } else {
-        crate::onboarding::styled_output::render_warning("BYOM configuration cancelled.");
+        crate::onboarding::styled_output::render_warning(
+            "Custom provider configuration cancelled.",
+        );
         false
     }
 }

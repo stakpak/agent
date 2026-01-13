@@ -23,6 +23,7 @@ async fn test_local_db_operations() {
         anthropic_config: None,
         openai_config: None,
         gemini_config: None,
+        custom_providers: None,
         smart_model: None,
         eco_model: None,
         recovery_model: None,

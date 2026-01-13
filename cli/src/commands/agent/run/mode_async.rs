@@ -98,6 +98,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 anthropic_config: ctx.get_anthropic_config_with_auth(),
                 openai_config: ctx.get_openai_config_with_auth(),
                 gemini_config: ctx.get_gemini_config_with_auth(),
+                custom_providers: ctx.get_custom_providers_config(),
                 eco_model: ctx.eco_model.clone(),
                 recovery_model: ctx.recovery_model.clone(),
                 smart_model: ctx.smart_model.clone(),

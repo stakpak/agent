@@ -187,6 +187,7 @@ async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String
                 anthropic_config,
                 openai_config,
                 gemini_config,
+                custom_providers: config.get_custom_providers_config(),
                 eco_model: config.eco_model.clone(),
                 recovery_model: config.recovery_model.clone(),
                 smart_model: config.smart_model.clone(),

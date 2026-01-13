@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Request for generating AI completions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateRequest {
-    /// Model identifier (can be provider-prefixed like "openai:gpt-4")
+    /// Model identifier (can be provider-prefixed like "openai/gpt-4")
     #[serde(skip)]
     pub model: String,
 
