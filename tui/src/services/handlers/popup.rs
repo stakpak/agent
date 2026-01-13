@@ -441,13 +441,6 @@ pub fn handle_toggle_collapsed_messages(
     }
 }
 
-// ========== Context Popup Handlers ==========
-
-/// Handle toggle context popup event
-pub fn handle_toggle_context_popup(state: &mut AppState) {
-    state.show_context_popup = !state.show_context_popup;
-}
-
 // ========== Side Panel Handlers ==========
 
 /// Handle toggle side panel event

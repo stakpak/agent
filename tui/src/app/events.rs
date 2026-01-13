@@ -75,7 +75,6 @@ pub enum InputEvent {
     InteractiveStallDetected(String),
     AttemptQuit,
     ToggleCollapsedMessages,
-    ToggleContextPopup,
     ShowFileChangesPopup,
     FileChangesRevertFile,
     FileChangesRevertAll,

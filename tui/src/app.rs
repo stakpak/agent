@@ -160,9 +160,6 @@ pub struct AppState {
     pub show_shortcuts_popup: bool,
     pub shortcuts_scroll: usize,
 
-    // ========== Context Popup State ==========
-    pub show_context_popup: bool,
-
     // ========== File Changes Popup State ==========
     pub show_file_changes_popup: bool,
     pub file_changes_selected: usize,
@@ -361,7 +358,6 @@ impl AppState {
             show_collapsed_messages: false,
             collapsed_messages_scroll: 0,
             collapsed_messages_selected: 0,
-            show_context_popup: false,
             is_git_repo,
             message_lines_cache: None,
             collapsed_message_lines_cache: None,

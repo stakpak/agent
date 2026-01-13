@@ -551,6 +551,12 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         total_tokens: 0,
         prompt_tokens_details: None,
     };
+    state.current_message_usage = LLMTokenUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        prompt_tokens_details: None,
+    };
 
     let _ = output_tx.try_send(OutputEvent::ResumeSession);
 
@@ -572,6 +578,12 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
 
     // Reset usage for the new session
     state.total_session_usage = LLMTokenUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        prompt_tokens_details: None,
+    };
+    state.current_message_usage = LLMTokenUsage {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,

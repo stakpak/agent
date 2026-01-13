@@ -239,10 +239,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
-
-    if state.show_context_popup {
-        crate::services::context_popup::render_context_popup(f, state);
-    }
 }
 
 // Calculate how many lines the input will take up when wrapped

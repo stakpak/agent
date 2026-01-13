@@ -1354,19 +1354,20 @@ pub fn render_refreshed_terminal_bubble(
     render_styled_header_and_borders(title, content.to_vec(), colors, terminal_width)
 }
 
-pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
-    let tool_call_name = crate::utils::strip_tool_name(&tool_call.function.name);
-    let tool_calls = [
-        "view",
-        "search_memory",
-        "search_docs",
-        "read_rulebook",
-        "local_code_search",
-    ];
-    if tool_calls.contains(&tool_call_name) {
-        return true;
-    }
-    false
+pub fn is_collapsed_tool_call(_tool_call: &ToolCall) -> bool {
+    // let tool_call_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    // let tool_calls = [
+    //     "view",
+    //     "search_memory",
+    //     "search_docs",
+    //     "read_rulebook",
+    //     "local_code_search",
+    // ];
+    // if tool_calls.contains(&tool_call_name) {
+    //     return true;
+    // }
+    // collapse all tool calls
+    true
 }
 
 pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &mut AppState) {
