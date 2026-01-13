@@ -224,7 +224,7 @@ impl AppConfig {
         }
     }
 
-    /// Migrate legacy provider configs (openai, anthropic, gemini, custom_providers)
+    /// Migrate legacy provider configs (openai, anthropic, gemini)
     /// to the new unified `providers` HashMap format.
     fn migrate_legacy_provider_configs<P: AsRef<Path>>(
         config_path: P,
@@ -830,7 +830,6 @@ impl From<AppConfig> for ProfileConfig {
             openai: None,
             anthropic: None,
             gemini: None,
-            custom_providers: None,
             eco_model: config.eco_model,
             smart_model: config.smart_model,
             recovery_model: config.recovery_model,

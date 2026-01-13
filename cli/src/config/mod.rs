@@ -2,7 +2,7 @@
 //!
 //! This module handles loading, saving, and managing configuration including:
 //! - Profile configurations (per-environment settings)
-//! - Provider configurations (OpenAI, Anthropic, Gemini, custom providers)
+//! - Provider configurations (OpenAI, Anthropic, Gemini)
 //! - Rulebook filtering
 //! - Warden (runtime security) settings
 //! - Authentication and credential resolution
@@ -22,10 +22,6 @@ pub use app::AppConfig;
 pub use file::ConfigFile;
 pub use profile::ProfileConfig;
 pub use types::ProviderType;
-
-// Re-export LegacyCustomProvider for backward compatibility
-#[allow(deprecated, unused_imports)]
-pub use profile::LegacyCustomProvider as CustomProvider;
 
 // Re-export for internal use (used by tests and submodules)
 #[allow(unused_imports)]

@@ -798,40 +798,6 @@ api_key = "gemini-key"
     assert_eq!(gemini.api_key(), Some("gemini-key"));
 }
 
-#[test]
-fn test_legacy_custom_providers_toml_parsing() {
-    // Test that legacy format still parses correctly
-    let toml_str = r#"
-[settings]
-
-[profiles.litellm]
-provider = "local"
-eco_model = "litellm/claude-opus-4-5"
-smart_model = "litellm/claude-opus-4-5"
-
-[[profiles.litellm.custom_providers]]
-name = "litellm"
-api_endpoint = "http://localhost:4000"
-api_key = "sk-1234"
-"#;
-
-    let config: ConfigFile = toml::from_str(toml_str).expect("Failed to parse toml");
-
-    let profile = config
-        .profiles
-        .get("litellm")
-        .expect("litellm profile not found");
-
-    // Legacy custom_providers should still parse
-    let custom_providers = profile
-        .custom_providers
-        .as_ref()
-        .expect("custom_providers not found");
-    assert_eq!(custom_providers.len(), 1);
-    assert_eq!(custom_providers[0].name, "litellm");
-    assert_eq!(custom_providers[0].api_endpoint, "http://localhost:4000");
-}
-
 // =============================================================================
 // Legacy Provider Migration Tests
 // =============================================================================
@@ -874,49 +840,6 @@ api_key = "sk-ant-key"
     let saved_content = std::fs::read_to_string(&config_path).unwrap();
     assert!(saved_content.contains("[profiles.default.providers.openai]"));
     assert!(saved_content.contains("[profiles.default.providers.anthropic]"));
-}
-
-#[test]
-fn test_legacy_custom_providers_migration() {
-    let dir = TempDir::new().unwrap();
-    let config_path = dir.path().join("config.toml");
-
-    let old_config = r#"
-[settings]
-
-[profiles.default]
-provider = "local"
-smart_model = "litellm/claude-opus"
-eco_model = "litellm/claude-opus"
-
-[[profiles.default.custom_providers]]
-name = "litellm"
-api_endpoint = "http://localhost:4000"
-api_key = "sk-litellm"
-"#;
-    std::fs::write(&config_path, old_config).unwrap();
-
-    let config_file = AppConfig::load_config_file(&config_path).unwrap();
-    let profile = config_file.profiles.get("default").unwrap();
-
-    // Should have migrated to providers HashMap
-    let provider = profile
-        .providers
-        .get("litellm")
-        .expect("litellm provider should exist");
-    match provider {
-        ProviderConfig::Custom {
-            api_key,
-            api_endpoint,
-        } => {
-            assert_eq!(api_endpoint, "http://localhost:4000");
-            assert_eq!(api_key, &Some("sk-litellm".to_string()));
-        }
-        _ => panic!("Expected Custom provider"),
-    }
-
-    // Legacy field should be cleared
-    assert!(profile.custom_providers.is_none());
 }
 
 #[test]

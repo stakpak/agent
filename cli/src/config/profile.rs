@@ -34,11 +34,6 @@ use super::warden::WardenConfig;
 /// [profiles.myprofile]
 /// openai.api_key = "sk-..."
 /// anthropic.api_key = "sk-ant-..."
-///
-/// [[profiles.myprofile.custom_providers]]
-/// name = "litellm"
-/// api_endpoint = "http://localhost:4000"
-/// api_key = "sk-litellm"
 /// ```
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProfileConfig {
@@ -75,9 +70,6 @@ pub struct ProfileConfig {
     /// Anthropic configuration (legacy - use providers instead)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic: Option<AnthropicConfig>,
-    /// Custom OpenAI-compatible providers (legacy - use providers instead)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_providers: Option<Vec<LegacyCustomProvider>>,
 
     /// Eco (fast/cheap) model name
     pub eco_model: Option<String>,
@@ -85,18 +77,6 @@ pub struct ProfileConfig {
     pub smart_model: Option<String>,
     /// Recovery model name
     pub recovery_model: Option<String>,
-}
-
-/// Legacy custom provider configuration (for backward compatibility).
-/// Use `providers` with `type = "custom"` instead.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct LegacyCustomProvider {
-    /// Unique name for this provider (used in model strings like "litellm/claude-opus")
-    pub name: String,
-    /// API endpoint URL (e.g., "http://localhost:4000")
-    pub api_endpoint: String,
-    /// API key (optional, some providers don't require auth)
-    pub api_key: Option<String>,
 }
 
 impl ProfileConfig {
@@ -131,47 +111,20 @@ impl ProfileConfig {
     ///
     /// This converts:
     /// - `openai`, `anthropic`, `gemini` fields -> `providers["openai"]`, etc.
-    /// - `custom_providers` array -> `providers["name"]` for each custom provider
     ///
     /// Returns true if any migration was performed.
     #[allow(clippy::collapsible_if)]
     pub fn migrate_legacy_providers(&mut self) -> bool {
         let mut migrated = false;
 
-        // Migrate openai - check for BYOM (custom endpoint) first
+        // Migrate openai
         if let Some(openai) = self.openai.take() {
-            if let Some(api_endpoint) = openai.api_endpoint {
-                // BYOM config: openai.api_endpoint was used for custom providers
-                // Extract provider name from smart_model (e.g., "litellm/claude" -> "litellm")
-                // Only use prefix if model contains '/', otherwise use "custom"
-                let provider_name = self
-                    .smart_model
-                    .as_ref()
-                    .and_then(|m| {
-                        if m.contains('/') {
-                            m.split('/').next().map(|p| p.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| "custom".to_string());
-
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    self.providers.entry(provider_name)
-                {
-                    e.insert(ProviderConfig::Custom {
-                        api_key: openai.api_key,
-                        api_endpoint,
-                    });
-                    migrated = true;
-                }
-            } else if let std::collections::hash_map::Entry::Vacant(e) =
+            if let std::collections::hash_map::Entry::Vacant(e) =
                 self.providers.entry("openai".to_string())
             {
-                // Regular OpenAI config (no custom endpoint)
                 e.insert(ProviderConfig::OpenAI {
                     api_key: openai.api_key,
-                    api_endpoint: None,
+                    api_endpoint: openai.api_endpoint,
                 });
                 migrated = true;
             }
@@ -206,31 +159,12 @@ impl ProfileConfig {
             }
         }
 
-        // Migrate custom_providers
-        if let Some(custom_providers) = self.custom_providers.take() {
-            for cp in custom_providers {
-                if !self.providers.contains_key(&cp.name) {
-                    self.providers.insert(
-                        cp.name.clone(),
-                        ProviderConfig::Custom {
-                            api_key: cp.api_key,
-                            api_endpoint: cp.api_endpoint,
-                        },
-                    );
-                    migrated = true;
-                }
-            }
-        }
-
         migrated
     }
 
     /// Check if this profile has legacy provider fields that need migration.
     pub fn needs_provider_migration(&self) -> bool {
-        self.openai.is_some()
-            || self.anthropic.is_some()
-            || self.gemini.is_some()
-            || self.custom_providers.is_some()
+        self.openai.is_some() || self.anthropic.is_some() || self.gemini.is_some()
     }
 
     /// Merge this profile with another, using self's values if present.
@@ -284,10 +218,6 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
-            custom_providers: self
-                .custom_providers
-                .clone()
-                .or_else(|| other.and_then(|config| config.custom_providers.clone())),
             eco_model: self
                 .eco_model
                 .clone()
@@ -300,16 +230,6 @@ impl ProfileConfig {
                 .recovery_model
                 .clone()
                 .or_else(|| other.and_then(|config| config.recovery_model.clone())),
-        }
-    }
-}
-
-impl LegacyCustomProvider {
-    /// Convert to unified ProviderConfig.
-    pub fn to_provider_config(&self) -> ProviderConfig {
-        ProviderConfig::Custom {
-            api_key: self.api_key.clone(),
-            api_endpoint: self.api_endpoint.clone(),
         }
     }
 }

@@ -279,7 +279,6 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stakpak_shared::models::integrations::openai::OpenAIConfig;
 
     #[test]
     fn test_generate_custom_provider_profile() {
@@ -343,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_to_toml_preview_with_custom_providers() {
+    fn test_config_to_toml_preview_with_custom_provider() {
         let mut profile = ProfileConfig {
             provider: Some(ProviderType::Local),
             smart_model: Some("litellm/claude-opus".to_string()),
@@ -398,136 +397,5 @@ mod tests {
             .take_while(|l| !l.starts_with('[') || l.contains("providers.ollama"))
             .any(|l| l.contains("api_key"));
         assert!(!has_api_key_in_ollama_section);
-    }
-
-    #[test]
-    fn test_migrate_byom_to_providers() {
-        // Old BYOM config using openai.api_endpoint
-        let mut profile = ProfileConfig {
-            provider: Some(ProviderType::Local),
-            smart_model: Some("qwen/qwen-2.5-coder-32b".to_string()),
-            eco_model: Some("qwen/qwen-2.5-coder-32b".to_string()),
-            openai: Some(OpenAIConfig {
-                api_key: Some("sk-old-key".to_string()),
-                api_endpoint: Some("http://localhost:4000".to_string()),
-            }),
-            ..ProfileConfig::default()
-        };
-
-        profile.migrate_legacy_providers();
-
-        // Should have providers entry now
-        let provider = profile
-            .providers
-            .get("qwen")
-            .expect("qwen provider should exist");
-        match provider {
-            ProviderConfig::Custom {
-                api_key,
-                api_endpoint,
-            } => {
-                assert_eq!(api_endpoint, "http://localhost:4000");
-                assert_eq!(api_key, &Some("sk-old-key".to_string()));
-            }
-            _ => panic!("Expected Custom provider"),
-        }
-
-        // openai config should be cleared (endpoint was for BYOM, not actual OpenAI)
-        assert!(profile.openai.is_none());
-    }
-
-    #[test]
-    fn test_migrate_byom_preserves_real_openai_config() {
-        // A profile with actual OpenAI config (no custom api_endpoint)
-        let mut profile = ProfileConfig {
-            provider: Some(ProviderType::Local),
-            smart_model: Some("gpt-4".to_string()),
-            eco_model: Some("gpt-4o-mini".to_string()),
-            openai: Some(OpenAIConfig {
-                api_key: Some("sk-openai-key".to_string()),
-                api_endpoint: None, // No custom endpoint = real OpenAI
-            }),
-            ..ProfileConfig::default()
-        };
-
-        profile.migrate_legacy_providers();
-
-        // Should migrate to providers HashMap as OpenAI type
-        assert!(profile.openai.is_none()); // Consumed by migration
-        let openai = profile
-            .providers
-            .get("openai")
-            .expect("openai should exist");
-        match openai {
-            ProviderConfig::OpenAI { api_key, .. } => {
-                assert_eq!(api_key, &Some("sk-openai-key".to_string()));
-            }
-            _ => panic!("Expected OpenAI provider"),
-        }
-    }
-
-    #[test]
-    fn test_migrate_byom_no_provider_prefix_in_model() {
-        // BYOM config where model doesn't have a prefix (edge case)
-        // Should use "custom" as the provider name
-        let mut profile = ProfileConfig {
-            provider: Some(ProviderType::Local),
-            smart_model: Some("some-model".to_string()), // No "/" prefix
-            eco_model: Some("some-model".to_string()),
-            openai: Some(OpenAIConfig {
-                api_key: Some("sk-key".to_string()),
-                api_endpoint: Some("http://localhost:4000".to_string()),
-            }),
-            ..ProfileConfig::default()
-        };
-
-        profile.migrate_legacy_providers();
-
-        // Should migrate, using "custom" as provider name (no prefix in model)
-        let provider = profile
-            .providers
-            .get("custom")
-            .expect("custom provider should exist");
-        assert!(matches!(provider, ProviderConfig::Custom { .. }));
-    }
-
-    #[test]
-    fn test_migrate_byom_already_has_provider() {
-        // Profile that already has the provider in providers HashMap should not be modified
-        let mut profile = ProfileConfig {
-            provider: Some(ProviderType::Local),
-            smart_model: Some("litellm/claude".to_string()),
-            eco_model: Some("litellm/claude".to_string()),
-            openai: Some(OpenAIConfig {
-                api_key: Some("old-key".to_string()),
-                api_endpoint: Some("http://old-endpoint".to_string()),
-            }),
-            ..ProfileConfig::default()
-        };
-        profile.providers.insert(
-            "litellm".to_string(),
-            ProviderConfig::Custom {
-                api_endpoint: "http://localhost:4000".to_string(),
-                api_key: Some("new-key".to_string()),
-            },
-        );
-
-        profile.migrate_legacy_providers();
-
-        // Should not change providers - litellm already existed
-        let provider = profile
-            .providers
-            .get("litellm")
-            .expect("litellm should exist");
-        match provider {
-            ProviderConfig::Custom {
-                api_key,
-                api_endpoint,
-            } => {
-                assert_eq!(api_key, &Some("new-key".to_string()));
-                assert_eq!(api_endpoint, "http://localhost:4000");
-            }
-            _ => panic!("Expected Custom provider"),
-        }
     }
 }
