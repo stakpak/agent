@@ -50,6 +50,18 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ToggleContextPopup)
                 }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::ShowFileChangesPopup)
+                }
+                KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesRevertFile)
+                }
+                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesRevertAll)
+                }
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::FileChangesOpenEditor)
+                }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::RulebookSwitcherDeselectAll)
                 }
@@ -66,10 +78,10 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                     Some(InputEvent::InputCursorStart)
                 }
                 KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::AutoApproveCurrentTool)
+                    Some(InputEvent::ToggleSidePanel)
                 }
-                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::InputCursorEnd)
+                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(InputEvent::AutoApproveCurrentTool)
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
                     Some(InputEvent::InputCursorNextWord)
@@ -159,6 +171,9 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
         Event::Mouse(me) => match me.kind {
             MouseEventKind::ScrollUp => Some(InputEvent::ScrollUp),
             MouseEventKind::ScrollDown => Some(InputEvent::ScrollDown),
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                Some(InputEvent::MouseClick(me.column, me.row))
+            }
             _ => None,
         },
         Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),

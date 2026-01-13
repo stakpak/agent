@@ -7,7 +7,7 @@ use crate::services::commands::{CommandAction, CommandContext, execute_command, 
 use crate::services::helper_block::push_error_message;
 use crate::services::message::{Message, invalidate_message_lines_cache};
 use stakpak_shared::models::integrations::openai::{
-    ToolCall, ToolCallResult, ToolCallResultProgress,
+    ToolCall, ToolCallResult, ToolCallResultProgress, ToolCallResultStatus,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -264,8 +264,7 @@ pub fn clear_streaming_tool_results(state: &mut AppState) {
 
 /// Update session tool calls queue
 pub fn update_session_tool_calls_queue(state: &mut AppState, tool_call_result: &ToolCallResult) {
-    if tool_call_result.status
-        == stakpak_shared::models::integrations::openai::ToolCallResultStatus::Error
+    if tool_call_result.status == ToolCallResultStatus::Error
         && let Some(failed_idx) = state
             .tool_call_execution_order
             .iter()
@@ -327,5 +326,215 @@ pub fn execute_command_palette_selection(
         }
         state.text_area.set_text("");
         state.show_helper_dropdown = false;
+    }
+}
+
+/// Handle completed tool result event
+pub fn handle_tool_result(state: &mut AppState, result: ToolCallResult) {
+    use crate::services::changeset::FileEdit;
+
+    // Only process successful tool calls
+    if !matches!(result.status, ToolCallResultStatus::Success)
+        || result.result.contains("TOOL_CALL_REJECTED")
+    {
+        return;
+    }
+
+    let function_name = result.call.function.name.as_str();
+    let args_str = &result.call.function.arguments;
+
+    // Parse arguments
+    let args: serde_json::Value = match serde_json::from_str(args_str) {
+        Ok(v) => v,
+        Err(_) => return, // Should not happen if tool call was successful
+    };
+
+    // Normalize/Strip tool name for checking
+    let tool_name_stripped = crate::utils::strip_tool_name(function_name);
+
+    match tool_name_stripped {
+        "write_to_file" | "create" | "create_file" => {
+            if let Some(path) = args
+                .get("TargetFile")
+                .or(args.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                let code_content = args
+                    .get("CodeContent")
+                    .or(args.get("content"))
+                    .or(args.get("file_content"))
+                    .or(args.get("body"))
+                    .or(args.get("text"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let is_overwrite = args
+                    .get("Overwrite")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                // If no content in args but file exists, read from disk to count lines
+                let line_count = if code_content.is_empty() {
+                    std::fs::read_to_string(path)
+                        .map(|content| content.lines().count().max(1)) // At least 1 line for non-empty files
+                        .unwrap_or(0)
+                } else {
+                    code_content.lines().count()
+                };
+
+                let summary = if is_overwrite {
+                    "Overwrote file"
+                } else {
+                    "Created file"
+                };
+
+                let edit = FileEdit::new(summary.to_string())
+                    .with_stats(line_count, 0)
+                    .with_tool_call(result.call.clone());
+
+                state.changeset.track_file(path, edit);
+
+                // If file does not exist, mark it as Deleted immediately
+                if !std::path::Path::new(path).exists() {
+                    state.changeset.mark_removed(path, None);
+                }
+            }
+        }
+        "replace_file_content" | "multi_replace_file_content" | "str_replace" | "edit_file" => {
+            if let Some(path) = args
+                .get("TargetFile")
+                .or(args.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                // For str_replace, check if the changes are still present in the file
+                // This prevents tracking reverted or manually edited files
+                if tool_name_stripped == "str_replace"
+                    && let Some(new_str) = args.get("new_str").and_then(|v| v.as_str())
+                    && let Ok(current_content) = std::fs::read_to_string(path)
+                    && !current_content.contains(new_str)
+                {
+                    // File was reverted or manually edited, don't track it
+                    return;
+                }
+
+                // Parse diff from the result message
+                let (added, removed) = parse_diff_stats(&result.result);
+
+                let summary = if tool_name_stripped == "replace_file_content"
+                    || tool_name_stripped == "str_replace"
+                {
+                    "Edited file"
+                } else {
+                    "Multi-edit file"
+                };
+
+                // Extract diff preview - first few lines of the diff block
+                let diff_preview = extract_diff_preview(&result.result);
+
+                let mut edit = FileEdit::new(summary.to_string())
+                    .with_stats(added, removed)
+                    .with_tool_call(result.call.clone());
+
+                if let Some(preview) = diff_preview {
+                    edit = edit.with_diff_preview(preview);
+                }
+
+                state.changeset.track_file(path, edit);
+
+                // If file does not exist, mark it as Deleted immediately
+                if !std::path::Path::new(path).exists() {
+                    state.changeset.mark_removed(path, None);
+                }
+            }
+        }
+        "remove_file" | "delete_file" | "stakpak__remove" | "remove" => {
+            // Assuming remove_file takes "path" or "TargetFile"
+            if let Some(path) = args
+                .get("path")
+                .or(args.get("TargetFile"))
+                .and_then(|v| v.as_str())
+            {
+                // Extract backup path from result.result if available
+                let backup_path = extract_backup_path(&result.result);
+
+                state.changeset.mark_removed(path, backup_path);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Extract backup path from the XML output
+fn extract_backup_path(result: &str) -> Option<String> {
+    // Look for backup_path="..." in the result string
+    // Format: backup_path="/path/to/backup/file"
+    if let Some(start_idx) = result.find("backup_path=\"") {
+        let after_start = &result[start_idx + "backup_path=\"".len()..];
+        if let Some(end_idx) = after_start.find('"') {
+            return Some(after_start[..end_idx].to_string());
+        }
+    }
+    None
+}
+
+/// Parse added/removed lines from a diff string
+fn parse_diff_stats(message: &str) -> (usize, usize) {
+    let mut added = 0;
+    let mut removed = 0;
+    let mut in_diff_block = false;
+
+    for line in message.lines() {
+        if line.trim().starts_with("```diff") {
+            in_diff_block = true;
+            continue;
+        }
+        if line.trim().starts_with("```") && in_diff_block {
+            in_diff_block = false;
+            continue;
+        }
+
+        if in_diff_block {
+            // Skip diff headers
+            if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+                continue;
+            }
+
+            if line.starts_with('+') {
+                added += 1;
+            } else if line.starts_with('-') {
+                removed += 1;
+            }
+        }
+    }
+
+    (added, removed)
+}
+
+/// Extract the first few lines of the diff for preview
+fn extract_diff_preview(message: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut in_diff_block = false;
+
+    for line in message.lines() {
+        if line.trim().starts_with("```diff") {
+            in_diff_block = true;
+            continue;
+        }
+        if line.trim().starts_with("```") && in_diff_block {
+            break;
+        }
+
+        if in_diff_block {
+            lines.push(line);
+            if lines.len() >= 5 {
+                // Keep only first 5 lines
+                break;
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
     }
 }

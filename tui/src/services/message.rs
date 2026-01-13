@@ -4,7 +4,7 @@ use crate::services::bash_block::{
     render_file_diff_full, render_result_block, render_styled_block,
 };
 use crate::services::detect_term::AdaptiveColors;
-use crate::services::markdown_renderer::render_markdown_to_lines;
+use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
@@ -288,9 +288,9 @@ pub fn get_wrapped_styled_block_lines<'a>(
         .collect()
 }
 
-pub fn get_wrapped_markdown_lines(markdown: &str) -> Vec<(Line<'_>, Style)> {
+pub fn get_wrapped_markdown_lines(markdown: &str, width: usize) -> Vec<(Line<'_>, Style)> {
     let mut result = Vec::new();
-    let rendered_lines = render_markdown_to_lines(markdown).unwrap_or_default();
+    let rendered_lines = render_markdown_to_lines_with_width(markdown, width).unwrap_or_default();
     for line in rendered_lines {
         result.push((line, Style::default()));
     }
@@ -639,7 +639,8 @@ fn get_wrapped_message_lines_internal(
                 }
 
                 let borrowed_lines =
-                    render_markdown_to_lines(&cleaned.to_string()).unwrap_or_default();
+                    render_markdown_to_lines_with_width(&cleaned.to_string(), width)
+                        .unwrap_or_default();
                 // let borrowed_lines = get_wrapped_plain_lines(&cleaned, style, width);
                 for line in borrowed_lines {
                     all_lines.push((convert_line_to_owned(line), *style));
@@ -872,7 +873,7 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::Markdown(markdown) => {
-                let borrowed_lines = get_wrapped_markdown_lines(markdown);
+                let borrowed_lines = get_wrapped_markdown_lines(markdown, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }

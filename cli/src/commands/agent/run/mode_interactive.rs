@@ -5,7 +5,7 @@ use crate::commands::agent::run::checkpoint::{
 };
 use crate::commands::agent::run::helpers::{
     add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
-    tool_call_history_string, tool_result, user_message,
+    refresh_billing_info, tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -121,6 +121,7 @@ pub async fn run_interactive(
             include_tags: rb.include_tags,
             exclude_tags: rb.exclude_tags,
         });
+        let editor_command = ctx.editor.clone();
 
         let model_clone = model.clone();
         let auth_display_info_for_tui = ctx.get_auth_display_info();
@@ -140,6 +141,7 @@ pub async fn run_interactive(
                 current_profile_for_tui,
                 rulebook_config_for_tui,
                 model_clone,
+                editor_command,
                 auth_display_info_for_tui,
             )
             .await
@@ -221,6 +223,11 @@ pub async fn run_interactive(
 
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
+
+            // Fetch billing info (only for remote provider)
+            if matches!(provider_type, ProviderType::Remote) {
+                refresh_billing_info(client.as_ref(), &input_tx).await;
+            }
             // Load available profiles and send to TUI
             let profiles_config_path = ctx_clone.config_path.clone();
             let current_profile_name = ctx_clone.profile_name.clone();
@@ -977,6 +984,11 @@ pub async fn run_interactive(
                             InputEvent::TotalUsage(total_session_usage.clone()),
                         )
                         .await?;
+
+                        // Refresh billing info after each assistant message (only for remote provider)
+                        if matches!(provider_type, ProviderType::Remote) {
+                            refresh_billing_info(client.as_ref(), &input_tx).await;
+                        }
 
                         if current_session_id.is_none()
                             && let Some(checkpoint_id) =

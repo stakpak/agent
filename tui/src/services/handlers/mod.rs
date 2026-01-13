@@ -60,6 +60,57 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    state.scroll = state.scroll.max(0);
+
+    // Intercept keys for File Changes Popup
+    if state.show_file_changes_popup {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_file_changes_popup_cancel(state);
+                return;
+            }
+            InputEvent::FileChangesRevertAll => {
+                // Ctrl+Z to Revert All
+                popup::handle_file_changes_popup_revert_all(state);
+                return;
+            }
+            InputEvent::FileChangesRevertFile => {
+                // Ctrl+X to Revert single file
+                popup::handle_file_changes_popup_revert(state);
+                return;
+            }
+            InputEvent::FileChangesOpenEditor => {
+                // Ctrl+N to open in editor
+                popup::handle_file_changes_popup_open_editor(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_file_changes_popup_navigate(state, -1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_file_changes_popup_navigate(state, 1);
+                return;
+            }
+            InputEvent::InputChanged(c) => {
+                popup::handle_file_changes_popup_search_input(state, c);
+                return;
+            }
+            InputEvent::InputBackspace => {
+                popup::handle_file_changes_popup_backspace(state);
+                return;
+            }
+            InputEvent::MouseClick(col, row) => {
+                popup::handle_file_changes_popup_mouse_click(state, col, row);
+                return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
+
     // Intercept keys for Shell Mode (only when not loading)
     if state.show_shell_mode
         && state.active_shell_command.is_some()
@@ -436,8 +487,22 @@ pub fn update(
         InputEvent::ToggleContextPopup => {
             popup::handle_toggle_context_popup(state);
         }
+        InputEvent::ShowFileChangesPopup => {
+            popup::handle_show_file_changes_popup(state);
+        }
         InputEvent::ToggleMoreShortcuts => {
             popup::handle_toggle_more_shortcuts(state);
+        }
+
+        // Side panel handlers
+        InputEvent::ToggleSidePanel => {
+            popup::handle_toggle_side_panel(state);
+        }
+        InputEvent::SidePanelNextSection => {
+            popup::handle_side_panel_next_section(state);
+        }
+        InputEvent::SidePanelToggleSection => {
+            popup::handle_side_panel_toggle_section(state);
         }
 
         // Message handlers
@@ -491,6 +556,19 @@ pub fn update(
         InputEvent::ToggleMouseCapture => {
             misc::handle_toggle_mouse_capture(state);
         }
+        InputEvent::OpenFileInEditor => {
+            // Handled in file changes popup context above
+            // This match arm exists to satisfy exhaustive pattern matching
+        }
+        InputEvent::FileChangesRevertFile => {
+            // Handled in file changes popup context above
+        }
+        InputEvent::FileChangesRevertAll => {
+            // Handled in file changes popup context above
+        }
+        InputEvent::FileChangesOpenEditor => {
+            // Handled in file changes popup context above
+        }
         InputEvent::EmergencyClearTerminal => {
             // EmergencyClearTerminal is handled in event loop
         }
@@ -512,9 +590,23 @@ pub fn update(
         InputEvent::StreamModel(model) => {
             misc::handle_stream_model(state, model);
         }
+        InputEvent::BillingInfoLoaded(billing_info) => {
+            misc::handle_billing_info_loaded(state, billing_info);
+        }
         InputEvent::RunToolCall(_) => {}
-        InputEvent::ToolResult(_) => {}
+        InputEvent::ToolResult(_) => {
+            // NOTE: handle_tool_result is called in event_loop.rs before routing here,
+            // so we don't need to call it again to avoid double-counting file changes.
+        }
         InputEvent::ApprovalPopupSubmit => {}
+        InputEvent::MouseClick(col, row) => {
+            // Check if click is on file changes popup first
+            if state.show_file_changes_popup {
+                popup::handle_file_changes_popup_mouse_click(state, col, row);
+            } else {
+                popup::handle_side_panel_mouse_click(state, col, row);
+            }
+        }
     }
 
     navigation::adjust_scroll(state, message_area_height, message_area_width);

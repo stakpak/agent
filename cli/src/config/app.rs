@@ -59,6 +59,8 @@ pub struct AppConfig {
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
     pub collect_telemetry: Option<bool>,
+    /// Editor command
+    pub editor: Option<String>,
 }
 
 impl AppConfig {
@@ -163,6 +165,7 @@ impl AppConfig {
             recovery_model: profile_config.recovery_model,
             anonymous_id: settings.anonymous_id,
             collect_telemetry: settings.collect_telemetry,
+            editor: settings.editor,
         }
     }
 
@@ -784,6 +787,7 @@ impl From<AppConfig> for Settings {
             auto_append_gitignore: config.auto_append_gitignore,
             anonymous_id: config.anonymous_id,
             collect_telemetry: config.collect_telemetry,
+            editor: config.editor,
         }
     }
 }

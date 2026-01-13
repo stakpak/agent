@@ -115,9 +115,13 @@ impl FileSearch {
         // Build overrides to exclude .git directory
         let mut overrides_builder = OverrideBuilder::new(dir);
         overrides_builder.add("!.git/").ok();
-        let overrides = overrides_builder.build().unwrap_or_else(|_| {
-            OverrideBuilder::new(dir).build().unwrap()
-        });
+        let overrides = match overrides_builder.build() {
+            Ok(o) => o,
+            Err(_) => match OverrideBuilder::new(dir).build() {
+                Ok(o) => o,
+                Err(_) => return,
+            },
+        };
 
         // Use ignore crate for fast parallel directory walking
         let walker = WalkBuilder::new(dir)

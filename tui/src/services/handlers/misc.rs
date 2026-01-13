@@ -124,6 +124,12 @@ pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area
 
 /// Handle tab in normal mode
 fn handle_tab_normal(state: &mut AppState) {
+    // If side panel is visible and input is empty, cycle sections
+    if state.show_side_panel && state.text_area.text().is_empty() {
+        state.side_panel_focus = state.side_panel_focus.next();
+        return;
+    }
+
     // Check if we're already in helper dropdown mode
     if state.show_helper_dropdown {
         // If in file file_search mode, handle file selection
@@ -140,7 +146,16 @@ fn handle_tab_normal(state: &mut AppState) {
         // Handle helper selection - auto-complete the selected helper
         if !state.filtered_helpers.is_empty() && state.input().starts_with('/') {
             let selected_helper = &state.filtered_helpers[state.helper_selected];
-            state.text_area.set_text(selected_helper.command);
+            // Commands that take arguments should have a trailing space
+            let needs_space = matches!(selected_helper.command, "/editor" | "/toggle_auto_approve");
+            let new_text = if needs_space {
+                format!("{} ", selected_helper.command)
+            } else {
+                selected_helper.command.to_string()
+            };
+            state.text_area.set_text(&new_text);
+            // Position cursor at the end of the text
+            state.text_area.set_cursor(new_text.len());
             state.show_helper_dropdown = false;
             state.filtered_helpers.clear();
             state.helper_selected = 0;
@@ -273,6 +288,9 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     state.messages.push(Message::assistant(None, msg, None));
+
+    // Auto-show side panel on first message (assistant)
+    state.auto_show_side_panel();
 }
 
 /// Handle get status event
@@ -283,4 +301,12 @@ pub fn handle_get_status(state: &mut AppState, account_info: String) {
 /// Handle stream model event
 pub fn handle_stream_model(state: &mut AppState, model: LLMModel) {
     state.llm_model = Some(model);
+}
+
+/// Handle billing info loaded event
+pub fn handle_billing_info_loaded(
+    state: &mut AppState,
+    billing_info: stakpak_shared::models::billing::BillingResponse,
+) {
+    state.billing_info = Some(billing_info);
 }

@@ -186,3 +186,26 @@ pub fn add_agents_md(user_input: &str, agents_md: &AgentsMdInfo) -> (String, Str
     let formatted_input = format!("{}\n<agents_md>\n{}\n</agents_md>", user_input, agents_text);
     (formatted_input, agents_text)
 }
+
+/// Refresh billing info and send it to the TUI.
+/// This is used to update the balance display after assistant messages.
+pub async fn refresh_billing_info(
+    client: &dyn stakpak_api::AgentProvider,
+    input_tx: &tokio::sync::mpsc::Sender<stakpak_tui::InputEvent>,
+) {
+    if let Ok(account_data) = client.get_my_account().await {
+        let billing_username = account_data
+            .scope
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or(&account_data.username);
+
+        if let Ok(billing_info) = client.get_billing_info(billing_username).await {
+            let _ = crate::commands::agent::run::tui::send_input_event(
+                input_tx,
+                stakpak_tui::InputEvent::BillingInfoLoaded(billing_info),
+            )
+            .await;
+        }
+    }
+}

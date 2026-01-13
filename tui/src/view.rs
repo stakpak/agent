@@ -9,18 +9,43 @@ use crate::services::message::{
 use crate::services::message_pattern::spans_to_string;
 use crate::services::sessions_dialog::render_sessions_dialog;
 use crate::services::shell_popup;
+use crate::services::side_panel;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
+    // First, handle the horizontal split for the side panel
+    let (main_area, side_panel_area) = if state.show_side_panel {
+        // Fixed width of 32 characters for side panel
+        let panel_width = 32u16;
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(panel_width)])
+            .split(f.area());
+        // Add 1 char right margin to main area for symmetric spacing around the side panel divider
+        let main_with_margin = Rect {
+            x: horizontal_chunks[0].x,
+            y: horizontal_chunks[0].y,
+            width: horizontal_chunks[0].width.saturating_sub(1),
+            height: horizontal_chunks[0].height,
+        };
+        (main_with_margin, Some(horizontal_chunks[1]))
+    } else {
+        (f.area(), None)
+    };
+
+    // Render side panel if visible
+    if let Some(panel_area) = side_panel_area {
+        side_panel::render_side_panel(f, state, panel_area);
+    }
+
     // Calculate the required height for the input area based on content
-    let input_area_width = f.area().width.saturating_sub(4) as usize;
+    let input_area_width = main_area.width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16;
     let margin_height = 2;
@@ -59,7 +84,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
 
     // Calculate shell popup height (goes above input)
-    let shell_popup_height = shell_popup::calculate_popup_height(state, f.area().height);
+    let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
     // Hide input when shell popup is expanded (takes over input)
     let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
@@ -81,10 +106,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         constraints.push(Constraint::Length(dropdown_height));
     }
     constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
-    let chunks = ratatui::layout::Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.area());
+        .split(main_area);
 
     let message_area = chunks[0];
     let loading_area = chunks[1]; // Reserved line for loading indicator
@@ -155,12 +180,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     if state.show_collapsed_messages {
         render_collapsed_messages_popup(f, state);
-    } else if state.show_sessions_dialog {
-        render_sessions_dialog(f, state);
     } else if state.is_dialog_open {
     } else if state.shell_popup_visible && state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
-    } else {
+    } else if !state.show_sessions_dialog {
+        // Don't render input when sessions dialog is visible
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         render_file_search_dropdown(f, state, dropdown_area);
@@ -176,7 +200,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         render_hint_or_shortcuts(f, state, padded_hint_area);
     }
 
-    // Render approval popup LAST to ensure it appears on top of everything
+    // === POPUPS - rendered last to appear on top of side panel ===
+
+    // Render sessions dialog (on top of side panel)
+    if state.show_sessions_dialog {
+        render_sessions_dialog(f, state);
+    }
+
+    // Render approval popup to ensure it appears on top of everything
     if state.approval_popup.is_visible() {
         state.approval_popup.render(f, f.area());
     }
@@ -184,6 +215,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render profile switcher
     if state.show_profile_switcher {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
+    }
+
+    // Render file changes popup
+    if state.show_file_changes_popup {
+        crate::services::file_changes_popup::render_file_changes_popup(f, state);
     }
 
     // Render shortcuts popup
@@ -467,70 +503,13 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Reset utilization warnings before calculating
     state.context_usage_percent = 0;
-
-    // Right side: total tokens (if > 0) - hide when sessions dialog is open
-    let used_context = &state.current_message_usage;
     let total_width = area.width as usize;
     let mut final_spans = Vec::new();
 
     if !state.show_sessions_dialog {
-        if used_context.total_tokens > 0 {
-            // Get context info from model
-            let context_info = state
-                .llm_model
-                .as_ref()
-                .map(|model| model.context_info())
-                .unwrap_or_default();
-            let max_tokens = context_info.max_tokens as u32;
-
-            let capped_tokens = used_context.total_tokens.min(max_tokens);
-            let utilization_ratio = (capped_tokens as f64 / max_tokens as f64).clamp(0.0, 1.0);
-            let ctx_percentage = (utilization_ratio * 100.0).round() as u64;
-            let percentage_text = format!("{}% of ctx . ctrl+g", ctx_percentage);
-            let tokens_text = format!(
-                "consumed {} tokens",
-                crate::services::helper_block::format_number_with_separator(
-                    state.total_session_usage.total_tokens,
-                )
-            );
-
-            // Calculate high utilization threshold (e.g. 90%)
-            let high_util_threshold = (max_tokens as f64 * 0.9) as u32;
-            let high_utilization = capped_tokens >= high_util_threshold;
-
-            state.context_usage_percent = ctx_percentage;
-
-            // Calculate spacing to push tokens to the absolute right edge
-            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-            let total_adjusted_width = if state.loading {
-                total_width + 4
-            } else {
-                total_width
-            };
-            let total_text_len = tokens_text.len() + 3 + percentage_text.len();
-            let spacing = total_adjusted_width.saturating_sub(left_len + total_text_len);
-
-            // Add left content first
-            final_spans.extend(left_spans);
-
-            // Add spacing to push tokens to absolute right
-            if spacing > 0 {
-                final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
-            }
-
-            // Add tokens at the absolute right edge - all in gray
-            let token_style = if high_utilization {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-
-            final_spans.push(Span::styled(tokens_text, token_style));
-            final_spans.push(Span::styled(" · ", token_style));
-            final_spans.push(Span::styled(percentage_text, token_style));
-        } else {
-            // No tokens, show hint in the same right-aligned slot
-            let hint_text = "prompt to see ctx stats";
+        if !state.show_side_panel {
+            // No tokens and side panel is closed, show hint to open side panel
+            let hint_text = "ctrl+y side panel";
             let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
             let total_adjusted_width = if state.loading {
                 total_width + 4
@@ -549,6 +528,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
             ));
+        } else {
+            // Side panel is open, no hint needed - just extend with left content
+            final_spans.extend(left_spans);
         }
     } else {
         // Sessions dialog is open - just show left content

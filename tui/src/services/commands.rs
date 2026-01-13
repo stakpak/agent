@@ -237,7 +237,11 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/issue",
-            description: "Submit issue on GitHub repo",
+            description: "Report an issue or bug",
+        },
+        HelperCommand {
+            command: "/editor",
+            description: "Open file in external editor: /editor <path>",
         },
         HelperCommand {
             command: "/support",
@@ -414,12 +418,61 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             let _ = ctx.input_tx.try_send(InputEvent::ToggleMouseCapture);
             Ok(())
         }
+        "/editor" => {
+            // Parse path argument if provided: /editor <path>
+            let input = ctx.state.input().trim().to_string();
+            let path_arg = if let Some(stripped) = input.strip_prefix("/editor ") {
+                let path = stripped.trim();
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(path.to_string())
+                }
+            } else {
+                None
+            };
+
+            if let Some(path_str) = path_arg {
+                // Resolve the path - handle both absolute and relative paths
+                let path = std::path::Path::new(&path_str);
+                let resolved_path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    // Resolve relative path against current working directory
+                    std::env::current_dir().unwrap_or_default().join(path)
+                };
+
+                if resolved_path.exists() {
+                    ctx.state.pending_editor_open =
+                        Some(resolved_path.to_string_lossy().to_string());
+                    ctx.state.text_area.set_text("");
+                    ctx.state.show_helper_dropdown = false;
+                } else {
+                    push_error_message(
+                        ctx.state,
+                        &format!("File not found: {}", resolved_path.display()),
+                        None,
+                    );
+                    ctx.state.text_area.set_text("");
+                    ctx.state.show_helper_dropdown = false;
+                }
+            } else {
+                // No path provided - keep /editor with space so user can type path
+                // This makes /editor a standalone feature, not tied to changeset
+                let new_text = "/editor ";
+                ctx.state.text_area.set_text(new_text);
+                ctx.state.text_area.set_cursor(new_text.len());
+                ctx.state.show_helper_dropdown = false;
+            }
+            Ok(())
+        }
         "/shortcuts" => {
             ctx.state.text_area.set_text("");
             ctx.state.show_helper_dropdown = false;
             let _ = ctx.input_tx.try_send(InputEvent::ShowShortcuts);
             Ok(())
         }
+
         _ => Err(format!("Unknown command: {}", command_id)),
     }
 }

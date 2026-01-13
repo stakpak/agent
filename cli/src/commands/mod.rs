@@ -604,6 +604,9 @@ machine_name = "my-development-machine"
 
 # Automatically append .stakpak to .gitignore files
 auto_append_gitignore = true
+
+# Preferred external editor for /editor command (vim, nvim, nano, code, etc.)
+editor = "nano"
 "#
     );
 }

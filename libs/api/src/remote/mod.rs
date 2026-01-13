@@ -110,9 +110,9 @@ impl RemoteClient {
 
         match serde_json::from_value::<JsonRpcResponse<ToolsCallResponse>>(value.clone()) {
             Ok(response) => Ok(response.result.content),
-            Err(e) => {
-                eprintln!("Failed to deserialize response: {}", e);
-                eprintln!("Raw response: {}", value);
+            Err(_) => {
+                // eprintln!("Failed to deserialize response: {}", e);
+                // eprintln!("Raw response: {}", value);
                 Err("Failed to deserialize response:".into())
             }
         }
@@ -169,6 +169,36 @@ impl AgentProvider for RemoteClient {
                 eprintln!("Failed to deserialize response: {}", e);
                 eprintln!("Raw response: {}", value);
                 Err("Failed to deserialize response:".into())
+            }
+        }
+    }
+
+    async fn get_billing_info(
+        &self,
+        account_username: &str,
+    ) -> Result<stakpak_shared::models::billing::BillingResponse, String> {
+        // Billing endpoint is v2 and requires account username in path
+
+        let base = self.base_url.trim_end_matches("/v1");
+        let url = format!("{}/v2/{}/billing", base, account_username);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e: ReqwestError| e.to_string())?;
+
+        let response = self.handle_response_error(response).await?;
+
+        let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        match serde_json::from_value::<stakpak_shared::models::billing::BillingResponse>(
+            value.clone(),
+        ) {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                let error_msg = format!("Failed to deserialize billing response: {}", e);
+                Err(error_msg)
             }
         }
     }

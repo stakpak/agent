@@ -146,6 +146,25 @@ pub fn handle_input_submitted_event(
         state.approval_popup.escape();
         return;
     }
+
+    // Sessions dialog takes priority over side panel
+    if state.show_sessions_dialog {
+        // Let handle_input_submitted process it
+    }
+    // If side panel is visible and input is empty, Enter toggles the focused section
+    // This is safe because empty input has nothing to submit anyway
+    else if state.show_side_panel && state.text_area.text().is_empty() {
+        let current = state
+            .side_panel_section_collapsed
+            .get(&state.side_panel_focus)
+            .copied()
+            .unwrap_or(false);
+        state
+            .side_panel_section_collapsed
+            .insert(state.side_panel_focus, !current);
+        return;
+    }
+
     if !state.is_pasting {
         handle_input_submitted(
             state,
@@ -399,10 +418,37 @@ fn handle_input_submitted(
             }
             return; // Only return after executing a valid command
         }
+
         // IMPORTANT: If no matching helpers and not in file search,
-        // fall through to normal message submission below
-        // This fixes the issue where "/invalid" would not submit
+        // fall through to check for commands with arguments below
         state.show_helper_dropdown = false;
+    }
+
+    // Check if input starts with a known command that takes arguments
+    // This runs regardless of show_helper_dropdown state to handle cases like:
+    // - User types "/editor path/to/file" manually
+    // - User selects a file via @ dropdown, resulting in "/editor filename"
+    {
+        let input = state.input().to_string();
+        let command_with_args: Option<&str> = if input.starts_with("/editor ") {
+            Some("/editor")
+        } else if input.starts_with("/toggle_auto_approve ") {
+            Some("/toggle_auto_approve")
+        } else {
+            None
+        };
+
+        if let Some(command_id) = command_with_args {
+            let ctx = CommandContext {
+                state,
+                input_tx,
+                output_tx,
+            };
+            if let Err(e) = execute_command(command_id, ctx) {
+                push_error_message(state, &e, None);
+            }
+            return;
+        }
     }
 
     if !state.input().trim().is_empty() || !state.attached_images.is_empty() {
@@ -643,6 +689,7 @@ fn handle_input_submitted(
             }
 
             state.messages.push(Message::user(final_input, None));
+
             // Add spacing after user message
             state.messages.push(Message::plain_text(""));
             state.messages.push(Message::info("Approaching max context limit this will overload the model and might not work as expected. ctrl+g for more".to_string(), Some(Style::default().fg(Color::Yellow))));
