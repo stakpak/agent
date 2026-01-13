@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ignore::WalkBuilder;
+use ignore::overrides::OverrideBuilder;
 use nucleo_matcher::{
     Matcher, Utf32Str,
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
@@ -99,8 +100,8 @@ impl Default for FileSearch {
 }
 
 impl FileSearch {
-    /// Load all files from current directory using parallel walking with ignore crate
-    pub fn load_files_from_directory(&mut self, dir: &Path) {
+    /// Load all files and directories from current directory using parallel walking with ignore crate
+    pub fn scan_directory(&mut self, dir: &Path) {
         let dir_str = dir.to_string_lossy().to_string();
 
         // Only reload if directory changed or files are empty
@@ -111,10 +112,21 @@ impl FileSearch {
         self.file_suggestions.clear();
         self.last_directory = Some(dir_str);
 
+        // Build overrides to exclude .git directory
+        let mut overrides_builder = OverrideBuilder::new(dir);
+        overrides_builder.add("!.git/").ok();
+        let overrides = overrides_builder.build().unwrap_or_else(|_| {
+            OverrideBuilder::new(dir).build().unwrap()
+        });
+
         // Use ignore crate for fast parallel directory walking
         let walker = WalkBuilder::new(dir)
             .threads(2) // Use 2 threads for optimal performance
             .hidden(false) // Don't skip hidden files
+            .git_ignore(true) // Respect .gitignore files
+            .git_global(true) // Respect global gitignore
+            .git_exclude(true) // Respect .git/info/exclude
+            .overrides(overrides) // Exclude .git directory
             .require_git(false) // Don't require git to be present
             .build_parallel();
 
@@ -125,12 +137,20 @@ impl FileSearch {
             let file_suggestions = file_suggestions_clone.clone();
             Box::new(move |entry_result| {
                 if let Ok(entry) = entry_result
-                    && entry.file_type().is_some_and(|ft| ft.is_file())
+                    && let Some(ft) = entry.file_type()
+                    && (ft.is_file() || ft.is_dir())
                     && let Ok(rel_path) = entry.path().strip_prefix(dir)
                     && let Some(path_str) = rel_path.to_str()
+                    && !path_str.is_empty() // Skip the root directory itself
                     && let Ok(mut files) = file_suggestions.lock()
                 {
-                    files.push(path_str.to_string());
+                    // Append "/" to directories to distinguish them
+                    let entry_str = if ft.is_dir() {
+                        format!("{}/", path_str)
+                    } else {
+                        path_str.to_string()
+                    };
+                    files.push(entry_str);
                 }
                 ignore::WalkState::Continue
             })
@@ -226,7 +246,7 @@ impl FileSearch {
     /// Force reload files from directory (useful when files are created/deleted)
     pub fn force_reload_files(&mut self, dir: &Path) {
         self.clear_caches();
-        self.load_files_from_directory(dir);
+        self.scan_directory(dir);
     }
 }
 
@@ -290,7 +310,7 @@ pub fn handle_tab_trigger(state: &mut AppState) -> bool {
     if state.file_search.file_suggestions.is_empty()
         && let Ok(current_dir) = std::env::current_dir()
     {
-        state.file_search.load_files_from_directory(&current_dir);
+        state.file_search.scan_directory(&current_dir);
     }
 
     let current_word = get_current_word(state.input(), state.cursor_position(), None);
@@ -311,7 +331,7 @@ pub fn handle_at_trigger(input: &str, cursor_pos: usize, file_search: &mut FileS
     if file_search.file_suggestions.is_empty()
         && let Ok(current_dir) = std::env::current_dir()
     {
-        file_search.load_files_from_directory(&current_dir);
+        file_search.scan_directory(&current_dir);
     }
     let current_word = get_current_word(input, cursor_pos, Some('@'));
     file_search.filter_files(&current_word);
