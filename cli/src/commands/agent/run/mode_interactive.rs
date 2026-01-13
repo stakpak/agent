@@ -5,7 +5,7 @@ use crate::commands::agent::run::checkpoint::{
 };
 use crate::commands::agent::run::helpers::{
     add_agents_md, add_local_context, add_rulebooks, add_subagents, convert_tools_with_filter,
-    tool_call_history_string, tool_result, user_message,
+    refresh_billing_info, tool_call_history_string, tool_result, user_message,
 };
 use crate::commands::agent::run::mcp_init;
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
@@ -226,28 +226,7 @@ pub async fn run_interactive(
 
             // Fetch billing info (only for remote provider)
             if matches!(provider_type, ProviderType::Remote) {
-                let billing_username = data
-                    .scope
-                    .as_ref()
-                    .map(|s| s.name.as_str())
-                    .unwrap_or(&data.username);
-
-                match client.get_billing_info(billing_username).await {
-                    Ok(billing_info) => {
-                        let _ = send_input_event(
-                            &input_tx,
-                            InputEvent::BillingInfoLoaded(billing_info),
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        let _ = send_input_event(
-                            &input_tx,
-                            InputEvent::Error(format!("Failed to fetch billing info: {}", e)),
-                        )
-                        .await;
-                    }
-                }
+                refresh_billing_info(client.as_ref(), &input_tx).await;
             }
             // Load available profiles and send to TUI
             let profiles_config_path = ctx_clone.config_path.clone();
@@ -1005,6 +984,11 @@ pub async fn run_interactive(
                             InputEvent::TotalUsage(total_session_usage.clone()),
                         )
                         .await?;
+
+                        // Refresh billing info after each assistant message (only for remote provider)
+                        if matches!(provider_type, ProviderType::Remote) {
+                            refresh_billing_info(client.as_ref(), &input_tx).await;
+                        }
 
                         if current_session_id.is_none()
                             && let Some(checkpoint_id) =

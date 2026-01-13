@@ -198,8 +198,6 @@ impl AgentProvider for RemoteClient {
             Ok(response) => Ok(response),
             Err(e) => {
                 let error_msg = format!("Failed to deserialize billing response: {}", e);
-                eprintln!("{}", error_msg);
-                eprintln!("Raw response: {}", value);
                 Err(error_msg)
             }
         }

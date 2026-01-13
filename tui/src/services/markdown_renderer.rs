@@ -226,11 +226,22 @@ impl MarkdownStyle {
 
 pub struct MarkdownRenderer {
     pub style: MarkdownStyle,
+    pub content_width: Option<usize>,
 }
 
 impl MarkdownRenderer {
     pub fn new(style: MarkdownStyle) -> Self {
-        Self { style }
+        Self {
+            style,
+            content_width: None,
+        }
+    }
+
+    pub fn with_width(style: MarkdownStyle, width: usize) -> Self {
+        Self {
+            style,
+            content_width: Some(width),
+        }
     }
 
     // Improved parser with performance optimizations and limits
@@ -778,8 +789,11 @@ impl MarkdownRenderer {
     }
 
     fn get_terminal_width(&self) -> Option<usize> {
-        // Try to get terminal size using crossterm or similar
-        // This is a safe fallback that works in most terminals
+        // Use the explicitly set content width if available
+        if let Some(width) = self.content_width {
+            return Some(width.saturating_sub(6));
+        }
+        // Fallback to terminal size
         if let Ok((width, _)) = crossterm::terminal::size() {
             Some(width.saturating_sub(6) as usize)
         } else {
@@ -1512,6 +1526,21 @@ pub fn render_markdown_to_lines(
 
     let style = MarkdownStyle::adaptive(); // Use adaptive styling
     let renderer = MarkdownRenderer::new(style);
+    let components = renderer.parse_markdown(parsed_content.as_str())?;
+    let lines = renderer.render_to_lines(components);
+    Ok(lines)
+}
+
+/// Render markdown with an explicit content width for proper table sizing.
+/// Use this when the display area width is known (e.g., when side panel is open).
+pub fn render_markdown_to_lines_with_width(
+    markdown_content: &str,
+    width: usize,
+) -> Result<Vec<Line<'static>>, Box<dyn std::error::Error>> {
+    let parsed_content = xml_tags_to_markdown_headers(markdown_content);
+
+    let style = MarkdownStyle::adaptive();
+    let renderer = MarkdownRenderer::with_width(style, width);
     let components = renderer.parse_markdown(parsed_content.as_str())?;
     let lines = renderer.render_to_lines(components);
     Ok(lines)
