@@ -16,6 +16,7 @@ async fn test_gemini_generate() {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);
@@ -40,6 +41,7 @@ async fn test_gemini_streaming() {
             role: Role::User,
             content: "Count from 1 to 3".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);

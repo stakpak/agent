@@ -8,6 +8,7 @@ fn test_message_creation() {
         role: Role::User,
         content: "Hello".into(),
         name: None,
+        provider_options: None,
     };
     assert_eq!(msg.role, Role::User);
     assert_eq!(msg.text(), Some("Hello".to_string()));
@@ -19,6 +20,7 @@ fn test_message_system() {
         role: Role::System,
         content: "You are helpful".into(),
         name: None,
+        provider_options: None,
     };
     assert_eq!(msg.role, Role::System);
     assert_eq!(msg.text(), Some("You are helpful".to_string()));
@@ -30,6 +32,7 @@ fn test_message_assistant() {
         role: Role::Assistant,
         content: "I can help".into(),
         name: None,
+        provider_options: None,
     };
     assert_eq!(msg.role, Role::Assistant);
     assert_eq!(msg.text(), Some("I can help".to_string()));
@@ -41,6 +44,7 @@ fn test_message_with_name() {
         role: Role::User,
         content: "Hello".into(),
         name: Some("Alice".to_string()),
+        provider_options: None,
     };
     assert_eq!(msg.name, Some("Alice".to_string()));
 }
@@ -49,7 +53,7 @@ fn test_message_with_name() {
 fn test_content_part_text() {
     let part = ContentPart::text("Hello");
     match part {
-        ContentPart::Text { text } => assert_eq!(text, "Hello"),
+        ContentPart::Text { text, .. } => assert_eq!(text, "Hello"),
         _ => panic!("Expected text content"),
     }
 }
@@ -58,7 +62,7 @@ fn test_content_part_text() {
 fn test_content_part_image() {
     let part = ContentPart::image("https://example.com/image.jpg");
     match part {
-        ContentPart::Image { url, detail } => {
+        ContentPart::Image { url, detail, .. } => {
             assert_eq!(url, "https://example.com/image.jpg");
             assert_eq!(detail, None);
         }
@@ -70,7 +74,7 @@ fn test_content_part_image() {
 fn test_content_part_image_with_detail() {
     let part = ContentPart::image_with_detail("https://example.com/image.jpg", ImageDetail::High);
     match part {
-        ContentPart::Image { url, detail } => {
+        ContentPart::Image { url, detail, .. } => {
             assert_eq!(url, "https://example.com/image.jpg");
             assert_eq!(detail, Some(ImageDetail::High));
         }
@@ -81,11 +85,12 @@ fn test_content_part_image_with_detail() {
 #[test]
 fn test_generate_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.7);
@@ -99,11 +104,12 @@ fn test_generate_request_creation() {
 #[test]
 fn test_generate_request_simple() {
     let request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         }],
     );
     assert_eq!(request.messages.len(), 1);
@@ -173,6 +179,7 @@ fn test_response_text_extraction() {
         usage: Usage::default(),
         finish_reason: FinishReason::stop(),
         metadata: None,
+        warnings: None,
     };
 
     assert_eq!(response.text(), "Hello World");

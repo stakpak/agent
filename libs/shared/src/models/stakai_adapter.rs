@@ -7,7 +7,7 @@ use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMInput,
     LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent, LLMModel,
-    LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool,
+    LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool, ProviderConfig,
 };
 use futures::StreamExt;
 use stakai::{
@@ -81,7 +81,7 @@ pub fn from_stakai_message(msg: &Message) -> LLMMessage {
 /// Convert StakAI ContentPart to CLI LLMMessageTypedContent
 fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
     match part {
-        ContentPart::Text { text } => LLMMessageTypedContent::Text { text: text.clone() },
+        ContentPart::Text { text, .. } => LLMMessageTypedContent::Text { text: text.clone() },
         ContentPart::Image { url, .. } => {
             // Parse data URI back to base64
             let (media_type, data) = if url.starts_with("data:") {
@@ -112,6 +112,7 @@ fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
             id,
             name,
             arguments,
+            ..
         } => LLMMessageTypedContent::ToolCall {
             id: id.clone(),
             name: name.clone(),
@@ -120,6 +121,7 @@ fn from_stakai_content_part(part: &ContentPart) -> LLMMessageTypedContent {
         ContentPart::ToolResult {
             tool_call_id,
             content,
+            ..
         } => LLMMessageTypedContent::ToolResult {
             tool_use_id: tool_call_id.clone(),
             content: match content {
@@ -139,6 +141,7 @@ pub fn to_stakai_tool(tool: &LLMTool) -> Tool {
             description: tool.description.clone(),
             parameters: tool.input_schema.clone(),
         },
+        provider_options: None,
     }
 }
 
@@ -263,6 +266,8 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
+                    prompt_cache_key: None,
+                    prompt_cache_retention: None,
                 }))
             } else {
                 None
@@ -271,9 +276,10 @@ pub fn to_stakai_provider_options(
         LLMModel::Gemini(_) => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
                 thinking_budget: google.thinking_budget,
+                cached_content: None,
             })
         }),
-        LLMModel::Custom(_) => {
+        LLMModel::Custom { .. } => {
             // For custom models, try to infer from which options are set
             if let Some(anthropic) = &opts.anthropic {
                 let thinking = anthropic
@@ -299,11 +305,14 @@ pub fn to_stakai_provider_options(
                     system_message_mode: None,
                     store: None,
                     user: None,
+                    prompt_cache_key: None,
+                    prompt_cache_retention: None,
                 }))
             } else {
                 opts.google.as_ref().map(|google| {
                     ProviderOptions::Google(GoogleOptions {
                         thinking_budget: google.thinking_budget,
+                        cached_content: None,
                     })
                 })
             }
@@ -368,54 +377,163 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
 pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceConfig, String> {
     let mut inference_config = InferenceConfig::new();
 
-    if let Some(openai) = &config.openai_config
-        && let Some(api_key) = &openai.api_key
-    {
-        inference_config = inference_config.openai(api_key.clone(), openai.api_endpoint.clone());
-    }
-
-    // For Anthropic, check if we have OAuth access_token or API key
-    // OAuth tokens need to use Bearer auth, API keys use x-api-key header
-    if let Some(anthropic) = &config.anthropic_config {
-        let stakai_config = if let Some(ref access_token) = anthropic.access_token {
-            // OAuth authentication - uses Bearer token header
-            let mut cfg = StakaiAnthropicConfig::with_oauth(access_token);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
+    for (name, provider_config) in &config.providers {
+        match provider_config {
+            ProviderConfig::OpenAI {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    inference_config =
+                        inference_config.openai(api_key.clone(), api_endpoint.clone());
+                }
             }
-            Some(cfg)
-        } else if let Some(ref api_key) = anthropic.api_key {
-            // API key authentication - uses x-api-key header
-            let mut cfg = StakaiAnthropicConfig::new(api_key);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
-            }
-            Some(cfg)
-        } else {
-            None
-        };
+            ProviderConfig::Anthropic {
+                api_key,
+                api_endpoint,
+                access_token,
+            } => {
+                let stakai_config = if let Some(token) = access_token {
+                    // OAuth authentication - uses Bearer token header
+                    let mut cfg = StakaiAnthropicConfig::with_oauth(token);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else if let Some(key) = api_key {
+                    // API key authentication - uses x-api-key header
+                    let mut cfg = StakaiAnthropicConfig::new(key);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else {
+                    None
+                };
 
-        if let Some(cfg) = stakai_config {
-            inference_config = inference_config.anthropic_config(cfg);
+                if let Some(cfg) = stakai_config {
+                    inference_config = inference_config.anthropic_config(cfg);
+                }
+            }
+            ProviderConfig::Gemini {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    inference_config =
+                        inference_config.gemini(api_key.clone(), api_endpoint.clone());
+                }
+            }
+            ProviderConfig::Custom { .. } => {
+                // Custom providers are handled by build_provider_registry_direct
+                // InferenceConfig doesn't support custom providers directly
+                let _ = name; // Suppress unused warning
+            }
         }
-    }
-
-    if let Some(gemini) = &config.gemini_config
-        && let Some(api_key) = &gemini.api_key
-    {
-        inference_config = inference_config.gemini(api_key.clone(), gemini.api_endpoint.clone());
     }
 
     Ok(inference_config)
 }
 
+/// Build a ProviderRegistry directly with all providers including custom ones
+fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<ProviderRegistry, String> {
+    use stakai::providers::anthropic::{
+        AnthropicConfig as StakaiAnthropicConfig, AnthropicProvider,
+    };
+    use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
+    use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
+
+    let mut registry = ProviderRegistry::new();
+
+    for (name, provider_config) in &config.providers {
+        match provider_config {
+            ProviderConfig::OpenAI {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    let mut openai_config = StakaiOpenAIConfig::new(api_key.clone());
+                    if let Some(endpoint) = api_endpoint {
+                        openai_config = openai_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = OpenAIProvider::new(openai_config)
+                        .map_err(|e| format!("Failed to create OpenAI provider: {}", e))?;
+                    registry = registry.register("openai", provider);
+                }
+            }
+            ProviderConfig::Anthropic {
+                api_key,
+                api_endpoint,
+                access_token,
+            } => {
+                let stakai_config = if let Some(token) = access_token {
+                    let mut cfg = StakaiAnthropicConfig::with_oauth(token);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else if let Some(key) = api_key {
+                    let mut cfg = StakaiAnthropicConfig::new(key);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else {
+                    None
+                };
+
+                if let Some(cfg) = stakai_config {
+                    let provider = AnthropicProvider::new(cfg)
+                        .map_err(|e| format!("Failed to create Anthropic provider: {}", e))?;
+                    registry = registry.register("anthropic", provider);
+                }
+            }
+            ProviderConfig::Gemini {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    let mut gemini_config = StakaiGeminiConfig::new(api_key.clone());
+                    if let Some(endpoint) = api_endpoint {
+                        gemini_config = gemini_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = GeminiProvider::new(gemini_config)
+                        .map_err(|e| format!("Failed to create Gemini provider: {}", e))?;
+                    registry = registry.register("google", provider);
+                }
+            }
+            ProviderConfig::Custom {
+                api_key,
+                api_endpoint,
+            } => {
+                // Custom providers are registered as OpenAI-compatible providers.
+                // The provider is registered with the config key (e.g., "litellm") as its ID.
+                // When a model like "litellm/anthropic/claude-opus" is used:
+                // 1. "litellm" is matched to this provider
+                // 2. "anthropic/claude-opus" is sent as the model name to the API
+                let key = api_key.clone().unwrap_or_default();
+                let openai_config =
+                    StakaiOpenAIConfig::new(key).with_base_url(api_endpoint.clone());
+
+                let provider = OpenAIProvider::new(openai_config)
+                    .map_err(|e| format!("Failed to create custom provider '{}': {}", name, e))?;
+
+                // Register with the config key as provider ID (e.g., "litellm", "ollama")
+                registry = registry.register(name, provider);
+            }
+        }
+    }
+
+    Ok(registry)
+}
+
 /// Get model string with provider prefix for StakAI
 pub fn get_stakai_model_string(model: &LLMModel) -> String {
     match model {
-        LLMModel::Anthropic(m) => format!("anthropic:{}", m),
-        LLMModel::Gemini(m) => format!("google:{}", m),
-        LLMModel::OpenAI(m) => format!("openai:{}", m),
-        LLMModel::Custom(name) => name.clone(), // Custom models use OpenAI-compatible endpoint
+        LLMModel::Anthropic(m) => format!("anthropic/{}", m),
+        LLMModel::Gemini(m) => format!("google/{}", m),
+        LLMModel::OpenAI(m) => format!("openai/{}", m),
+        LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
     }
 }
 
@@ -427,12 +545,16 @@ pub struct StakAIClient {
 impl StakAIClient {
     /// Create a new StakAI client from CLI provider config
     pub fn new(config: &LLMProviderConfig) -> Result<Self, AgentError> {
-        let inference_config = build_inference_config(config)
+        // Build registry with all providers including custom ones
+        let registry = build_provider_registry_direct(config)
             .map_err(|e| AgentError::BadRequest(BadRequestErrorMessage::InvalidAgentInput(e)))?;
 
-        let inference = Inference::with_config(inference_config).map_err(|e| {
-            AgentError::BadRequest(BadRequestErrorMessage::InvalidAgentInput(e.to_string()))
-        })?;
+        let inference = Inference::builder()
+            .with_registry(registry)
+            .build()
+            .map_err(|e| {
+                AgentError::BadRequest(BadRequestErrorMessage::InvalidAgentInput(e.to_string()))
+            })?;
 
         Ok(Self { inference })
     }
@@ -1137,7 +1259,7 @@ mod tests {
     fn test_model_string_anthropic() {
         let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("anthropic:"));
+        assert!(model_str.starts_with("anthropic/"));
         assert!(model_str.contains("claude"));
     }
 
@@ -1145,7 +1267,7 @@ mod tests {
     fn test_model_string_openai() {
         let model = LLMModel::OpenAI(OpenAIModel::GPT5);
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("openai:"));
+        assert!(model_str.starts_with("openai/"));
         assert!(model_str.contains("gpt"));
     }
 
@@ -1153,15 +1275,18 @@ mod tests {
     fn test_model_string_gemini() {
         let model = LLMModel::Gemini(GeminiModel::Gemini25Flash);
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("google:"));
+        assert!(model_str.starts_with("google/"));
         assert!(model_str.contains("gemini"));
     }
 
     #[test]
     fn test_model_string_custom() {
-        let model = LLMModel::Custom("my-custom-model".to_string());
+        let model = LLMModel::Custom {
+            provider: "litellm".to_string(),
+            model: "claude-opus-4-5".to_string(),
+        };
         let model_str = get_stakai_model_string(&model);
-        assert_eq!(model_str, "my-custom-model");
+        assert_eq!(model_str, "litellm/claude-opus-4-5");
     }
 
     // ==================== Response Conversion Tests ====================
@@ -1175,6 +1300,7 @@ mod tests {
             usage: Usage::new(10, 5),
             finish_reason: FinishReason::stop(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "gpt-4");
@@ -1215,6 +1341,7 @@ mod tests {
             usage: Usage::new(20, 15),
             finish_reason: FinishReason::tool_calls(),
             metadata: None,
+            warnings: None,
         };
 
         let llm_response = from_stakai_response(response, "claude-3");
@@ -1333,11 +1460,7 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_empty() {
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: None,
-            gemini_config: None,
-        };
+        let config = LLMProviderConfig::new();
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1345,16 +1468,16 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_openai() {
-        use crate::models::integrations::openai::OpenAIConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: Some(OpenAIConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "openai",
+            ProviderConfig::OpenAI {
                 api_key: Some("sk-test-key".to_string()),
                 api_endpoint: Some("https://api.openai.com/v1".to_string()),
-            }),
-            gemini_config: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1362,17 +1485,17 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_anthropic() {
-        use crate::models::integrations::anthropic::AnthropicConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: Some(AnthropicConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "anthropic",
+            ProviderConfig::Anthropic {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
-            }),
-            openai_config: None,
-            gemini_config: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1380,16 +1503,16 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_gemini() {
-        use crate::models::integrations::gemini::GeminiConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: None,
-            gemini_config: Some(GeminiConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "gemini",
+            ProviderConfig::Gemini {
                 api_key: Some("gemini-test-key".to_string()),
                 api_endpoint: None,
-            }),
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1397,28 +1520,66 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_all_providers() {
-        use crate::models::integrations::anthropic::AnthropicConfig;
-        use crate::models::integrations::gemini::GeminiConfig;
-        use crate::models::integrations::openai::OpenAIConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: Some(AnthropicConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "anthropic",
+            ProviderConfig::Anthropic {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
-            }),
-            openai_config: Some(OpenAIConfig {
+            },
+        );
+        config.add_provider(
+            "openai",
+            ProviderConfig::OpenAI {
                 api_key: Some("sk-openai-test".to_string()),
                 api_endpoint: None,
-            }),
-            gemini_config: Some(GeminiConfig {
+            },
+        );
+        config.add_provider(
+            "gemini",
+            ProviderConfig::Gemini {
                 api_key: Some("gemini-test".to_string()),
                 api_endpoint: None,
-            }),
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_provider_registry_with_custom_providers() {
+        use crate::models::llm::ProviderConfig;
+
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "litellm",
+            ProviderConfig::Custom {
+                api_endpoint: "http://localhost:4000".to_string(),
+                api_key: Some("sk-1234".to_string()),
+            },
+        );
+        config.add_provider(
+            "ollama",
+            ProviderConfig::Custom {
+                api_endpoint: "http://localhost:11434/v1".to_string(),
+                api_key: None,
+            },
+        );
+
+        let result = build_provider_registry_direct(&config);
+        assert!(
+            result.is_ok(),
+            "Failed to build registry: {:?}",
+            result.err()
+        );
+
+        let registry = result.unwrap();
+        assert!(registry.has_provider("litellm"));
+        assert!(registry.has_provider("ollama"));
     }
 
     // ==================== Round-trip Tests ====================

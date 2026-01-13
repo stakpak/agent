@@ -318,7 +318,7 @@ fn render_collapsed_messages_popup(f: &mut Frame, state: &mut AppState) {
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightMagenta))
         .style(ratatui::style::Style::default())
         .title(ratatui::text::Span::styled(
-            "Expanded Messages (Ctrl+T to close, Tab to previous message, ↑/↓ to scroll)",
+            "Expanded Messages (ctrl+t to close, tab to previous message, ↑/↓ to scroll)",
             ratatui::style::Style::default()
                 .fg(ratatui::style::Color::LightMagenta)
                 .add_modifier(ratatui::style::Modifier::BOLD),
@@ -495,7 +495,7 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
 
         if state.loading_type == LoadingType::Llm {
             left_spans.push(Span::styled(
-                " - Esc to cancel",
+                " - esc to cancel",
                 Style::default().fg(Color::DarkGray),
             ));
         }

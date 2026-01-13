@@ -86,9 +86,7 @@ impl StakpakAcpAgent {
                 let client = LocalClient::new(LocalClientConfig {
                     stakpak_base_url: Some(config.api_endpoint.clone()),
                     store_path: None,
-                    anthropic_config: config.get_anthropic_config_with_auth(),
-                    openai_config: config.get_openai_config_with_auth(),
-                    gemini_config: config.get_gemini_config_with_auth(),
+                    providers: config.get_llm_provider_config(),
                     eco_model: config.eco_model.clone(),
                     recovery_model: config.recovery_model.clone(),
                     smart_model: config.smart_model.clone(),

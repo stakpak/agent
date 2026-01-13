@@ -177,9 +177,7 @@ pub async fn run_interactive(
                     let client = LocalClient::new(LocalClientConfig {
                         stakpak_base_url: Some(api_endpoint_for_client.clone()),
                         store_path: None,
-                        anthropic_config: ctx_clone.get_anthropic_config_with_auth(),
-                        openai_config: ctx_clone.get_openai_config_with_auth(),
-                        gemini_config: ctx_clone.get_gemini_config_with_auth(),
+                        providers: ctx_clone.get_llm_provider_config(),
                         eco_model: ctx_clone.eco_model.clone(),
                         recovery_model: ctx_clone.recovery_model.clone(),
                         smart_model: ctx_clone.smart_model.clone(),
@@ -1081,9 +1079,7 @@ pub async fn run_interactive(
                     let client = LocalClient::new(LocalClientConfig {
                         store_path: None,
                         stakpak_base_url: Some(new_config.api_endpoint.clone()),
-                        anthropic_config: new_config.get_anthropic_config_with_auth(),
-                        openai_config: new_config.get_openai_config_with_auth(),
-                        gemini_config: new_config.get_gemini_config_with_auth(),
+                        providers: new_config.get_llm_provider_config(),
                         eco_model: new_config.eco_model.clone(),
                         recovery_model: new_config.recovery_model.clone(),
                         smart_model: new_config.smart_model.clone(),
@@ -1156,9 +1152,7 @@ pub async fn run_interactive(
                 let client = LocalClient::new(LocalClientConfig {
                     store_path: None,
                     stakpak_base_url: Some(final_api_endpoint.clone()),
-                    anthropic_config: ctx.get_anthropic_config_with_auth(),
-                    openai_config: ctx.get_openai_config_with_auth(),
-                    gemini_config: ctx.get_gemini_config_with_auth(),
+                    providers: ctx.get_llm_provider_config(),
                     eco_model: ctx.eco_model.clone(),
                     recovery_model: ctx.recovery_model.clone(),
                     smart_model: ctx.smart_model.clone(),

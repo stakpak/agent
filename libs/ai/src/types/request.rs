@@ -1,12 +1,13 @@
 //! Request types for AI generation
 
+use super::cache::PromptCacheRetention;
 use super::{GenerateOptions, Message};
 use serde::{Deserialize, Serialize};
 
 /// Request for generating AI completions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateRequest {
-    /// Model identifier (can be provider-prefixed like "openai:gpt-4")
+    /// Model identifier (can be provider-prefixed like "openai/gpt-4")
     #[serde(skip)]
     pub model: String,
 
@@ -89,6 +90,31 @@ pub struct OpenAIOptions {
     /// User identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+
+    /// Manual prompt cache key for better cache hit rates.
+    ///
+    /// OpenAI automatically caches prompts >= 1024 tokens. Use this to
+    /// provide a stable identifier that helps optimize cache hits.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{OpenAIOptions, ProviderOptions};
+    ///
+    /// let opts = OpenAIOptions {
+    ///     prompt_cache_key: Some("my-session-123".into()),
+    ///     ..Default::default()
+    /// };
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+
+    /// Cache retention policy for prompt caching.
+    ///
+    /// - `InMemory` (default): Standard caching (~5-60 min depending on load)
+    /// - `Extended24h`: Extended 24-hour caching (GPT-5.1+ only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_retention: Option<PromptCacheRetention>,
 }
 
 /// Controls how system messages are handled in OpenAI requests
@@ -126,6 +152,24 @@ pub struct GoogleOptions {
     /// Thinking budget in tokens
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u32>,
+
+    /// Name of cached content to use (format: cachedContents/{id})
+    ///
+    /// Use Google's `GoogleAICacheManager` to create cached content,
+    /// then reference it by name here.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{GoogleOptions, ProviderOptions};
+    ///
+    /// let opts = GoogleOptions {
+    ///     cached_content: Some("cachedContents/abc123".into()),
+    ///     ..Default::default()
+    /// };
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_content: Option<String>,
 }
 
 impl GenerateRequest {

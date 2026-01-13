@@ -240,7 +240,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 Style::default().fg(Color::Reset),
             ));
         }
-        spans_vec.push(Span::styled("ctrl+o", Style::default().fg(Color::DarkGray)));
+        spans_vec.push(Span::styled("ctrl+o", Style::default().fg(Color::Cyan)));
         spans_vec.push(Span::styled(
             " toggle auto-approve",
             Style::default().fg(Color::DarkGray),

@@ -48,7 +48,7 @@ pub enum WardenCommands {
 }
 
 impl WardenCommands {
-    pub async fn run(self, _config: AppConfig) -> Result<(), String> {
+    pub async fn run(self, config: AppConfig) -> Result<(), String> {
         // Get warden path (will download if not available)
         let warden_path = get_warden_plugin_path().await;
 
@@ -72,6 +72,13 @@ impl WardenCommands {
 
                 for env_var in env {
                     cmd.args(["--env", &env_var]);
+                }
+
+                // Prepare volumes from config first, then add user-specified volumes
+                // User volumes come last to allow overrides
+                for vol in prepare_volumes(&config, false) {
+                    let expanded_vol = expand_volume_path(vol);
+                    cmd.args(["--volume", &expanded_vol]);
                 }
 
                 for vol in volume {
@@ -152,9 +159,12 @@ fn prepare_volumes(config: &AppConfig, check_enabled: bool) -> Vec<String> {
         volumes_to_mount.extend(warden_config.volumes.clone());
     }
 
-    // Always append stakpak config if it exists and not already in the list
+    // Always append stakpak config and auth files if they exist and not already in the list
     if let Ok(home_dir) = std::env::var("HOME") {
-        let config_path = Path::new(&home_dir).join(".stakpak").join("config.toml");
+        let stakpak_dir = Path::new(&home_dir).join(".stakpak");
+
+        // Mount config.toml if it exists
+        let config_path = stakpak_dir.join("config.toml");
         if config_path.exists() {
             let config_path_str = config_path.to_string_lossy();
             let stakpak_config_mount =
@@ -169,6 +179,24 @@ fn prepare_volumes(config: &AppConfig, check_enabled: bool) -> Vec<String> {
 
             if !config_already_mounted {
                 volumes_to_mount.push(stakpak_config_mount);
+            }
+        }
+
+        // Mount auth.toml if it exists (contains provider credentials)
+        let auth_path = stakpak_dir.join("auth.toml");
+        if auth_path.exists() {
+            let auth_path_str = auth_path.to_string_lossy();
+            let stakpak_auth_mount = format!("{}:/home/agent/.stakpak/auth.toml:ro", auth_path_str);
+
+            // Check if auth.toml is already in the volume list
+            let auth_already_mounted = volumes_to_mount.iter().any(|v| {
+                v.contains("/.stakpak/auth.toml")
+                    || v.ends_with(":/home/agent/.stakpak/auth.toml:ro")
+                    || v.ends_with(":/home/agent/.stakpak/auth.toml")
+            });
+
+            if !auth_already_mounted {
+                volumes_to_mount.push(stakpak_auth_mount);
             }
         }
     }

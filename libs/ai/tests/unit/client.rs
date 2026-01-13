@@ -55,17 +55,19 @@ fn test_registry_list_providers() {
 #[test]
 fn test_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![
             Message {
                 role: Role::System,
                 content: "You are helpful".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "Hello".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -85,6 +87,7 @@ fn test_request_with_model() {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         }],
     );
 
@@ -99,15 +102,17 @@ fn test_request_multiple_messages() {
             role: Role::System,
             content: "You are helpful".into(),
             name: None,
+            provider_options: None,
         },
         Message {
             role: Role::User,
             content: "Hello".into(),
             name: None,
+            provider_options: None,
         },
     ];
 
-    let request = GenerateRequest::new("openai:gpt-4", messages);
+    let request = GenerateRequest::new("openai/gpt-4", messages);
 
     assert_eq!(request.messages.len(), 2);
 }

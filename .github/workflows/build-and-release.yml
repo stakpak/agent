@@ -240,7 +240,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.setup.outputs.version }}
+            ghcr.io/${{ github.repository }}:v${{ needs.setup.outputs.version }}
             ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}:latest', github.repository) || '' }}
 
   docker_warden:
@@ -266,9 +266,9 @@ jobs:
           context: .warden
           push: true
           build-args: |
-            BASE_IMAGE_TAG=${{ needs.setup.outputs.version }}
+            BASE_IMAGE_TAG=v${{ needs.setup.outputs.version }}
           tags: |
-            ghcr.io/${{ github.repository }}-warden:${{ needs.setup.outputs.version }}
+            ghcr.io/${{ github.repository }}-warden:v${{ needs.setup.outputs.version }}
             ${{ needs.setup.outputs.is_beta != 'true' && format('ghcr.io/{0}-warden:latest', github.repository) || '' }}
 
   update-release-notes:

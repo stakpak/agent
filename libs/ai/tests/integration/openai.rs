@@ -16,6 +16,7 @@ async fn test_openai_generate() {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);
@@ -41,6 +42,7 @@ async fn test_openai_streaming() {
             role: Role::User,
             content: "Count from 1 to 3".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);
@@ -83,11 +85,13 @@ async fn test_openai_with_system_message() {
                 role: Role::System,
                 content: "You are a helpful assistant that responds in one word".into(),
                 name: None,
+                provider_options: None,
             },
             Message {
                 role: Role::User,
                 content: "What color is the sky?".into(),
                 name: None,
+                provider_options: None,
             },
         ],
     );
@@ -108,15 +112,16 @@ async fn test_openai_explicit_provider() {
     let client = Inference::new();
 
     let request = GenerateRequest::new(
-        "openai:gpt-3.5-turbo",
+        "openai/gpt-3.5-turbo",
         vec![Message {
             role: Role::User,
             content: "Say hello".into(),
             name: None,
+            provider_options: None,
         }],
     );
 
-    // Test with explicit provider:model format
+    // Test with explicit provider/model format
     let response = client.generate(&request).await;
 
     assert!(response.is_ok());
@@ -134,6 +139,7 @@ async fn test_openai_temperature_variation() {
             role: Role::User,
             content: "Say exactly: 'Test'".into(),
             name: None,
+            provider_options: None,
         }],
     );
     request.options.temperature = Some(0.0);

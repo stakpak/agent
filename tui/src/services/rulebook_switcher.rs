@@ -297,18 +297,23 @@ pub fn render_rulebook_switcher_popup(f: &mut Frame, state: &AppState) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(Color::Yellow)),
-        Span::raw(": Navigate  "),
-        Span::styled("Space", Style::default().fg(Color::Cyan)),
-        Span::raw(": Toggle  "),
-        Span::styled("Ctrl+S", Style::default().fg(Color::Magenta)),
-        Span::raw(": Select All  "),
-        Span::styled("Ctrl+D", Style::default().fg(Color::Magenta)),
-        Span::raw(": Deselect All  "),
-        Span::styled("↵", Style::default().fg(Color::Green)),
-        Span::raw(": Confirm  "),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Cancel"),
+        Span::styled("↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("space", Style::default().fg(Color::DarkGray)),
+        Span::styled(" toggle", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("ctrl+s", Style::default().fg(Color::DarkGray)),
+        Span::styled(" select all", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("ctrl+d", Style::default().fg(Color::DarkGray)),
+        Span::styled(" deselect all", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("↵", Style::default().fg(Color::DarkGray)),
+        Span::styled(" confirm", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" cancel", Style::default().fg(Color::Cyan)),
     ]));
 
     let help_area = Rect {

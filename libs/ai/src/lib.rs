@@ -20,15 +20,15 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Inference::new();
-//!     
+//!
 //!     let request = GenerateRequest::new(
 //!         "gpt-4",
 //!         vec![Message::new(Role::User, "What is Rust?")]
 //!     );
-//!     
+//!
 //!     let response = client.generate(&request).await?;
 //!     println!("Response: {}", response.text());
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -40,15 +40,60 @@ pub mod providers;
 pub mod registry;
 pub mod types;
 
+#[cfg(feature = "tracing")]
+pub mod tracing;
+
 // Re-export commonly used types
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
 pub use types::{
-    AnthropicOptions, ContentPart, FinishReason, FinishReasonKind, GenerateOptions,
-    GenerateRequest, GenerateResponse, GenerateStream, GoogleOptions, Headers, InputTokenDetails,
-    Message, MessageContent, OpenAIOptions, OutputTokenDetails, ProviderOptions, ReasoningEffort,
-    ReasoningSummary, ResponseContent, Role, StreamEvent, ThinkingOptions, Tool, ToolCall,
-    ToolChoice, ToolFunction, Usage,
+    // Message types
+    AnthropicContentPartOptions,
+    AnthropicMessageOptions,
+    // Request types
+    AnthropicOptions,
+    // Options types
+    AnthropicToolOptions,
+    // Cache control types
+    CacheContext,
+    CacheControl,
+    CacheControlValidator,
+    CacheWarning,
+    CacheWarningType,
+    ContentPart,
+    ContentPartProviderOptions,
+    // Response types
+    FinishReason,
+    FinishReasonKind,
+    GenerateOptions,
+    GenerateRequest,
+    GenerateResponse,
+    GenerateStream,
+    GoogleOptions,
+    Headers,
+    ImageDetail,
+    InputTokenDetails,
+    Message,
+    MessageContent,
+    MessageProviderOptions,
+    OpenAIOptions,
+    OutputTokenDetails,
+    PromptCacheRetention,
+    ProviderOptions,
+    ReasoningEffort,
+    ReasoningSummary,
+    ResponseContent,
+    ResponseWarning,
+    Role,
+    StreamEvent,
+    SystemMessageMode,
+    ThinkingOptions,
+    Tool,
+    ToolCall,
+    ToolChoice,
+    ToolFunction,
+    ToolProviderOptions,
+    Usage,
 };
 
 /// Prelude module for convenient imports

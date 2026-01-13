@@ -1,6 +1,7 @@
 //! Generation options and tool definitions
 
 use super::Headers;
+use super::cache::CacheControl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -103,6 +104,33 @@ impl GenerateOptions {
     }
 }
 
+/// Provider-specific options for tool definitions
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ToolProviderOptions {
+    /// Anthropic-specific tool options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<AnthropicToolOptions>,
+}
+
+impl ToolProviderOptions {
+    /// Create Anthropic-specific options with cache control
+    pub fn anthropic_cache(cache_control: CacheControl) -> Self {
+        Self {
+            anthropic: Some(AnthropicToolOptions {
+                cache_control: Some(cache_control),
+            }),
+        }
+    }
+}
+
+/// Anthropic-specific tool options
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnthropicToolOptions {
+    /// Cache control for this tool (Anthropic prompt caching)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
+}
+
 /// A tool/function definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {
@@ -111,6 +139,9 @@ pub struct Tool {
     pub tool_type: String,
     /// Function definition
     pub function: ToolFunction,
+    /// Provider-specific options (e.g., cache control for Anthropic)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<ToolProviderOptions>,
 }
 
 impl Tool {
@@ -123,6 +154,7 @@ impl Tool {
                 description: description.into(),
                 parameters: Value::Object(Default::default()),
             },
+            provider_options: None,
         }
     }
 
@@ -130,6 +162,37 @@ impl Tool {
     pub fn parameters(mut self, parameters: Value) -> Self {
         self.function.parameters = parameters;
         self
+    }
+
+    /// Add Anthropic cache control to this tool
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{Tool, CacheControl};
+    /// use serde_json::json;
+    ///
+    /// let tool = Tool::function("search", "Search documents")
+    ///     .parameters(json!({"type": "object", "properties": {}}))
+    ///     .with_cache_control(CacheControl::ephemeral());
+    /// ```
+    pub fn with_cache_control(mut self, cache_control: CacheControl) -> Self {
+        self.provider_options = Some(ToolProviderOptions::anthropic_cache(cache_control));
+        self
+    }
+
+    /// Add provider-specific options to this tool
+    pub fn with_provider_options(mut self, options: ToolProviderOptions) -> Self {
+        self.provider_options = Some(options);
+        self
+    }
+
+    /// Get the cache control from provider options (if set for Anthropic)
+    pub fn cache_control(&self) -> Option<&CacheControl> {
+        self.provider_options
+            .as_ref()
+            .and_then(|opts| opts.anthropic.as_ref())
+            .and_then(|anthropic| anthropic.cache_control.as_ref())
     }
 }
 
