@@ -112,7 +112,7 @@ async fn test_openai_explicit_provider() {
     let client = Inference::new();
 
     let request = GenerateRequest::new(
-        "openai:gpt-3.5-turbo",
+        "openai/gpt-3.5-turbo",
         vec![Message {
             role: Role::User,
             content: "Say hello".into(),
@@ -121,7 +121,7 @@ async fn test_openai_explicit_provider() {
         }],
     );
 
-    // Test with explicit provider:model format
+    // Test with explicit provider/model format
     let response = client.generate(&request).await;
 
     assert!(response.is_ok());

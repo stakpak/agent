@@ -66,7 +66,7 @@ impl Inference {
     ///
     /// # Arguments
     ///
-    /// * `request` - Generation request with model identifier (e.g., "gpt-4" or "openai:gpt-4")
+    /// * `request` - Generation request with model identifier (e.g., "gpt-4" or "openai/gpt-4")
     ///
     /// # Example
     ///
@@ -75,7 +75,7 @@ impl Inference {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = Inference::new();
     /// let request = GenerateRequest::new(
-    ///     "openai:gpt-4",
+    ///     "openai/gpt-4",
     ///     vec![Message::new(Role::User, "Hello!")]
     /// );
     /// let response = client.generate(&request).await?;
@@ -201,7 +201,7 @@ impl Inference {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = Inference::new();
     /// let request = GenerateRequest::new(
-    ///     "openai:gpt-4",
+    ///     "openai/gpt-4",
     ///     vec![Message::new(Role::User, "Count to 5")]
     /// );
     /// let mut stream = client.stream(&request).await?;
@@ -293,8 +293,8 @@ impl Inference {
 
     /// Parse model string into provider and model ID
     pub(crate) fn parse_model<'a>(&self, model: &'a str) -> Result<(String, &'a str)> {
-        if let Some((provider, model_id)) = model.split_once(':') {
-            // Explicit provider:model format
+        if let Some((provider, model_id)) = model.split_once('/') {
+            // Explicit provider/model format
             Ok((provider.to_string(), model_id))
         } else {
             // Auto-detect provider from model name

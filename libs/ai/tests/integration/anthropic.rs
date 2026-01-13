@@ -79,7 +79,7 @@ async fn test_anthropic_explicit_provider_prefix() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "anthropic:claude-haiku-4-5-20251001",
+        "anthropic/claude-haiku-4-5-20251001",
         vec![Message {
             role: Role::User,
             content: "Say 'test'".into(),
@@ -473,7 +473,7 @@ async fn test_anthropic_missing_api_key_error() {
     // try to make a request that would fail
     if let Ok(client) = client_result {
         let request = GenerateRequest::new(
-            "anthropic:claude-haiku-4-5-20251001", // Explicitly use anthropic
+            "anthropic/claude-haiku-4-5-20251001", // Explicitly use anthropic
             vec![Message {
                 role: Role::User,
                 content: "Test".into(),

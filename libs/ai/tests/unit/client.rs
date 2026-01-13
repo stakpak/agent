@@ -55,7 +55,7 @@ fn test_registry_list_providers() {
 #[test]
 fn test_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![
             Message {
                 role: Role::System,
@@ -112,7 +112,7 @@ fn test_request_multiple_messages() {
         },
     ];
 
-    let request = GenerateRequest::new("openai:gpt-4", messages);
+    let request = GenerateRequest::new("openai/gpt-4", messages);
 
     assert_eq!(request.messages.len(), 2);
 }

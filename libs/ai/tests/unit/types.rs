@@ -85,7 +85,7 @@ fn test_content_part_image_with_detail() {
 #[test]
 fn test_generate_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
@@ -104,7 +104,7 @@ fn test_generate_request_creation() {
 #[test]
 fn test_generate_request_simple() {
     let request = GenerateRequest::new(
-        "openai:gpt-4",
+        "openai/gpt-4",
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
