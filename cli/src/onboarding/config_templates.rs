@@ -1,4 +1,57 @@
 //! Configuration templates for different provider setups
+//!
+//! # Provider Configuration
+//!
+//! Providers are configured in a `providers` HashMap where:
+//! - The key becomes the model prefix for custom providers
+//! - Built-in types: `openai`, `anthropic`, `gemini`
+//! - Custom type: `custom` for OpenAI-compatible providers
+//!
+//! # Built-in Providers
+//!
+//! For built-in providers, you can use model names directly without a prefix:
+//!
+//! ```toml
+//! [profiles.default]
+//! smart_model = "claude-sonnet-4-5"  # auto-detected as anthropic
+//! eco_model = "gpt-4-turbo"          # auto-detected as openai
+//!
+//! [profiles.default.providers.openai]
+//! type = "openai"
+//! api_key = "sk-..."  # or use auth.toml / OPENAI_API_KEY env var
+//!
+//! [profiles.default.providers.anthropic]
+//! type = "anthropic"
+//! api_key = "sk-ant-..."  # or use auth.toml / ANTHROPIC_API_KEY env var
+//! ```
+//!
+//! # Custom Providers
+//!
+//! For OpenAI-compatible providers (Ollama, vLLM, etc.):
+//!
+//! ```toml
+//! [profiles.default]
+//! smart_model = "claude-sonnet-4-5"  # built-in, auto-detected
+//! eco_model = "offline/llama3"       # custom provider
+//!
+//! [profiles.default.providers.offline]
+//! type = "custom"
+//! api_endpoint = "http://localhost:11434/v1"
+//! # api_key is optional for local providers
+//! ```
+//!
+//! # Model Routing
+//!
+//! - Built-in models: `claude-sonnet-4-5`, `gpt-4`, `gemini-2.5-pro` → auto-detected
+//! - Custom providers: `offline/llama3` → routes to `offline` provider, sends `llama3` to API
+//!
+//! # Credential Resolution Order
+//!
+//! For built-in providers, credentials are resolved in order:
+//! 1. `auth.toml` (profile-specific)
+//! 2. `auth.toml` (shared/all)
+//! 3. `config.toml` providers section
+//! 4. Environment variable (e.g., `ANTHROPIC_API_KEY`)
 
 use crate::config::ProfileConfig;
 use crate::config::ProviderType;

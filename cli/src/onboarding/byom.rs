@@ -1,7 +1,37 @@
 //! Bring Your Own Model (BYOM) / Custom Provider configuration
 //!
 //! This module provides configuration for custom OpenAI-compatible providers
-//! such as LiteLLM, Ollama, or any other provider that implements the OpenAI API.
+//! such as Ollama, vLLM, or any other provider that implements the OpenAI API.
+//!
+//! # Configuration Format
+//!
+//! Custom providers are configured in the `providers` HashMap. The provider key
+//! becomes the model prefix used to route requests.
+//!
+//! ```toml
+//! [profiles.default]
+//! provider = "local"
+//! smart_model = "offline/llama3"
+//! eco_model = "offline/phi3"
+//!
+//! [profiles.default.providers.offline]
+//! type = "custom"
+//! api_endpoint = "http://localhost:11434/v1"
+//! # api_key is optional for local providers like Ollama
+//! ```
+//!
+//! # Model Prefix Routing
+//!
+//! The provider key (e.g., `offline`) becomes the model prefix:
+//! - `offline/llama3` → provider: `offline`, model sent to API: `llama3`
+//! - `custom/anthropic/claude-opus` → provider: `custom`, model sent to API: `anthropic/claude-opus`
+//!
+//! This allows nested prefixes for providers that route to upstream providers.
+//!
+//! # API Endpoint
+//!
+//! The `api_endpoint` should be the base URL of your provider. Do NOT include
+//! `/chat/completions` - this is appended automatically at runtime.
 
 use crate::config::ProfileConfig;
 use crate::onboarding::config_templates::{self, generate_custom_provider_profile};

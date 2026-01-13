@@ -1,3 +1,55 @@
+//! LLM Provider and Model Configuration
+//!
+//! This module provides the configuration types for LLM providers and models.
+//!
+//! # Provider Configuration
+//!
+//! Providers are configured in a `providers` HashMap where the key becomes the
+//! model prefix for routing requests to the correct provider.
+//!
+//! ## Built-in Providers
+//!
+//! - `openai` - OpenAI API
+//! - `anthropic` - Anthropic API (supports OAuth via `access_token`)
+//! - `gemini` - Google Gemini API
+//!
+//! For built-in providers, you can use the model name directly without a prefix:
+//! - `claude-sonnet-4-5` → auto-detected as Anthropic
+//! - `gpt-4` → auto-detected as OpenAI
+//! - `gemini-2.5-pro` → auto-detected as Gemini
+//!
+//! ## Custom Providers
+//!
+//! Any OpenAI-compatible API can be configured using `type = "custom"`.
+//! The provider key becomes the model prefix.
+//!
+//! # Model Routing
+//!
+//! Models can be specified with or without a provider prefix:
+//!
+//! - `claude-sonnet-4-5` → auto-detected as `anthropic` provider
+//! - `anthropic/claude-sonnet-4-5` → explicit `anthropic` provider
+//! - `offline/llama3` → routes to `offline` custom provider, sends `llama3` to API
+//! - `custom/anthropic/claude-opus` → routes to `custom` provider,
+//!   sends `anthropic/claude-opus` to the API
+//!
+//! # Example Configuration
+//!
+//! ```toml
+//! [profiles.default]
+//! provider = "local"
+//! smart_model = "claude-sonnet-4-5"  # auto-detected as anthropic
+//! eco_model = "offline/llama3"       # custom provider
+//!
+//! [profiles.default.providers.anthropic]
+//! type = "anthropic"
+//! # api_key from auth.toml or ANTHROPIC_API_KEY env var
+//!
+//! [profiles.default.providers.offline]
+//! type = "custom"
+//! api_endpoint = "http://localhost:11434/v1"
+//! ```
+
 use crate::models::{
     integrations::{anthropic::AnthropicModel, gemini::GeminiModel, openai::OpenAIModel},
     model_pricing::{ContextAware, ModelContextInfo},
@@ -12,8 +64,15 @@ use std::fmt::Display;
 
 /// Unified provider configuration enum
 ///
-/// All provider configurations are stored in a HashMap<String, ProviderConfig>
-/// where the key is the provider name (e.g., "openai", "anthropic", "litellm").
+/// All provider configurations are stored in a `HashMap<String, ProviderConfig>`
+/// where the key is the provider name and becomes the model prefix for routing.
+///
+/// # Provider Key = Model Prefix
+///
+/// The key used in the HashMap becomes the prefix used in model names:
+/// - Config key: `providers.offline`
+/// - Model usage: `offline/llama3`
+/// - Routing: finds `offline` provider, sends `llama3` to API
 ///
 /// # Example TOML
 /// ```toml
@@ -26,10 +85,9 @@ use std::fmt::Display;
 /// api_key = "sk-ant-..."
 /// access_token = "oauth-token"
 ///
-/// [profiles.myprofile.providers.litellm]
+/// [profiles.myprofile.providers.offline]
 /// type = "custom"
-/// api_endpoint = "http://localhost:4000"
-/// api_key = "sk-litellm"
+/// api_endpoint = "http://localhost:11434/v1"
 /// ```
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -58,30 +116,28 @@ pub enum ProviderConfig {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_endpoint: Option<String>,
     },
-    /// Custom OpenAI-compatible provider (LiteLLM, Ollama, etc.)
+    /// Custom OpenAI-compatible provider (Ollama, vLLM, etc.)
     ///
     /// The provider key in the config becomes the model prefix.
-    /// For example, if configured as `providers.litellm`, use models as:
-    /// - `litellm/claude-opus` - passes `claude-opus` to the API
-    /// - `litellm/anthropic/claude-opus` - passes `anthropic/claude-opus` to the API
-    ///   (useful for LiteLLM which expects provider prefixes)
+    /// For example, if configured as `providers.offline`, use models as:
+    /// - `offline/llama3` - passes `llama3` to the API
+    /// - `offline/anthropic/claude-opus` - passes `anthropic/claude-opus` to the API
     ///
     /// # Example TOML
     /// ```toml
-    /// [profiles.myprofile.providers.litellm]
+    /// [profiles.myprofile.providers.offline]
     /// type = "custom"
-    /// api_endpoint = "http://localhost:4000"
-    /// api_key = "sk-litellm"
+    /// api_endpoint = "http://localhost:11434/v1"
     ///
     /// # Then use models as:
-    /// smart_model = "litellm/anthropic/claude-opus"
-    /// eco_model = "litellm/openai/gpt-4-turbo"
+    /// smart_model = "offline/llama3"
+    /// eco_model = "offline/phi3"
     /// ```
     Custom {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_key: Option<String>,
         /// API endpoint URL (required for custom providers)
-        /// Use the base URL as required by your provider (e.g., "http://localhost:4000")
+        /// Use the base URL as required by your provider (e.g., "http://localhost:11434/v1")
         api_endpoint: String,
     },
 }

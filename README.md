@@ -147,32 +147,62 @@ Create `~/.stakpak/config.toml` with one of these configurations:
 [profiles.byok]
 provider = "local"
 
-# customize models
+# Model names are auto-detected for built-in providers
 smart_model = "claude-sonnet-4-5"
 eco_model = "claude-haiku-4-5"
 
-[profiles.byok.anthropic]
+# Built-in providers - credentials can also be set via environment variables
+# (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
+[profiles.byok.providers.anthropic]
+type = "anthropic"
 api_key = "sk-ant-..."
 
-[profiles.byok.openai]
+[profiles.byok.providers.openai]
+type = "openai"
 api_key = "sk-..."
 
-[profiles.byok.gemini]
-api_key = "sk-..."
+[profiles.byok.providers.gemini]
+type = "gemini"
+api_key = "..."
 
 [settings]
 ```
 
-**Option 2: Bring Your Own LLM** - Point to a local OpenAI-compatible endpoint (e.g. LM Studio):
+**Option 2: Bring Your Own LLM** - Use a local OpenAI-compatible endpoint (e.g. Ollama, LM Studio):
 ```toml
 [profiles.offline]
 provider = "local"
-smart_model = "qwen/qwen3-coder-30b"
-eco_model = "qwen/qwen3-coder-30b"
 
-[profiles.offline.openai]
-api_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
-api_key = ""
+# Custom provider models use the format: provider_key/model_name
+smart_model = "offline/qwen/qwen3-coder-30b"
+eco_model = "offline/qwen/qwen3-coder-30b"
+
+# The provider key "offline" becomes the model prefix
+[profiles.offline.providers.offline]
+type = "custom"
+api_endpoint = "http://localhost:11434/v1"
+# api_key is optional for local providers
+
+[settings]
+```
+
+**Option 3: Mix Built-in and Custom Providers**:
+```toml
+[profiles.hybrid]
+provider = "local"
+
+# Built-in provider - model name auto-detected
+smart_model = "claude-sonnet-4-5"
+# Custom provider - requires provider prefix
+eco_model = "offline/llama3"
+
+[profiles.hybrid.providers.anthropic]
+type = "anthropic"
+# Uses ANTHROPIC_API_KEY env var
+
+[profiles.hybrid.providers.offline]
+type = "custom"
+api_endpoint = "http://localhost:11434/v1"
 
 [settings]
 ```
@@ -182,6 +212,8 @@ Then run with your profile:
 stakpak --profile byok
 # or
 stakpak --profile offline
+# or
+stakpak --profile hybrid
 ```
 
 ### Start Stakpak Agent TUI
