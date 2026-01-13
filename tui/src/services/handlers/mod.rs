@@ -484,9 +484,6 @@ pub fn update(
         InputEvent::ToggleCollapsedMessages => {
             popup::handle_toggle_collapsed_messages(state, message_area_height, message_area_width);
         }
-        InputEvent::ToggleContextPopup => {
-            popup::handle_toggle_context_popup(state);
-        }
         InputEvent::ShowFileChangesPopup => {
             popup::handle_show_file_changes_popup(state);
         }

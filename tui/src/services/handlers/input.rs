@@ -382,6 +382,12 @@ fn handle_input_submitted(
             total_tokens: 0,
             prompt_tokens_details: None,
         };
+        state.current_message_usage = LLMTokenUsage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            prompt_tokens_details: None,
+        };
 
         render_system_message(state, &format!("Switching to session . {}", selected.title));
         state.show_sessions_dialog = false;

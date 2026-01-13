@@ -899,6 +899,43 @@ impl MarkdownRenderer {
         result
     }
 
+    /// Strip markdown syntax (backticks, bold markers) from text for table cells
+    fn strip_markdown_for_table(&self, text: &str) -> String {
+        let mut result = String::new();
+        let mut chars = text.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '`' {
+                // Skip backtick, include content until next backtick
+                while let Some(&next) = chars.peek() {
+                    if next == '`' {
+                        chars.next(); // consume closing backtick
+                        break;
+                    }
+                    result.push(chars.next().unwrap_or(' '));
+                }
+            } else if c == '*' && chars.peek() == Some(&'*') {
+                chars.next(); // consume second *
+                // Include content until next **
+                while let Some(&next) = chars.peek() {
+                    if next == '*' {
+                        chars.next();
+                        if chars.peek() == Some(&'*') {
+                            chars.next(); // consume closing **
+                            break;
+                        }
+                        result.push('*');
+                    } else {
+                        result.push(chars.next().unwrap_or(' '));
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
     // Calculate display width for Unicode text with accurate emoji detection
     fn display_width(&self, text: &str) -> usize {
         text.chars().map(|c| self.char_display_width(c)).sum()
@@ -928,12 +965,12 @@ impl MarkdownRenderer {
             return None;
         }
 
-        // Parse headers from the first line
+        // Parse headers from the first line, stripping markdown syntax
         let headers: Vec<String> = start_line
             .trim_start_matches('|')
             .trim_end_matches('|')
             .split('|')
-            .map(|s| s.trim().to_string())
+            .map(|s| self.strip_markdown_for_table(s.trim()))
             .collect();
 
         if headers.is_empty() {
@@ -969,12 +1006,12 @@ impl MarkdownRenderer {
                 break;
             }
 
-            // Parse the row cells
+            // Parse the row cells, stripping markdown syntax
             let cells: Vec<String> = row_line
                 .trim_start_matches('|')
                 .trim_end_matches('|')
                 .split('|')
-                .map(|s| s.trim().to_string())
+                .map(|s| self.strip_markdown_for_table(s.trim()))
                 .collect();
 
             if !cells.is_empty() {

@@ -22,10 +22,6 @@ pub fn handle_esc_event(
     _shell_tx: &Sender<InputEvent>,
     cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
 ) {
-    if state.show_context_popup {
-        state.show_context_popup = false;
-        return;
-    }
     if state.show_rulebook_switcher {
         state.show_rulebook_switcher = false;
         return;

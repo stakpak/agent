@@ -47,9 +47,6 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::HandleCtrlS)
                 }
-                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(InputEvent::ToggleContextPopup)
-                }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(InputEvent::ShowFileChangesPopup)
                 }

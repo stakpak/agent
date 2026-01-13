@@ -229,6 +229,7 @@ impl AppConfig {
 
     /// Migrate legacy provider configs (openai, anthropic, gemini)
     /// to the new unified `providers` HashMap format.
+    /// Also ensures settings have default values (e.g., editor).
     fn migrate_legacy_provider_configs<P: AsRef<Path>>(
         config_path: P,
         mut config_file: ConfigFile,
@@ -242,25 +243,29 @@ impl AppConfig {
             }
         }
 
-        // Save if any profile was migrated
+        // Ensure editor setting has a default value
+        if config_file.settings.editor.is_none() {
+            config_file.settings.editor = Some("nano".to_string());
+            any_migrated = true;
+        }
+
+        // Save if any setting was migrated or added
         if any_migrated {
             toml::to_string_pretty(&config_file)
                 .map_err(|e| {
                     ConfigError::Message(format!(
-                        "Failed to serialize config after provider migration: {}",
+                        "Failed to serialize config after migration: {}",
                         e
                     ))
                 })
                 .and_then(|config_str| {
                     write(config_path, config_str).map_err(|e| {
                         ConfigError::Message(format!(
-                            "Failed to save config after provider migration: {}",
+                            "Failed to save config after migration: {}",
                             e
                         ))
                     })
                 })?;
-
-            println!("Migrated provider configuration to new unified format.");
         }
 
         Ok(config_file)
