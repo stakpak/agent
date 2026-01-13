@@ -56,7 +56,6 @@ pub struct Product {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BillingResponse {
     pub created_at: u64,
-    pub email: String,
     pub env: String,
     pub features: HashMap<String, Feature>,
     pub id: String,
