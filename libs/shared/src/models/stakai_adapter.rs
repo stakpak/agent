@@ -7,7 +7,7 @@ use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMInput,
     LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent, LLMModel,
-    LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool,
+    LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool, ProviderConfig,
 };
 use futures::StreamExt;
 use stakai::{
@@ -377,42 +377,59 @@ pub fn from_stakai_response(response: GenerateResponse, model: &str) -> LLMCompl
 pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceConfig, String> {
     let mut inference_config = InferenceConfig::new();
 
-    if let Some(openai) = &config.openai_config
-        && let Some(api_key) = &openai.api_key
-    {
-        inference_config = inference_config.openai(api_key.clone(), openai.api_endpoint.clone());
-    }
-
-    // For Anthropic, check if we have OAuth access_token or API key
-    // OAuth tokens need to use Bearer auth, API keys use x-api-key header
-    if let Some(anthropic) = &config.anthropic_config {
-        let stakai_config = if let Some(ref access_token) = anthropic.access_token {
-            // OAuth authentication - uses Bearer token header
-            let mut cfg = StakaiAnthropicConfig::with_oauth(access_token);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
+    for (name, provider_config) in &config.providers {
+        match provider_config {
+            ProviderConfig::OpenAI {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    inference_config =
+                        inference_config.openai(api_key.clone(), api_endpoint.clone());
+                }
             }
-            Some(cfg)
-        } else if let Some(ref api_key) = anthropic.api_key {
-            // API key authentication - uses x-api-key header
-            let mut cfg = StakaiAnthropicConfig::new(api_key);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
-            }
-            Some(cfg)
-        } else {
-            None
-        };
+            ProviderConfig::Anthropic {
+                api_key,
+                api_endpoint,
+                access_token,
+            } => {
+                let stakai_config = if let Some(token) = access_token {
+                    // OAuth authentication - uses Bearer token header
+                    let mut cfg = StakaiAnthropicConfig::with_oauth(token);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else if let Some(key) = api_key {
+                    // API key authentication - uses x-api-key header
+                    let mut cfg = StakaiAnthropicConfig::new(key);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else {
+                    None
+                };
 
-        if let Some(cfg) = stakai_config {
-            inference_config = inference_config.anthropic_config(cfg);
+                if let Some(cfg) = stakai_config {
+                    inference_config = inference_config.anthropic_config(cfg);
+                }
+            }
+            ProviderConfig::Gemini {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    inference_config =
+                        inference_config.gemini(api_key.clone(), api_endpoint.clone());
+                }
+            }
+            ProviderConfig::Custom { .. } => {
+                // Custom providers are handled by build_provider_registry_direct
+                // InferenceConfig doesn't support custom providers directly
+                let _ = name; // Suppress unused warning
+            }
         }
-    }
-
-    if let Some(gemini) = &config.gemini_config
-        && let Some(api_key) = &gemini.api_key
-    {
-        inference_config = inference_config.gemini(api_key.clone(), gemini.api_endpoint.clone());
     }
 
     Ok(inference_config)
@@ -428,69 +445,77 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
 
     let mut registry = ProviderRegistry::new();
 
-    // Register OpenAI provider
-    if let Some(openai) = &config.openai_config
-        && let Some(api_key) = &openai.api_key
-    {
-        let mut openai_config = StakaiOpenAIConfig::new(api_key.clone());
-        if let Some(endpoint) = &openai.api_endpoint {
-            openai_config = openai_config.with_base_url(endpoint.clone());
-        }
-        let provider = OpenAIProvider::new(openai_config)
-            .map_err(|e| format!("Failed to create OpenAI provider: {}", e))?;
-        registry = registry.register("openai", provider);
-    }
-
-    // Register Anthropic provider
-    if let Some(anthropic) = &config.anthropic_config {
-        let stakai_config = if let Some(ref access_token) = anthropic.access_token {
-            let mut cfg = StakaiAnthropicConfig::with_oauth(access_token);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
+    for (name, provider_config) in &config.providers {
+        match provider_config {
+            ProviderConfig::OpenAI {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    let mut openai_config = StakaiOpenAIConfig::new(api_key.clone());
+                    if let Some(endpoint) = api_endpoint {
+                        openai_config = openai_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = OpenAIProvider::new(openai_config)
+                        .map_err(|e| format!("Failed to create OpenAI provider: {}", e))?;
+                    registry = registry.register("openai", provider);
+                }
             }
-            Some(cfg)
-        } else if let Some(ref api_key) = anthropic.api_key {
-            let mut cfg = StakaiAnthropicConfig::new(api_key);
-            if let Some(ref endpoint) = anthropic.api_endpoint {
-                cfg = cfg.with_base_url(endpoint);
+            ProviderConfig::Anthropic {
+                api_key,
+                api_endpoint,
+                access_token,
+            } => {
+                let stakai_config = if let Some(token) = access_token {
+                    let mut cfg = StakaiAnthropicConfig::with_oauth(token);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else if let Some(key) = api_key {
+                    let mut cfg = StakaiAnthropicConfig::new(key);
+                    if let Some(endpoint) = api_endpoint {
+                        cfg = cfg.with_base_url(endpoint);
+                    }
+                    Some(cfg)
+                } else {
+                    None
+                };
+
+                if let Some(cfg) = stakai_config {
+                    let provider = AnthropicProvider::new(cfg)
+                        .map_err(|e| format!("Failed to create Anthropic provider: {}", e))?;
+                    registry = registry.register("anthropic", provider);
+                }
             }
-            Some(cfg)
-        } else {
-            None
-        };
+            ProviderConfig::Gemini {
+                api_key,
+                api_endpoint,
+            } => {
+                if let Some(api_key) = api_key {
+                    let mut gemini_config = StakaiGeminiConfig::new(api_key.clone());
+                    if let Some(endpoint) = api_endpoint {
+                        gemini_config = gemini_config.with_base_url(endpoint.clone());
+                    }
+                    let provider = GeminiProvider::new(gemini_config)
+                        .map_err(|e| format!("Failed to create Gemini provider: {}", e))?;
+                    registry = registry.register("google", provider);
+                }
+            }
+            ProviderConfig::Custom {
+                api_key,
+                api_endpoint,
+            } => {
+                // Custom providers are registered as OpenAI-compatible providers
+                let key = api_key.clone().unwrap_or_default();
+                let openai_config =
+                    StakaiOpenAIConfig::new(key).with_base_url(api_endpoint.clone());
 
-        if let Some(cfg) = stakai_config {
-            let provider = AnthropicProvider::new(cfg)
-                .map_err(|e| format!("Failed to create Anthropic provider: {}", e))?;
-            registry = registry.register("anthropic", provider);
-        }
-    }
+                let provider = OpenAIProvider::new(openai_config)
+                    .map_err(|e| format!("Failed to create custom provider '{}': {}", name, e))?;
 
-    // Register Gemini provider
-    if let Some(gemini) = &config.gemini_config
-        && let Some(api_key) = &gemini.api_key
-    {
-        let mut gemini_config = StakaiGeminiConfig::new(api_key.clone());
-        if let Some(endpoint) = &gemini.api_endpoint {
-            gemini_config = gemini_config.with_base_url(endpoint.clone());
-        }
-        let provider = GeminiProvider::new(gemini_config)
-            .map_err(|e| format!("Failed to create Gemini provider: {}", e))?;
-        registry = registry.register("google", provider);
-    }
-
-    // Register custom providers as OpenAI-compatible providers
-    if let Some(custom_providers) = &config.custom_providers {
-        for custom in custom_providers {
-            let api_key = custom.api_key.clone().unwrap_or_default();
-            let openai_config =
-                StakaiOpenAIConfig::new(api_key).with_base_url(custom.api_endpoint.clone());
-
-            let provider = OpenAIProvider::new(openai_config).map_err(|e| {
-                format!("Failed to create custom provider '{}': {}", custom.name, e)
-            })?;
-
-            registry = registry.register(&custom.name, provider);
+                registry = registry.register(name, provider);
+            }
         }
     }
 
@@ -1430,12 +1455,7 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_empty() {
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: None,
-            gemini_config: None,
-            custom_providers: None,
-        };
+        let config = LLMProviderConfig::new();
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1443,17 +1463,16 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_openai() {
-        use crate::models::integrations::openai::OpenAIConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: Some(OpenAIConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "openai",
+            ProviderConfig::OpenAI {
                 api_key: Some("sk-test-key".to_string()),
                 api_endpoint: Some("https://api.openai.com/v1".to_string()),
-            }),
-            gemini_config: None,
-            custom_providers: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1461,18 +1480,17 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_anthropic() {
-        use crate::models::integrations::anthropic::AnthropicConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: Some(AnthropicConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "anthropic",
+            ProviderConfig::Anthropic {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
-            }),
-            openai_config: None,
-            gemini_config: None,
-            custom_providers: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1480,17 +1498,16 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_with_gemini() {
-        use crate::models::integrations::gemini::GeminiConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: None,
-            gemini_config: Some(GeminiConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "gemini",
+            ProviderConfig::Gemini {
                 api_key: Some("gemini-test-key".to_string()),
                 api_endpoint: None,
-            }),
-            custom_providers: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1498,26 +1515,31 @@ mod tests {
 
     #[test]
     fn test_build_inference_config_all_providers() {
-        use crate::models::integrations::anthropic::AnthropicConfig;
-        use crate::models::integrations::gemini::GeminiConfig;
-        use crate::models::integrations::openai::OpenAIConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: Some(AnthropicConfig {
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "anthropic",
+            ProviderConfig::Anthropic {
                 api_key: Some("sk-ant-test".to_string()),
                 api_endpoint: None,
                 access_token: None,
-            }),
-            openai_config: Some(OpenAIConfig {
+            },
+        );
+        config.add_provider(
+            "openai",
+            ProviderConfig::OpenAI {
                 api_key: Some("sk-openai-test".to_string()),
                 api_endpoint: None,
-            }),
-            gemini_config: Some(GeminiConfig {
+            },
+        );
+        config.add_provider(
+            "gemini",
+            ProviderConfig::Gemini {
                 api_key: Some("gemini-test".to_string()),
                 api_endpoint: None,
-            }),
-            custom_providers: None,
-        };
+            },
+        );
 
         let result = build_inference_config(&config);
         assert!(result.is_ok());
@@ -1525,25 +1547,23 @@ mod tests {
 
     #[test]
     fn test_build_provider_registry_with_custom_providers() {
-        use crate::models::llm::CustomProviderConfig;
+        use crate::models::llm::ProviderConfig;
 
-        let config = LLMProviderConfig {
-            anthropic_config: None,
-            openai_config: None,
-            gemini_config: None,
-            custom_providers: Some(vec![
-                CustomProviderConfig {
-                    name: "litellm".to_string(),
-                    api_endpoint: "http://localhost:4000".to_string(),
-                    api_key: Some("sk-1234".to_string()),
-                },
-                CustomProviderConfig {
-                    name: "ollama".to_string(),
-                    api_endpoint: "http://localhost:11434/v1".to_string(),
-                    api_key: None,
-                },
-            ]),
-        };
+        let mut config = LLMProviderConfig::new();
+        config.add_provider(
+            "litellm",
+            ProviderConfig::Custom {
+                api_endpoint: "http://localhost:4000".to_string(),
+                api_key: Some("sk-1234".to_string()),
+            },
+        );
+        config.add_provider(
+            "ollama",
+            ProviderConfig::Custom {
+                api_endpoint: "http://localhost:11434/v1".to_string(),
+                api_key: None,
+            },
+        );
 
         let result = build_provider_registry_direct(&config);
         assert!(

@@ -5,7 +5,9 @@ use crate::local::context_managers::{
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, ContentPart, ImageUrl, MessageContent, Role,
 };
-use stakpak_shared::models::llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent};
+use stakpak_shared::models::llm::{
+    LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMProviderConfig,
+};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -20,10 +22,7 @@ async fn test_local_db_operations() {
     let config = LocalClientConfig {
         stakpak_base_url: None,
         store_path: Some(db_path.clone()),
-        anthropic_config: None,
-        openai_config: None,
-        gemini_config: None,
-        custom_providers: None,
+        providers: LLMProviderConfig::new(),
         smart_model: None,
         eco_model: None,
         recovery_model: None,

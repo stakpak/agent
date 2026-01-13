@@ -13,17 +13,17 @@ use reqwest::Error as ReqwestError;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::hooks::{HookContext, HookRegistry, LifecycleEvent};
-use stakpak_shared::models::integrations::anthropic::{AnthropicConfig, AnthropicModel};
-use stakpak_shared::models::integrations::gemini::{GeminiConfig, GeminiModel};
+use stakpak_shared::models::integrations::anthropic::AnthropicModel;
+use stakpak_shared::models::integrations::gemini::GeminiModel;
 use stakpak_shared::models::integrations::openai::{
     AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIConfig,
-    OpenAIModel, Role, Tool,
+    ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, OpenAIModel, Role,
+    Tool,
 };
 use stakpak_shared::models::integrations::search_service::*;
 use stakpak_shared::models::llm::{
-    CustomProviderConfig, GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel,
-    LLMProviderConfig, LLMStreamInput,
+    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMProviderConfig,
+    LLMStreamInput,
 };
 use stakpak_shared::models::stakai_adapter::StakAIClient;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
@@ -43,10 +43,7 @@ mod tests;
 pub struct LocalClient {
     pub db: Connection,
     pub stakpak_base_url: Option<String>,
-    pub anthropic_config: Option<AnthropicConfig>,
-    pub openai_config: Option<OpenAIConfig>,
-    pub gemini_config: Option<GeminiConfig>,
-    pub custom_providers: Option<Vec<CustomProviderConfig>>,
+    pub providers: LLMProviderConfig,
     pub model_options: ModelOptions,
     pub hook_registry: Option<Arc<HookRegistry<AgentState>>>,
     _search_services_orchestrator: Option<Arc<SearchServicesOrchestrator>>,
@@ -103,10 +100,7 @@ impl From<ModelOptions> for ModelSet {
 pub struct LocalClientConfig {
     pub stakpak_base_url: Option<String>,
     pub store_path: Option<String>,
-    pub anthropic_config: Option<AnthropicConfig>,
-    pub openai_config: Option<OpenAIConfig>,
-    pub gemini_config: Option<GeminiConfig>,
-    pub custom_providers: Option<Vec<CustomProviderConfig>>,
+    pub providers: LLMProviderConfig,
     pub smart_model: Option<String>,
     pub eco_model: Option<String>,
     pub recovery_model: Option<String>,
@@ -185,10 +179,7 @@ impl LocalClient {
         Ok(Self {
             db: conn,
             stakpak_base_url: config.stakpak_base_url.map(|url| url + "/v1"),
-            anthropic_config: config.anthropic_config,
-            gemini_config: config.gemini_config,
-            openai_config: config.openai_config,
-            custom_providers: config.custom_providers,
+            providers: config.providers,
             model_options,
             hook_registry: Some(Arc::new(hook_registry)),
             _search_services_orchestrator: Some(Arc::new(SearchServicesOrchestrator)),
@@ -650,12 +641,7 @@ impl AgentProvider for LocalClient {
 
 impl LocalClient {
     fn get_llm_config(&self) -> LLMProviderConfig {
-        LLMProviderConfig {
-            anthropic_config: self.anthropic_config.clone(),
-            openai_config: self.openai_config.clone(),
-            gemini_config: self.gemini_config.clone(),
-            custom_providers: self.custom_providers.clone(),
-        }
+        self.providers.clone()
     }
 
     async fn run_agent_completion(
@@ -832,11 +818,11 @@ impl LocalClient {
 
         let llm_model = if let Some(eco_model) = &self.model_options.eco_model {
             eco_model.clone()
-        } else if llm_config.openai_config.is_some() {
+        } else if llm_config.get_provider("openai").is_some() {
             LLMModel::OpenAI(OpenAIModel::GPT5Mini)
-        } else if llm_config.anthropic_config.is_some() {
+        } else if llm_config.get_provider("anthropic").is_some() {
             LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-        } else if llm_config.gemini_config.is_some() {
+        } else if llm_config.get_provider("gemini").is_some() {
             LLMModel::Gemini(GeminiModel::Gemini25Flash)
         } else {
             return Err("No LLM config found".to_string());
@@ -1216,11 +1202,11 @@ fn get_search_model(
         Some(LLMModel::Gemini(_)) => LLMModel::Gemini(GeminiModel::Gemini3Flash),
         Some(LLMModel::Custom { provider, model }) => LLMModel::Custom { provider, model },
         None => {
-            if llm_config.openai_config.is_some() {
+            if llm_config.get_provider("openai").is_some() {
                 LLMModel::OpenAI(OpenAIModel::O4Mini)
-            } else if llm_config.anthropic_config.is_some() {
+            } else if llm_config.get_provider("anthropic").is_some() {
                 LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-            } else if llm_config.gemini_config.is_some() {
+            } else if llm_config.get_provider("gemini").is_some() {
                 LLMModel::Gemini(GeminiModel::Gemini3Flash)
             } else {
                 LLMModel::OpenAI(OpenAIModel::O4Mini)

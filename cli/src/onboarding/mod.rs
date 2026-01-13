@@ -449,7 +449,7 @@ async fn handle_claude_subscription_setup(config: &mut AppConfig, profile_name: 
     config.provider = profile
         .provider
         .unwrap_or(crate::config::ProviderType::Local);
-    config.anthropic = profile.anthropic.clone();
+    config.providers = profile.providers.clone();
     config.smart_model = profile.smart_model.clone();
     config.eco_model = profile.eco_model.clone();
     config.anonymous_id = telemetry.anonymous_id;
@@ -542,7 +542,7 @@ async fn handle_openai_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.provider = profile
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
-                    config.openai = profile.openai.clone();
+                    config.providers = profile.providers.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
@@ -644,7 +644,7 @@ async fn handle_gemini_setup(config: &mut AppConfig, profile_name: &str) -> bool
                     config.provider = profile
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
-                    config.gemini = profile.gemini.clone();
+                    config.providers = profile.providers.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
@@ -747,7 +747,7 @@ async fn handle_anthropic_api_key_setup(config: &mut AppConfig, profile_name: &s
                     config.provider = profile
                         .provider
                         .unwrap_or(crate::config::ProviderType::Local);
-                    config.anthropic = profile.anthropic.clone();
+                    config.providers = profile.providers.clone();
                     config.smart_model = profile.smart_model.clone();
                     config.eco_model = profile.eco_model.clone();
                     config.anonymous_id = telemetry.anonymous_id;
@@ -834,9 +834,7 @@ async fn handle_hybrid_setup(config: &mut AppConfig, profile_name: &str) -> bool
             config.provider = profile
                 .provider
                 .unwrap_or(crate::config::ProviderType::Local);
-            config.openai = profile.openai.clone();
-            config.anthropic = profile.anthropic.clone();
-            config.gemini = profile.gemini.clone();
+            config.providers = profile.providers.clone();
             config.smart_model = profile.smart_model.clone();
             config.eco_model = profile.eco_model.clone();
             config.recovery_model = profile.recovery_model.clone();
@@ -993,10 +991,7 @@ async fn handle_byom_setup(config: &mut AppConfig, profile_name: &str) -> bool {
         config.provider = profile
             .provider
             .unwrap_or(crate::config::ProviderType::Local);
-        config.openai = profile.openai.clone();
-        config.anthropic = profile.anthropic.clone();
-        config.gemini = profile.gemini.clone();
-        config.custom_providers = profile.custom_providers.clone();
+        config.providers = profile.providers.clone();
         config.smart_model = profile.smart_model.clone();
         config.eco_model = profile.eco_model.clone();
         config.recovery_model = profile.recovery_model.clone();

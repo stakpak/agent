@@ -276,19 +276,12 @@ async fn main() {
                         ProviderType::Local => {
                             // Use credential resolution with auth.toml fallback chain
                             // Refresh OAuth tokens in parallel to minimize startup delay
-                            let (anthropic_config, openai_config, gemini_config) = tokio::join!(
-                                config.get_anthropic_config_with_auth_async(),
-                                config.get_openai_config_with_auth_async(),
-                                config.get_gemini_config_with_auth_async()
-                            );
+                            let providers = config.get_llm_provider_config_async().await;
 
                             let client = LocalClient::new(LocalClientConfig {
                                 store_path: None,
                                 stakpak_base_url: Some(config.api_endpoint.clone()),
-                                anthropic_config,
-                                openai_config,
-                                gemini_config,
-                                custom_providers: config.get_custom_providers_config(),
+                                providers,
                                 eco_model: config.eco_model.clone(),
                                 recovery_model: config.recovery_model.clone(),
                                 smart_model: config.smart_model.clone(),
