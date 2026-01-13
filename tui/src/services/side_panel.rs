@@ -82,13 +82,22 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         4 // Header + Plan + Credits
     };
 
+    // Calculate todo content width for wrapping
+    let todo_content_width = padded_area.width.saturating_sub(10) as usize; // Accounts for LEFT_PADDING + symbol + spacing
+
     let todos_height = if todos_collapsed {
         collapsed_height
     } else if state.todos.is_empty() {
         3 // Header + "No tasks" + blank line
     } else {
-        // +1 for header, +1 for blank line spacing, max 10
-        (state.todos.len() + 2).min(10) as u16
+        // Calculate total lines needed including wrapped lines
+        let mut total_lines = 1; // Header
+        for todo in &state.todos {
+            let wrapped_lines = wrap_text(&todo.text, todo_content_width);
+            total_lines += wrapped_lines.len().max(1);
+        }
+        total_lines += 1; // blank line spacing
+        (total_lines as u16).min(15) // Increase max to accommodate wrapping
     };
 
     let changeset_height = if changeset_collapsed {
@@ -328,22 +337,41 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
+        // Calculate available width for todo text (after LEFT_PADDING + symbol + spaces)
+        let prefix_width = LEFT_PADDING.len() + 6; // "  [x] " = 6 chars
+        let content_width = (area.width as usize).saturating_sub(prefix_width + 2);
+
         for todo in &state.todos {
             let (symbol, symbol_color, text_color) = match todo.status {
                 TodoStatus::Done => ("[x]", Color::Green, Color::Reset),
                 TodoStatus::InProgress => ("[/]", Color::Yellow, Color::Reset),
                 TodoStatus::Pending => ("[ ]", Color::DarkGray, Color::DarkGray),
             };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{}  {} ", LEFT_PADDING, symbol),
-                    Style::default().fg(symbol_color),
-                ),
-                Span::styled(
-                    truncate_string(&todo.text, area.width as usize - 10),
-                    Style::default().fg(text_color),
-                ),
-            ]));
+
+            // Wrap the todo text
+            let wrapped_lines = wrap_text(&todo.text, content_width);
+
+            for (i, line_text) in wrapped_lines.iter().enumerate() {
+                if i == 0 {
+                    // First line includes the symbol
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{}  {} ", LEFT_PADDING, symbol),
+                            Style::default().fg(symbol_color),
+                        ),
+                        Span::styled(line_text.clone(), Style::default().fg(text_color)),
+                    ]));
+                } else {
+                    // Continuation lines are indented to align with the text
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{}      ", LEFT_PADDING), // Same indent as after symbol
+                            Style::default().fg(Color::Reset),
+                        ),
+                        Span::styled(line_text.clone(), Style::default().fg(text_color)),
+                    ]));
+                }
+            }
         }
     }
     // Add blank line for spacing before Changeset section
@@ -628,5 +656,52 @@ fn truncate_string(s: &str, max_width: usize) -> String {
         format!("{}...", &s[..max_width - 3])
     } else {
         s[..max_width].to_string()
+    }
+}
+
+/// Wrap text to fit within a given width, returning multiple lines
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    // Handle edge cases - always return at least the original text
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    if max_width == 0 || max_width < 5 {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for word in text.split_whitespace() {
+        let word_width = unicode_width::UnicodeWidthStr::width(word);
+
+        if current_line.is_empty() {
+            // First word on the line
+            current_line = word.to_string();
+            current_width = word_width;
+        } else if current_width + 1 + word_width <= max_width {
+            // Word fits on current line with a space
+            current_line.push(' ');
+            current_line.push_str(word);
+            current_width += 1 + word_width;
+        } else {
+            // Word doesn't fit, start a new line
+            lines.push(current_line);
+            current_line = word.to_string();
+            current_width = word_width;
+        }
+    }
+
+    // Don't forget the last line
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    // Ensure we always return at least one line
+    if lines.is_empty() {
+        vec![text.to_string()]
+    } else {
+        lines
     }
 }
