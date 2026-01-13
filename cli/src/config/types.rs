@@ -25,6 +25,8 @@ pub struct Settings {
     pub anonymous_id: Option<String>,
     /// Whether to collect telemetry data
     pub collect_telemetry: Option<bool>,
+    /// Preferred external editor (e.g. vim, nano, code)
+    pub editor: Option<String>,
 }
 
 /// Legacy configuration format for migration purposes.
@@ -43,6 +45,7 @@ impl From<OldAppConfig> for Settings {
             auto_append_gitignore: old_config.auto_append_gitignore,
             anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
             collect_telemetry: Some(true),
+            editor: Some("nano".to_string()),
         }
     }
 }

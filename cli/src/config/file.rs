@@ -28,6 +28,7 @@ impl Default for ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -46,6 +47,7 @@ impl ConfigFile {
                 auto_append_gitignore: Some(true),
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
+                editor: Some("nano".to_string()),
             },
         }
     }
@@ -88,12 +90,14 @@ impl ConfigFile {
         // Preserve existing anonymous_id and collect_telemetry if AppConfig values are None
         let existing_anonymous_id = self.settings.anonymous_id.clone();
         let existing_collect_telemetry = self.settings.collect_telemetry;
+        let existing_editor = self.settings.editor.clone();
 
         self.settings = Settings {
             machine_name: config.machine_name,
             auto_append_gitignore: config.auto_append_gitignore,
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
+            editor: config.editor.or(existing_editor),
         };
     }
 

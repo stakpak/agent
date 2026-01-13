@@ -212,11 +212,11 @@ impl ProfileConfig {
                 }
                 ProviderConfig::Custom { api_endpoint, .. } => {
                     let clean = Self::clean_api_endpoint(Some(api_endpoint.clone()));
-                    if let Some(clean_ep) = clean {
-                        if &clean_ep != api_endpoint {
-                            *api_endpoint = clean_ep;
-                            cleaned = true;
-                        }
+                    if let Some(clean_ep) = clean
+                        && &clean_ep != api_endpoint
+                    {
+                        *api_endpoint = clean_ep;
+                        cleaned = true;
                     }
                 }
             }
@@ -234,10 +234,10 @@ impl ProfileConfig {
 
         // Check for endpoints with /chat/completions that need cleaning
         for provider in self.providers.values() {
-            if let Some(ep) = provider.api_endpoint() {
-                if ep.contains("/chat/completions") {
-                    return true;
-                }
+            if let Some(ep) = provider.api_endpoint()
+                && ep.contains("/chat/completions")
+            {
+                return true;
             }
         }
 

@@ -64,6 +64,7 @@ fn sample_app_config(profile_name: &str) -> AppConfig {
         recovery_model: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
+        editor: Some("nano".into()),
     }
 }
 
@@ -198,6 +199,7 @@ fn resolved_profile_config_merges_all_profile_defaults() {
             auto_append_gitignore: Some(true),
             anonymous_id: Some("test-user-id".into()),
             collect_telemetry: Some(true),
+            editor: Some("nano".into()),
         },
     };
 
@@ -430,6 +432,7 @@ fn save_writes_profile_and_settings() {
         recovery_model: None,
         anonymous_id: Some("test-user-id".into()),
         collect_telemetry: Some(true),
+        editor: Some("nano".into()),
     };
 
     config.save().unwrap();
