@@ -717,7 +717,10 @@ pub fn list_auto_approved_tools(state: &mut AppState) {
 }
 
 // ========== Command Palette Rendering ==========
+// NOTE: render_command_palette is preserved for reference but no longer used.
+// The unified popup in shortcuts_popup.rs now handles command palette rendering.
 
+#[allow(dead_code)]
 pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
     // Calculate popup size (smaller height)
     let area = centered_rect(42, 50, f.area());
@@ -923,6 +926,7 @@ pub fn render_command_palette(f: &mut Frame, state: &crate::app::AppState) {
 }
 
 /// Helper function to create a centered rectangle
+#[allow(dead_code)]
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

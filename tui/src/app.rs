@@ -159,6 +159,7 @@ pub struct AppState {
     // ========== Shortcuts Popup State ==========
     pub show_shortcuts_popup: bool,
     pub shortcuts_scroll: usize,
+    pub shortcuts_popup_mode: ShortcutsPopupMode,
 
     // ========== File Changes Popup State ==========
     pub show_file_changes_popup: bool,
@@ -396,6 +397,7 @@ impl AppState {
             // Shortcuts popup initialization
             show_shortcuts_popup: false,
             shortcuts_scroll: 0,
+            shortcuts_popup_mode: ShortcutsPopupMode::default(),
             // Rulebook switcher initialization
             show_rulebook_switcher: false,
             available_rulebooks: Vec::new(),

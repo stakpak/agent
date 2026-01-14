@@ -68,6 +68,14 @@ pub enum ToolCallStatus {
     Pending,
 }
 
+/// Mode for the unified shortcuts/commands popup
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ShortcutsPopupMode {
+    #[default]
+    Commands,
+    Shortcuts,
+}
+
 #[derive(Debug)]
 pub struct LoadingStateManager {
     active_operations: std::collections::HashSet<LoadingOperation>,

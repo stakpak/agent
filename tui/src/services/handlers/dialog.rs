@@ -26,8 +26,8 @@ pub fn handle_esc_event(
         state.show_rulebook_switcher = false;
         return;
     }
-    if state.show_command_palette {
-        state.show_command_palette = false;
+    if state.show_shortcuts_popup {
+        state.show_shortcuts_popup = false;
         state.command_palette_search.clear();
         return;
     }

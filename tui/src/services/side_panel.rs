@@ -70,7 +70,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let context_height = if context_collapsed {
         collapsed_height
     } else {
-        4 // Header + Tokens + Model
+        5 // Header + Tokens + Model + Provider
     };
 
     // Billing section is hidden when billing_info is None (local mode)
@@ -228,6 +228,15 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
 
         lines.push(make_row("Model", truncated_model, Color::Cyan));
     }
+
+    // Provider - show subscription, auth provider, or config provider
+    let provider_value = match &state.auth_display_info {
+        (_, Some(_), Some(subscription)) => subscription.clone(),
+        (_, Some(auth_provider), None) => auth_provider.clone(),
+        (Some(config_provider), None, None) => config_provider.clone(),
+        _ => "N/A".to_string(),
+    };
+    lines.push(make_row("Provider", provider_value, Color::DarkGray));
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);

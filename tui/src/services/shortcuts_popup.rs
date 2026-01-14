@@ -1,13 +1,21 @@
+//! Unified Commands & Shortcuts Popup
+//!
+//! This module provides a unified popup with:
+//! - Commands section: Searchable and triggerable command palette items
+//! - Shortcuts section: Read-only keyboard shortcuts grouped by category
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Tabs},
 };
 use std::sync::OnceLock;
 
+use crate::app::ShortcutsPopupMode;
 use crate::constants::SCROLL_BUFFER_LINES;
+use crate::services::commands::filter_commands;
 
 #[derive(Debug, Clone)]
 pub struct Shortcut {
@@ -188,7 +196,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    // Split area for title, content, scroll indicators, and help text inside the block
+    // Split area for title, tabs, and content - layout differs by mode
     let inner_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
@@ -196,31 +204,370 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         height: area.height - 2,
     };
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // Title
-            Constraint::Min(3),    // Content
-            Constraint::Length(1), // Scroll indicators
-            Constraint::Length(1), // Help text
-        ])
-        .split(inner_area);
-
     // Render title inside the popup
-    let title = " Keyboard Shortcuts ";
+    let title = " Commands & Shortcuts ";
     let title_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
 
-    f.render_widget(title_paragraph, chunks[0]);
+    // Render tabs
+    let tab_titles = vec![" Commands ", " Shortcuts "];
+    let selected_tab = match state.shortcuts_popup_mode {
+        ShortcutsPopupMode::Commands => 0,
+        ShortcutsPopupMode::Shortcuts => 1,
+    };
+    let tabs = Tabs::new(tab_titles)
+        .select(selected_tab)
+        .style(Style::default().fg(Color::DarkGray))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .divider(" | ");
 
-    // Get all shortcuts lines and calculate scroll info
-    let all_lines = get_cached_shortcuts_content(Some(area.width as usize));
+    // Render content based on mode with mode-specific layouts
+    match state.shortcuts_popup_mode {
+        ShortcutsPopupMode::Commands => {
+            // Commands mode: Title, Tabs, Search, Content, Scroll, Help
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Title
+                    Constraint::Length(1), // Tabs
+                    Constraint::Length(3), // Search
+                    Constraint::Min(3),    // Content
+                    Constraint::Length(1), // Scroll indicators
+                    Constraint::Length(1), // Help text
+                ])
+                .split(inner_area);
+
+            f.render_widget(title_paragraph, chunks[0]);
+            f.render_widget(tabs, chunks[1]);
+            render_commands_section(f, state, chunks[2], chunks[3], chunks[4], chunks[5], area);
+        }
+        ShortcutsPopupMode::Shortcuts => {
+            // Shortcuts mode: Title, Tabs, Spacer, Search, Content, Scroll, Help
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Title
+                    Constraint::Length(1), // Tabs
+                    Constraint::Length(1), // Spacer
+                    Constraint::Length(1), // Search (reduced from 3 if we remove border)
+                    Constraint::Min(3),    // Content
+                    Constraint::Length(1), // Scroll indicators
+                    Constraint::Length(1), // Help text
+                ])
+                .split(inner_area);
+
+            f.render_widget(title_paragraph, chunks[0]);
+            f.render_widget(tabs, chunks[1]);
+            // spacer at chunks[2] is empty
+            render_shortcuts_section(f, state, chunks[3], chunks[4], chunks[5], chunks[6], area);
+        }
+    }
+
+    // Render the border with title last (so it's on top)
+    f.render_widget(block, area);
+}
+
+fn render_commands_section(
+    f: &mut Frame,
+    state: &crate::app::AppState,
+    search_area: Rect,
+    content_area: Rect,
+    scroll_area: Rect,
+    help_area: Rect,
+    area: Rect,
+) {
+    // Render search input
+    let search_prompt = ">";
+    let cursor = "|";
+    let placeholder = "Type to filter";
+
+    let search_spans = if state.command_palette_search.is_empty() {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "), // Small space after
+        ]
+    } else {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(
+                &state.command_palette_search,
+                Style::default()
+                    .fg(Color::Reset)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::raw(" "), // Small space after
+        ]
+    };
+
+    let search_text = ratatui::text::Text::from(vec![
+        Line::from(""), // Empty line above
+        Line::from(search_spans),
+        Line::from(""), // Empty line below
+    ]);
+    let search_paragraph = Paragraph::new(search_text);
+    f.render_widget(search_paragraph, search_area);
+
+    // Get filtered commands
+    let filtered_commands = filter_commands(&state.command_palette_search);
+    let total_commands = filtered_commands.len();
+    let height = content_area.height as usize;
+
+    // Calculate scroll position
+    let max_scroll = total_commands.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
+    let scroll = if state.command_palette_scroll > max_scroll {
+        max_scroll
+    } else {
+        state.command_palette_scroll
+    };
+
+    // Add top arrow indicator if there are hidden items above
+    let mut visible_lines = Vec::new();
+    let has_content_above = scroll > 0;
+    if has_content_above {
+        visible_lines.push(Line::from(vec![Span::styled(
+            " ▲",
+            Style::default().fg(Color::Reset),
+        )]));
+    }
+
+    // Create visible lines
+    for i in 0..height {
+        let line_index = scroll + i;
+        if line_index < total_commands {
+            let command = &filtered_commands[line_index];
+            let available_width = area.width as usize - 2; // Account for borders
+            let is_selected = line_index == state.command_palette_selected;
+            let bg_color = if is_selected {
+                Color::Cyan
+            } else {
+                Color::Reset
+            };
+            let text_color = if is_selected {
+                Color::Black
+            } else {
+                Color::Reset
+            };
+
+            // Create a single line with name on left and shortcut on right
+            let name_formatted = format!(
+                " {:<width$}",
+                command.name,
+                width = available_width - command.shortcut.len() - 2
+            );
+            let shortcut_formatted = format!("{} ", command.shortcut);
+
+            let spans = vec![
+                Span::styled(name_formatted, Style::default().fg(text_color).bg(bg_color)),
+                Span::styled(
+                    shortcut_formatted,
+                    Style::default()
+                        .fg(if is_selected {
+                            Color::Black
+                        } else {
+                            Color::DarkGray
+                        })
+                        .bg(bg_color),
+                ),
+            ];
+
+            visible_lines.push(Line::from(spans));
+        } else {
+            visible_lines.push(Line::from(""));
+        }
+    }
+
+    // Render content
+    let content_paragraph = Paragraph::new(visible_lines)
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .style(Style::default().bg(Color::Reset).fg(Color::White));
+
+    f.render_widget(content_paragraph, content_area);
+
+    // Scroll indicators
+    let has_content_below = scroll < max_scroll;
+
+    if has_content_above || has_content_below {
+        let mut indicator_spans = vec![];
+
+        // Show cumulative commands counter
+        let cumulative = (scroll + height).min(total_commands);
+        indicator_spans.push(Span::styled(
+            format!(" ({}/{})", cumulative, total_commands),
+            Style::default().fg(Color::Reset),
+        ));
+
+        if has_content_below {
+            indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+        }
+
+        let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
+        f.render_widget(indicator_paragraph, scroll_area);
+    } else {
+        // Empty line when no scroll indicators
+        f.render_widget(Paragraph::new(""), scroll_area);
+    }
+
+    // Help text
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("enter", Style::default().fg(Color::DarkGray)),
+        Span::styled(" select", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("tab", Style::default().fg(Color::DarkGray)),
+        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" close", Style::default().fg(Color::Cyan)),
+    ]));
+
+    f.render_widget(help, help_area);
+}
+
+fn render_shortcuts_section(
+    f: &mut Frame,
+    state: &mut crate::app::AppState,
+    search_area: Rect,
+    content_area: Rect,
+    scroll_area: Rect,
+    help_area: Rect,
+    area: Rect,
+) {
+    // Render search input
+    let search_term = &state.command_palette_search;
+    let search_prompt = ">";
+    let cursor = "|";
+    let placeholder = "Type to filter (e.g. 'ctrl+')";
+
+    let search_spans = if search_term.is_empty() {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "), // Small space after
+        ]
+    } else {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::raw(search_term),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+        ]
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(search_spans))
+            .block(Block::default().border_style(Style::default().fg(Color::DarkGray))),
+        search_area,
+    );
+
+    // Get shortcuts content (filtered or cached)
+    let search_lower = search_term.to_lowercase();
+    let all_lines = if search_term.is_empty() {
+        get_cached_shortcuts_content(Some(area.width as usize)).clone()
+    } else {
+        // Dynamic filtering
+        let all_shortcuts = get_all_shortcuts();
+        let filtered: Vec<&Shortcut> = all_shortcuts
+            .iter()
+            .filter(|s| {
+                s.key.to_lowercase().contains(&search_lower)
+                    || s.description.to_lowercase().contains(&search_lower)
+                    || s.category.to_lowercase().contains(&search_lower)
+            })
+            .collect();
+
+        // Rebuild lines (reusing logic from get_cached_shortcuts_content slightly simplified)
+        let mut lines = Vec::new();
+        lines.push(Line::from(""));
+
+        let mut categories: std::collections::HashMap<&str, Vec<&Shortcut>> =
+            std::collections::HashMap::new();
+        for s in filtered {
+            categories.entry(&s.category).or_default().push(s);
+        }
+
+        let category_order = vec![
+            "Navigation",
+            "Text Input",
+            "Tool Management",
+            "UI Controls",
+            "Commands",
+            "File Search",
+            "Mouse",
+        ];
+
+        for category_name in &category_order {
+            if let Some(category_shortcuts) = categories.get(category_name) {
+                // Add category header
+                let category_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD);
+                let category_width =
+                    area.width.saturating_sub(category_name.len() as u16 + 5) as usize;
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {} ", category_name), category_style),
+                    Span::styled(
+                        "─".repeat(category_width).to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+
+                for shortcut in category_shortcuts {
+                    let key_formatted = format!(" {:<25}", shortcut.key);
+                    let description_formatted = format!("{:<40} ", shortcut.description);
+
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            key_formatted,
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(description_formatted, Style::default().fg(Color::Reset)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+        }
+        lines
+    };
+
     let total_lines = all_lines.len();
-    let height = chunks[1].height as usize;
-    let shortcuts_count = get_shortcuts_count();
+    let height = content_area.height as usize;
+    let shortcuts_count = if search_term.is_empty() {
+        get_shortcuts_count()
+    } else {
+        // Count filtered shortcuts
+        let mut count = 0;
+        for line in &all_lines {
+            for span in &line.spans {
+                if span.style.fg == Some(Color::Green) {
+                    count += 1;
+                    break;
+                }
+            }
+        }
+        count
+    };
 
     // Calculate scroll position (similar to collapsed messages)
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
@@ -253,7 +600,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         .wrap(ratatui::widgets::Wrap { trim: false })
         .style(Style::default().bg(Color::Reset).fg(Color::White));
 
-    f.render_widget(content_paragraph, chunks[1]);
+    f.render_widget(content_paragraph, content_area);
 
     // Calculate cumulative shortcuts count (including scrolled past ones)
     let mut cumulative_shortcuts_count = 0;
@@ -292,25 +639,25 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         }
 
         let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
-        f.render_widget(indicator_paragraph, chunks[2]);
+        f.render_widget(indicator_paragraph, scroll_area);
     } else {
         // Empty line when no scroll indicators
-        f.render_widget(Paragraph::new(""), chunks[2]);
+        f.render_widget(Paragraph::new(""), scroll_area);
     }
 
-    // Help text (clean, without scroll indicators)
+    // Help text
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
         Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("tab", Style::default().fg(Color::DarkGray)),
+        Span::styled(" switch", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
         Span::styled("esc", Style::default().fg(Color::DarkGray)),
         Span::styled(" close", Style::default().fg(Color::Cyan)),
     ]));
 
-    f.render_widget(help, chunks[3]);
-
-    // Render the border with title last (so it's on top)
-    f.render_widget(block, area);
+    f.render_widget(help, help_area);
 }
 
 /// Helper function to create a centered rectangle
