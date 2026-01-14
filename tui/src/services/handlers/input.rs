@@ -784,17 +784,25 @@ pub fn handle_paste(state: &mut AppState, pasted: String) -> bool {
         }
     }
 
+    // Detect and redact secrets in pasted content
+    // This allows users to paste API keys, passwords, etc. and have them automatically
+    // redacted with placeholders that the agent can use
+    let redacted_pasted = state
+        .secret_manager
+        .redact_and_store_secrets(&normalized_pasted, None);
+
     // Also check if the pasted text itself contains file paths
     // (e.g., user pastes "check this out /path/to/image.png")
-    let char_count = normalized_pasted.chars().count();
+    let char_count = redacted_pasted.chars().count();
     if char_count > MAX_PASTE_CHAR_COUNT {
         let placeholder = format!("[Pasted Content {char_count} chars]");
         state.text_area.insert_element(&placeholder);
-        state.pending_pastes.push((placeholder, normalized_pasted));
-    } else if char_count > 1 && handle_paste_image_path(state, normalized_pasted.clone()) {
+        // Store the redacted version (with placeholders) for later expansion
+        state.pending_pastes.push((placeholder, redacted_pasted));
+    } else if char_count > 1 && handle_paste_image_path(state, redacted_pasted.clone()) {
         // Path inserted - conversion will happen when user types or hits Enter
     } else {
-        state.text_area.insert_str(&normalized_pasted);
+        state.text_area.insert_str(&redacted_pasted);
     }
 
     true
