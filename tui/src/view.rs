@@ -48,7 +48,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let input_area_width = main_area.width.saturating_sub(4) as usize;
     let input_lines = calculate_input_lines(state, input_area_width); // -4 for borders and padding
     let input_height = (input_lines + 2) as u16;
-    let margin_height = 2;
+    let margin_height = 1;
     let dropdown_showing = state.show_helper_dropdown
         && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
             || !state.filtered_files.is_empty());
