@@ -391,58 +391,13 @@ fn render_collapsed_messages_content(f: &mut Frame, state: &mut AppState, area: 
 
 fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Create a block for the input area
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::ALL)
         .border_style(if state.show_shell_mode {
             Style::default().fg(AdaptiveColors::dark_magenta())
         } else {
             Style::default().fg(Color::DarkGray)
         });
-
-    if !state.show_shell_mode && !state.loading {
-        block = block.title(
-            Line::from(Span::styled(
-                "'$' for Shell mode",
-                Style::default().fg(Color::DarkGray),
-            ))
-            .left_aligned(),
-        );
-    }
-
-    // Display auth info on the right: subscription name if available, otherwise auth provider
-    match &state.auth_display_info {
-        (_, Some(_auth_provider), Some(subscription)) => {
-            // Show subscription name (e.g., "Claude Pro", "Claude Max")
-            block = block.title(
-                Line::from(Span::styled(
-                    subscription.as_str(),
-                    Style::default().fg(Color::Reset),
-                ))
-                .right_aligned(),
-            );
-        }
-        (_, Some(auth_provider), None) => {
-            // Show auth provider name if no subscription (e.g., "Anthropic")
-            block = block.title(
-                Line::from(Span::styled(
-                    auth_provider.as_str(),
-                    Style::default().fg(Color::Reset),
-                ))
-                .right_aligned(),
-            );
-        }
-        (Some(config_provider), None, None) => {
-            // Show config provider if no auth (e.g., "Local")
-            block = block.title(
-                Line::from(Span::styled(
-                    config_provider.as_str(),
-                    Style::default().fg(Color::DarkGray),
-                ))
-                .right_aligned(),
-            );
-        }
-        _ => {}
-    }
 
     // Create content area inside the block
     let content_area = Rect {
@@ -497,39 +452,9 @@ fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
         }
     }
 
-    // Reset utilization warnings before calculating
-    state.context_usage_percent = 0;
-    let total_width = area.width as usize;
     let mut final_spans = Vec::new();
 
     if !state.show_sessions_dialog {
-        if !state.show_side_panel {
-            // No tokens and side panel is closed, show hint to open side panel
-            let hint_text = "ctrl+y side panel";
-            let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
-            let total_adjusted_width = if state.loading {
-                total_width + 4
-            } else {
-                total_width
-            };
-            let spacing = total_adjusted_width.saturating_sub(left_len + hint_text.len());
-
-            final_spans.extend(left_spans);
-            if spacing > 0 {
-                final_spans.push(Span::styled(" ".repeat(spacing), Style::default()));
-            }
-            final_spans.push(Span::styled(
-                hint_text,
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            ));
-        } else {
-            // Side panel is open, no hint needed - just extend with left content
-            final_spans.extend(left_spans);
-        }
-    } else {
-        // Sessions dialog is open - just show left content
         final_spans.extend(left_spans);
     }
 

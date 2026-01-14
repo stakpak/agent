@@ -8,7 +8,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use stakpak_shared::models::integrations::openai::AgentModel;
 use stakpak_shared::models::model_pricing::ContextAware;
 
 pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
@@ -40,13 +39,14 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
-            Line::from("ctrl+p palette . @ files . / commands . ctrl+s shortcuts"),
+            Line::from("'$' Shell . / commands . ctrl+s shortcuts"),
             Line::from(format!(
                 "{} shell mode . ↵ submit . ctrl+c quit . ctrl+f profile . ctrl+k rulebooks . ctrl+s shortcuts",
                 SHELL_PROMPT_PREFIX.trim()
             )),
         ];
-        let shortcuts_widget = Paragraph::new(shortcuts).style(Style::default().fg(Color::Cyan));
+        let shortcuts_widget =
+            Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
         f.render_widget(shortcuts_widget, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
         let context_info = state
@@ -62,7 +62,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
         if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
+            let shortcuts_text = "'$' Shell | / commands | ctrl+s shortcuts";
             let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -93,72 +93,48 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             };
 
             // Create spans for left and right alignment on first line
-            let left_text = "ctrl+p palette . @ files . / commands . ctrl+s shortcuts";
+            let left_text = "'$' Shell | / commands | ctrl+s shortcuts";
 
             // Calculate spacing to align profile info to the right
 
             let right_text_content = {
                 let mut s = String::new();
 
-                // Add model info
-                s.push_str("model ");
-                s.push_str(&state.agent_model.to_string());
-
                 // Add profile info only if side panel is hidden
                 if !state.show_side_panel {
-                    s.push_str(" | profile ");
+                    s.push_str("profile ");
                     s.push_str(&state.current_profile_name);
                 }
 
                 // Add rulebooks info
-                s.push_str(" | ctrl+k rulebooks");
-                s.push_str(" | ctrl+k rulebooks");
+                s.push_str(" | ctrl+y side panel");
                 s
             };
 
             let right_style = Style::default().fg(Color::DarkGray);
 
             // Left side content
-            let left_spans = vec![Span::styled(left_text, Style::default().fg(Color::Cyan))];
+            let left_spans = vec![Span::styled(
+                left_text,
+                Style::default().fg(Color::DarkGray),
+            )];
 
             // Right side content
             let mut right_spans = vec![];
 
             if high_cost_warning || approaching_max {
                 right_spans.push(Span::styled(right_text_content, right_style));
-            } else {
-                right_spans.push(Span::styled("model ", Style::default().fg(Color::DarkGray)));
-                match state.agent_model {
-                    AgentModel::Smart => {
-                        right_spans.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
-                    }
-                    AgentModel::Eco => {
-                        right_spans
-                            .push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
-                    }
-                    AgentModel::Recovery => {
-                        right_spans.push(Span::styled(
-                            "recovery",
-                            Style::default().fg(Color::LightBlue),
-                        ));
-                    }
-                }
-
-                // Show profile info only if side panel is hidden
-                if !state.show_side_panel {
-                    right_spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
-                    right_spans.push(Span::styled(
-                        "profile ",
-                        Style::default().fg(Color::DarkGray),
-                    ));
-                    right_spans.push(Span::styled(
-                        state.current_profile_name.clone(),
-                        Style::default().fg(Color::Reset),
-                    ));
-                }
-
+            } else if !state.show_side_panel {
                 right_spans.push(Span::styled(
-                    " | ctrl+k rulebooks",
+                    "profile ",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                right_spans.push(Span::styled(
+                    state.current_profile_name.clone(),
+                    Style::default().fg(Color::Reset),
+                ));
+                right_spans.push(Span::styled(
+                    " | ctrl+y side panel",
                     Style::default().fg(Color::DarkGray),
                 ));
             }
@@ -197,21 +173,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             }
         }
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
-        // Show auto-approve status
-        let auto_approve_status = if state.auto_approve_manager.is_enabled() {
-            "auto-approve is ON"
-        } else {
-            "auto-approve is OFF"
-        };
-        let status_color = if state.auto_approve_manager.is_enabled() {
-            if should_use_rgb_colors() {
-                Color::LightYellow
-            } else {
-                Color::Cyan
-            }
-        } else {
-            Color::DarkGray
-        };
+        let status_color = Color::DarkGray;
 
         // detect if terminal is vscode
         let terminal_info = detect_terminal();
@@ -219,10 +181,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let is_iterm2 = terminal_name == "iTerm2";
         let new_line_hint = if !is_iterm2 { "ctrl+j" } else { "shift+enter" };
         let hint = Paragraph::new(Span::styled(
-            format!(
-                "{} new line | {} | ctrl+o toggle auto-approve",
-                new_line_hint, auto_approve_status
-            ),
+            format!("{} new line | @ files", new_line_hint),
             Style::default().fg(status_color),
         ));
         f.render_widget(hint, area);

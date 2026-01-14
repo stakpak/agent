@@ -489,8 +489,6 @@ pub fn welcome_messages(
         Message::info("SPACING_MARKER", None),
         version_message(latest_version),
         Message::info("SPACING_MARKER", None),
-        Message::info(format!("profile: {}", state.current_profile_name), None),
-        Message::info("SPACING_MARKER", None),
         Message::info(
             format!(
                 "cwd: {}",
@@ -498,8 +496,6 @@ pub fn welcome_messages(
             ),
             None,
         ),
-        Message::info("SPACING_MARKER", None),
-        Message::info("ctrl+s for shortcuts . ctrl+f switch profiles", None),
     ];
 
     // Show allowed tools for debugging
