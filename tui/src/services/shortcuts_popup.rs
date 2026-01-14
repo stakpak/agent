@@ -196,25 +196,13 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    // Split area for title, tabs, search, content, scroll indicators, and help text inside the block
+    // Split area for title, tabs, and content - layout differs by mode
     let inner_area = Rect {
         x: area.x + 1,
         y: area.y + 1,
         width: area.width - 2,
         height: area.height - 2,
     };
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // Title
-            Constraint::Length(1), // Tabs
-            Constraint::Length(3), // Search (only visible in Commands mode)
-            Constraint::Min(3),    // Content
-            Constraint::Length(1), // Scroll indicators
-            Constraint::Length(1), // Help text
-        ])
-        .split(inner_area);
 
     // Render title inside the popup
     let title = " Commands & Shortcuts ";
@@ -223,8 +211,6 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
         .add_modifier(Modifier::BOLD);
     let title_line = Line::from(Span::styled(title, title_style));
     let title_paragraph = Paragraph::new(title_line);
-
-    f.render_widget(title_paragraph, chunks[0]);
 
     // Render tabs
     let tab_titles = vec![" Commands ", " Shortcuts "];
@@ -241,17 +227,43 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
                 .add_modifier(Modifier::BOLD),
         )
         .divider(" | ");
-    f.render_widget(tabs, chunks[1]);
 
-    // Render content based on mode
+    // Render content based on mode with mode-specific layouts
     match state.shortcuts_popup_mode {
         ShortcutsPopupMode::Commands => {
+            // Commands mode: Title, Tabs, Search, Content, Scroll, Help
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Title
+                    Constraint::Length(1), // Tabs
+                    Constraint::Length(3), // Search
+                    Constraint::Min(3),    // Content
+                    Constraint::Length(1), // Scroll indicators
+                    Constraint::Length(1), // Help text
+                ])
+                .split(inner_area);
+
+            f.render_widget(title_paragraph, chunks[0]);
+            f.render_widget(tabs, chunks[1]);
             render_commands_section(f, state, chunks[2], chunks[3], chunks[4], chunks[5], area);
         }
         ShortcutsPopupMode::Shortcuts => {
-            // Clear search area in shortcuts mode
-            f.render_widget(Paragraph::new(""), chunks[2]);
-            render_shortcuts_section(f, state, chunks[3], chunks[4], chunks[5], area);
+            // Shortcuts mode: Title, Tabs, Content (no search), Scroll, Help
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Title
+                    Constraint::Length(1), // Tabs
+                    Constraint::Min(3),    // Content (no search area)
+                    Constraint::Length(1), // Scroll indicators
+                    Constraint::Length(1), // Help text
+                ])
+                .split(inner_area);
+
+            f.render_widget(title_paragraph, chunks[0]);
+            f.render_widget(tabs, chunks[1]);
+            render_shortcuts_section(f, state, chunks[2], chunks[3], chunks[4], area);
         }
     }
 
