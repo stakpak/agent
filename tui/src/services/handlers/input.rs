@@ -28,7 +28,9 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         }
         return; // Consume all input when popup is visible
     }
-    if state.show_command_palette {
+    if state.show_shortcuts_popup
+        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
+    {
         // Handle search input for command palette
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
         return;
@@ -47,7 +49,9 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
 
 /// Handle InputBackspace event - routes to appropriate handler based on popup state
 pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<InputEvent>) {
-    if state.show_command_palette {
+    if state.show_shortcuts_popup
+        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
+    {
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
         return;
     }
@@ -71,7 +75,9 @@ pub fn handle_input_submitted_event(
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
         return;
     }
-    if state.show_command_palette {
+    if state.show_shortcuts_popup
+        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
+    {
         // Execute the selected command
         use super::tool::execute_command_palette_selection;
         execute_command_palette_selection(state, input_tx, output_tx);

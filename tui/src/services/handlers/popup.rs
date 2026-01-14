@@ -339,9 +339,9 @@ pub fn handle_current_rulebooks_loaded(state: &mut AppState, current_uris: Vec<S
 
 // ========== Command Palette Handlers ==========
 
-/// Handle show command palette event
+/// Handle show command palette event - opens unified popup with Commands tab
 pub fn handle_show_command_palette(state: &mut AppState) {
-    // Don't show command palette if input is blocked or dialog is open
+    // Don't show if input is blocked or dialog is open
     if state.profile_switching_in_progress
         || state.is_dialog_open
         || state.approval_popup.is_visible()
@@ -349,7 +349,8 @@ pub fn handle_show_command_palette(state: &mut AppState) {
         return;
     }
 
-    state.show_command_palette = true;
+    state.show_shortcuts_popup = true;
+    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Commands;
     state.command_palette_selected = 0;
     state.command_palette_scroll = 0;
     state.command_palette_search = String::new();
@@ -357,7 +358,9 @@ pub fn handle_show_command_palette(state: &mut AppState) {
 
 /// Handle command palette search input changed event
 pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char) {
-    if state.show_command_palette {
+    if state.show_shortcuts_popup
+        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
+    {
         state.command_palette_search.push(c);
         state.command_palette_selected = 0;
     }
@@ -365,7 +368,10 @@ pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char
 
 /// Handle command palette search backspace event
 pub fn handle_command_palette_search_backspace(state: &mut AppState) {
-    if state.show_command_palette && !state.command_palette_search.is_empty() {
+    if state.show_shortcuts_popup
+        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
+        && !state.command_palette_search.is_empty()
+    {
         state.command_palette_search.pop();
         state.command_palette_selected = 0;
     }
@@ -373,7 +379,7 @@ pub fn handle_command_palette_search_backspace(state: &mut AppState) {
 
 // ========== Shortcuts Popup Handlers ==========
 
-/// Handle show shortcuts event
+/// Handle show shortcuts event - opens unified popup with Shortcuts tab
 pub fn handle_show_shortcuts(state: &mut AppState) {
     // Don't show shortcuts popup if input is blocked or dialog is open
     if state.profile_switching_in_progress
@@ -385,6 +391,8 @@ pub fn handle_show_shortcuts(state: &mut AppState) {
     }
 
     state.show_shortcuts_popup = true;
+    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Shortcuts;
+    state.shortcuts_scroll = 0;
 }
 
 /// Handle shortcuts cancel event

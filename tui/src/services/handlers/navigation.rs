@@ -114,29 +114,23 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
-    if state.show_command_palette {
-        let filtered_commands = filter_commands(&state.command_palette_search);
-        if state.command_palette_selected > 0 {
-            state.command_palette_selected -= 1;
-        } else {
-            state.command_palette_selected = filtered_commands.len().saturating_sub(1);
-        }
-        // Update scroll position to keep selected item visible
-        update_command_palette_scroll(state);
-        return;
-    }
-    if state.show_profile_switcher {
-        if state.profile_switcher_selected > 0 {
-            state.profile_switcher_selected -= 1;
-        } else {
-            state.profile_switcher_selected = state.available_profiles.len() - 1;
-        }
-        return;
-    }
-
     if state.show_shortcuts_popup {
-        // Handle scrolling up in shortcuts popup (like collapsed messages)
-        state.shortcuts_scroll = state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
+        match state.shortcuts_popup_mode {
+            crate::app::ShortcutsPopupMode::Commands => {
+                // Navigate commands list
+                let filtered_commands = filter_commands(&state.command_palette_search);
+                if state.command_palette_selected > 0 {
+                    state.command_palette_selected -= 1;
+                } else {
+                    state.command_palette_selected = filtered_commands.len().saturating_sub(1);
+                }
+                update_command_palette_scroll(state);
+            }
+            crate::app::ShortcutsPopupMode::Shortcuts => {
+                // Scroll shortcuts content
+                state.shortcuts_scroll = state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
+            }
+        }
         return;
     }
     if state.show_rulebook_switcher {
@@ -179,29 +173,23 @@ pub fn handle_down_navigation(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    if state.show_command_palette {
-        let filtered_commands = filter_commands(&state.command_palette_search);
-        if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
-            state.command_palette_selected += 1;
-        } else {
-            state.command_palette_selected = 0;
-        }
-        // Update scroll position to keep selected item visible
-        update_command_palette_scroll(state);
-        return;
-    }
-    if state.show_profile_switcher {
-        if state.profile_switcher_selected < state.available_profiles.len() - 1 {
-            state.profile_switcher_selected += 1;
-        } else {
-            state.profile_switcher_selected = 0;
-        }
-        return;
-    }
-
     if state.show_shortcuts_popup {
-        // Handle scrolling down in shortcuts popup (like collapsed messages)
-        state.shortcuts_scroll = state.shortcuts_scroll.saturating_add(SCROLL_LINES);
+        match state.shortcuts_popup_mode {
+            crate::app::ShortcutsPopupMode::Commands => {
+                // Navigate commands list
+                let filtered_commands = filter_commands(&state.command_palette_search);
+                if state.command_palette_selected < filtered_commands.len().saturating_sub(1) {
+                    state.command_palette_selected += 1;
+                } else {
+                    state.command_palette_selected = 0;
+                }
+                update_command_palette_scroll(state);
+            }
+            crate::app::ShortcutsPopupMode::Shortcuts => {
+                // Scroll shortcuts content
+                state.shortcuts_scroll = state.shortcuts_scroll.saturating_add(SCROLL_LINES);
+            }
+        }
         return;
     }
     if state.show_rulebook_switcher {
