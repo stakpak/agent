@@ -358,9 +358,7 @@ pub fn handle_show_command_palette(state: &mut AppState) {
 
 /// Handle command palette search input changed event
 pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char) {
-    if state.show_shortcuts_popup
-        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
-    {
+    if state.show_shortcuts_popup {
         state.command_palette_search.push(c);
         state.command_palette_selected = 0;
     }
@@ -368,10 +366,7 @@ pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char
 
 /// Handle command palette search backspace event
 pub fn handle_command_palette_search_backspace(state: &mut AppState) {
-    if state.show_shortcuts_popup
-        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
-        && !state.command_palette_search.is_empty()
-    {
+    if state.show_shortcuts_popup && !state.command_palette_search.is_empty() {
         state.command_palette_search.pop();
         state.command_palette_selected = 0;
     }

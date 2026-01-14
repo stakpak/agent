@@ -28,10 +28,8 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         }
         return; // Consume all input when popup is visible
     }
-    if state.show_shortcuts_popup
-        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
-    {
-        // Handle search input for command palette
+    if state.show_shortcuts_popup {
+        // Handle search input for command palette / shortcuts
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
         return;
     }
@@ -49,9 +47,7 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
 
 /// Handle InputBackspace event - routes to appropriate handler based on popup state
 pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<InputEvent>) {
-    if state.show_shortcuts_popup
-        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
-    {
+    if state.show_shortcuts_popup {
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
         return;
     }

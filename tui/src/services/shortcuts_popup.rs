@@ -249,13 +249,15 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
             render_commands_section(f, state, chunks[2], chunks[3], chunks[4], chunks[5], area);
         }
         ShortcutsPopupMode::Shortcuts => {
-            // Shortcuts mode: Title, Tabs, Content (no search), Scroll, Help
+            // Shortcuts mode: Title, Tabs, Spacer, Search, Content, Scroll, Help
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(1), // Title
                     Constraint::Length(1), // Tabs
-                    Constraint::Min(3),    // Content (no search area)
+                    Constraint::Length(1), // Spacer
+                    Constraint::Length(1), // Search (reduced from 3 if we remove border)
+                    Constraint::Min(3),    // Content
                     Constraint::Length(1), // Scroll indicators
                     Constraint::Length(1), // Help text
                 ])
@@ -263,7 +265,8 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
 
             f.render_widget(title_paragraph, chunks[0]);
             f.render_widget(tabs, chunks[1]);
-            render_shortcuts_section(f, state, chunks[2], chunks[3], chunks[4], area);
+            // spacer at chunks[2] is empty
+            render_shortcuts_section(f, state, chunks[3], chunks[4], chunks[5], chunks[6], area);
         }
     }
 
@@ -439,16 +442,132 @@ fn render_commands_section(
 fn render_shortcuts_section(
     f: &mut Frame,
     state: &mut crate::app::AppState,
+    search_area: Rect,
     content_area: Rect,
     scroll_area: Rect,
     help_area: Rect,
     area: Rect,
 ) {
-    // Get all shortcuts lines and calculate scroll info
-    let all_lines = get_cached_shortcuts_content(Some(area.width as usize));
+    // Render search input
+    let search_term = &state.command_palette_search;
+    let search_prompt = ">";
+    let cursor = "|";
+    let placeholder = "Type to filter (e.g. 'ctrl+')";
+
+    let search_spans = if search_term.is_empty() {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "), // Small space after
+        ]
+    } else {
+        vec![
+            Span::raw(" "), // Small space before
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::raw(search_term),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+        ]
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(search_spans))
+            .block(Block::default().border_style(Style::default().fg(Color::DarkGray))),
+        search_area,
+    );
+
+    // Get shortcuts content (filtered or cached)
+    let search_lower = search_term.to_lowercase();
+    let all_lines = if search_term.is_empty() {
+        get_cached_shortcuts_content(Some(area.width as usize)).clone()
+    } else {
+        // Dynamic filtering
+        let all_shortcuts = get_all_shortcuts();
+        let filtered: Vec<&Shortcut> = all_shortcuts
+            .iter()
+            .filter(|s| {
+                s.key.to_lowercase().contains(&search_lower)
+                    || s.description.to_lowercase().contains(&search_lower)
+                    || s.category.to_lowercase().contains(&search_lower)
+            })
+            .collect();
+
+        // Rebuild lines (reusing logic from get_cached_shortcuts_content slightly simplified)
+        let mut lines = Vec::new();
+        lines.push(Line::from(""));
+
+        let mut categories: std::collections::HashMap<&str, Vec<&Shortcut>> =
+            std::collections::HashMap::new();
+        for s in filtered {
+            categories.entry(&s.category).or_default().push(s);
+        }
+
+        let category_order = vec![
+            "Navigation",
+            "Text Input",
+            "Tool Management",
+            "UI Controls",
+            "Commands",
+            "File Search",
+            "Mouse",
+        ];
+
+        for category_name in &category_order {
+            if let Some(category_shortcuts) = categories.get(category_name) {
+                // Add category header
+                let category_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD);
+                let category_width =
+                    area.width.saturating_sub(category_name.len() as u16 + 5) as usize;
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {} ", category_name), category_style),
+                    Span::styled(
+                        "─".repeat(category_width).to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+
+                for shortcut in category_shortcuts {
+                    let key_formatted = format!(" {:<25}", shortcut.key);
+                    let description_formatted = format!("{:<40} ", shortcut.description);
+
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            key_formatted,
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(description_formatted, Style::default().fg(Color::Reset)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+        }
+        lines
+    };
+
     let total_lines = all_lines.len();
     let height = content_area.height as usize;
-    let shortcuts_count = get_shortcuts_count();
+    let shortcuts_count = if search_term.is_empty() {
+        get_shortcuts_count()
+    } else {
+        // Count filtered shortcuts
+        let mut count = 0;
+        for line in &all_lines {
+            for span in &line.spans {
+                if span.style.fg == Some(Color::Green) {
+                    count += 1;
+                    break;
+                }
+            }
+        }
+        count
+    };
 
     // Calculate scroll position (similar to collapsed messages)
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));

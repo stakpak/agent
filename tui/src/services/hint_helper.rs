@@ -39,7 +39,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
     if state.show_shortcuts && state.input().is_empty() {
         let shortcuts = vec![
-            Line::from("$ Shell . / commands . ctrl+s shortcuts"),
+            Line::from("$ shell . / commands . ctrl+s shortcuts"),
             Line::from(format!(
                 "{} shell mode . ↵ submit . ctrl+c quit . ctrl+f profile . ctrl+k rulebooks . ctrl+s shortcuts",
                 SHELL_PROMPT_PREFIX.trim()
@@ -62,7 +62,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
 
         if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
             // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "$ Shell | / commands | ctrl+s shortcuts";
+            let shortcuts_text = "$ shell | / commands | ctrl+s shortcuts";
             let retry_text = "ctrl+r to retry last command in shell mode";
 
             // Calculate spacing to align retry hint to the right
@@ -93,7 +93,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
             };
 
             // Create spans for left and right alignment on first line
-            let left_text = "$ Shell | / commands | ctrl+s shortcuts";
+            let left_text = "$ shell | / commands | ctrl+s shortcuts";
 
             // Calculate spacing to align profile info to the right
 
