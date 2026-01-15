@@ -610,19 +610,12 @@ pub fn render_streaming_block_compact(
 
     // Split into lines and take only the last 3
     let all_content_lines: Vec<&str> = preprocessed_content.lines().collect();
-    let total_lines = all_content_lines.len();
-    let last_3_lines: Vec<&str> = if total_lines > 3 {
-        all_content_lines[total_lines - 3..].to_vec()
-    } else {
-        all_content_lines
-    };
 
-    // Convert last 3 lines to ratatui Text
-    let last_3_content = last_3_lines.join("\n");
-    let ratatui_text = last_3_content
+    let content_joined_lines = all_content_lines.join("\n");
+    let ratatui_text = content_joined_lines
         .clone()
         .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::from(last_3_content.clone()));
+        .unwrap_or_else(|_| ratatui::text::Text::from(content_joined_lines.clone()));
 
     let mut formatted_lines = Vec::new();
     formatted_lines.push(title_border);
@@ -1429,12 +1422,12 @@ fn render_styled_header_with_dot(
 
     // Calculate available width for command on first line
     let first_line_available = max_line_width.saturating_sub(first_line_prefix_len + 1); // +1 for closing paren
-    
+
     // Wrap the command text
     let wrapped_lines = wrap_text_simple_unicode(command_name, first_line_available);
-    
+
     let mut result_lines = Vec::new();
-    
+
     if wrapped_lines.len() <= 1 {
         // Single line - command fits on one line with title
         result_lines.push(Line::from(vec![
@@ -1472,12 +1465,12 @@ fn render_styled_header_with_dot(
                 Style::default().fg(colors.command),
             ),
         ]));
-        
+
         // Middle lines - use wider width since we only have the indent
         let continuation_available = max_line_width.saturating_sub(continuation_prefix_len);
         let remaining_text: String = wrapped_lines[1..].join(" ");
         let rewrapped = wrap_text_simple_unicode(&remaining_text, continuation_available);
-        
+
         for (i, line) in rewrapped.iter().enumerate() {
             let is_last = i == rewrapped.len() - 1;
             let line_content = if is_last {
@@ -1485,17 +1478,14 @@ fn render_styled_header_with_dot(
             } else {
                 line.clone()
             };
-            
+
             result_lines.push(Line::from(vec![
                 Span::from(continuation_indent.to_string()),
-                Span::styled(
-                    line_content,
-                    Style::default().fg(colors.command),
-                ),
+                Span::styled(line_content, Style::default().fg(colors.command)),
             ]));
         }
     }
-    
+
     result_lines
 }
 

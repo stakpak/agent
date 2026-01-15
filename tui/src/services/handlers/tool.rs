@@ -31,12 +31,14 @@ pub fn handle_stream_tool_result(
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
         // Extract the message content (everything after the marker)
-        let stall_message = progress
+        let mut stall_message = progress
             .message
             .replace(INTERACTIVE_STALL_MARKER, "")
             .trim_start_matches(':')
             .trim()
             .to_string();
+
+        stall_message = format!(" {}", stall_message);
 
         // Update the pending bash message to show stall warning
         if let Some(pending_id) = state.pending_bash_message_id {

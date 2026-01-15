@@ -13,7 +13,9 @@ use regex::Regex;
 use serde_json::Value;
 #[cfg(test)]
 use stakpak_shared::models::integrations::openai::FunctionCall;
-use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{
+    ToolCall, ToolCallResult, ToolCallResultStatus,
+};
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BubbleColors {
@@ -868,7 +870,8 @@ fn get_wrapped_message_lines_internal(
 
             MessageContent::RenderCommandCollapsedResult(tool_call_result) => {
                 let lines = format_text_content(&tool_call_result.result.clone(), width);
-                let rendered_lines = render_collapsed_command_message(tool_call_result, lines, width);
+                let rendered_lines =
+                    render_collapsed_command_message(tool_call_result, lines, width);
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
@@ -905,15 +908,27 @@ fn get_wrapped_message_lines_internal(
                 let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
                 all_lines.push((spacing_marker.clone(), Style::default()));
 
+                let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                    Color::LightGreen
+                } else {
+                    Color::Red
+                };
+
+                let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                    crate::services::detect_term::AdaptiveColors::text()
+                } else {
+                    Color::Red
+                };
+
                 let header_lines =
                     crate::services::bash_block::render_styled_header_with_dot_public(
                         &title,
                         &command_args,
                         Some(crate::services::bash_block::LinesColors {
-                            dot: Color::LightGreen,
+                            dot: dot_color,
                             title: Color::White,
                             command: crate::services::detect_term::AdaptiveColors::text(),
-                            message: crate::services::detect_term::AdaptiveColors::text(),
+                            message: message_color,
                         }),
                         Some(width),
                     );

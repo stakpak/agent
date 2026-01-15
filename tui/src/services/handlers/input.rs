@@ -155,7 +155,7 @@ pub fn handle_input_submitted_event(
     }
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    else if state.show_side_panel && state.text_area.text().is_empty() {
+    else if state.show_side_panel && !state.is_dialog_open && state.text_area.text().is_empty() {
         let current = state
             .side_panel_section_collapsed
             .get(&state.side_panel_focus)

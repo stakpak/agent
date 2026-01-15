@@ -234,7 +234,7 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         (_, Some(_), Some(subscription)) => subscription.clone(),
         (_, Some(auth_provider), None) => auth_provider.clone(),
         (Some(config_provider), None, None) => config_provider.clone(),
-        _ => "N/A".to_string(),
+        _ => "Remote".to_string(),
     };
     lines.push(make_row("Provider", provider_value, Color::DarkGray));
 
@@ -476,7 +476,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
 
             // Prefix part: " " (1) + "  " (2) + "▸" (1) + " " (1) = 5 chars
             let prefix_part = format!("{}  {} ", LEFT_PADDING, prefix);
-            let prefix_visual_len = 5;
+            let prefix_visual_len = 6;
 
             // Stats or State Label
             let (stats_spans, stats_len) = match file.state {
@@ -568,7 +568,7 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
         // Show hint if there are more files than displayed
         if total_files > max_display {
             lines.push(Line::from(Span::styled(
-                format!("{}  Ctrl+e to show all files", LEFT_PADDING),
+                format!("{}  ctrl+g to show all files", LEFT_PADDING),
                 Style::default().fg(Color::DarkGray),
             )));
         }
@@ -629,7 +629,7 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
         Span::styled("ctrl+y", Style::default().fg(Color::DarkGray)),
         Span::styled(" hide", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("ctrl+e", Style::default().fg(Color::DarkGray)),
+        Span::styled("ctrl+g", Style::default().fg(Color::DarkGray)),
         Span::styled(" changes", Style::default().fg(Color::Cyan)),
     ]));
 

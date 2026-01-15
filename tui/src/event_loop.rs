@@ -188,10 +188,11 @@ pub async fn run_tui(
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_name == "run_command" {
                            state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
+                      if tool_call_result.status == ToolCallResultStatus::Cancelled || tool_call_result.status == ToolCallResultStatus::Error {
+                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                       state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
 
-                       // Route tool results based on tool type:
-                       // TUI view shows messages with is_collapsed == None
-                       // Full screen popup shows messages with is_collapsed == Some(true)
+                      }else {
                        match tool_name {
                            "str_replace" | "create" => {
                                // TUI: Show diff result block with yellow border (is_collapsed: None)
@@ -215,6 +216,7 @@ pub async fn run_tui(
 
                        // Handle file changes for the Changeset
                        handle_tool_result(&mut state, tool_call_result.clone());
+                       }
                    }
                    if let InputEvent::ToggleMouseCapture = event {
                        #[cfg(unix)]
