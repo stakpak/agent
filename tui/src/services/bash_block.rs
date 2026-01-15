@@ -878,6 +878,7 @@ pub fn render_file_diff_full(
             command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
+        Some(terminal_width),
     ));
     result.push(spacing_marker.clone());
     result.extend(diff_content);
@@ -969,6 +970,7 @@ pub fn render_markdown_block(
             command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
+        None, // No width available here
     ));
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     let content_lines = render_markdown_to_lines(&processed_result.to_string()).unwrap_or_default();
@@ -1383,7 +1385,7 @@ pub fn render_bash_block_rejected(
         command: AdaptiveColors::text(),
         message: c,
     });
-    render_styled_lines(command_name, title, message, colors)
+    render_styled_lines(command_name, title, message, colors, None)
 }
 
 #[derive(Clone)]
@@ -1399,14 +1401,16 @@ pub fn render_styled_header_with_dot_public(
     title: &str,
     command_name: &str,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
-    render_styled_header_with_dot(title, command_name, colors)
+    render_styled_header_with_dot(title, command_name, colors, terminal_width)
 }
 
 fn render_styled_header_with_dot(
     title: &str,
     command_name: &str,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -1414,23 +1418,85 @@ fn render_styled_header_with_dot(
         command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
-    vec![Line::from(vec![
-        Span::styled(
-            "● ",
-            Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            title.to_string(),
-            Style::default()
-                .fg(colors.title)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" ({})", command_name),
-            Style::default().fg(colors.command),
-        ),
-        Span::styled("...", Style::default().fg(colors.command)),
-    ])]
+
+    // Use actual terminal width if provided, otherwise fall back to 100
+    let max_line_width: usize = terminal_width.unwrap_or(100);
+    // First line prefix: "● " (2) + title + " (" (2)
+    let first_line_prefix_len: usize = 2 + title.chars().count() + 2;
+    // Continuation line prefix: just some indentation (2 spaces)
+    let continuation_indent = "  ";
+    let continuation_prefix_len: usize = continuation_indent.len();
+
+    // Calculate available width for command on first line
+    let first_line_available = max_line_width.saturating_sub(first_line_prefix_len + 1); // +1 for closing paren
+    
+    // Wrap the command text
+    let wrapped_lines = wrap_text_simple_unicode(command_name, first_line_available);
+    
+    let mut result_lines = Vec::new();
+    
+    if wrapped_lines.len() <= 1 {
+        // Single line - command fits on one line with title
+        result_lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                title.to_string(),
+                Style::default()
+                    .fg(colors.title)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({})", command_name),
+                Style::default().fg(colors.command),
+            ),
+        ]));
+    } else {
+        // Multi-line - need to wrap
+        // First line: title + start of command
+        result_lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                title.to_string(),
+                Style::default()
+                    .fg(colors.title)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({}", wrapped_lines.first().unwrap_or(&String::new())),
+                Style::default().fg(colors.command),
+            ),
+        ]));
+        
+        // Middle lines - use wider width since we only have the indent
+        let continuation_available = max_line_width.saturating_sub(continuation_prefix_len);
+        let remaining_text: String = wrapped_lines[1..].join(" ");
+        let rewrapped = wrap_text_simple_unicode(&remaining_text, continuation_available);
+        
+        for (i, line) in rewrapped.iter().enumerate() {
+            let is_last = i == rewrapped.len() - 1;
+            let line_content = if is_last {
+                format!("{})", line)
+            } else {
+                line.clone()
+            };
+            
+            result_lines.push(Line::from(vec![
+                Span::from(continuation_indent.to_string()),
+                Span::styled(
+                    line_content,
+                    Style::default().fg(colors.command),
+                ),
+            ]));
+        }
+    }
+    
+    result_lines
 }
 
 pub fn render_styled_lines(
@@ -1438,8 +1504,9 @@ pub fn render_styled_lines(
     title: &str,
     message: Option<String>,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
-    render_styled_lines_with_content(command_name, title, None, message, colors)
+    render_styled_lines_with_content(command_name, title, None, message, colors, terminal_width)
 }
 
 pub fn render_styled_lines_with_content(
@@ -1448,6 +1515,7 @@ pub fn render_styled_lines_with_content(
     content: Option<Vec<Line<'static>>>,
     message: Option<String>,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -1460,68 +1528,13 @@ pub fn render_styled_lines_with_content(
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
-    // Handle multi-line command name if needed
-    let title_with_args = format!("{} ({})", title, command_name);
-    let max_width = 120; // Reasonable max width for rejected commands
-
-    if title_with_args.len() <= max_width {
-        // Single line
-        lines.extend(render_styled_header_with_dot(
-            title,
-            command_name,
-            Some(colors.clone()),
-        ));
-    } else {
-        // Multi-line - title on first line, arguments on subsequent lines
-        lines.push(Line::from(vec![
-            Span::styled(
-                "● ",
-                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(term_color(Color::White))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-
-        // Split command arguments into multiple lines
-        // Calculate proper indentation to align under the command name
-        let title_indent = 2 + title.len(); // "● " + title length
-        let args_prefix = " ".repeat(title_indent); // Align directly under the command name
-        let args_available_width = max_width - title_indent;
-
-        let wrapped_args = wrap_text_simple_unicode(command_name, args_available_width);
-
-        for (i, arg_line) in wrapped_args.iter().enumerate() {
-            if i == 0 {
-                // First line of arguments
-                lines.push(Line::from(vec![
-                    Span::from(args_prefix.clone()),
-                    Span::styled(
-                        format!("({}", arg_line),
-                        Style::default().fg(colors.command),
-                    ),
-                ]));
-            } else {
-                // Continuation lines
-                lines.push(Line::from(vec![
-                    Span::from(args_prefix.clone()),
-                    Span::styled(arg_line.clone(), Style::default().fg(colors.command)),
-                ]));
-            }
-        }
-
-        // Close the parentheses on the last line if we had multiple lines
-        if wrapped_args.len() > 1
-            && let Some(last_line) = lines.last_mut()
-            && let Some(last_content_span) = last_line.spans.last_mut()
-            && last_content_span.style.fg == Some(Color::Gray)
-        {
-            last_content_span.content = format!("{})", last_content_span.content).into();
-        }
-    }
+    // Always use single-line truncated header - command stays on same line as title
+    lines.extend(render_styled_header_with_dot(
+        title,
+        command_name,
+        Some(colors.clone()),
+        terminal_width,
+    ));
 
     // Render optional content lines between header and message
     if let Some(content_lines) = content {
@@ -1589,6 +1602,7 @@ pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
 pub fn render_collapsed_command_message(
     tool_call_result: &ToolCallResult,
     lines: Vec<Line<'static>>,
+    terminal_width: usize,
 ) -> Vec<Line<'static>> {
     let result = tool_call_result.result.clone();
     let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
@@ -1615,5 +1629,6 @@ pub fn render_collapsed_command_message(
         Some(lines),
         Some(message),
         Some(colors),
+        Some(terminal_width),
     )
 }

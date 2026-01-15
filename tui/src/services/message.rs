@@ -868,7 +868,7 @@ fn get_wrapped_message_lines_internal(
 
             MessageContent::RenderCommandCollapsedResult(tool_call_result) => {
                 let lines = format_text_content(&tool_call_result.result.clone(), width);
-                let rendered_lines = render_collapsed_command_message(tool_call_result, lines);
+                let rendered_lines = render_collapsed_command_message(tool_call_result, lines, width);
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
@@ -915,6 +915,7 @@ fn get_wrapped_message_lines_internal(
                             command: crate::services::detect_term::AdaptiveColors::text(),
                             message: crate::services::detect_term::AdaptiveColors::text(),
                         }),
+                        Some(width),
                     );
                 for line in header_lines {
                     all_lines.push((convert_line_to_owned(line), Style::default()));
