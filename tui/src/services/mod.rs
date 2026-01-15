@@ -5,6 +5,7 @@ pub mod changeset;
 pub mod clipboard_paste;
 pub mod commands;
 pub mod detect_term;
+pub mod disclaimer_popup;
 pub mod editor;
 pub mod file_changes_popup;
 pub mod file_diff;

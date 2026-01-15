@@ -130,6 +130,10 @@ struct Cli {
     #[arg(long = "model")]
     model: Option<AgentModel>,
 
+    /// Dangerously skip all tool call permission prompts (requires user confirmation on startup)
+    #[arg(long = "dangerously-skip-permissions", default_value_t = false)]
+    dangerously_skip_permissions: bool,
+
     /// Custom path to config file (overrides default ~/.stakpak/config.toml)
     #[arg(long = "config")]
     config_path: Option<PathBuf>,
@@ -493,6 +497,7 @@ async fn main() {
                                 },
                                 model: cli.model.unwrap_or(AgentModel::Smart),
                                 agents_md,
+                                dangerously_skip_permissions: cli.dangerously_skip_permissions,
                             },
                         )
                         .await

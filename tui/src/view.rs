@@ -235,6 +235,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render disclaimer popup (highest priority - blocks all interaction until accepted/rejected)
+    if state.show_disclaimer_popup {
+        crate::services::disclaimer_popup::render_disclaimer_popup(f, state);
+    }
 }
 
 // Calculate how many lines the input will take up when wrapped

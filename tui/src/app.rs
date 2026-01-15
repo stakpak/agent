@@ -161,6 +161,12 @@ pub struct AppState {
     pub shortcuts_scroll: usize,
     pub shortcuts_popup_mode: ShortcutsPopupMode,
 
+    // ========== Disclaimer Popup State ==========
+    pub show_disclaimer_popup: bool,
+    pub disclaimer_accepted: bool,
+    pub disclaimer_selected: usize, // 0 = Yes, 1 = No
+    pub skip_permissions: bool,
+
     // ========== File Changes Popup State ==========
     pub show_file_changes_popup: bool,
     pub file_changes_selected: usize,
@@ -232,6 +238,7 @@ pub struct AppStateOptions<'a> {
     pub editor_command: Option<String>,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
+    pub dangerously_skip_permissions: bool,
 }
 
 impl AppState {
@@ -273,6 +280,7 @@ impl AppState {
             agent_model,
             editor_command,
             auth_display_info,
+            dangerously_skip_permissions,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -398,6 +406,13 @@ impl AppState {
             show_shortcuts_popup: false,
             shortcuts_scroll: 0,
             shortcuts_popup_mode: ShortcutsPopupMode::default(),
+
+            // Disclaimer popup initialization
+            show_disclaimer_popup: false, // Will be set by event_loop if flag is true
+            disclaimer_accepted: false,
+            disclaimer_selected: 0, // Default to "Yes"
+            skip_permissions: dangerously_skip_permissions,
+
             // Rulebook switcher initialization
             show_rulebook_switcher: false,
             available_rulebooks: Vec::new(),

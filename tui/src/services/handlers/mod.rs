@@ -58,6 +58,45 @@ pub fn update(
         }
     }
 
+    // Handle disclaimer popup - blocks all input except navigation and confirmation
+    if state.show_disclaimer_popup {
+        match event {
+            InputEvent::CursorLeft => {
+                // Navigate to "Yes" button
+                if state.disclaimer_selected > 0 {
+                    state.disclaimer_selected -= 1;
+                }
+                return;
+            }
+            InputEvent::CursorRight => {
+                // Navigate to "No" button
+                if state.disclaimer_selected < 1 {
+                    state.disclaimer_selected += 1;
+                }
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                // Confirm selection
+                state.show_disclaimer_popup = false;
+                if state.disclaimer_selected == 0 {
+                    // Yes selected - accept disclaimer
+                    state.disclaimer_accepted = true;
+                } else {
+                    // No selected - quit
+                    let _ = input_tx.try_send(InputEvent::Quit);
+                }
+                return;
+            }
+            InputEvent::Quit => {
+                // Allow quit
+            }
+            _ => {
+                // Block all other events
+                return;
+            }
+        }
+    }
+
     state.scroll = state.scroll.max(0);
 
     state.scroll = state.scroll.max(0);

@@ -64,6 +64,7 @@ pub struct RunInteractiveConfig {
     pub enabled_tools: EnabledToolsConfig,
     pub model: AgentModel,
     pub agents_md: Option<AgentsMdInfo>,
+    pub dangerously_skip_permissions: bool,
 }
 
 pub async fn run_interactive(
@@ -104,6 +105,7 @@ pub async fn run_interactive(
         let enable_mtls = config.enable_mtls;
         let is_git_repo = config.is_git_repo;
         let study_mode = config.study_mode;
+        let dangerously_skip_permissions = config.dangerously_skip_permissions;
 
         let (input_tx, input_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
         let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<OutputEvent>(100);
@@ -143,6 +145,7 @@ pub async fn run_interactive(
                 model_clone,
                 editor_command,
                 auth_display_info_for_tui,
+                dangerously_skip_permissions,
             )
             .await
             .map_err(|e| e.to_string())

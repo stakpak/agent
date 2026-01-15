@@ -51,6 +51,7 @@ pub async fn run_tui(
     agent_model: AgentModel,
     editor_command: Option<String>,
     auth_display_info: (Option<String>, Option<String>, Option<String>),
+    dangerously_skip_permissions: bool,
 ) -> io::Result<()> {
     let _guard = TerminalGuard;
 
@@ -93,6 +94,7 @@ pub async fn run_tui(
         agent_model,
         editor_command,
         auth_display_info,
+        dangerously_skip_permissions,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
@@ -108,6 +110,11 @@ pub async fn run_tui(
     // Set the current profile name and rulebook config
     state.current_profile_name = current_profile_name;
     state.rulebook_config = rulebook_config;
+
+    // Show disclaimer popup if skip_permissions is enabled
+    if dangerously_skip_permissions {
+        state.show_disclaimer_popup = true;
+    }
 
     // Add welcome messages after state is created
     let welcome_msg =

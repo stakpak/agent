@@ -218,11 +218,14 @@ pub fn handle_show_confirmation_dialog(
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
+    // Check if skip_permissions flag is active and disclaimer was accepted
+    let should_skip_permissions = state.skip_permissions && state.disclaimer_accepted;
+
     // Tool call is pending - create pending border block and check if we should show popup
     let message_id = Uuid::new_v4();
     state.messages.push(Message::render_pending_border_block(
         tool_call.clone(),
-        is_auto_approved,
+        is_auto_approved || should_skip_permissions,
         Some(message_id),
     ));
     state.pending_bash_message_id = Some(message_id);
@@ -276,7 +279,9 @@ pub fn handle_show_confirmation_dialog(
     }
 
     // Check if this tool call is already approved (after popup interaction or auto-approved)
+    // Also auto-approve if skip_permissions is active
     if is_auto_approved
+        || should_skip_permissions
         || state
             .message_approved_tools
             .iter()
