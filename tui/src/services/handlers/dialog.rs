@@ -218,13 +218,6 @@ pub fn handle_show_confirmation_dialog(
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
-    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
-    if tool_name == "str_replace" || tool_name == "create" {
-        state
-            .messages
-            .push(Message::render_collapsed_message(tool_call.clone()));
-    }
-
     // Tool call is pending - create pending border block and check if we should show popup
     let message_id = Uuid::new_v4();
     state.messages.push(Message::render_pending_border_block(

@@ -158,222 +158,236 @@ pub async fn run_tui(
             state.ctrl_c_timer = None;
         }
         tokio::select! {
-               event = input_rx.recv() => {
-                let Some(event) = event else {
-                    should_quit = true;
-                    continue;
-                };
-                   if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
-                   InputEvent::ShellWaitingForInput | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
-            // These are shell events, forward them to the shell channel
-            let _ = shell_event_tx.send(event).await;
-            continue;
-        }
-                   if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
-                    continue;
-                   }
-                   if let InputEvent::RunToolCall(tool_call) = &event {
+                     event = input_rx.recv() => {
+                      let Some(event) = event else {
+                          should_quit = true;
+                          continue;
+                      };
+                         if matches!(event, InputEvent::ShellOutput(_) | InputEvent::ShellError(_) |
+                         InputEvent::ShellWaitingForInput | InputEvent::ShellCompleted(_) | InputEvent::ShellClear) {
+                  // These are shell events, forward them to the shell channel
+                  let _ = shell_event_tx.send(event).await;
+                  continue;
+              }
+                         if let InputEvent::EmergencyClearTerminal = event {
+                          emergency_clear_and_redraw(&mut terminal, &mut state)?;
+                          continue;
+                         }
+                         if let InputEvent::RunToolCall(tool_call) = &event {
 
-                       crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                       state.poll_file_search_results();
-                       terminal.draw(|f| view(f, &mut state))?;
-                       continue;
-                   }
-                   if let InputEvent::ToolResult(ref tool_call_result) = event {
-                       clear_streaming_tool_results(&mut state);
-                       state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
-                       update_session_tool_calls_queue(&mut state, tool_call_result);
-                       if tool_call_result.status == ToolCallResultStatus::Cancelled && crate::utils::strip_tool_name(&tool_call_result.call.function.name) == "run_command" {
+                             crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                             state.poll_file_search_results();
+                             terminal.draw(|f| view(f, &mut state))?;
+                             continue;
+                         }
+                         if let InputEvent::ToolResult(ref tool_call_result) = event {
+                             clear_streaming_tool_results(&mut state);
+                             state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
+                             update_session_tool_calls_queue(&mut state, tool_call_result);
+                             let tool_name = crate::utils::strip_tool_name(&tool_call_result.call.function.name);
+                             if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_name == "run_command" {
 
-                            state.latest_tool_call = Some(tool_call_result.call.clone());
+                                  state.latest_tool_call = Some(tool_call_result.call.clone());
 
-                       }
-                       render_collapsed_result_block(tool_call_result, &mut state);
-                       // Handle file changes for the Changeset
-                       handle_tool_result(&mut state, tool_call_result.clone());
+                             }
+                             if tool_name == "run_command"{
+                                  state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
 
-                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                   }
-                   if let InputEvent::ToggleMouseCapture = event {
-                       #[cfg(unix)]
-                       toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
-                       continue;
-                   }
+                             } else if tool_name == "str_replace" || tool_name == "create" {
+                              state.messages.push(Message::render_pending_border_block(tool_call_result.call.clone(), true, None));
+        state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                             } else {
+                                  render_collapsed_result_block(tool_call_result, &mut state);
 
-                   if let InputEvent::Quit = event {
-                       should_quit = true;
-                   }
-                   else {
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
-                       let input_height = 3;
-                       let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
-                       let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
-                       } else {
-                           0
-                       };
-                       let hint_height = if dropdown_showing { 0 } else { margin_height };
-                       let outer_chunks = ratatui::layout::Layout::default()
-                           .direction(ratatui::layout::Direction::Vertical)
-                           .constraints([
-                               ratatui::layout::Constraint::Min(1), // messages
-                               ratatui::layout::Constraint::Length(1), // loading indicator
-                               ratatui::layout::Constraint::Length(input_height as u16),
-                               ratatui::layout::Constraint::Length(dropdown_height),
-                               ratatui::layout::Constraint::Length(hint_height),
-                           ])
-                           .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
-                       let message_area_height = outer_chunks[0].height as usize;
-                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        state.poll_file_search_results();
-                       // Handle pending editor open request
-                       if let Some(file_path) = state.pending_editor_open.take() {
-                           // Disable mouse capture before opening editor to prevent weird input
-                           let was_mouse_capture_enabled = state.mouse_capture_enabled;
-                           if was_mouse_capture_enabled {
-                               let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                               state.mouse_capture_enabled = false;
-                           }
-
-                           match crate::services::editor::open_in_editor(
-                               &mut terminal,
-                               &state.editor_command,
-                               &file_path,
-                               None,
-                           ) {
-                               Ok(()) => {
-                                   // Editor closed successfully
-                               }
-                               Err(error) => {
-                                   // Show error message
-                                   state.messages.push(Message::info(
-                                       format!("Failed to open editor: {}", error),
-                                       Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
-                                   ));
-                               }
-                           }
-
-                           // Restore mouse capture if it was enabled before
-                           if was_mouse_capture_enabled {
-                               let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                               state.mouse_capture_enabled = true;
-                           }
-                       }
-                   }
-               }
-               event = internal_rx.recv() => {
-
-                let Some(event) = event else {
-                    should_quit = true;
-                    continue;
-                };
-
-                if let InputEvent::ToggleMouseCapture = event {
-                    #[cfg(unix)]
-                    toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
-                    continue;
-                }
-                if let InputEvent::Quit = event {
-                    should_quit = true;
-                }
-                   else {
-                       let term_size = terminal.size()?;
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
-                       let input_height = 3;
-                       let margin_height = 2;
-                       let dropdown_showing = state.show_helper_dropdown
-                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
-                               || !state.filtered_files.is_empty());
-                       let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
-                       } else {
-                           0
-                       };
-                       let hint_height = if dropdown_showing { 0 } else { margin_height };
-                       let outer_chunks = ratatui::layout::Layout::default()
-                           .direction(ratatui::layout::Direction::Vertical)
-                           .constraints([
-                               ratatui::layout::Constraint::Min(1), // messages
-                               ratatui::layout::Constraint::Length(1), // loading indicator
-                               ratatui::layout::Constraint::Length(input_height as u16),
-                               ratatui::layout::Constraint::Length(dropdown_height),
-                               ratatui::layout::Constraint::Length(hint_height),
-                           ])
-                           .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
-                       let message_area_height = outer_chunks[0].height as usize;
-                    if let InputEvent::EmergencyClearTerminal = event {
-                    emergency_clear_and_redraw(&mut terminal, &mut state)?;
-                    continue;
-                   }
-                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        state.poll_file_search_results();
-
-                        // Handle pending editor open request
-                         if let Some(file_path) = state.pending_editor_open.take() {
-                             // Pause input thread to avoid stealing input from editor
-                             input_paused.store(true, Ordering::Relaxed);
-                             // Small delay to ensure input thread cycle completes
-                             std::thread::sleep(Duration::from_millis(10));
-
-                             // Disable mouse capture before opening editor to prevent weird input
-                             let was_mouse_capture_enabled = state.mouse_capture_enabled;
-                             if was_mouse_capture_enabled {
-                                 let _ = execute!(std::io::stdout(), DisableMouseCapture);
-                                 state.mouse_capture_enabled = false;
                              }
 
-                             match crate::services::editor::open_in_editor(
-                                 &mut terminal,
-                                 &state.editor_command,
-                                 &file_path,
-                                 None,
-                             ) {
-                                 Ok(()) => {
-                                     // Editor closed successfully
-                                 }
-                                 Err(error) => {
-                                     // Show error message
-                                     state.messages.push(Message::info(
-                                         format!("Failed to open editor: {}", error),
-                                         Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
-                                     ));
-                                 }
-                             }
+                                 if tool_name != "str_replace" || tool_name != "create" {
+ state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
 
-                             // Restore mouse capture if it was enabled before
-                             if was_mouse_capture_enabled {
-                                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                                 state.mouse_capture_enabled = true;
-                             }
+                                 } 
 
-                             // Resume input thread
-                             input_paused.store(false, Ordering::Relaxed);
+                             // Handle file changes for the Changeset
+                             handle_tool_result(&mut state, tool_call_result.clone());
+                         }
+                         if let InputEvent::ToggleMouseCapture = event {
+                             #[cfg(unix)]
+                             toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                             continue;
                          }
 
-                        state.update_session_empty_status();
-                    }
-                }
-               _ = spinner_interval.tick() => {
-                   // Also check double Ctrl+C timer expiry on every tick
-                   if state.ctrl_c_pressed_once
-                       && let Some(timer) = state.ctrl_c_timer
-                           && std::time::Instant::now() > timer {
-                               state.ctrl_c_pressed_once = false;
-                               state.ctrl_c_timer = None;
-                           }
-                   state.spinner_frame = state.spinner_frame.wrapping_add(1);
-                   // Update shell cursor blink (toggles every ~5 ticks = 500ms)
-                   crate::services::shell_popup::update_cursor_blink(&mut state);
-                   state.poll_file_search_results();
-                   terminal.draw(|f| view(f, &mut state))?;
-               }
-           }
+                         if let InputEvent::Quit = event {
+                             should_quit = true;
+                         }
+                         else {
+                             let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                             let input_height = 3;
+                             let margin_height = 2;
+                             let dropdown_showing = state.show_helper_dropdown
+                                 && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                                     || !state.filtered_files.is_empty());
+                             let dropdown_height = if dropdown_showing {
+                                 state.filtered_helpers.len() as u16
+                             } else {
+                                 0
+                             };
+                             let hint_height = if dropdown_showing { 0 } else { margin_height };
+                             let outer_chunks = ratatui::layout::Layout::default()
+                                 .direction(ratatui::layout::Direction::Vertical)
+                                 .constraints([
+                                     ratatui::layout::Constraint::Min(1), // messages
+                                     ratatui::layout::Constraint::Length(1), // loading indicator
+                                     ratatui::layout::Constraint::Length(input_height as u16),
+                                     ratatui::layout::Constraint::Length(dropdown_height),
+                                     ratatui::layout::Constraint::Length(hint_height),
+                                 ])
+                                 .split(term_rect);
+                             let message_area_width = outer_chunks[0].width as usize;
+                             let message_area_height = outer_chunks[0].height as usize;
+                              crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                              state.poll_file_search_results();
+                             // Handle pending editor open request
+                             if let Some(file_path) = state.pending_editor_open.take() {
+                                 // Disable mouse capture before opening editor to prevent weird input
+                                 let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                                 if was_mouse_capture_enabled {
+                                     let _ = execute!(std::io::stdout(), DisableMouseCapture);
+                                     state.mouse_capture_enabled = false;
+                                 }
+
+                                 match crate::services::editor::open_in_editor(
+                                     &mut terminal,
+                                     &state.editor_command,
+                                     &file_path,
+                                     None,
+                                 ) {
+                                     Ok(()) => {
+                                         // Editor closed successfully
+                                     }
+                                     Err(error) => {
+                                         // Show error message
+                                         state.messages.push(Message::info(
+                                             format!("Failed to open editor: {}", error),
+                                             Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
+                                         ));
+                                     }
+                                 }
+
+                                 // Restore mouse capture if it was enabled before
+                                 if was_mouse_capture_enabled {
+                                     let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                     state.mouse_capture_enabled = true;
+                                 }
+                             }
+                         }
+                     }
+                     event = internal_rx.recv() => {
+
+                      let Some(event) = event else {
+                          should_quit = true;
+                          continue;
+                      };
+
+                      if let InputEvent::ToggleMouseCapture = event {
+                          #[cfg(unix)]
+                          toggle_mouse_capture_with_redraw(&mut terminal, &mut state)?;
+                          continue;
+                      }
+                      if let InputEvent::Quit = event {
+                          should_quit = true;
+                      }
+                         else {
+                             let term_size = terminal.size()?;
+                             let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                             let input_height = 3;
+                             let margin_height = 2;
+                             let dropdown_showing = state.show_helper_dropdown
+                                 && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                                     || !state.filtered_files.is_empty());
+                             let dropdown_height = if dropdown_showing {
+                                 state.filtered_helpers.len() as u16
+                             } else {
+                                 0
+                             };
+                             let hint_height = if dropdown_showing { 0 } else { margin_height };
+                             let outer_chunks = ratatui::layout::Layout::default()
+                                 .direction(ratatui::layout::Direction::Vertical)
+                                 .constraints([
+                                     ratatui::layout::Constraint::Min(1), // messages
+                                     ratatui::layout::Constraint::Length(1), // loading indicator
+                                     ratatui::layout::Constraint::Length(input_height as u16),
+                                     ratatui::layout::Constraint::Length(dropdown_height),
+                                     ratatui::layout::Constraint::Length(hint_height),
+                                 ])
+                                 .split(term_rect);
+                             let message_area_width = outer_chunks[0].width as usize;
+                             let message_area_height = outer_chunks[0].height as usize;
+                          if let InputEvent::EmergencyClearTerminal = event {
+                          emergency_clear_and_redraw(&mut terminal, &mut state)?;
+                          continue;
+                         }
+                              crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                              state.poll_file_search_results();
+
+                              // Handle pending editor open request
+                               if let Some(file_path) = state.pending_editor_open.take() {
+                                   // Pause input thread to avoid stealing input from editor
+                                   input_paused.store(true, Ordering::Relaxed);
+                                   // Small delay to ensure input thread cycle completes
+                                   std::thread::sleep(Duration::from_millis(10));
+
+                                   // Disable mouse capture before opening editor to prevent weird input
+                                   let was_mouse_capture_enabled = state.mouse_capture_enabled;
+                                   if was_mouse_capture_enabled {
+                                       let _ = execute!(std::io::stdout(), DisableMouseCapture);
+                                       state.mouse_capture_enabled = false;
+                                   }
+
+                                   match crate::services::editor::open_in_editor(
+                                       &mut terminal,
+                                       &state.editor_command,
+                                       &file_path,
+                                       None,
+                                   ) {
+                                       Ok(()) => {
+                                           // Editor closed successfully
+                                       }
+                                       Err(error) => {
+                                           // Show error message
+                                           state.messages.push(Message::info(
+                                               format!("Failed to open editor: {}", error),
+                                               Some(ratatui::style::Style::default().fg(ratatui::style::Color::Red)),
+                                           ));
+                                       }
+                                   }
+
+                                   // Restore mouse capture if it was enabled before
+                                   if was_mouse_capture_enabled {
+                                       let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                       state.mouse_capture_enabled = true;
+                                   }
+
+                                   // Resume input thread
+                                   input_paused.store(false, Ordering::Relaxed);
+                               }
+
+                              state.update_session_empty_status();
+                          }
+                      }
+                     _ = spinner_interval.tick() => {
+                         // Also check double Ctrl+C timer expiry on every tick
+                         if state.ctrl_c_pressed_once
+                             && let Some(timer) = state.ctrl_c_timer
+                                 && std::time::Instant::now() > timer {
+                                     state.ctrl_c_pressed_once = false;
+                                     state.ctrl_c_timer = None;
+                                 }
+                         state.spinner_frame = state.spinner_frame.wrapping_add(1);
+                         // Update shell cursor blink (toggles every ~5 ticks = 500ms)
+                         crate::services::shell_popup::update_cursor_blink(&mut state);
+                         state.poll_file_search_results();
+                         terminal.draw(|f| view(f, &mut state))?;
+                     }
+                 }
         if should_quit {
             break;
         }

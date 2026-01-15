@@ -1,7 +1,8 @@
 use crate::AppState;
 use crate::services::bash_block::{
-    format_text_content, is_collapsed_tool_call, render_bash_block, render_file_diff,
-    render_file_diff_full, render_result_block, render_styled_block,
+    format_text_content, is_collapsed_tool_call, render_bash_block,
+    render_collapsed_command_message, render_file_diff, render_file_diff_full, render_result_block,
+    render_streaming_block_compact,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
@@ -35,6 +36,7 @@ pub enum MessageContent {
     RenderPendingBorderBlockWithStallWarning(ToolCall, bool, String),
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
     RenderResultBorderBlock(ToolCallResult),
+    RenderCommandCollapsedResult(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
     RenderEscapedTextBlock(String),
     BashBubble {
@@ -185,6 +187,14 @@ impl Message {
         }
     }
 
+    pub fn render_collapsed_command_message(tool_call_result: ToolCallResult) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderCommandCollapsedResult(tool_call_result),
+            is_collapsed: None,
+        }
+    }
+
     pub fn render_pending_border_block(
         tool_call: ToolCall,
         is_auto_approved: bool,
@@ -227,8 +237,7 @@ impl Message {
     }
 
     pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
-        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
-            && tool_call_result.result.lines().count() > 3;
+        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call);
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderResultBorderBlock(tool_call_result),
@@ -817,7 +826,7 @@ fn get_wrapped_message_lines_internal(
                         Span::styled(
                             format!("  {}{}", warning_text, " ".repeat(warning_padding)),
                             Style::default()
-                                .fg(Color::Yellow)
+                                .fg(Color::DarkGray)
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(" │", Style::default().fg(border_color)),
@@ -832,7 +841,8 @@ fn get_wrapped_message_lines_internal(
             }
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
-                if crate::utils::strip_tool_name(&tool_call.function.name) == "str_replace" {
+                let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+                if tool_name == "str_replace" || tool_name == "create" {
                     let rendered_lines = render_file_diff_full(tool_call, width, Some(true));
                     if !rendered_lines.is_empty() {
                         let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
@@ -841,21 +851,25 @@ fn get_wrapped_message_lines_internal(
                     }
                 }
             }
+
+            MessageContent::RenderCommandCollapsedResult(tool_call_result) => {
+                let lines = format_text_content(&tool_call_result.result.clone(), width);
+                let rendered_lines = render_collapsed_command_message(tool_call_result, lines);
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+
             MessageContent::RenderStreamingBorderBlock(
                 content,
-                outside_title,
+                _outside_title,
                 bubble_title,
                 colors,
-                tool_type,
+                _tool_type,
             ) => {
-                let rendered_lines = render_styled_block(
-                    content,
-                    outside_title,
-                    bubble_title,
-                    colors.clone(),
-                    width,
-                    tool_type,
-                );
+                // Use compact streaming renderer that shows only last 3 lines with hint
+                let rendered_lines =
+                    render_streaming_block_compact(content, bubble_title, colors.clone(), width);
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
