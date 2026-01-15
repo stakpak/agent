@@ -356,6 +356,7 @@ impl ShellSession for LocalShellSession {
         // Spawn task to read output and stream it
         let handle = tokio::spawn(async move {
             let mut output = String::new();
+            let mut last_streamed_len = 0usize; // Track what we've already streamed
 
             loop {
                 if start.elapsed() > timeout_duration {
@@ -414,15 +415,21 @@ impl ShellSession for LocalShellSession {
                         let chunk = String::from_utf8_lossy(&data);
                         output.push_str(&chunk);
 
-                        // Stream the chunk (but filter out markers)
-                        let chunk_str = chunk.to_string();
-                        if !chunk_str.contains(&marker_clone) {
-                            let _ = tx
-                                .send(OutputChunk {
-                                    text: chunk_str,
-                                    is_final: false,
-                                })
-                                .await;
+                        // Clean the entire accumulated output and stream only new content
+                        // This ensures consistent cleaning across chunk boundaries
+                        let cleaned_so_far =
+                            clean_shell_output(&output, &command_owned, &marker_clone);
+                        if cleaned_so_far.len() > last_streamed_len {
+                            let new_content = &cleaned_so_far[last_streamed_len..];
+                            if !new_content.trim().is_empty() {
+                                let _ = tx
+                                    .send(OutputChunk {
+                                        text: new_content.to_string(),
+                                        is_final: false,
+                                    })
+                                    .await;
+                            }
+                            last_streamed_len = cleaned_so_far.len();
                         }
 
                         // Check for marker completion
@@ -980,16 +987,37 @@ mod streaming_tests {
         let result = handle.await.expect("Task panicked");
         let output = result.expect("Command failed");
 
-        println!("Final output: {:?}", output.output);
+        println!("Final cleaned output: {:?}", output.output);
+
+        // Verify the final output is clean (no ANSI codes, no prompts)
         assert!(
             output.output.contains("hello streaming"),
             "Output should contain 'hello streaming', got: {}",
             output.output
         );
         assert!(
+            !output.output.contains("\x1b["),
+            "Output should not contain ANSI codes"
+        );
+        assert!(
+            !output.output.contains("@"),
+            "Output should not contain prompt (user@host)"
+        );
+        assert!(
             !chunks.is_empty(),
             "Should have received at least one chunk"
         );
+
+        // Verify streamed chunks are also clean
+        for chunk in &chunks {
+            if !chunk.is_final && !chunk.text.is_empty() {
+                assert!(
+                    !chunk.text.contains("\x1b["),
+                    "Streamed chunk should not contain ANSI codes: {:?}",
+                    chunk.text
+                );
+            }
+        }
     }
 
     #[tokio::test]

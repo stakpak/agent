@@ -4,6 +4,7 @@
 //! for state persistence across commands.
 
 use super::ShellSessionManager;
+use super::clean_shell_output;
 use super::session::{CommandOutput, ShellSession, ShellSessionError};
 use crate::remote_connection::RemoteConnectionInfo;
 use async_trait::async_trait;
@@ -472,6 +473,7 @@ impl ShellSession for RemoteShellSession {
         // Spawn task to read output and stream it
         let handle = tokio::spawn(async move {
             let mut output = String::new();
+            let mut last_streamed_len = 0usize; // Track what we've already streamed
 
             loop {
                 if start.elapsed() > timeout_duration {
@@ -504,15 +506,20 @@ impl ShellSession for RemoteShellSession {
                                 let chunk = String::from_utf8_lossy(&data);
                                 output.push_str(&chunk);
 
-                                // Stream the chunk (but filter out markers)
-                                let chunk_str = chunk.to_string();
-                                if !chunk_str.contains(&marker_clone) {
-                                    let _ = tx
-                                        .send(OutputChunk {
-                                            text: chunk_str,
-                                            is_final: false,
-                                        })
-                                        .await;
+                                // Clean the entire accumulated output and stream only new content
+                                let cleaned_so_far =
+                                    clean_shell_output(&output, &command_owned, &marker_clone);
+                                if cleaned_so_far.len() > last_streamed_len {
+                                    let new_content = &cleaned_so_far[last_streamed_len..];
+                                    if !new_content.trim().is_empty() {
+                                        let _ = tx
+                                            .send(OutputChunk {
+                                                text: new_content.to_string(),
+                                                is_final: false,
+                                            })
+                                            .await;
+                                    }
+                                    last_streamed_len = cleaned_so_far.len();
                                 }
 
                                 // Check for marker completion
@@ -525,15 +532,20 @@ impl ShellSession for RemoteShellSession {
                                 let chunk = String::from_utf8_lossy(&data);
                                 output.push_str(&chunk);
 
-                                // Stream stderr too
-                                let chunk_str = chunk.to_string();
-                                if !chunk_str.contains(&marker_clone) {
-                                    let _ = tx
-                                        .send(OutputChunk {
-                                            text: chunk_str,
-                                            is_final: false,
-                                        })
-                                        .await;
+                                // Clean and stream stderr using same approach
+                                let cleaned_so_far =
+                                    clean_shell_output(&output, &command_owned, &marker_clone);
+                                if cleaned_so_far.len() > last_streamed_len {
+                                    let new_content = &cleaned_so_far[last_streamed_len..];
+                                    if !new_content.trim().is_empty() {
+                                        let _ = tx
+                                            .send(OutputChunk {
+                                                text: new_content.to_string(),
+                                                is_final: false,
+                                            })
+                                            .await;
+                                    }
+                                    last_streamed_len = cleaned_so_far.len();
                                 }
                             }
                             russh::ChannelMsg::Eof => {
