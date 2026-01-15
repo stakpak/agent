@@ -651,7 +651,7 @@ pub enum TokenType {
     CacheWriteInputTokens,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub struct PromptTokensDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u32>,
