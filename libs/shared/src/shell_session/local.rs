@@ -174,10 +174,7 @@ impl LocalShellSession {
             .writer
             .write_all(full_command.as_bytes())
             .map_err(ShellSessionError::IoError)?;
-        inner
-            .writer
-            .flush()
-            .map_err(ShellSessionError::IoError)?;
+        inner.writer.flush().map_err(ShellSessionError::IoError)?;
 
         trace!(command = %command, marker = %marker, "Sent command to PTY");
 
@@ -302,6 +299,204 @@ impl ShellSession for LocalShellSession {
         _command: &str,
         _timeout: Option<Duration>,
     ) -> Result<CommandOutput, ShellSessionError> {
+        Err(ShellSessionError::PtyError(
+            "PTY not supported on this platform".to_string(),
+        ))
+    }
+
+    #[cfg(any(unix, windows))]
+    async fn execute_streaming(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
+        use super::session::{OutputChunk, OutputSender};
+        use tokio::sync::mpsc;
+
+        let marker = Self::generate_marker();
+        let start = Instant::now();
+        let timeout_duration = timeout.unwrap_or(Duration::from_secs(300));
+
+        // Create channel for streaming output
+        let (tx, rx): (OutputSender, _) = mpsc::channel(100);
+
+        // Check if session is closed before starting
+        {
+            let inner = self.inner.lock().await;
+            if inner.closed {
+                return Err(ShellSessionError::SessionClosed);
+            }
+        }
+
+        // Send command to PTY
+        {
+            let mut inner = self.inner.lock().await;
+            let full_command = format!("{}\necho \"{}\"\n", command.trim(), marker);
+            inner
+                .writer
+                .write_all(full_command.as_bytes())
+                .map_err(ShellSessionError::IoError)?;
+            inner.writer.flush().map_err(ShellSessionError::IoError)?;
+        }
+
+        trace!(command = %command, marker = %marker, "Sent command to PTY for streaming");
+
+        // Clone what we need for the spawned task
+        let inner_arc = self.inner.clone();
+        let session_id = self.session_id.clone();
+        let command_owned = command.to_string();
+        let marker_clone = marker.clone();
+
+        // Spawn task to read output and stream it
+        let handle = tokio::spawn(async move {
+            let mut output = String::new();
+
+            loop {
+                if start.elapsed() > timeout_duration {
+                    let _ = tx
+                        .send(OutputChunk {
+                            text: "\n[TIMEOUT]\n".to_string(),
+                            is_final: true,
+                        })
+                        .await;
+                    return Err(ShellSessionError::Timeout(timeout_duration));
+                }
+
+                // Clone Arc for the blocking task
+                let inner_arc_clone = inner_arc.clone();
+
+                // Perform blocking read in a separate thread
+                let read_result = tokio::task::spawn_blocking(move || {
+                    let rt = tokio::runtime::Handle::current();
+                    let mut inner_guard = rt.block_on(inner_arc_clone.lock());
+
+                    if inner_guard.closed {
+                        return Ok((Vec::new(), true)); // (data, is_closed)
+                    }
+
+                    let mut buf = [0u8; 4096];
+                    match inner_guard.reader.read(&mut buf) {
+                        Ok(0) => Ok((Vec::new(), false)), // EOF
+                        Ok(n) => {
+                            let data = buf[..n].to_vec();
+                            Ok((data, false))
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            Ok((Vec::new(), false))
+                        }
+                        Err(e) => Err(e),
+                    }
+                })
+                .await;
+
+                match read_result {
+                    Ok(Ok((data, is_closed))) => {
+                        if is_closed {
+                            let _ = tx
+                                .send(OutputChunk {
+                                    text: "\n[SESSION CLOSED]\n".to_string(),
+                                    is_final: true,
+                                })
+                                .await;
+                            return Err(ShellSessionError::SessionClosed);
+                        }
+                        if data.is_empty() {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            continue;
+                        }
+
+                        let chunk = String::from_utf8_lossy(&data);
+                        output.push_str(&chunk);
+
+                        // Stream the chunk (but filter out markers)
+                        let chunk_str = chunk.to_string();
+                        if !chunk_str.contains(&marker_clone) {
+                            let _ = tx
+                                .send(OutputChunk {
+                                    text: chunk_str,
+                                    is_final: false,
+                                })
+                                .await;
+                        }
+
+                        // Check for marker completion
+                        let marker_count = output.matches(&marker_clone).count();
+                        if marker_count >= 2 {
+                            break;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx
+                            .send(OutputChunk {
+                                text: format!("\n[IO ERROR: {}]\n", e),
+                                is_final: true,
+                            })
+                            .await;
+                        return Err(ShellSessionError::IoError(e));
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(OutputChunk {
+                                text: format!("\n[TASK ERROR: {}]\n", e),
+                                is_final: true,
+                            })
+                            .await;
+                        return Err(ShellSessionError::ExecutionFailed(format!(
+                            "Read task failed: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+
+            let duration = start.elapsed();
+
+            // Clean up output
+            let cleaned_output = clean_shell_output(&output, &command_owned, &marker_clone);
+
+            // Send final chunk
+            let _ = tx
+                .send(OutputChunk {
+                    text: String::new(),
+                    is_final: true,
+                })
+                .await;
+
+            debug!(
+                session_id = %session_id,
+                duration_ms = duration.as_millis(),
+                output_len = cleaned_output.len(),
+                "Streaming command completed"
+            );
+
+            Ok(CommandOutput {
+                output: cleaned_output,
+                exit_code: None,
+                duration,
+            })
+        });
+
+        Ok((rx, handle))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    async fn execute_streaming(
+        &self,
+        _command: &str,
+        _timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
         Err(ShellSessionError::PtyError(
             "PTY not supported on this platform".to_string(),
         ))
@@ -754,5 +949,79 @@ mod tests {
             "Should remove zsh prompt, got: '{}'",
             cleaned2
         );
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_execute_streaming_basic() {
+        let session =
+            LocalShellSession::new(None, None, None, None).expect("Failed to create session");
+
+        let (mut rx, handle) = session
+            .execute_streaming("echo 'hello streaming'", Some(Duration::from_secs(10)))
+            .await
+            .expect("Failed to start streaming");
+
+        // Collect all chunks
+        let mut chunks = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            println!("Received chunk: {:?}", chunk);
+            chunks.push(chunk.clone());
+            if chunk.is_final {
+                break;
+            }
+        }
+
+        // Wait for completion
+        let result = handle.await.expect("Task panicked");
+        let output = result.expect("Command failed");
+
+        println!("Final output: {:?}", output.output);
+        assert!(
+            output.output.contains("hello streaming"),
+            "Output should contain 'hello streaming', got: {}",
+            output.output
+        );
+        assert!(
+            !chunks.is_empty(),
+            "Should have received at least one chunk"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_streaming_multiline() {
+        let session =
+            LocalShellSession::new(None, None, None, None).expect("Failed to create session");
+
+        let (mut rx, handle) = session
+            .execute_streaming(
+                "for i in 1 2 3; do echo \"line $i\"; done",
+                Some(Duration::from_secs(10)),
+            )
+            .await
+            .expect("Failed to start streaming");
+
+        // Collect chunks
+        let mut all_text = String::new();
+        while let Some(chunk) = rx.recv().await {
+            all_text.push_str(&chunk.text);
+            if chunk.is_final {
+                break;
+            }
+        }
+
+        let result = handle.await.expect("Task panicked");
+        let output = result.expect("Command failed");
+
+        println!("Streamed text: {:?}", all_text);
+        println!("Final output: {:?}", output.output);
+
+        assert!(output.output.contains("line 1"), "Should contain line 1");
+        assert!(output.output.contains("line 2"), "Should contain line 2");
+        assert!(output.output.contains("line 3"), "Should contain line 3");
     }
 }

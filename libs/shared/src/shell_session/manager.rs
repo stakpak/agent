@@ -266,6 +266,38 @@ impl ShellSessionManager {
         result
     }
 
+    /// Execute a command in a session with streaming output
+    ///
+    /// Returns a receiver for output chunks and a join handle for the final result.
+    pub async fn execute_in_session_streaming(
+        &self,
+        session_id: &str,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<super::session::CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
+        let session = self.get_session(session_id).await.ok_or_else(|| {
+            ShellSessionError::SessionDead(format!("Session {} not found", session_id))
+        })?;
+
+        let timeout = timeout.unwrap_or(self.config.command_timeout);
+
+        // Start streaming execution
+        let (rx, handle) = {
+            let session_guard = session.read().await;
+            session_guard
+                .execute_streaming(command, Some(timeout))
+                .await?
+        };
+
+        Ok((rx, handle))
+    }
+
     /// Close and remove a session
     pub async fn close_session(&self, session_id: &str) -> Result<(), ShellSessionError> {
         // Remove from maps
@@ -387,6 +419,20 @@ impl ShellSession for DefaultIdLocalSession {
     async fn close(&mut self) -> Result<(), ShellSessionError> {
         self.inner.close().await
     }
+
+    async fn execute_streaming(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<super::session::CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
+        self.inner.execute_streaming(command, timeout).await
+    }
 }
 
 /// Wrapper to override session ID for default remote sessions
@@ -419,6 +465,20 @@ impl ShellSession for DefaultIdRemoteSession {
 
     async fn close(&mut self) -> Result<(), ShellSessionError> {
         self.inner.close().await
+    }
+
+    async fn execute_streaming(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<super::session::CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
+        self.inner.execute_streaming(command, timeout).await
     }
 }
 

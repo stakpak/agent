@@ -341,9 +341,10 @@ impl RemoteShellSession {
 
         // Remove the echoed command (first line often contains it)
         if let Some(first) = lines.first()
-            && (first.trim() == command.trim() || first.contains(command.trim())) {
-                lines.remove(0);
-            }
+            && (first.trim() == command.trim() || first.contains(command.trim()))
+        {
+            lines.remove(0);
+        }
 
         // Remove empty lines at start and end
         while lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
@@ -419,6 +420,196 @@ impl ShellSession for RemoteShellSession {
         timeout: Option<Duration>,
     ) -> Result<CommandOutput, ShellSessionError> {
         self.execute_with_marker(command, timeout).await
+    }
+
+    async fn execute_streaming(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            super::session::OutputReceiver,
+            tokio::task::JoinHandle<Result<CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    > {
+        use super::session::{OutputChunk, OutputSender};
+        use tokio::sync::mpsc;
+
+        let marker = Self::generate_marker();
+        let start = Instant::now();
+        let timeout_duration = timeout.unwrap_or(Duration::from_secs(300));
+
+        // Create channel for streaming output
+        let (tx, rx): (OutputSender, _) = mpsc::channel(100);
+
+        // Check if session is closed and send command
+        {
+            let inner = self.inner.lock().await;
+            if inner.closed {
+                return Err(ShellSessionError::SessionClosed);
+            }
+
+            // Send command followed by marker echo
+            let full_command = format!("{}\necho \"{}\"\n", command.trim(), marker);
+            inner
+                .channel
+                .data(full_command.as_bytes())
+                .await
+                .map_err(|e| {
+                    ShellSessionError::SshError(format!("Failed to send command: {}", e))
+                })?;
+        }
+
+        trace!(command = %command, marker = %marker, "Sent command to remote for streaming");
+
+        // Clone what we need for the spawned task
+        let inner_arc = self.inner.clone();
+        let session_id = self.session_id.clone();
+        let command_owned = command.to_string();
+        let marker_clone = marker.clone();
+
+        // Spawn task to read output and stream it
+        let handle = tokio::spawn(async move {
+            let mut output = String::new();
+
+            loop {
+                if start.elapsed() > timeout_duration {
+                    let _ = tx
+                        .send(OutputChunk {
+                            text: "\n[TIMEOUT]\n".to_string(),
+                            is_final: true,
+                        })
+                        .await;
+                    return Err(ShellSessionError::Timeout(timeout_duration));
+                }
+
+                let mut inner = inner_arc.lock().await;
+
+                if inner.closed {
+                    let _ = tx
+                        .send(OutputChunk {
+                            text: "\n[SESSION CLOSED]\n".to_string(),
+                            is_final: true,
+                        })
+                        .await;
+                    return Err(ShellSessionError::SessionClosed);
+                }
+
+                // Wait for data with timeout
+                match tokio::time::timeout(Duration::from_millis(100), inner.channel.wait()).await {
+                    Ok(Some(msg)) => {
+                        match msg {
+                            russh::ChannelMsg::Data { data } => {
+                                let chunk = String::from_utf8_lossy(&data);
+                                output.push_str(&chunk);
+
+                                // Stream the chunk (but filter out markers)
+                                let chunk_str = chunk.to_string();
+                                if !chunk_str.contains(&marker_clone) {
+                                    let _ = tx
+                                        .send(OutputChunk {
+                                            text: chunk_str,
+                                            is_final: false,
+                                        })
+                                        .await;
+                                }
+
+                                // Check for marker completion
+                                let marker_count = output.matches(&marker_clone).count();
+                                if marker_count >= 2 {
+                                    break;
+                                }
+                            }
+                            russh::ChannelMsg::ExtendedData { data, .. } => {
+                                let chunk = String::from_utf8_lossy(&data);
+                                output.push_str(&chunk);
+
+                                // Stream stderr too
+                                let chunk_str = chunk.to_string();
+                                if !chunk_str.contains(&marker_clone) {
+                                    let _ = tx
+                                        .send(OutputChunk {
+                                            text: chunk_str,
+                                            is_final: false,
+                                        })
+                                        .await;
+                                }
+                            }
+                            russh::ChannelMsg::Eof => {
+                                let _ = tx
+                                    .send(OutputChunk {
+                                        text: "\n[EOF]\n".to_string(),
+                                        is_final: true,
+                                    })
+                                    .await;
+                                return Err(ShellSessionError::SessionDead(
+                                    "Remote shell closed".to_string(),
+                                ));
+                            }
+                            russh::ChannelMsg::Close => {
+                                inner.closed = true;
+                                let _ = tx
+                                    .send(OutputChunk {
+                                        text: "\n[CHANNEL CLOSED]\n".to_string(),
+                                        is_final: true,
+                                    })
+                                    .await;
+                                return Err(ShellSessionError::SessionDead(
+                                    "Remote channel closed".to_string(),
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(None) => {
+                        inner.closed = true;
+                        let _ = tx
+                            .send(OutputChunk {
+                                text: "\n[CHANNEL CLOSED]\n".to_string(),
+                                is_final: true,
+                            })
+                            .await;
+                        return Err(ShellSessionError::SessionDead(
+                            "Remote channel closed unexpectedly".to_string(),
+                        ));
+                    }
+                    Err(_) => {
+                        // Timeout on wait, continue loop
+                        continue;
+                    }
+                }
+            }
+
+            let duration = start.elapsed();
+
+            // Clean up output
+            let cleaned_output =
+                RemoteShellSession::clean_output(&output, &command_owned, &marker_clone);
+
+            // Send final chunk
+            let _ = tx
+                .send(OutputChunk {
+                    text: String::new(),
+                    is_final: true,
+                })
+                .await;
+
+            debug!(
+                session_id = %session_id,
+                duration_ms = duration.as_millis(),
+                output_len = cleaned_output.len(),
+                "Remote streaming command completed"
+            );
+
+            Ok(CommandOutput {
+                output: cleaned_output,
+                exit_code: None,
+                duration,
+            })
+        });
+
+        Ok((rx, handle))
     }
 
     async fn is_alive(&self) -> bool {

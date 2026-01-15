@@ -320,37 +320,113 @@ If the command's output exceeds 300 lines the result will be truncated and the f
         }
     }
 
-    /// Execute a command in a persistent shell session
+    /// Execute a command in a persistent shell session with streaming output
     async fn execute_in_persistent_session(
         &self,
         session_id: &str,
         command: &str,
         timeout: Option<std::time::Duration>,
-        _ctx: &RequestContext<RoleServer>,
+        ctx: &RequestContext<RoleServer>,
     ) -> Result<CommandResult, CallToolResult> {
+        use rmcp::model::{NumberOrString, ProgressNotificationParam, ProgressToken};
+        use uuid::Uuid;
+
         // Restore secrets in command before execution
         let actual_command = self.get_secret_manager().restore_secrets_in_string(command);
 
+        // Try streaming execution first
         match self
             .get_shell_session_manager()
-            .execute_in_session(session_id, &actual_command, timeout)
+            .execute_in_session_streaming(session_id, &actual_command, timeout)
             .await
         {
-            Ok(output) => {
-                // Redact secrets in output
-                let redacted_output = self
-                    .get_secret_manager()
-                    .redact_and_store_secrets(&output.output, None);
+            Ok((mut rx, handle)) => {
+                let progress_id = Uuid::new_v4();
+                let mut accumulated_output = String::new();
 
-                Ok(CommandResult {
-                    output: redacted_output,
-                    exit_code: output.exit_code.unwrap_or(0),
-                })
+                // Stream chunks as they arrive
+                while let Some(chunk) = rx.recv().await {
+                    if !chunk.text.is_empty() {
+                        // Redact secrets in chunk before streaming
+                        let redacted_chunk = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&chunk.text, None);
+
+                        accumulated_output.push_str(&redacted_chunk);
+
+                        // Send progress notification for real-time streaming
+                        let _ = ctx
+                            .peer
+                            .notify_progress(ProgressNotificationParam {
+                                progress_token: ProgressToken(NumberOrString::Number(0)),
+                                progress: 50.0,
+                                total: Some(100.0),
+                                message: Some(
+                                    serde_json::to_string(&ToolCallResultProgress {
+                                        id: progress_id,
+                                        message: redacted_chunk,
+                                    })
+                                    .unwrap_or_default(),
+                                ),
+                            })
+                            .await;
+                    }
+
+                    if chunk.is_final {
+                        break;
+                    }
+                }
+
+                // Wait for final result
+                match handle.await {
+                    Ok(Ok(output)) => {
+                        // Use the cleaned output from the session
+                        let redacted_output = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&output.output, None);
+
+                        Ok(CommandResult {
+                            output: redacted_output,
+                            exit_code: output.exit_code.unwrap_or(0),
+                        })
+                    }
+                    Ok(Err(e)) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Command execution failed: {}", e)),
+                    ])),
+                    Err(e) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Task join error: {}", e)),
+                    ])),
+                }
             }
-            Err(e) => Err(CallToolResult::error(vec![
-                Content::text("SESSION_ERROR"),
-                Content::text(format!("Failed to execute in session: {}", e)),
-            ])),
+            Err(e) => {
+                // Fall back to non-streaming execution
+                tracing::warn!(
+                    "Streaming execution failed, falling back to non-streaming: {}",
+                    e
+                );
+                match self
+                    .get_shell_session_manager()
+                    .execute_in_session(session_id, &actual_command, timeout)
+                    .await
+                {
+                    Ok(output) => {
+                        let redacted_output = self
+                            .get_secret_manager()
+                            .redact_and_store_secrets(&output.output, None);
+
+                        Ok(CommandResult {
+                            output: redacted_output,
+                            exit_code: output.exit_code.unwrap_or(0),
+                        })
+                    }
+                    Err(e) => Err(CallToolResult::error(vec![
+                        Content::text("SESSION_ERROR"),
+                        Content::text(format!("Failed to execute in session: {}", e)),
+                    ])),
+                }
+            }
         }
     }
 

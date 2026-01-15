@@ -86,9 +86,10 @@ pub(crate) fn clean_shell_output(raw_output: &str, command: &str, marker: &str) 
 
     // Remove the echoed command (first line often contains it)
     if let Some(first) = lines.first()
-        && (first.trim() == command.trim() || first.contains(command.trim())) {
-            lines.remove(0);
-        }
+        && (first.trim() == command.trim() || first.contains(command.trim()))
+    {
+        lines.remove(0);
+    }
 
     // Remove empty lines at start and end
     while lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {

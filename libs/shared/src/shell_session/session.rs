@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 /// Errors that can occur during shell session operations
 #[derive(Debug, Error)]
@@ -35,7 +36,25 @@ pub enum ShellSessionError {
 
     #[error("Marker detection failed: {0}")]
     MarkerDetectionFailed(String),
+
+    #[error("Channel send error: {0}")]
+    ChannelError(String),
 }
+
+/// A chunk of output from streaming command execution
+#[derive(Debug, Clone)]
+pub struct OutputChunk {
+    /// The text content of this chunk
+    pub text: String,
+    /// Whether this is the final chunk (command completed)
+    pub is_final: bool,
+}
+
+/// Type alias for the streaming output receiver
+pub type OutputReceiver = mpsc::Receiver<OutputChunk>;
+
+/// Type alias for the streaming output sender
+pub type OutputSender = mpsc::Sender<OutputChunk>;
 
 /// Output from a command execution
 #[derive(Debug, Clone)]
@@ -82,6 +101,30 @@ pub trait ShellSession: Send + Sync {
         command: &str,
         timeout: Option<Duration>,
     ) -> Result<CommandOutput, ShellSessionError>;
+
+    /// Execute a command with streaming output
+    ///
+    /// Similar to `execute`, but returns a channel receiver that yields output chunks
+    /// as they become available. This enables real-time output streaming to the UI.
+    ///
+    /// # Arguments
+    /// * `command` - The shell command to execute
+    /// * `timeout` - Optional timeout for command execution
+    ///
+    /// # Returns
+    /// * `Ok((OutputReceiver, JoinHandle))` - Receiver for output chunks and task handle
+    /// * `Err(ShellSessionError)` - If execution fails to start
+    async fn execute_streaming(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            OutputReceiver,
+            tokio::task::JoinHandle<Result<CommandOutput, ShellSessionError>>,
+        ),
+        ShellSessionError,
+    >;
 
     /// Check if the session is still alive and responsive
     ///
