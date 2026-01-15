@@ -927,20 +927,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_strip_ansi_codes() {
-        use crate::shell_session::strip_ansi_codes;
-        // Test the ANSI stripping function directly
-        let input = "\x1b[32mgreen\x1b[0m normal \x1b[1mbold\x1b[0m";
-        let stripped = strip_ansi_codes(input);
-        assert_eq!(stripped, "green normal bold");
-
-        // Test with cursor movement codes
-        let input2 = "\x1b[2Jclear\x1b[H";
-        let stripped2 = strip_ansi_codes(input2);
-        assert!(stripped2.contains("clear"));
-    }
-
-    #[tokio::test]
     async fn test_clean_output_removes_prompts() {
         use super::clean_shell_output;
         // Test standalone prompt patterns are removed

@@ -328,7 +328,7 @@ impl RemoteShellSession {
     /// Clean output by removing command echo, marker, and shell artifacts
     fn clean_output(raw_output: &str, command: &str, marker: &str) -> String {
         // First, strip ANSI escape codes
-        let stripped = Self::strip_ansi_codes(raw_output);
+        let stripped = console::strip_ansi_codes(raw_output);
 
         let mut lines: Vec<&str> = stripped.lines().collect();
 
@@ -370,41 +370,6 @@ impl RemoteShellSession {
         lines.join("\n")
     }
 
-    /// Strip ANSI escape codes from a string
-    fn strip_ansi_codes(s: &str) -> String {
-        // Match ANSI escape sequences: ESC [ ... final_byte
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                // Start of escape sequence
-                if chars.peek() == Some(&'[') {
-                    chars.next(); // consume '['
-                    // Skip until we hit a letter (the final byte of CSI sequence)
-                    while let Some(&next) = chars.peek() {
-                        chars.next();
-                        if next.is_ascii_alphabetic() || next == '~' {
-                            break;
-                        }
-                    }
-                } else if chars.peek() == Some(&']') {
-                    // OSC sequence - skip until BEL or ST
-                    chars.next(); // consume ']'
-                    while let Some(&next) = chars.peek() {
-                        chars.next();
-                        if next == '\x07' || next == '\\' {
-                            break;
-                        }
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-
-        result
-    }
 }
 
 struct ParsedConnection {

@@ -5601,6 +5601,7 @@ dependencies = [
  "axum-server",
  "base64 0.22.1",
  "chrono",
+ "console",
  "dirs",
  "futures",
  "futures-util",
