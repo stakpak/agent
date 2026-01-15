@@ -42,6 +42,9 @@ sha2 = "0.10"
 base64 = "0.22"
 urlencoding = "2.1"
 
+[target.'cfg(any(unix, windows))'.dependencies]
+portable-pty = "0.8"
+
 
 [dev-dependencies]
 tempfile = { workspace = true}

@@ -5607,6 +5607,7 @@ dependencies = [
  "hyper 1.8.1",
  "itertools 0.14.0",
  "notify",
+ "portable-pty",
  "rand 0.9.2",
  "rcgen",
  "regex",
