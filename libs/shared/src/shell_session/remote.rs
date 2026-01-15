@@ -369,7 +369,6 @@ impl RemoteShellSession {
 
         lines.join("\n")
     }
-
 }
 
 struct ParsedConnection {
