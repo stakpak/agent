@@ -1,8 +1,7 @@
 use crate::AppState;
 use crate::services::bash_block::{
-    format_text_content, is_collapsed_tool_call, render_bash_block,
-    render_collapsed_command_message, render_file_diff, render_file_diff_full, render_result_block,
-    render_streaming_block_compact,
+    format_text_content, render_bash_block, render_collapsed_command_message, render_file_diff,
+    render_file_diff_full, render_result_block, render_streaming_block_compact,
 };
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
@@ -38,6 +37,7 @@ pub enum MessageContent {
     RenderResultBorderBlock(ToolCallResult),
     RenderCommandCollapsedResult(ToolCallResult),
     RenderCollapsedMessage(ToolCall),
+    RenderFullContentMessage(ToolCallResult), // Full content for popup view
     RenderEscapedTextBlock(String),
     BashBubble {
         title: String,
@@ -191,6 +191,8 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderCommandCollapsedResult(tool_call_result),
+            // is_collapsed: None means it shows in main TUI view
+            // Full screen popup gets content via separate mechanism
             is_collapsed: None,
         }
     }
@@ -237,11 +239,23 @@ impl Message {
     }
 
     pub fn render_result_border_block(tool_call_result: ToolCallResult) -> Self {
-        let is_collapsed = is_collapsed_tool_call(&tool_call_result.call);
+        // is_collapsed: None means it shows in main TUI view
+        // For str_replace/create, we want the diff block to show in TUI
         Message {
             id: Uuid::new_v4(),
             content: MessageContent::RenderResultBorderBlock(tool_call_result),
-            is_collapsed: if is_collapsed { Some(true) } else { None },
+            is_collapsed: None,
+        }
+    }
+
+    /// Render full content message for full screen popup
+    /// Shows the complete tool result without truncation
+    pub fn render_full_content_message(tool_call_result: ToolCallResult) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderFullContentMessage(tool_call_result),
+            // is_collapsed: Some(true) means it shows in full screen popup only
+            is_collapsed: Some(true),
         }
     }
 }
@@ -879,6 +893,42 @@ fn get_wrapped_message_lines_internal(
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderFullContentMessage(tool_call_result) => {
+                // Full content view for popup - shows complete result without truncation
+                let title = crate::services::message::get_command_type_name(&tool_call_result.call);
+                let command_args =
+                    extract_truncated_command_arguments(&tool_call_result.call, None);
+                let result = &tool_call_result.result;
+
+                // Render header with dot
+                let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+                all_lines.push((spacing_marker.clone(), Style::default()));
+
+                let header_lines =
+                    crate::services::bash_block::render_styled_header_with_dot_public(
+                        &title,
+                        &command_args,
+                        Some(crate::services::bash_block::LinesColors {
+                            dot: Color::LightGreen,
+                            title: Color::White,
+                            command: crate::services::detect_term::AdaptiveColors::text(),
+                            message: crate::services::detect_term::AdaptiveColors::text(),
+                        }),
+                    );
+                for line in header_lines {
+                    all_lines.push((convert_line_to_owned(line), Style::default()));
+                }
+
+                all_lines.push((spacing_marker.clone(), Style::default()));
+
+                // Render full content
+                let content_lines = format_text_content(result, width);
+                for line in content_lines {
+                    all_lines.push((line, Style::default()));
+                }
+
+                all_lines.push((spacing_marker, Style::default()));
             }
             MessageContent::RenderEscapedTextBlock(content) => {
                 let rendered_lines = format_text_content(content, width);
