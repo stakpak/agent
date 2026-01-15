@@ -506,20 +506,24 @@ impl ShellSession for RemoteShellSession {
                                 let chunk = String::from_utf8_lossy(&data);
                                 output.push_str(&chunk);
 
-                                // Clean the entire accumulated output and stream only new content
+                                // Clean the entire accumulated output and stream only new complete lines
                                 let cleaned_so_far =
                                     clean_shell_output(&output, &command_owned, &marker_clone);
                                 if cleaned_so_far.len() > last_streamed_len {
                                     let new_content = &cleaned_so_far[last_streamed_len..];
-                                    if !new_content.trim().is_empty() {
-                                        let _ = tx
-                                            .send(OutputChunk {
-                                                text: new_content.to_string(),
-                                                is_final: false,
-                                            })
-                                            .await;
+                                    // Only stream complete lines to avoid flicker
+                                    if let Some(last_newline) = new_content.rfind('\n') {
+                                        let complete_lines = &new_content[..=last_newline];
+                                        if !complete_lines.trim().is_empty() {
+                                            let _ = tx
+                                                .send(OutputChunk {
+                                                    text: complete_lines.to_string(),
+                                                    is_final: false,
+                                                })
+                                                .await;
+                                        }
+                                        last_streamed_len += last_newline + 1;
                                     }
-                                    last_streamed_len = cleaned_so_far.len();
                                 }
 
                                 // Check for marker completion
@@ -537,15 +541,19 @@ impl ShellSession for RemoteShellSession {
                                     clean_shell_output(&output, &command_owned, &marker_clone);
                                 if cleaned_so_far.len() > last_streamed_len {
                                     let new_content = &cleaned_so_far[last_streamed_len..];
-                                    if !new_content.trim().is_empty() {
-                                        let _ = tx
-                                            .send(OutputChunk {
-                                                text: new_content.to_string(),
-                                                is_final: false,
-                                            })
-                                            .await;
+                                    // Only stream complete lines to avoid flicker
+                                    if let Some(last_newline) = new_content.rfind('\n') {
+                                        let complete_lines = &new_content[..=last_newline];
+                                        if !complete_lines.trim().is_empty() {
+                                            let _ = tx
+                                                .send(OutputChunk {
+                                                    text: complete_lines.to_string(),
+                                                    is_final: false,
+                                                })
+                                                .await;
+                                        }
+                                        last_streamed_len += last_newline + 1;
                                     }
-                                    last_streamed_len = cleaned_so_far.len();
                                 }
                             }
                             russh::ChannelMsg::Eof => {
