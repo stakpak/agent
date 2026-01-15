@@ -1,11 +1,8 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use crate::app::AppState;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_diff::{render_file_diff_block, render_file_diff_block_from_args};
 use crate::services::markdown_renderer::render_markdown_to_lines;
-use crate::services::message::{
-    BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
-};
+use crate::services::message::{BubbleColors, extract_command_purpose, get_command_type_name};
 use ansi_to_tui::IntoText;
 use console::strip_ansi_codes;
 use ratatui::style::{Color, Modifier, Style};
@@ -16,7 +13,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
-use uuid::Uuid;
 
 #[allow(dead_code)]
 pub enum ContentAlignment {
@@ -840,43 +836,53 @@ pub fn render_styled_header_and_borders(
     result
 }
 
+/// Render file diff for full screen popup - shows diff lines with context
+/// Uses the same diff-only approach as the TUI view for consistency
 pub fn render_file_diff_full(
     tool_call: &ToolCall,
     terminal_width: usize,
     do_show: Option<bool>,
 ) -> Vec<Line<'static>> {
-    let (_diff_lines, mut full_diff_lines) =
+    // Get diff lines - use the truncated version which starts from first change
+    // but we'll show all diff lines without truncation for the full screen view
+    let (_truncated_diff_lines, full_diff_lines) =
         render_file_diff_block_from_args(tool_call, terminal_width);
+
     let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .unwrap_or_else(|_| serde_json::json!({}));
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
 
-    let title: String = get_command_type_name(&tool_call);
+    let title: String = get_command_type_name(tool_call);
 
-    if full_diff_lines.is_empty() && !do_show.unwrap_or(false) {
+    // Use full diff lines for the fullscreen popup - no truncation needed here
+    let diff_content = if !full_diff_lines.is_empty() {
+        full_diff_lines
+    } else {
+        vec![]
+    };
+
+    if diff_content.is_empty() && !do_show.unwrap_or(false) {
         return Vec::new();
     }
+
     // render header dot
     let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
 
-    full_diff_lines = [
-        vec![spacing_marker.clone()],
-        render_styled_header_with_dot(
-           &title,
-            path,
-            Some(LinesColors {
-                dot: Color::Magenta,
-                title: Color::Yellow,
-                command: AdaptiveColors::text(),
-                message: Color::LightGreen,
-            }),
-        ),
-        vec![spacing_marker.clone()],
-        full_diff_lines,
-    ]
-    .concat();
+    let mut result = vec![spacing_marker.clone()];
+    result.extend(render_styled_header_with_dot(
+        &title,
+        path,
+        Some(LinesColors {
+            dot: Color::LightGreen,
+            title: Color::White,
+            command: AdaptiveColors::text(),
+            message: Color::LightGreen,
+        }),
+    ));
+    result.push(spacing_marker.clone());
+    result.extend(diff_content);
 
-    full_diff_lines
+    result
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
@@ -899,11 +905,10 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
 
         let formatted_title = format!(" {} ", title);
         let colors = Some(BubbleColors {
-           border_color: Color::DarkGray,
+            border_color: Color::DarkGray,
             title_color: term_color(Color::Reset),
             content_color: Color::Reset,
             tool_type: title,
-            
         });
 
         let result =
@@ -959,8 +964,8 @@ pub fn render_markdown_block(
         &title,
         &command_args,
         Some(LinesColors {
-            dot: Color::Magenta,
-            title: Color::Yellow,
+            dot: Color::LightGreen,
+            title: Color::White,
             command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
@@ -975,6 +980,13 @@ pub fn render_markdown_block(
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     lines
+}
+
+/// Render str_replace/create results - clean diff view without borders
+/// Uses the same approach as fullscreen popup for consistency
+pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Vec<Line<'static>> {
+    // Use the same clean diff rendering as the fullscreen popup
+    render_file_diff_full(tool_call, width, Some(true))
 }
 
 pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
@@ -997,6 +1009,12 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             Some("Interrupted by user".to_string()),
             None,
         );
+    }
+
+    // Handle str_replace/create with diff-only content and yellow borders
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "str_replace" || tool_name == "create" {
+        return render_diff_result_block(&tool_call, width);
     }
 
     if command_args.contains(".md") && is_collapsed {
@@ -1376,6 +1394,15 @@ pub struct LinesColors {
     pub message: Color,
 }
 
+/// Public version of render_styled_header_with_dot for use in message.rs
+pub fn render_styled_header_with_dot_public(
+    title: &str,
+    command_name: &str,
+    colors: Option<LinesColors>,
+) -> Vec<Line<'static>> {
+    render_styled_header_with_dot(title, command_name, colors)
+}
+
 fn render_styled_header_with_dot(
     title: &str,
     command_name: &str,
@@ -1589,25 +1616,4 @@ pub fn render_collapsed_command_message(
         Some(message),
         Some(colors),
     )
-}
-pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &mut AppState) {
-    let is_collapsed = is_collapsed_tool_call(&tool_call_result.call);
-    let result = tool_call_result.result.clone();
-    let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
-    let title = get_command_type_name(&tool_call_result.call);
-    if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
-        let colors = LinesColors {
-            dot: Color::LightGreen,
-            title: term_color(Color::White),
-            command: AdaptiveColors::text(),
-            message: AdaptiveColors::text(),
-        };
-        let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
-        state.messages.push(Message {
-            id: Uuid::new_v4(),
-            content: MessageContent::StyledBlock(lines),
-            is_collapsed: None,
-        });
-    }
 }
