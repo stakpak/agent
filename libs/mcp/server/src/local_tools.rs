@@ -177,25 +177,18 @@ pub struct ViewWebPageRequest {
 
 #[tool_router(router = tool_router_local, vis = "pub")]
 impl ToolContainer {
-    #[tool(
-        description = "A system command execution tool that allows running shell commands with full system access on local or remote systems via SSH.
+    #[tool(description = "Execute shell commands locally or remotely via SSH.
 
 REMOTE EXECUTION:
-- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ (id_ed25519, id_rsa, etc.) if no credentials provided
-- Examples:
-  * 'user@server.com' (uses default port 22 and auto-discovered keys)
-  * 'user@server.com:2222' with password authentication
-  * Remote paths: 'ssh://user@host/path' or 'user@host:/path'
+- Set 'remote' to 'user@host' or 'user@host:port' for SSH
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
 SECRET HANDLING:
-- Output containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
-- You can use these placeholders in subsequent commands - they will be automatically restored to actual values before execution
-- Example: If you see 'export API_KEY=[REDACTED_SECRET:api-key:abc123]', you can use '[REDACTED_SECRET:api-key:abc123]' in later commands
+- Secrets in output are redacted as [REDACTED_SECRET:rule-id:hash]
+- Use these placeholders in subsequent commands - they auto-restore before execution
+- Example: If output shows 'API_KEY=[REDACTED_SECRET:api-key:abc123]', use that placeholder in later commands
 
-If the command's output exceeds 300 lines the result will be truncated and the full output will be saved to a file in the current directory"
-    )]
+Output exceeding 300 lines is truncated and saved to a file.")]
     pub async fn run_command(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -245,37 +238,19 @@ If the command's output exceeds 300 lines the result will be truncated and the f
     }
 
     #[tool(
-        description = "Execute a shell command asynchronously in the background on LOCAL OR REMOTE systems and return immediately with task information without waiting for completion.
+        description = "Execute a shell command asynchronously in the background on local or remote systems. Returns immediately with task info.
 
-REMOTE EXECUTION SUPPORT:
-- Set 'remote' parameter to 'user@host' or 'user@host:port' for SSH background execution
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Examples:
-  * 'user@server.com' - Remote background task with auto-discovered keys
-  * 'user@server.com:2222' - Remote background task with custom port
+REMOTE EXECUTION:
+- Set 'remote' to 'user@host' or 'user@host:port' for SSH background execution
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
-Use this for port-forwarding, starting servers, tailing logs, or other long-running commands that you want to monitor separately, or whenever the user wants to run a command in the background.
+Use for port-forwarding, servers, log tailing, or long-running commands.
 
-PARAMETERS:
-- command: The shell command to execute (locally or remotely)
-- description: Optional description of the command (not used in execution)
-- timeout: Optional timeout in seconds after which the task will be terminated
-- remote: Optional remote connection string for SSH execution
-- password: Optional password for remote authentication
-- private_key_path: Optional path to private key for remote authentication
+RETURNS: task_id, status ('Running' initially), start_time
 
-RETURNS:
-- task_id: Unique identifier for the background task
-- status: Current task status (will be 'Running' initially)
-- start_time: When the task was started
+SECRET HANDLING: Secrets are restored before execution; output is redacted when retrieved.
 
-SECRET HANDLING:
-- Commands containing secrets will have them restored before execution
-- Task output will be redacted when retrieved
-- Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in commands
-
-Use the get_all_tasks tool to monitor task progress, or the cancel_task tool to cancel a task."
+Use get_all_tasks to monitor progress, cancel_task to cancel."
     )]
     pub async fn run_command_task(
         &self,
@@ -591,29 +566,19 @@ Use this tool to check the progress and results of long-running background tasks
     }
 
     #[tool(
-        description = "View the contents of a local or remote file/directory. Can read entire files or specific line ranges.
+        description = "View contents of a local or remote file/directory. Supports line ranges.
 
-REMOTE FILE ACCESS:
-- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
-- IMPORTANT: Use ABSOLUTE paths for remote files/directories (e.g., '/etc/config' not 'config')
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Examples:
-  * 'user@server.com:/etc/nginx/nginx.conf' - Remote file with auto-discovered keys
-  * 'ssh://user@server.com/var/log/app.log' - Remote file with SSH URL format
-  * 'user@server.com:/home/user/documents' - Remote directory listing
-  * '/local/path/file.txt' - Local file (default behavior)
+REMOTE ACCESS:
+- Path format: 'user@host:/path' or 'user@host#port:/path' (use ABSOLUTE paths)
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
-For directories:
-- Default behavior: Lists immediate directory contents
-- With tree=true: Displays nested directory structure as a tree (limited to 3 levels deep)
+DIRECTORIES:
+- Default: Lists immediate contents
+- tree=true: Nested tree structure (max 3 levels)
 
-SECRET HANDLING:
-- File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
-- These placeholders represent actual secret values that are safely stored for later use
-- You can reference these placeholders when working with the file content
+SECRET HANDLING: Secrets are redacted as [REDACTED_SECRET:rule-id:hash] placeholders.
 
-A maximum of 300 lines will be shown at a time, the rest will be truncated."
+Max 300 lines shown; rest is truncated."
     )]
     pub async fn view(
         &self,
@@ -648,24 +613,15 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
     }
 
     #[tool(
-        description = "Replace a specific string in a local or remote file with new text. The old_str must match exactly including whitespace and indentation.
+        description = "Replace a string in a local or remote file. old_str must match exactly (including whitespace).
 
-REMOTE FILE EDITING:
-- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
-- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/etc/config' not 'config')
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Examples:
-  * 'user@server.com:/etc/nginx/sites-available/default' - Edit remote config
-  * 'ssh://user@server.com/var/www/app/config.php' - Edit remote application config
-  * '/local/path/file.txt' - Edit local file (default behavior)
+REMOTE EDITING:
+- Path format: 'user@host:/path' or 'user@host#port:/path' (use ABSOLUTE paths)
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
-SECRET HANDLING:
-- You can use secret placeholders like [REDACTED_SECRET:rule-id:hash] in both old_str and new_str parameters
-- These placeholders will be automatically restored to actual secret values before performing the replacement
-- This allows you to safely work with secret values without exposing them
+SECRET HANDLING: Use [REDACTED_SECRET:rule-id:hash] placeholders in old_str/new_str - they auto-restore before replacement.
 
-When replacing code, ensure the new text maintains proper syntax, indentation, and follows the codebase style."
+Ensure new text maintains proper syntax and follows codebase style."
     )]
     pub async fn str_replace(
         &self,
@@ -706,22 +662,15 @@ When replacing code, ensure the new text maintains proper syntax, indentation, a
     }
 
     #[tool(
-        description = "Create a new local or remote file with the specified content. Will fail if file already exists. When creating code, ensure the new text has proper syntax, indentation, and follows the codebase style. Parent directories will be created automatically if they don't exist.
+        description = "Create a new local or remote file with specified content. Fails if file exists. Parent directories are auto-created.
 
-REMOTE FILE CREATION:
-- Use path formats: 'user@host:/path' or 'user@host#port:/path' for remote files
-- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/script.sh' not 'script.sh')
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Parent directories will be created automatically on remote systems
-- Examples:
-  * 'user@server.com:/tmp/script.sh' - Create remote script
-  * 'ssh://user@server.com/var/www/new-config.json' - Create remote config
-  * '/local/path/file.txt' - Create local file (default behavior)
+REMOTE CREATION:
+- Path format: 'user@host:/path' or 'user@host#port:/path' (use ABSOLUTE paths)
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
-SECRET HANDLING:
-- File content containing secrets will have them restored before writing to ensure functionality
-- Use secret placeholders like [REDACTED_SECRET:rule-id:hash] in file_text parameter"
+SECRET HANDLING: Use [REDACTED_SECRET:rule-id:hash] placeholders - they auto-restore before writing.
+
+Ensure code has proper syntax and follows codebase style."
     )]
     pub async fn create(
         &self,
@@ -893,35 +842,15 @@ The response will be truncated if it exceeds 300 lines, with the full content sa
     }
 
     #[tool(
-        description = "Remove/delete a local or remote file or directory. Files are automatically backed up before removal and can be recovered.
+        description = "Remove/delete a local or remote file or directory. Files are safely backed up before removal.
 
-REMOTE FILE REMOVAL:
-- Supports SSH connections for remote file operations
-- Use format: 'user@host:/path' or 'user@host#port:/path'
-- IMPORTANT: Use ABSOLUTE paths for remote files (e.g., '/tmp/file.txt' not 'file.txt')
-- Use 'password' for password authentication or 'private_key_path' for key-based auth
-- Automatic SSH key discovery from ~/.ssh/ if no credentials provided
-- Examples:
-  * 'user@server.com:/tmp/old-file.txt' - Remove remote file
-  * 'user@server.com#2222:/var/log/old-logs/' - Remove remote directory (with recursive=true)
-  * '/local/path/file.txt' - Remove local file (default behavior)
+REMOTE REMOVAL:
+- Path format: 'user@host:/path' or 'user@host#port:/path' (use ABSOLUTE paths)
+- Use 'password' or 'private_key_path' for auth (auto-discovers ~/.ssh keys if not provided)
 
-DIRECTORY REMOVAL:
-- Use 'recursive=true' to remove directories and their contents
-- Files can be removed without the recursive flag
+DIRECTORIES: Use 'recursive=true' for directories with contents.
 
-BACKUP & RECOVERY:
-- ALL removed files and directories are automatically backed up before deletion
-- Local files: Moved to '.stakpak/session/backups/{uuid}/' on the local machine
-- Remote files: Moved to '.stakpak/session/backups/{uuid}/' on the remote machine
-- Backup paths are returned in XML format showing original and backup locations
-- Files are moved (not copied) to backup location, making removal efficient
-- Both files and entire directories can be recovered from backup locations
-
-SAFETY NOTES:
-- Files are moved to backup location (not permanently deleted)
-- Backup locations are preserved until manually cleaned up
-- Use backup paths from XML output to restore files if needed"
+SAFETY: Files are NOT permanently deleted - they are moved to '.stakpak/session/backups/{uuid}/'. Backup paths are returned in output for easy recovery."
     )]
     pub async fn remove(
         &self,
