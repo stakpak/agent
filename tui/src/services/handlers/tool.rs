@@ -27,7 +27,6 @@ pub fn handle_stream_tool_result(
     }
 
     // Check for interactive stall notification
-    // Check for interactive stall notification
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
         // Extract the message content (everything after the marker)

@@ -20,6 +20,7 @@ use stakpak_api::{
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
+use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::time::Instant;
 use uuid::Uuid;
@@ -49,6 +50,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     let start_time = Instant::now();
     let mut llm_response_time = std::time::Duration::new(0, 0);
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
+    let mut total_usage = LLMTokenUsage::default();
     let renderer = OutputRenderer::new(config.output_format.clone(), config.verbose);
 
     print!("{}", renderer.render_title("Stakpak Agent - Async Mode"));
@@ -206,6 +208,29 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             .await
             .map_err(|e| e.to_string())?;
         llm_response_time += llm_start.elapsed();
+
+        // Accumulate token usage
+        total_usage.prompt_tokens += response.usage.prompt_tokens;
+        total_usage.completion_tokens += response.usage.completion_tokens;
+        total_usage.total_tokens += response.usage.total_tokens;
+        if let Some(details) = &response.usage.prompt_tokens_details {
+            if total_usage.prompt_tokens_details.is_none() {
+                total_usage.prompt_tokens_details = Some(Default::default());
+            }
+            if let Some(ref mut total_details) = total_usage.prompt_tokens_details {
+                total_details.input_tokens = Some(
+                    total_details.input_tokens.unwrap_or(0) + details.input_tokens.unwrap_or(0),
+                );
+                total_details.cache_read_input_tokens = Some(
+                    total_details.cache_read_input_tokens.unwrap_or(0)
+                        + details.cache_read_input_tokens.unwrap_or(0),
+                );
+                total_details.cache_write_input_tokens = Some(
+                    total_details.cache_write_input_tokens.unwrap_or(0)
+                        + details.cache_write_input_tokens.unwrap_or(0),
+                );
+            }
+        }
 
         chat_messages.push(response.choices[0].message.clone());
 
@@ -370,6 +395,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     );
 
     print!("{}", renderer.render_final_completion(&chat_messages));
+    println!();
+
+    // Print token usage at the end
+    print!("{}", renderer.render_token_usage_stats(&total_usage));
 
     // Save conversation to file
     let conversation_json = serde_json::to_string_pretty(&chat_messages).unwrap_or_default();
