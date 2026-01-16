@@ -1182,11 +1182,8 @@ pub async fn run_interactive(
             println!(
                 r#"To resume, run:
 stakpak -c {}
-
-To get session data, run:
-stakpak agent get {}
 "#,
-                latest_checkpoint, latest_checkpoint
+                latest_checkpoint
             );
         }
 
