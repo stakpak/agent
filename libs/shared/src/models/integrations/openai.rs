@@ -985,6 +985,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     usage: None,
+                    ..Default::default()
                 },
                 ChatMessage {
                     role: Role::User,
@@ -993,6 +994,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     usage: None,
+                    ..Default::default()
                 },
             ],
             frequency_penalty: None,
