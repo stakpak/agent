@@ -12,6 +12,7 @@ pub mod remote_connection;
 pub mod remote_store;
 pub mod secret_manager;
 pub mod secrets;
+pub mod shell_session;
 pub mod task_manager;
 pub mod telemetry;
 pub mod tls_client;

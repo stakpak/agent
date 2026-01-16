@@ -29,6 +29,7 @@ impl Default for ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                shell_sessions: None,
             },
         }
     }
@@ -48,6 +49,7 @@ impl ConfigFile {
                 anonymous_id: Some(uuid::Uuid::new_v4().to_string()),
                 collect_telemetry: Some(true),
                 editor: Some("nano".to_string()),
+                shell_sessions: None,
             },
         }
     }
@@ -91,6 +93,7 @@ impl ConfigFile {
         let existing_anonymous_id = self.settings.anonymous_id.clone();
         let existing_collect_telemetry = self.settings.collect_telemetry;
         let existing_editor = self.settings.editor.clone();
+        let existing_shell_sessions = self.settings.shell_sessions.clone();
 
         self.settings = Settings {
             machine_name: config.machine_name,
@@ -98,6 +101,7 @@ impl ConfigFile {
             anonymous_id: config.anonymous_id.or(existing_anonymous_id),
             collect_telemetry: config.collect_telemetry.or(existing_collect_telemetry),
             editor: config.editor.or(existing_editor),
+            shell_sessions: existing_shell_sessions,
         };
     }
 
