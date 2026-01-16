@@ -114,6 +114,14 @@ pub fn handle_dropdown_down(state: &mut AppState) {
 
 /// Handles upward navigation with approval popup check
 pub fn handle_up_navigation(state: &mut AppState) {
+    if state.show_profile_switcher {
+        if state.profile_switcher_selected > 0 {
+            state.profile_switcher_selected -= 1;
+        } else {
+            state.profile_switcher_selected = state.available_profiles.len().saturating_sub(1);
+        }
+        return;
+    }
     if state.show_shortcuts_popup {
         match state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
@@ -173,6 +181,14 @@ pub fn handle_down_navigation(
     message_area_height: usize,
     message_area_width: usize,
 ) {
+    if state.show_profile_switcher {
+        if state.profile_switcher_selected < state.available_profiles.len().saturating_sub(1) {
+            state.profile_switcher_selected += 1;
+        } else {
+            state.profile_switcher_selected = 0;
+        }
+        return;
+    }
     if state.show_shortcuts_popup {
         match state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => {
