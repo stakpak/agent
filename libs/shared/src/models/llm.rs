@@ -140,6 +140,30 @@ pub enum ProviderConfig {
         /// Use the base URL as required by your provider (e.g., "http://localhost:11434/v1")
         api_endpoint: String,
     },
+    /// Stakpak provider configuration
+    ///
+    /// Routes inference through Stakpak's unified API, which provides:
+    /// - Access to multiple LLM providers via a single endpoint
+    /// - Usage tracking and billing
+    /// - Session management and checkpoints
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.stakpak]
+    /// type = "stakpak"
+    /// api_key = "your-stakpak-api-key"
+    /// api_endpoint = "https://apiv2.stakpak.dev"  # optional, this is the default
+    ///
+    /// # Then use models as:
+    /// smart_model = "stakpak/anthropic/claude-sonnet-4-5-20250929"
+    /// ```
+    Stakpak {
+        /// Stakpak API key (required)
+        api_key: String,
+        /// API endpoint URL (default: https://apiv2.stakpak.dev)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+    },
 }
 
 impl ProviderConfig {
@@ -150,6 +174,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { .. } => "anthropic",
             ProviderConfig::Gemini { .. } => "gemini",
             ProviderConfig::Custom { .. } => "custom",
+            ProviderConfig::Stakpak { .. } => "stakpak",
         }
     }
 
@@ -160,6 +185,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
+            ProviderConfig::Stakpak { api_key, .. } => Some(api_key.as_str()),
         }
     }
 
@@ -170,6 +196,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
+            ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
         }
     }
 
@@ -209,6 +236,14 @@ impl ProviderConfig {
     /// Create a custom provider config
     pub fn custom(api_endpoint: String, api_key: Option<String>) -> Self {
         ProviderConfig::Custom {
+            api_key,
+            api_endpoint,
+        }
+    }
+
+    /// Create a Stakpak provider config
+    pub fn stakpak(api_key: String, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::Stakpak {
             api_key,
             api_endpoint,
         }

@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::provider::Provider;
 use crate::providers::{
     anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider,
+    stakpak::StakpakProvider,
 };
 use crate::registry::ProviderRegistry;
 
@@ -59,6 +60,13 @@ impl ClientBuilder {
             && let Ok(provider) = GeminiProvider::new(config)
         {
             registry = registry.register("google", provider);
+        }
+
+        // Register Stakpak if configured
+        if let Some(config) = inference_config.stakpak_config
+            && let Ok(provider) = StakpakProvider::new(config)
+        {
+            registry = registry.register("stakpak", provider);
         }
 
         self.registry = Some(registry);

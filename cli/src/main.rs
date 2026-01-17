@@ -1,11 +1,7 @@
 use clap::Parser;
 use names::{self, Name};
 use rustls::crypto::CryptoProvider;
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    remote::RemoteClient,
-};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::{integrations::openai::AgentModel, subagent::SubagentConfigs};
 use std::{
@@ -28,7 +24,7 @@ use commands::{
         run::{OutputFormat, RunAsyncConfig, RunInteractiveConfig},
     },
 };
-use config::{AppConfig, ProviderType};
+use config::AppConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utils::agents_md::discover_agents_md;
 use utils::check_update::{auto_update, check_update};
@@ -248,10 +244,10 @@ async fn main() {
                     }
                 }
                 None => {
-                    // Use get_stakpak_api_key() to check auth.toml fallback chain
-                    if config.get_stakpak_api_key().is_none()
-                        && config.provider == ProviderType::Remote
-                    {
+                    // Run onboarding if no credentials are configured at all
+                    let has_stakpak_key = config.get_stakpak_api_key().is_some();
+                    let has_provider_keys = !config.get_llm_provider_config().providers.is_empty();
+                    if !has_stakpak_key && !has_provider_keys {
                         run_onboarding(&mut config, OnboardingMode::Default).await;
                     }
                     let local_context = analyze_local_context(&config).await.ok();
@@ -264,37 +260,33 @@ async fn main() {
                             .and_then(|cwd| discover_agents_md(&cwd))
                     };
 
-                    let client: Arc<dyn AgentProvider> = match config.provider {
-                        ProviderType::Remote => {
-                            let client =
-                                RemoteClient::new(&config.clone().into()).unwrap_or_else(|e| {
-                                    eprintln!("Failed to create client: {}", e);
-                                    std::process::exit(1);
-                                });
-                            Arc::new(client)
-                        }
-                        ProviderType::Local => {
-                            // Use credential resolution with auth.toml fallback chain
-                            // Refresh OAuth tokens in parallel to minimize startup delay
-                            let providers = config.get_llm_provider_config_async().await;
+                    // Use credential resolution with auth.toml fallback chain
+                    // Refresh OAuth tokens in parallel to minimize startup delay
+                    let providers = config.get_llm_provider_config_async().await;
 
-                            let client = LocalClient::new(LocalClientConfig {
-                                store_path: None,
-                                stakpak_base_url: Some(config.api_endpoint.clone()),
-                                providers,
-                                eco_model: config.eco_model.clone(),
-                                recovery_model: config.recovery_model.clone(),
-                                smart_model: config.smart_model.clone(),
-                                hook_registry: None,
-                            })
-                            .await
-                            .unwrap_or_else(|e| {
-                                eprintln!("Failed to create local client: {}", e);
-                                std::process::exit(1);
-                            });
-                            Arc::new(client)
-                        }
-                    };
+                    // Create unified AgentClient - automatically routes through Stakpak when API key is present
+                    let mut client_config = AgentClientConfig::new()
+                        .with_stakpak_endpoint(config.api_endpoint.clone())
+                        .with_providers(providers);
+
+                    if let Some(api_key) = config.get_stakpak_api_key() {
+                        client_config = client_config.with_stakpak_key(api_key);
+                    }
+                    if let Some(smart_model) = &config.smart_model {
+                        client_config = client_config.with_smart_model(smart_model.clone());
+                    }
+                    if let Some(eco_model) = &config.eco_model {
+                        client_config = client_config.with_eco_model(eco_model.clone());
+                    }
+                    if let Some(recovery_model) = &config.recovery_model {
+                        client_config = client_config.with_recovery_model(recovery_model.clone());
+                    }
+
+                    let client: Arc<dyn AgentProvider> =
+                        Arc::new(AgentClient::new(client_config).await.unwrap_or_else(|e| {
+                            eprintln!("Failed to create client: {}", e);
+                            std::process::exit(1);
+                        }));
 
                     // Parallelize HTTP calls for faster startup
                     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
@@ -322,8 +314,8 @@ async fn main() {
                     match api_result {
                         Ok(_) => {}
                         Err(e) => {
-                            // Only exit on error if using remote provider
-                            if matches!(config.provider, ProviderType::Remote) {
+                            // Only exit on error if using Stakpak API (has API key)
+                            if has_stakpak_key {
                                 println!();
                                 println!("❌ API key validation failed: {}", e);
                                 println!("Please check your API key and run the below command");

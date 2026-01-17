@@ -214,6 +214,7 @@ impl AgentInput {
                         tool_calls: None,
                         tool_call_id: None,
                         usage: None,
+                        ..Default::default()
                     }]);
                 }
             }
@@ -713,7 +714,8 @@ impl From<&LLMOutput> for ChatMessage {
             name: None,
             tool_calls,
             tool_call_id: None,
-            usage: None,
+            usage: Some(value.usage.clone()),
+            ..Default::default()
         }
     }
 }

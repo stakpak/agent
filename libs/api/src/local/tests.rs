@@ -2,12 +2,14 @@ use super::*;
 use crate::local::context_managers::{
     ContextManager, simple_context_manager::SimpleContextManager,
 };
+use crate::models::{
+    AgentCheckpointListItem, AgentID, AgentOutput, AgentSession, AgentSessionVisibility,
+    AgentStatus,
+};
 use stakpak_shared::models::integrations::openai::{
     ChatMessage, ContentPart, ImageUrl, MessageContent, Role,
 };
-use stakpak_shared::models::llm::{
-    LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMProviderConfig,
-};
+use stakpak_shared::models::llm::{LLMMessage, LLMMessageContent, LLMMessageTypedContent};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -19,19 +21,15 @@ async fn test_local_db_operations() {
         .to_string_lossy()
         .to_string();
 
-    let config = LocalClientConfig {
-        stakpak_base_url: None,
-        store_path: Some(db_path.clone()),
-        providers: LLMProviderConfig::new(),
-        smart_model: None,
-        eco_model: None,
-        recovery_model: None,
-        hook_registry: None,
-    };
-
-    let client = LocalClient::new(config)
+    // Initialize database directly
+    let db_builder = libsql::Builder::new_local(&db_path)
+        .build()
         .await
-        .expect("Failed to create local client");
+        .expect("Failed to build database");
+    let conn = db_builder.connect().expect("Failed to connect to database");
+    db::init_schema(&conn)
+        .await
+        .expect("Failed to initialize schema");
 
     // Test Session CRUD
     let session_id = Uuid::new_v4();
@@ -46,17 +44,17 @@ async fn test_local_db_operations() {
         updated_at: now,
     };
 
-    db::create_session(&client.db, &session)
+    db::create_session(&conn, &session)
         .await
         .expect("Failed to create session");
 
-    let sessions = db::list_sessions(&client.db)
+    let sessions = db::list_sessions(&conn)
         .await
         .expect("Failed to list sessions");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, session_id);
 
-    let fetched_session = db::get_session(&client.db, session_id)
+    let fetched_session = db::get_session(&conn, session_id)
         .await
         .expect("Failed to get session");
     assert_eq!(fetched_session.id, session_id);
@@ -73,8 +71,6 @@ async fn test_local_db_operations() {
         updated_at: now,
     };
 
-    use stakpak_shared::models::integrations::openai::{ChatMessage, MessageContent, Role};
-
     let output = AgentOutput::PabloV1 {
         messages: vec![ChatMessage {
             role: Role::User,
@@ -83,21 +79,22 @@ async fn test_local_db_operations() {
             tool_calls: None,
             tool_call_id: None,
             usage: None,
+            ..Default::default()
         }],
         node_states: serde_json::Value::Null,
     };
 
-    db::create_checkpoint(&client.db, session_id, &checkpoint, &output)
+    db::create_checkpoint(&conn, session_id, &checkpoint, &output)
         .await
         .expect("Failed to create checkpoint");
 
-    let fetched_checkpoint = db::get_checkpoint(&client.db, checkpoint_id)
+    let fetched_checkpoint = db::get_checkpoint(&conn, checkpoint_id)
         .await
         .expect("Failed to get checkpoint");
     assert_eq!(fetched_checkpoint.checkpoint.id, checkpoint_id);
     assert_eq!(fetched_checkpoint.session.id, session_id);
 
-    let latest_checkpoint = db::get_latest_checkpoint(&client.db, session_id)
+    let latest_checkpoint = db::get_latest_checkpoint(&conn, session_id)
         .await
         .expect("Failed to get latest checkpoint");
     assert_eq!(latest_checkpoint.checkpoint.id, checkpoint_id);
@@ -111,7 +108,6 @@ async fn test_local_db_operations() {
         panic!("Unexpected message content");
     }
 
-    drop(client);
     // temp_dir will be dropped here and clean up the directory
 }
 
@@ -141,6 +137,7 @@ fn test_context_manager_preserves_last_message_image() {
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     };
 
     // Create a last message with an image (should be preserved)
@@ -165,6 +162,7 @@ fn test_context_manager_preserves_last_message_image() {
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     };
 
     let messages = vec![history_msg, last_msg];
@@ -225,6 +223,7 @@ fn test_openai_message_conversion() {
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     };
 
     let llm_msg = LLMMessage::from(chat_msg.clone());

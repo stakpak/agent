@@ -1,14 +1,9 @@
 use crate::commands::agent::run::helpers::{system_message, user_message};
-use crate::config::ProviderType;
 use crate::{commands::agent::run::helpers::convert_tools_with_filter, config::AppConfig};
 use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotification};
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    remote::{ClientConfig, RemoteClient},
-};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
 use stakpak_shared::models::integrations::openai::{
@@ -64,38 +59,31 @@ impl StakpakAcpAgent {
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
         system_prompt: Option<String>,
     ) -> Result<Self, String> {
-        let client: Arc<dyn AgentProvider> = match config.provider {
-            ProviderType::Remote => {
-                let api_config: ClientConfig = config.clone().into();
-                if api_config.api_key.is_none() {
-                    log::warn!("No API key found. User will be prompted to authenticate.");
-                    let client = RemoteClient::new(&ClientConfig {
-                        api_key: Some("dummy_for_initialization".to_string()),
-                        api_endpoint: api_config.api_endpoint.clone(),
-                    })
-                    .map_err(|e| format!("Failed to create client: {}", e))?;
-                    Arc::new(client)
-                } else {
-                    let client = RemoteClient::new(&api_config)
-                        .map_err(|e| format!("Failed to create client: {}", e))?;
-                    Arc::new(client)
-                }
+        // Create unified AgentClient
+        let client: Arc<dyn AgentProvider> = {
+            let stakpak_api_key = config.get_stakpak_api_key();
+            if stakpak_api_key.is_none() {
+                log::warn!("No Stakpak API key found. Running in local mode.");
             }
-            ProviderType::Local => {
-                // Use credential resolution with auth.toml fallback chain
-                let client = LocalClient::new(LocalClientConfig {
-                    stakpak_base_url: Some(config.api_endpoint.clone()),
-                    store_path: None,
-                    providers: config.get_llm_provider_config(),
-                    eco_model: config.eco_model.clone(),
-                    recovery_model: config.recovery_model.clone(),
-                    smart_model: config.smart_model.clone(),
-                    hook_registry: None,
-                })
-                .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
-                Arc::new(client)
-            }
+
+            // Use credential resolution with auth.toml fallback chain
+            let stakpak = stakpak_api_key.map(|api_key| StakpakConfig {
+                api_key,
+                api_endpoint: config.api_endpoint.clone(),
+            });
+
+            let client = AgentClient::new(AgentClientConfig {
+                stakpak,
+                providers: config.get_llm_provider_config(),
+                eco_model: config.eco_model.clone(),
+                recovery_model: config.recovery_model.clone(),
+                smart_model: config.smart_model.clone(),
+                store_path: None,
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create agent client: {}", e))?;
+            Arc::new(client)
         };
 
         // Initialize MCP client and tools (optional for ACP)
@@ -1112,6 +1100,7 @@ impl StakpakAcpAgent {
             tool_calls: None,
             tool_call_id: None,
             usage: None,
+            ..Default::default()
         };
 
         // Compile regex once outside the loop

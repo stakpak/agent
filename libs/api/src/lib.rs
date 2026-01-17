@@ -8,10 +8,18 @@ use stakpak_shared::models::integrations::openai::{
 };
 use uuid::Uuid;
 
+pub mod client;
 pub mod error;
-pub mod local;
 pub mod models;
-pub mod remote;
+pub mod stakpak;
+
+// Internal modules (not re-exported directly)
+pub(crate) mod local;
+
+// Re-export unified AgentClient as the primary client
+pub use client::{
+    AgentClient, AgentClientConfig, DEFAULT_STAKPAK_ENDPOINT, ModelOptions, StakpakConfig,
+};
 
 #[async_trait]
 pub trait AgentProvider: Send + Sync {

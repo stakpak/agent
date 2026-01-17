@@ -17,6 +17,7 @@ use tracing::Instrument;
 use crate::tracing as gen_ai_tracing;
 
 /// High-level inference client for AI generation
+#[derive(Clone)]
 pub struct Inference {
     registry: ProviderRegistry,
     #[allow(dead_code)]

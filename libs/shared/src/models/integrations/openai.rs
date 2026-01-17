@@ -273,8 +273,17 @@ impl std::fmt::Display for Role {
     }
 }
 
-/// Chat message
+/// Model info for tracking which model generated a message
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ModelInfo {
+    /// Provider name (e.g., "anthropic", "openai")
+    pub provider: String,
+    /// Model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4")
+    pub id: String,
+}
+
+/// Chat message
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: Option<MessageContent>,
@@ -286,6 +295,29 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<LLMTokenUsage>,
+
+    // === Extended fields for session tracking ===
+    /// Unique message identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Model that generated this message (for assistant messages)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelInfo>,
+    /// Cost in dollars for this message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    /// Why the model stopped: "stop", "tool_calls", "length", "error"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+    /// Unix timestamp (ms) when message was created/sent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+    /// Unix timestamp (ms) when assistant finished generating
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<i64>,
+    /// Plugin extensibility - unstructured metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl ChatMessage {
@@ -821,6 +853,7 @@ impl From<LLMMessage> for ChatMessage {
             tool_calls,
             tool_call_id: None,
             usage: None,
+            ..Default::default()
         }
     }
 }
@@ -952,6 +985,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     usage: None,
+                    ..Default::default()
                 },
                 ChatMessage {
                     role: Role::User,
@@ -960,6 +994,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     usage: None,
+                    ..Default::default()
                 },
             ],
             frequency_penalty: None,

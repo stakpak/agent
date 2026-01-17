@@ -424,6 +424,12 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                         inference_config.gemini(api_key.clone(), api_endpoint.clone());
                 }
             }
+            ProviderConfig::Stakpak {
+                api_key,
+                api_endpoint,
+            } => {
+                inference_config = inference_config.stakpak(api_key.clone(), api_endpoint.clone());
+            }
             ProviderConfig::Custom { .. } => {
                 // Custom providers are handled by build_provider_registry_direct
                 // InferenceConfig doesn't support custom providers directly
@@ -442,6 +448,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     };
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
+    use stakai::providers::stakpak::{StakpakConfig as StakaiStakpakConfig, StakpakProvider};
 
     let mut registry = ProviderRegistry::new();
 
@@ -502,6 +509,18 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     registry = registry.register("google", provider);
                 }
             }
+            ProviderConfig::Stakpak {
+                api_key,
+                api_endpoint,
+            } => {
+                let mut stakpak_config = StakaiStakpakConfig::new(api_key.clone());
+                if let Some(endpoint) = api_endpoint {
+                    stakpak_config = stakpak_config.with_base_url(endpoint.clone());
+                }
+                let provider = StakpakProvider::new(stakpak_config)
+                    .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
+                registry = registry.register("stakpak", provider);
+            }
             ProviderConfig::Custom {
                 api_key,
                 api_endpoint,
@@ -538,6 +557,7 @@ pub fn get_stakai_model_string(model: &LLMModel) -> String {
 }
 
 /// Wrapper around StakAI Inference for CLI usage
+#[derive(Clone)]
 pub struct StakAIClient {
     inference: Inference,
 }

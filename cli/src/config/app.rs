@@ -1,7 +1,6 @@
 //! Main application configuration.
 
 use config::ConfigError;
-use stakpak_api::remote::ClientConfig;
 use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
@@ -775,15 +774,6 @@ impl AppConfig {
 }
 
 // Conversions
-
-impl From<AppConfig> for ClientConfig {
-    fn from(config: AppConfig) -> Self {
-        ClientConfig {
-            api_key: config.api_key.clone(),
-            api_endpoint: config.api_endpoint.clone(),
-        }
-    }
-}
 
 impl From<AppConfig> for Settings {
     fn from(config: AppConfig) -> Self {

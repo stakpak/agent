@@ -1,10 +1,10 @@
 //! OpenAI provider implementation
 
-mod convert;
+pub mod convert;
 mod error;
 mod provider;
-mod stream;
-mod types;
+pub mod stream;
+pub mod types;
 
 pub use error::OpenAIError;
 pub use provider::OpenAIProvider;

@@ -132,6 +132,7 @@ pub async fn process_responses_stream(
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     };
     let message_id = Uuid::new_v4();
     let mut tool_call_accumulator = ToolCallAccumulator::new();
