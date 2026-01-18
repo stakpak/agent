@@ -248,6 +248,16 @@ pub async fn run_tui(
                                    // Full screen popup: full content (is_collapsed: Some(true))
                                    state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
+                               "read" | "view" | "read_file" => {
+                                   // View file tool - show compact view with file icon and line count
+                                   // Extract file path from tool call arguments
+                                   let file_path = crate::services::handlers::tool::extract_file_path_from_tool_call(&tool_call_result.call)
+                                       .unwrap_or_else(|| "file".to_string());
+                                   let total_lines = tool_call_result.result.lines().count();
+                                   state.messages.push(Message::render_view_file_block(file_path, total_lines));
+                                   // Full screen popup: full content (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
                                _ => {
                                    // TUI: collapsed command message - last 3 lines (is_collapsed: None)
                                    state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));

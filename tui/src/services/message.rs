@@ -65,6 +65,9 @@ pub enum MessageContent {
         Option<String>,
         crate::services::bash_block::RunCommandState,
     ),
+    /// View file block - compact display showing file path and line count
+    /// (file_path: String, total_lines: usize)
+    RenderViewFileBlock(String, usize),
 }
 
 /// Compute a hash of the MessageContent for cache invalidation.
@@ -183,6 +186,11 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
             }
             // Hash state as discriminant
             std::mem::discriminant(state).hash(&mut hasher);
+        }
+        MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+            17u8.hash(&mut hasher);
+            file_path.hash(&mut hasher);
+            total_lines.hash(&mut hasher);
         }
     }
 
@@ -406,6 +414,16 @@ impl Message {
         Message {
             id: message_id.unwrap_or_else(Uuid::new_v4),
             content: MessageContent::RenderRunCommandBlock(command, result, state),
+            is_collapsed: None,
+        }
+    }
+
+    /// Create a view file block message
+    /// Shows a compact display with file icon, "View", file path, and line count
+    pub fn render_view_file_block(file_path: String, total_lines: usize) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderViewFileBlock(file_path, total_lines),
             is_collapsed: None,
         }
     }
@@ -1160,6 +1178,12 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
         }
+        MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+            let rendered =
+                crate::services::bash_block::render_view_file_block(file_path, *total_lines, width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
     }
 
     lines
@@ -1737,6 +1761,16 @@ fn get_wrapped_message_lines_internal(
                     command,
                     result.as_deref(),
                     state.clone(),
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+                let rendered_lines = crate::services::bash_block::render_view_file_block(
+                    file_path,
+                    *total_lines,
                     width,
                 );
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);

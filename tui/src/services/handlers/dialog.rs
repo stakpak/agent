@@ -6,13 +6,46 @@ use crate::app::{AppState, InputEvent, OutputEvent, ToolCallStatus};
 use crate::services::bash_block::render_bash_block_rejected;
 use crate::services::helper_block::push_styled_message;
 use crate::services::message::extract_truncated_command_arguments;
-use crate::services::message::{Message, MessageContent, get_command_type_name};
+use crate::services::message::{
+    Message, MessageContent, get_command_type_name, invalidate_message_lines_cache,
+};
 use ratatui::layout::Size;
 use ratatui::style::Color;
+use stakpak_shared::models::integrations::openai::ToolCall;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::EventChannels;
+
+/// Update a run_command block from Pending to Running state
+/// This should be called when a run_command tool is approved and starts executing
+pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall) {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name != "run_command" {
+        return;
+    }
+
+    // Find the pending message by pending_bash_message_id and update it to Running
+    if let Some(pending_id) = state.pending_bash_message_id {
+        for msg in &mut state.messages {
+            if msg.id == pending_id {
+                if let MessageContent::RenderRunCommandBlock(command, _result, _run_state) =
+                    &msg.content
+                {
+                    // Update to Running state - keep the same command, no result yet
+                    let cmd = command.clone();
+                    msg.content = MessageContent::RenderRunCommandBlock(
+                        cmd,
+                        None,
+                        crate::services::bash_block::RunCommandState::Running,
+                    );
+                }
+                break;
+            }
+        }
+        invalidate_message_lines_cache(state);
+    }
+}
 
 /// Handle ESC event (routes to appropriate handler)
 pub fn handle_esc_event(
@@ -364,6 +397,9 @@ pub fn handle_show_confirmation_dialog(
         state
             .message_approved_tools
             .retain(|tool| tool.id != tool_call.id);
+
+        // Update run_command block to Running state before execution starts
+        update_run_command_to_running(state, &tool_call);
 
         // Send tool call with delay
         let tool_call_clone = tool_call.clone();

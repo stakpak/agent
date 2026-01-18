@@ -1680,6 +1680,114 @@ pub fn render_collapsed_command_message(
     )
 }
 
+/// Renders a compact view file result block with borders
+/// Format: 📄 View path/to/file.rs - 123 lines
+pub fn render_view_file_block(
+    file_path: &str,
+    total_lines: usize,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+
+    let border_color = Color::DarkGray;
+    let icon = "📄";
+    let title = "View";
+    let lines_text = format!("- {} lines", total_lines);
+
+    // Calculate display widths
+    let icon_width = calculate_display_width(icon);
+    let title_width = calculate_display_width(title);
+    let path_width = calculate_display_width(file_path);
+    let lines_text_width = calculate_display_width(&lines_text);
+
+    // Total content: icon + " " + title + " " + path + " " + lines_text
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+
+    // Check if we need to truncate the path
+    let (display_path, display_path_width) = if total_content_width > inner_width {
+        // Need to truncate path
+        let available_for_path =
+            inner_width.saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+        let truncated = truncate_path_to_width(file_path, available_for_path);
+        let w = calculate_display_width(&truncated);
+        (truncated, w)
+    } else {
+        (file_path.to_string(), path_width)
+    };
+
+    let actual_content_width =
+        icon_width + 1 + title_width + 1 + display_path_width + 1 + lines_text_width;
+    let padding = inner_width.saturating_sub(actual_content_width);
+
+    let content_line = Line::from(vec![
+        Span::styled("│", Style::default().fg(border_color)),
+        Span::from(" "),
+        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::from(" "),
+        Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::from(" "),
+        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::from(" "),
+        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+        Span::from(" ".repeat(padding)),
+        Span::styled(" │", Style::default().fg(border_color)),
+    ]);
+
+    let horizontal_line = "─".repeat(inner_width + 2);
+    let top_border = Line::from(vec![Span::styled(
+        format!("╭{}╮", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    vec![top_border, content_line, bottom_border]
+}
+
+/// Truncate a file path to fit within a given display width
+fn truncate_path_to_width(path: &str, max_width: usize) -> String {
+    let path_width = calculate_display_width(path);
+    if path_width <= max_width {
+        return path.to_string();
+    }
+
+    // Try to show ".../" + filename
+    if let Some(file_name) = path.rsplit('/').next() {
+        let file_name_width = calculate_display_width(file_name);
+        if file_name_width + 4 <= max_width {
+            // ".../" + filename fits
+            return format!(".../{}", file_name);
+        }
+    }
+
+    // Fall back to truncating from the start
+    let mut result = String::new();
+    let mut current_width = 3; // For "..."
+
+    for ch in path.chars().rev() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if current_width + char_width > max_width {
+            break;
+        }
+        result.insert(0, ch);
+        current_width += char_width;
+    }
+
+    format!("...{}", result)
+}
+
 /// State for the unified run command block
 #[derive(Clone, Debug, PartialEq)]
 pub enum RunCommandState {
@@ -1742,10 +1850,10 @@ pub fn render_run_command_block(
 
     // Dot color and title suffix based on state
     // For error states, both dot and suffix text are LightRed
-    // For skipped, both dot and suffix text are Yellow
+    // For running/skipped, both dot and suffix text are Yellow
     let (dot_color, title_suffix, suffix_color) = match state {
         RunCommandState::Pending => (term_color(Color::Reset), "", None),
-        RunCommandState::Running => (Color::Yellow, " - Running...", None),
+        RunCommandState::Running => (Color::Yellow, " - Running...", Some(Color::Yellow)),
         RunCommandState::Completed => (Color::LightGreen, "", None),
         RunCommandState::Error => (Color::LightRed, " - Errored", Some(Color::LightRed)),
         RunCommandState::Cancelled => (Color::LightRed, " - Cancelled", Some(Color::LightRed)),
@@ -1873,6 +1981,15 @@ pub fn render_run_command_block(
                 | RunCommandState::Rejected
                 | RunCommandState::Skipped
         );
+
+        // Replace raw status strings with friendly messages
+        let result_content = if result_content.contains("TOOL_CALL_REJECTED") {
+            "Command was rejected"
+        } else if result_content.contains("TOOL_CALL_CANCELLED") {
+            "Command was cancelled"
+        } else {
+            result_content
+        };
 
         // Message color for error states
         let error_message_color = match state {

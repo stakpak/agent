@@ -123,13 +123,15 @@ pub fn handle_input_submitted_event(
             // Get the first tool from the ordered list
             if let Some((first_tool, is_approved)) = tools_status.first() {
                 // Compare with dialog_command to determine action
-                if let Some(dialog_command) = &state.dialog_command
-                    && first_tool == dialog_command
+                if let Some(dialog_command) = state.dialog_command.clone()
+                    && first_tool == &dialog_command
                 {
                     state
                         .session_tool_calls_queue
                         .insert(dialog_command.id.clone(), ToolCallStatus::Executed);
                     if *is_approved {
+                        // Update run_command block to Running state before execution starts
+                        super::dialog::update_run_command_to_running(state, &dialog_command);
                         // Fire accept tool
                         let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                     } else {
