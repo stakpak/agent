@@ -64,6 +64,19 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize,
     pub collapsed_messages_selected: usize,
     pub has_user_messages: bool,
+    /// Per-message rendered line cache for efficient incremental rendering
+    pub per_message_cache: PerMessageCache,
+    /// Assembled lines cache (the final combined output of all message lines)
+    /// Format: (cache_key, lines, generation_counter)
+    pub assembled_lines_cache: Option<(usize, Vec<Line<'static>>, u64)>,
+    /// Cache for visible lines on screen (avoids cloning on every frame)
+    pub visible_lines_cache: Option<VisibleLinesCache>,
+    /// Generation counter for assembled cache (increments on each rebuild)
+    pub cache_generation: u64,
+    /// Performance metrics for render operations
+    pub render_metrics: RenderMetrics,
+    /// Last width used for rendering (to detect width changes)
+    pub last_render_width: usize,
 
     // ========== Loading State ==========
     pub loading: bool,
@@ -363,6 +376,12 @@ impl AppState {
             message_lines_cache: None,
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
+            per_message_cache: HashMap::new(),
+            assembled_lines_cache: None,
+            visible_lines_cache: None,
+            cache_generation: 0,
+            render_metrics: RenderMetrics::new(),
+            last_render_width: 0,
             pending_pastes: Vec::new(),
             mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
             loading_manager: LoadingStateManager::new(),

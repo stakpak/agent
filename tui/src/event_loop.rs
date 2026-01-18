@@ -147,6 +147,14 @@ pub async fn run_tui(
     // Main async update/view loop
     terminal.draw(|f| view(f, &mut state))?;
     let mut should_quit = false;
+
+    // Scroll batching: count consecutive scroll events to process in one frame
+    // These are reset at the start of each scroll batch
+    #[allow(unused_assignments)]
+    let mut pending_scroll_up: i32 = 0;
+    #[allow(unused_assignments)]
+    let mut pending_scroll_down: i32 = 0;
+
     loop {
         // Check if double Ctrl+C timer expired
         if state.ctrl_c_pressed_once
@@ -228,7 +236,13 @@ pub async fn run_tui(
                        should_quit = true;
                    }
                    else {
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       // Calculate main area width accounting for side panel
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1) // side panel width + margin
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
@@ -250,7 +264,8 @@ pub async fn run_tui(
                                ratatui::layout::Constraint::Length(hint_height),
                            ])
                            .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
+                       // Subtract 2 for padding (matches view.rs padded_message_area)
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                         crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                         state.poll_file_search_results();
@@ -306,7 +321,13 @@ pub async fn run_tui(
                 }
                    else {
                        let term_size = terminal.size()?;
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       // Calculate main area width accounting for side panel
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1) // side panel width + margin
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
@@ -328,14 +349,63 @@ pub async fn run_tui(
                                ratatui::layout::Constraint::Length(hint_height),
                            ])
                            .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
+                       // Subtract 2 for padding (matches view.rs padded_message_area)
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::EmergencyClearTerminal = event {
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        state.poll_file_search_results();
+
+                   // Batch scroll events: if this is a scroll event, drain any pending scroll events
+                   // and combine them into a single scroll operation for better performance
+                   if matches!(event, InputEvent::ScrollUp | InputEvent::ScrollDown) {
+                       pending_scroll_up = 0;
+                       pending_scroll_down = 0;
+
+                       // Count the initial event
+                       match event {
+                           InputEvent::ScrollUp => pending_scroll_up += 1,
+                           InputEvent::ScrollDown => pending_scroll_down += 1,
+                           _ => {}
+                       }
+
+                       // Drain any additional scroll events from the channel (non-blocking)
+                       let mut other_event: Option<InputEvent> = None;
+                       while let Ok(next_event) = internal_rx.try_recv() {
+                           match next_event {
+                               InputEvent::ScrollUp => pending_scroll_up += 1,
+                               InputEvent::ScrollDown => pending_scroll_down += 1,
+                               // Non-scroll event - save it for later
+                               other => {
+                                   other_event = Some(other);
+                                   break;
+                               }
+                           }
+                       }
+
+                       // Process net scroll (combine up and down into single direction)
+                       let net_scroll = pending_scroll_down - pending_scroll_up;
+                       if net_scroll > 0 {
+                           // More downs than ups - scroll down by accumulated amount
+                           for _ in 0..net_scroll {
+                               crate::services::update::update(&mut state, InputEvent::ScrollDown, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                           }
+                       } else if net_scroll < 0 {
+                           // More ups than downs - scroll up by accumulated amount
+                           for _ in 0..(-net_scroll) {
+                               crate::services::update::update(&mut state, InputEvent::ScrollUp, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                           }
+                       }
+
+                       // If we encountered a non-scroll event, process it too
+                       if let Some(other) = other_event {
+                           crate::services::update::update(&mut state, other, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                       }
+                   } else {
+                       crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                   }
+                   state.poll_file_search_results();
 
                         // Handle pending editor open request
                          if let Some(file_path) = state.pending_editor_open.take() {

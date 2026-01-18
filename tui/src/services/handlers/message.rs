@@ -4,7 +4,9 @@
 
 use crate::app::AppState;
 use crate::services::helper_block::push_usage_message;
-use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
+use crate::services::message::{
+    Message, MessageContent, invalidate_message_cache, invalidate_message_lines_cache,
+};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -32,7 +34,9 @@ pub fn handle_stream_message(
                 state.todos = extracted_todos;
             }
         }
-        invalidate_message_lines_cache(state);
+        // Use per-message cache invalidation for better performance during streaming
+        // This only invalidates the specific message that changed, not all messages
+        invalidate_message_cache(state, id);
 
         // If content changed while user is scrolled up, mark it
         if !state.stay_at_bottom {
@@ -90,6 +94,10 @@ pub fn handle_add_user_message(state: &mut AppState, s: String) {
 
     // Invalidate cache since messages changed
     invalidate_message_lines_cache(state);
+
+    // Scroll to bottom to show the new message
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
 }
 
 /// Handle has user message event

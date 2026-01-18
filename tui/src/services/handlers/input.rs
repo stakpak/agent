@@ -368,7 +368,9 @@ fn handle_input_submitted(
 
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
-        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
+        let selected_id = selected.id.to_string();
+        let selected_title = selected.title.clone();
+        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
         state.message_tool_calls = None;
         state.message_approved_tools.clear();
         state.message_rejected_tools.clear();
@@ -376,6 +378,14 @@ fn handle_input_submitted(
         state.session_tool_calls_queue.clear();
         state.toggle_approved_message = true;
         state.messages.clear();
+
+        // Reset scroll state to show bottom when messages are loaded
+        state.scroll = 0;
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
+
+        // Invalidate caches
+        crate::services::message::invalidate_message_lines_cache(state);
 
         // Reset usage for the switched session
         state.total_session_usage = LLMTokenUsage {
@@ -391,7 +401,7 @@ fn handle_input_submitted(
             prompt_tokens_details: None,
         };
 
-        render_system_message(state, &format!("Switching to session . {}", selected.title));
+        render_system_message(state, &format!("Switching to session . {}", selected_title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
         state.toggle_approved_message = true;

@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::app::RenderedMessageCache;
 use crate::services::bash_block::{
     format_text_content, render_bash_block, render_collapsed_command_message, render_file_diff,
     render_file_diff_full, render_result_block, render_streaming_block_compact,
@@ -16,6 +17,10 @@ use stakpak_shared::models::integrations::openai::FunctionCall;
 use stakpak_shared::models::integrations::openai::{
     ToolCall, ToolCallResult, ToolCallResultStatus,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BubbleColors {
@@ -53,6 +58,119 @@ pub enum MessageContent {
         Option<BubbleColors>,
         usize, // Width
     ),
+}
+
+/// Compute a hash of the MessageContent for cache invalidation.
+/// This is a fast hash that captures content changes without deep comparison.
+pub fn hash_message_content(content: &MessageContent) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    match content {
+        MessageContent::Plain(text, _) => {
+            0u8.hash(&mut hasher);
+            text.hash(&mut hasher);
+        }
+        MessageContent::AssistantMD(text, _) => {
+            1u8.hash(&mut hasher);
+            text.hash(&mut hasher);
+        }
+        MessageContent::Styled(line) => {
+            2u8.hash(&mut hasher);
+            // Hash the span contents
+            for span in &line.spans {
+                span.content.as_ref().hash(&mut hasher);
+            }
+        }
+        MessageContent::StyledBlock(lines) => {
+            3u8.hash(&mut hasher);
+            lines.len().hash(&mut hasher);
+            // Hash first and last line for speed
+            if let Some(first) = lines.first() {
+                for span in &first.spans {
+                    span.content.as_ref().hash(&mut hasher);
+                }
+            }
+            if let Some(last) = lines.last() {
+                for span in &last.spans {
+                    span.content.as_ref().hash(&mut hasher);
+                }
+            }
+        }
+        MessageContent::Markdown(text) => {
+            4u8.hash(&mut hasher);
+            text.hash(&mut hasher);
+        }
+        MessageContent::PlainText(text) => {
+            5u8.hash(&mut hasher);
+            text.hash(&mut hasher);
+        }
+        MessageContent::RenderPendingBorderBlock(tool_call, is_auto) => {
+            6u8.hash(&mut hasher);
+            tool_call.id.hash(&mut hasher);
+            tool_call.function.arguments.hash(&mut hasher);
+            is_auto.hash(&mut hasher);
+        }
+        MessageContent::RenderPendingBorderBlockWithStallWarning(tool_call, is_auto, msg) => {
+            7u8.hash(&mut hasher);
+            tool_call.id.hash(&mut hasher);
+            is_auto.hash(&mut hasher);
+            msg.hash(&mut hasher);
+        }
+        MessageContent::RenderStreamingBorderBlock(content, title, bubble, _, tool_type) => {
+            8u8.hash(&mut hasher);
+            content.hash(&mut hasher);
+            title.hash(&mut hasher);
+            bubble.hash(&mut hasher);
+            tool_type.hash(&mut hasher);
+        }
+        MessageContent::RenderResultBorderBlock(result) => {
+            9u8.hash(&mut hasher);
+            result.call.id.hash(&mut hasher);
+            result.result.len().hash(&mut hasher);
+            // Hash a portion of the result for efficiency
+            result
+                .result
+                .get(..100.min(result.result.len()))
+                .hash(&mut hasher);
+        }
+        MessageContent::RenderCommandCollapsedResult(result) => {
+            10u8.hash(&mut hasher);
+            result.call.id.hash(&mut hasher);
+            result.result.len().hash(&mut hasher);
+        }
+        MessageContent::RenderCollapsedMessage(tool_call) => {
+            11u8.hash(&mut hasher);
+            tool_call.id.hash(&mut hasher);
+        }
+        MessageContent::RenderFullContentMessage(result) => {
+            12u8.hash(&mut hasher);
+            result.call.id.hash(&mut hasher);
+            result.result.len().hash(&mut hasher);
+        }
+        MessageContent::RenderEscapedTextBlock(content) => {
+            13u8.hash(&mut hasher);
+            content.hash(&mut hasher);
+        }
+        MessageContent::BashBubble {
+            title,
+            content,
+            colors: _,
+            tool_type,
+        } => {
+            14u8.hash(&mut hasher);
+            title.hash(&mut hasher);
+            content.len().hash(&mut hasher);
+            tool_type.hash(&mut hasher);
+        }
+        MessageContent::RenderRefreshedTerminal(title, lines, _, width) => {
+            15u8.hash(&mut hasher);
+            title.hash(&mut hasher);
+            lines.len().hash(&mut hasher);
+            width.hash(&mut hasher);
+        }
+    }
+
+    hasher.finish()
 }
 
 fn term_color(color: Color) -> Color {
@@ -467,6 +585,7 @@ fn convert_line_to_owned(line: Line<'_>) -> Line<'static> {
     Line::from(owned_spans)
 }
 
+#[allow(dead_code)]
 pub fn get_wrapped_message_lines(
     messages: &[Message],
     width: usize,
@@ -474,78 +593,647 @@ pub fn get_wrapped_message_lines(
     get_wrapped_message_lines_internal(messages, width, false)
 }
 
+/// Get the total number of cached lines without cloning.
+/// This is useful for scroll calculations where we only need the count.
+pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
+    let cache_key = if state.shell_popup_visible {
+        width + 100000
+    } else {
+        width
+    };
+
+    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache {
+        if cached_key == cache_key {
+            return Some(cached_lines.len());
+        }
+    }
+    None
+}
+
+/// Get visible lines with aggressive caching.
+/// NOTE: This function is no longer used since Ratatui requires owned data.
+/// Use `get_visible_lines_owned` instead.
+#[allow(dead_code)]
+pub fn get_visible_lines_arc(
+    state: &mut AppState,
+    width: usize,
+    start: usize,
+    count: usize,
+) -> Arc<Vec<Line<'static>>> {
+    // Ensure assembled cache is populated first
+    ensure_cache_populated(state, width);
+
+    let generation = state.cache_generation;
+
+    // FAST PATH: Check if visible lines cache is still valid
+    if let Some(ref cache) = state.visible_lines_cache {
+        if cache.scroll == start
+            && cache.width == width
+            && cache.height == count
+            && cache.source_generation == generation
+        {
+            // Perfect cache hit - return Arc without any cloning
+            return cache.lines.clone();
+        }
+    }
+
+    // MEDIUM PATH: Assembled cache is valid, just need to slice
+    let visible = if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
+        let end = (start + count).min(cached_lines.len());
+        let mut visible = Vec::with_capacity(count);
+        for i in start..end {
+            visible.push(cached_lines[i].clone());
+        }
+        // Pad with empty lines if needed
+        while visible.len() < count {
+            visible.push(Line::from(""));
+        }
+        visible
+    } else {
+        vec![Line::from(""); count]
+    };
+
+    let arc_visible = Arc::new(visible);
+
+    // Update visible lines cache
+    state.visible_lines_cache = Some(crate::app::VisibleLinesCache {
+        scroll: start,
+        width,
+        height: count,
+        lines: arc_visible.clone(),
+        source_generation: generation,
+    });
+
+    arc_visible
+}
+
+/// Get visible lines as owned Vec, optimized to avoid unnecessary cloning.
+/// NOTE: This function is deprecated - prefer using get_wrapped_message_lines_cached
+/// with Paragraph::scroll() for better performance.
+#[allow(dead_code)]
+pub fn get_visible_lines_owned(
+    state: &mut AppState,
+    width: usize,
+    start: usize,
+    count: usize,
+) -> Vec<Line<'static>> {
+    // Ensure assembled cache is populated first
+    ensure_cache_populated(state, width);
+
+    // Slice from assembled cache
+    if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
+        let end = (start + count).min(cached_lines.len());
+        let mut visible = Vec::with_capacity(count);
+        for i in start..end {
+            visible.push(cached_lines[i].clone());
+        }
+        // Pad with empty lines if needed
+        while visible.len() < count {
+            visible.push(Line::from(""));
+        }
+        visible
+    } else {
+        vec![Line::from(""); count]
+    }
+}
+
+/// Ensure the cache is populated without returning the lines.
+/// This is more efficient when you just need to ensure the cache exists.
+#[allow(dead_code)]
+fn ensure_cache_populated(state: &mut AppState, width: usize) {
+    let cache_key = if state.shell_popup_visible {
+        width + 100000
+    } else {
+        width
+    };
+
+    if let Some((cached_key, _, _)) = &state.assembled_lines_cache {
+        if *cached_key == cache_key {
+            return; // Cache is valid
+        }
+    }
+
+    // Cache miss - need to rebuild
+    let _ = get_wrapped_message_lines_cached(state, width);
+}
+
+/// Main cached message rendering function with per-message caching.
+/// This function uses a two-level caching strategy:
+/// 1. Per-message cache: Each message's rendered lines are cached individually
+/// 2. Assembled cache: The final combined output is cached for fast returns
+///
+/// When a single message changes (e.g., during streaming), only that message
+/// is re-rendered, and the assembled output is rebuilt from cached parts.
+///
+/// NOTE: Prefer using `get_visible_lines_cached` when you only need a slice,
+/// as it avoids cloning the entire vector.
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
-    // Filter out RenderRefreshedTerminal messages when shell popup is visible
-    // This hides the old bordered box when using the new popup
-    let messages: Vec<Message> = if state.shell_popup_visible {
+    // FAST PATH: If assembled cache exists and width matches, return it immediately.
+    // The cache is explicitly invalidated when messages change, so if it exists, it's valid.
+    // We encode shell_popup_visible in the width by adding a large offset when true.
+    // This ensures the cache is invalidated when shell popup visibility changes.
+    let cache_key = if state.shell_popup_visible {
+        width + 100000
+    } else {
+        width
+    };
+
+    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache {
+        if cached_key == cache_key {
+            // Cache hit - return immediately without any processing
+            return cached_lines.clone();
+        }
+    }
+
+    // SLOW PATH: Need to rebuild (cache was invalidated or width changed)
+    let render_start = Instant::now();
+    let mut cache_hits = 0usize;
+    let mut cache_misses = 0usize;
+
+    // Filter messages based on shell popup visibility
+    let message_refs: Vec<&Message> = if state.shell_popup_visible {
         state
             .messages
             .iter()
             .filter(|m| !matches!(&m.content, MessageContent::RenderRefreshedTerminal(..)))
-            .cloned()
+            .filter(|m| m.is_collapsed.is_none())
             .collect()
     } else {
-        state.messages.clone()
+        state
+            .messages
+            .iter()
+            .filter(|m| m.is_collapsed.is_none())
+            .collect()
     };
 
-    // Check if cache is valid
-    let cache_valid = if let Some((cached_messages, cached_width, _)) = &state.message_lines_cache {
-        cached_messages.len() == messages.len()
-            && *cached_width == width
-            && cached_messages
-                .iter()
-                .zip(messages.iter())
-                .all(|(a, b)| a.id == b.id)
-    } else {
-        false
-    };
+    // Pre-allocate with estimated capacity
+    let estimated_lines = message_refs.len() * 10; // Rough estimate of 10 lines per message
+    let mut all_processed_lines: Vec<Line<'static>> = Vec::with_capacity(estimated_lines);
 
-    if !cache_valid {
-        // Calculate and cache the processed lines directly
-        let processed_lines = get_processed_message_lines(&messages, width);
-        state.message_lines_cache = Some((messages.to_vec(), width, processed_lines.clone()));
-        processed_lines
-    } else {
-        // Return cached processed lines immediately - no more processing needed!
-        if let Some((_, _, cached_lines)) = &state.message_lines_cache {
-            cached_lines.clone()
-        } else {
-            // Fallback if cache is somehow invalid
-            get_processed_message_lines(&messages, width)
+    // Process each message, using cache when available
+    for msg in &message_refs {
+        let content_hash = hash_message_content(&msg.content);
+
+        // Check if we have a valid cached render for this message
+        if let Some(cached) = state.per_message_cache.get(&msg.id) {
+            if cached.width == width && cached.content_hash == content_hash {
+                // Cache hit! Reuse rendered lines
+                cache_hits += 1;
+                all_processed_lines.extend(cached.rendered_lines.iter().cloned());
+                continue;
+            }
         }
+
+        // Cache miss - render this single message
+        cache_misses += 1;
+        let rendered_lines = render_single_message(msg, width);
+
+        // Store in per-message cache
+        state.per_message_cache.insert(
+            msg.id,
+            RenderedMessageCache {
+                content_hash,
+                rendered_lines: Arc::new(rendered_lines.clone()),
+                width,
+            },
+        );
+
+        all_processed_lines.extend(rendered_lines);
     }
+
+    // Add trailing empty lines if we have content
+    if !all_processed_lines.is_empty() {
+        all_processed_lines.push(Line::from(""));
+        all_processed_lines.push(Line::from(""));
+    }
+
+    // Increment generation counter and update the assembled cache
+    state.cache_generation = state.cache_generation.wrapping_add(1);
+    state.assembled_lines_cache = Some((
+        cache_key,
+        all_processed_lines.clone(),
+        state.cache_generation,
+    ));
+    // Invalidate visible lines cache since source changed
+    state.visible_lines_cache = None;
+    state.last_render_width = width;
+
+    // Record performance metrics
+    let render_time_us = render_start.elapsed().as_micros() as u64;
+    state.render_metrics.record_render(
+        render_time_us,
+        cache_hits,
+        cache_misses,
+        all_processed_lines.len(),
+    );
+
+    all_processed_lines
 }
 
-// New function that does all the heavy processing once and caches the result
+/// Render a single message to lines.
+/// This is extracted to allow per-message caching.
+fn render_single_message(msg: &Message, width: usize) -> Vec<Line<'static>> {
+    use crate::services::message_pattern::spans_to_string;
+
+    // Render the message using the internal function
+    let raw_lines = render_single_message_internal(msg, width);
+
+    // Post-process: filter checkpoint lines and handle spacing markers
+    let mut processed: Vec<Line<'static>> = Vec::with_capacity(raw_lines.len());
+
+    for (line, _style) in raw_lines {
+        let line_text = spans_to_string(&line);
+
+        // Skip checkpoint_id lines entirely
+        if line_text.contains("<checkpoint_id>") {
+            continue;
+        }
+
+        // Convert spacing markers to empty lines
+        if line_text.trim() == "SPACING_MARKER" {
+            processed.push(Line::from(""));
+        } else {
+            processed.push(line);
+        }
+    }
+
+    processed
+}
+
+/// Internal function to render a single message to raw lines.
+/// This matches the logic from get_wrapped_message_lines_internal but for a single message.
+fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'static>, Style)> {
+    let mut lines: Vec<(Line<'static>, Style)> = Vec::new();
+
+    match &msg.content {
+        MessageContent::AssistantMD(text, style) => {
+            let mut cleaned = text.to_string();
+
+            // Strip markdown delimiters first (for session resume)
+            cleaned = strip_markdown_delimiters(&cleaned);
+
+            // Remove agent_mode tags
+            if let Some(start) = cleaned.find("<agent_mode>") {
+                if let Some(end) = cleaned.find("</agent_mode>") {
+                    cleaned.replace_range(start..end + "</agent_mode>".len(), "");
+                }
+            }
+
+            // Remove checkpoint_id tags and surrounding newlines
+            if let Some(start) = cleaned.find("<checkpoint_id>") {
+                if let Some(end) = cleaned.find("</checkpoint_id>") {
+                    let before_checkpoint = &cleaned[..start];
+                    let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
+
+                    let cleaned_before =
+                        if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
+                            stripped
+                        } else {
+                            before_checkpoint
+                        };
+
+                    cleaned = format!("{}{}", cleaned_before, after_checkpoint);
+                }
+            }
+
+            let borrowed_lines =
+                render_markdown_to_lines_with_width(&cleaned, width).unwrap_or_default();
+            for line in borrowed_lines {
+                lines.push((convert_line_to_owned(line), *style));
+            }
+        }
+        MessageContent::Plain(text, style) => {
+            let mut cleaned = text.to_string();
+
+            // Strip local_context blocks
+            while let Some(start) = cleaned.find("<local_context>") {
+                if let Some(end) = cleaned[start..].find("</local_context>") {
+                    let end_pos = start + end + "</local_context>".len();
+                    cleaned.replace_range(start..end_pos, "");
+                } else {
+                    break;
+                }
+            }
+
+            // Strip rulebooks blocks
+            while let Some(start) = cleaned.find("<rulebooks>") {
+                if let Some(end) = cleaned[start..].find("</rulebooks>") {
+                    let end_pos = start + end + "</rulebooks>".len();
+                    cleaned.replace_range(start..end_pos, "");
+                } else {
+                    break;
+                }
+            }
+
+            // Handle shell history
+            if cleaned.contains("Here's my shell history:") && cleaned.contains("```shell") {
+                let shell_lines = render_shell_history_lines(&cleaned, style, width);
+                lines.extend(shell_lines);
+            } else if cleaned.contains("\n\n") {
+                // Handle double newlines
+                for (i, section) in cleaned.split("\n\n").enumerate() {
+                    if i > 0 {
+                        lines.push((
+                            Line::from(vec![Span::from("SPACING_MARKER")]),
+                            Style::default(),
+                        ));
+                    }
+                    for line in section.split('\n') {
+                        let borrowed = get_wrapped_plain_lines(line, style, width);
+                        lines.extend(convert_to_owned_lines(borrowed));
+                    }
+                }
+            } else if cleaned.contains('\n') {
+                // Handle single newlines
+                for line in cleaned.split('\n') {
+                    let borrowed = get_wrapped_plain_lines(line, style, width);
+                    lines.extend(convert_to_owned_lines(borrowed));
+                }
+            } else {
+                let borrowed = get_wrapped_plain_lines(text, style, width);
+                lines.extend(convert_to_owned_lines(borrowed));
+            }
+        }
+        MessageContent::Styled(line) => {
+            let borrowed = get_wrapped_styled_lines(line, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::StyledBlock(block_lines) => {
+            let borrowed = get_wrapped_styled_block_lines(block_lines, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderPendingBorderBlock(tool_call, is_auto_approved) => {
+            let full_command = extract_full_command_arguments(tool_call);
+            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            let rendered = if (tool_name == "str_replace" || tool_name == "create")
+                && !render_file_diff(tool_call, width).is_empty()
+            {
+                render_file_diff(tool_call, width)
+            } else {
+                render_bash_block(tool_call, &full_command, false, width, *is_auto_approved)
+            };
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderPendingBorderBlockWithStallWarning(
+            tool_call,
+            is_auto_approved,
+            stall_message,
+        ) => {
+            let full_command = extract_full_command_arguments(tool_call);
+            let mut rendered =
+                render_bash_block(tool_call, &full_command, false, width, *is_auto_approved);
+
+            // Insert stall warning
+            if rendered.len() >= 2 {
+                let insert_pos = rendered.len() - 2;
+                let inner_width = if width > 4 { width - 4 } else { 40 };
+                let border_color = Color::Cyan;
+
+                let warning_text = stall_message;
+                let warning_display_width =
+                    unicode_width::UnicodeWidthStr::width(warning_text.as_str());
+                let warning_padding = inner_width.saturating_sub(warning_display_width + 1);
+                let warning_line = Line::from(vec![
+                    Span::styled("│", Style::default().fg(border_color)),
+                    Span::styled(
+                        format!("  {}{}", warning_text, " ".repeat(warning_padding)),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" │", Style::default().fg(border_color)),
+                ]);
+
+                rendered.insert(insert_pos, warning_line);
+            }
+
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderCollapsedMessage(tool_call) => {
+            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            if tool_name == "str_replace" || tool_name == "create" {
+                let rendered = render_file_diff_full(tool_call, width, Some(true));
+                if !rendered.is_empty() {
+                    let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+                    lines.extend(convert_to_owned_lines(borrowed));
+                }
+            }
+        }
+        MessageContent::RenderCommandCollapsedResult(tool_call_result) => {
+            let content_lines = format_text_content(&tool_call_result.result.clone(), width);
+            let rendered = render_collapsed_command_message(tool_call_result, content_lines, width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderStreamingBorderBlock(
+            content,
+            _outside_title,
+            bubble_title,
+            colors,
+            _tool_type,
+        ) => {
+            let rendered =
+                render_streaming_block_compact(content, bubble_title, colors.clone(), width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderResultBorderBlock(tool_call_result) => {
+            let rendered = render_result_block(tool_call_result, width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderFullContentMessage(tool_call_result) => {
+            let title = get_command_type_name(&tool_call_result.call);
+            let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
+            let result = &tool_call_result.result;
+
+            let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
+            lines.push((spacing_marker.clone(), Style::default()));
+
+            let dot_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                Color::LightGreen
+            } else {
+                Color::Red
+            };
+
+            let message_color = if tool_call_result.status == ToolCallResultStatus::Success {
+                AdaptiveColors::text()
+            } else {
+                Color::Red
+            };
+
+            let header_lines = crate::services::bash_block::render_styled_header_with_dot_public(
+                &title,
+                &command_args,
+                Some(crate::services::bash_block::LinesColors {
+                    dot: dot_color,
+                    title: Color::White,
+                    command: AdaptiveColors::text(),
+                    message: message_color,
+                }),
+                Some(width),
+            );
+            for line in header_lines {
+                lines.push((convert_line_to_owned(line), Style::default()));
+            }
+
+            lines.push((spacing_marker.clone(), Style::default()));
+
+            let content_lines = format_text_content(result, width);
+            for line in content_lines {
+                lines.push((line, Style::default()));
+            }
+
+            lines.push((spacing_marker, Style::default()));
+        }
+        MessageContent::RenderEscapedTextBlock(content) => {
+            let rendered = format_text_content(content, width);
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::Markdown(markdown) => {
+            let borrowed = get_wrapped_markdown_lines(markdown, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::PlainText(text) => {
+            let owned_line = Line::from(vec![Span::styled(text.clone(), Style::default())]);
+            lines.push((owned_line, Style::default()));
+        }
+        MessageContent::BashBubble {
+            title,
+            content,
+            colors,
+            tool_type: _,
+        } => {
+            let borrowed = get_wrapped_bash_bubble_lines(title, content, colors);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+        MessageContent::RenderRefreshedTerminal(title, content, colors, _stored_width) => {
+            let rendered = crate::services::bash_block::render_refreshed_terminal_bubble(
+                title,
+                content,
+                colors.clone(),
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
+    }
+
+    lines
+}
+
+/// Helper to render shell history lines (extracted from Plain handling)
+fn render_shell_history_lines(
+    text: &str,
+    style: &Style,
+    width: usize,
+) -> Vec<(Line<'static>, Style)> {
+    let mut lines = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find("```shell") {
+        let before = &remaining[..start];
+        if !before.trim().is_empty() {
+            let borrowed = get_wrapped_plain_lines(before, style, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
+        }
+
+        let after_start = &remaining[start + "```shell".len()..];
+        if let Some(end) = after_start.find("```") {
+            let shell_block = &after_start[..end];
+            let mut bubble_lines = Vec::new();
+            let mut current_command: Option<String> = None;
+            let mut current_output = Vec::new();
+
+            for line in shell_block.lines() {
+                if line.trim().starts_with(SHELL_PROMPT_PREFIX.trim()) {
+                    if let Some(cmd) = current_command.take() {
+                        bubble_lines.push(render_shell_bubble_with_unicode_border(
+                            &cmd,
+                            &current_output,
+                            width,
+                        ));
+                        current_output.clear();
+                    }
+                    current_command = Some(line.trim().to_string());
+                } else {
+                    current_output.push(line.to_string());
+                }
+            }
+
+            if let Some(cmd) = current_command {
+                bubble_lines.push(render_shell_bubble_with_unicode_border(
+                    &cmd,
+                    &current_output,
+                    width,
+                ));
+            }
+
+            for bubble in bubble_lines {
+                for l in bubble {
+                    lines.push((convert_line_to_owned(l), Style::default()));
+                }
+            }
+
+            remaining = &after_start[end + "```".len()..];
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
+        } else {
+            if !after_start.trim().is_empty() {
+                let borrowed = get_wrapped_plain_lines(after_start, style, width);
+                lines.extend(convert_to_owned_lines(borrowed));
+            }
+            break;
+        }
+    }
+
+    if !remaining.trim().is_empty() && !remaining.contains("```shell") {
+        let borrowed = get_wrapped_plain_lines(remaining, style, width);
+        lines.extend(convert_to_owned_lines(borrowed));
+    }
+
+    lines
+}
+
+/// Legacy function for backwards compatibility.
+/// New code should use get_wrapped_message_lines_cached with AppState.
+#[allow(dead_code)]
 pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
     use crate::services::message_pattern::spans_to_string;
 
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
 
-    // Pre-allocate with estimated capacity to reduce reallocations
-    let estimated_capacity = all_lines.len() + (all_lines.len() / 10); // +10% for processing overhead
+    let estimated_capacity = all_lines.len() + (all_lines.len() / 10);
     let mut processed_lines: Vec<Line> = Vec::with_capacity(estimated_capacity);
 
     for (line, _style) in all_lines.iter() {
         let line_text = spans_to_string(line);
-        // Skip checkpoint_id lines entirely - don't display them in the TUI
         if line_text.contains("<checkpoint_id>") {
             continue;
+        } else if line_text.trim() == "SPACING_MARKER" {
+            processed_lines.push(Line::from(""));
         } else {
-            // local_context and rulebooks are stripped earlier in Plain message processing
-            if line_text.trim() == "SPACING_MARKER" {
-                processed_lines.push(Line::from(""));
-            } else {
-                processed_lines.push(line.clone());
-            }
+            processed_lines.push(line.clone());
         }
     }
 
     processed_lines
 }
 
-/// Invalidate the message lines cache when messages change
-/// Smart invalidation: Skip when user has scrolled up to avoid jitter during streaming
+/// Invalidate the message lines cache when messages change.
+/// Smart invalidation: Skip when user has scrolled up to avoid jitter during streaming.
+///
+/// With per-message caching, this only invalidates the assembled cache.
+/// Individual message caches remain valid and will be reused if content hasn't changed.
 pub fn invalidate_message_lines_cache(state: &mut AppState) {
     // If user has scrolled up (reading old messages), don't invalidate cache
     // This prevents jitter when new streaming chunks arrive while scrolled up
@@ -553,8 +1241,33 @@ pub fn invalidate_message_lines_cache(state: &mut AppState) {
         return;
     }
 
+    // Invalidate both assembled and visible caches
+    state.assembled_lines_cache = None;
+    state.visible_lines_cache = None;
+
+    // Legacy cache invalidation for backwards compatibility
     state.message_lines_cache = None;
     state.collapsed_message_lines_cache = None;
+}
+
+/// Invalidate cache for a specific message (e.g., during streaming).
+/// This is more efficient than invalidating the entire cache.
+pub fn invalidate_message_cache(state: &mut AppState, message_id: Uuid) {
+    // Remove the specific message from per-message cache
+    state.per_message_cache.remove(&message_id);
+    // Invalidate assembled and visible caches since they need rebuilding
+    state.assembled_lines_cache = None;
+    state.visible_lines_cache = None;
+}
+
+/// Clean up stale entries from the per-message cache.
+/// Call this periodically or when messages are removed.
+#[allow(dead_code)]
+pub fn cleanup_message_cache(state: &mut AppState) {
+    let valid_ids: std::collections::HashSet<Uuid> = state.messages.iter().map(|m| m.id).collect();
+    state
+        .per_message_cache
+        .retain(|id, _| valid_ids.contains(id));
 }
 
 pub fn get_wrapped_collapsed_message_lines_cached(
