@@ -34,23 +34,24 @@ pub fn handle_stream_message(
                 state.todos = extracted_todos;
             }
         }
-        // Use per-message cache invalidation for better performance during streaming
-        // This only invalidates the specific message that changed, not all messages
-        invalidate_message_cache(state, id);
 
-        // If content changed while user is scrolled up, mark it
-        if !state.stay_at_bottom {
-            state.content_changed_while_scrolled_up = true;
-        }
-
-        // During streaming, only adjust scroll if we're staying at bottom
+        // If user is scrolled up, don't invalidate cache - just mark that content changed
+        // This prevents jittery scrolling while streaming when user is reading old messages
         if state.stay_at_bottom {
+            // Use per-message cache invalidation for better performance during streaming
+            // This only invalidates the specific message that changed, not all messages
+            invalidate_message_cache(state, id);
+
+            // Adjust scroll to follow the streaming content
             let input_height = 3;
             let total_lines = state.messages.len() * 2;
             let max_visible_lines =
                 std::cmp::max(1, message_area_height.saturating_sub(input_height));
             let max_scroll = total_lines.saturating_sub(max_visible_lines);
             state.scroll = max_scroll;
+        } else {
+            // Mark that content changed while scrolled up - cache will be rebuilt when user scrolls back
+            state.content_changed_while_scrolled_up = true;
         }
         state.is_streaming = false;
     } else {
