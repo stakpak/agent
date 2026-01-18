@@ -289,14 +289,32 @@ pub fn handle_start_loading_operation(
 
 /// Handle end loading operation event
 pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app::LoadingOperation) {
+    // Check if this is a checkpoint resume before consuming operation
+    let is_checkpoint_resume = matches!(operation, crate::app::LoadingOperation::CheckpointResume);
+
     state.loading_manager.end_operation(operation);
     state.loading = state.loading_manager.is_loading();
     state.loading_type = state.loading_manager.get_loading_type();
+
+    // After checkpoint resume completes, ensure we scroll to show the latest messages
+    if is_checkpoint_resume {
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
+        // Invalidate cache to ensure fresh render with correct scroll
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
 }
 
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     state.messages.push(Message::assistant(None, msg, None));
+
+    // Invalidate cache since messages changed
+    crate::services::message::invalidate_message_lines_cache(state);
+
+    // Scroll to bottom to show the new message
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
 
     // Auto-show side panel on first message (assistant)
     state.auto_show_side_panel();

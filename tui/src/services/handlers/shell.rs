@@ -892,9 +892,12 @@ pub fn handle_shell_completed(
 
     state.active_shell_command = None;
     state.active_shell_command_output = None;
+    // Remove the RefreshedTerminal message when shell completes
+    if let Some(shell_msg_id) = state.interactive_shell_message_id {
+        state.messages.retain(|m| m.id != shell_msg_id);
+    }
     state.interactive_shell_message_id = None;
     state.text_area.set_text("");
-    state.messages.push(Message::plain_text(""));
     state.is_tool_call_shell_command = false;
     adjust_scroll(state, message_area_height, message_area_width);
 }

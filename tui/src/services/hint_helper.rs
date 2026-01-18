@@ -104,10 +104,9 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 if !state.show_side_panel {
                     s.push_str("profile ");
                     s.push_str(&state.current_profile_name);
+                    // Add rulebooks info
+                    s.push_str(" | ctrl+y side panel");
                 }
-
-                // Add rulebooks info
-                s.push_str(" | ctrl+y side panel");
                 s
             };
 

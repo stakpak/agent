@@ -252,14 +252,12 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
-    let processed_lines = get_wrapped_message_lines_cached(state, width);
-    let total_lines = processed_lines.len();
+    // Ensure cache is populated and get all lines (returns reference to cached data)
+    let all_lines = get_wrapped_message_lines_cached(state, width);
+    let total_lines = all_lines.len();
 
     // Handle edge case where we have no content
     if total_lines == 0 {
-        let message_widget =
-            Paragraph::new(Vec::<Line>::new()).wrap(ratatui::widgets::Wrap { trim: false });
-        f.render_widget(message_widget, area);
         return;
     }
 
@@ -273,21 +271,9 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         state.scroll.min(max_scroll)
     };
 
-    // Create visible lines with pre-allocated capacity for better performance
-    let mut visible_lines = Vec::with_capacity(height);
-
-    for i in 0..height {
-        let line_index = scroll + i;
-        if line_index < processed_lines.len() {
-            visible_lines.push(processed_lines[line_index].clone());
-        } else {
-            visible_lines.push(Line::from(""));
-        }
-    }
-
-    // Add a space after the last message if we have content
-
-    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
+    // Use Ratatui's built-in scroll - no manual slicing/cloning needed!
+    // The scroll() method efficiently skips lines during rendering.
+    let message_widget = Paragraph::new(all_lines).scroll((scroll as u16, 0));
     f.render_widget(message_widget, area);
 }
 

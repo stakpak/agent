@@ -66,6 +66,7 @@ pub fn get_all_shortcuts() -> Vec<Shortcut> {
         Shortcut::new("Ctrl+F", "Show profile switcher", "UI Controls"),
         Shortcut::new("Ctrl+P", "Show command palette", "UI Controls"),
         Shortcut::new("Ctrl+S", "Show shortcuts (this popup)", "UI Controls"),
+        Shortcut::new("Ctrl+G", "Show file changes", "UI Controls"),
         // Commands
         Shortcut::new("/help", "Show help information", "Commands"),
         Shortcut::new("/clear", "Clear screen", "Commands"),

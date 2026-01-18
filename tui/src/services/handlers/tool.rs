@@ -37,17 +37,31 @@ pub fn handle_stream_tool_result(
             .trim()
             .to_string();
 
-        // Update the pending bash message to show stall warning
+        // Update the pending/running bash message to show stall warning
         if let Some(pending_id) = state.pending_bash_message_id {
             for msg in &mut state.messages {
                 if msg.id == pending_id {
-                    // Update to the stall warning variant
-                    if let crate::services::message::MessageContent::RenderPendingBorderBlock(
-                        tc,
-                        auto,
-                    ) = &msg.content
-                    {
-                        msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, stall_message.clone());
+                    // Update to the stall warning variant - handle both old and new block types
+                    match &msg.content {
+                        crate::services::message::MessageContent::RenderPendingBorderBlock(
+                            tc,
+                            auto,
+                        ) => {
+                            msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, format!(" {}", stall_message));
+                        }
+                        crate::services::message::MessageContent::RenderRunCommandBlock(
+                            command,
+                            result,
+                            _run_state,
+                        ) => {
+                            // Update to RunningWithStallWarning state
+                            msg.content = crate::services::message::MessageContent::RenderRunCommandBlock(
+                                command.clone(),
+                                result.clone(),
+                                crate::services::bash_block::RunCommandState::RunningWithStallWarning(stall_message.clone()),
+                            );
+                        }
+                        _ => {}
                     }
                     break;
                 }
@@ -75,24 +89,55 @@ pub fn handle_stream_tool_result(
         .or_default()
         .push_str(&format!("{}\n", progress.message));
 
-    // 2. Remove the old message with this id (if any)
+    // 2. Check if this is a run_command - get command from the pending message or dialog_command
+    let is_run_command = state
+        .dialog_command
+        .as_ref()
+        .map(|tc| crate::utils::strip_tool_name(&tc.function.name) == "run_command")
+        .unwrap_or(false);
+
+    let command_str = if is_run_command {
+        state
+            .dialog_command
+            .as_ref()
+            .and_then(|tc| extract_command_from_tool_call(tc).ok())
+    } else {
+        None
+    };
+
+    // 3. Remove the pending message with pending_bash_message_id (not the streaming message id)
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+    // Also remove any old streaming message with this id
     state.messages.retain(|m| m.id != tool_call_id);
 
-    // 3. Get the buffer content for rendering (clone to String)
+    // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
         .streaming_tool_results
         .get(&tool_call_id)
         .cloned()
         .unwrap_or_default();
 
-    state.messages.push(Message::render_streaming_border_block(
-        &buffer_content,
-        "Tool Streaming",
-        "Result",
-        None,
-        "Streaming",
-        Some(tool_call_id),
-    ));
+    // 5. Use unified run command block for run_command, otherwise use the default streaming block
+    if is_run_command {
+        let cmd = command_str.unwrap_or_else(|| "command".to_string());
+        state.messages.push(Message::render_run_command_block(
+            cmd,
+            Some(buffer_content),
+            crate::services::bash_block::RunCommandState::Running,
+            Some(tool_call_id),
+        ));
+    } else {
+        state.messages.push(Message::render_streaming_border_block(
+            &buffer_content,
+            "Tool Streaming",
+            "Result",
+            None,
+            "Streaming",
+            Some(tool_call_id),
+        ));
+    }
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it
@@ -532,4 +577,44 @@ fn extract_diff_preview(message: &str) -> Option<String> {
     } else {
         Some(lines.join("\n"))
     }
+}
+
+/// Extract file path from a view/read tool call
+pub fn extract_file_path_from_tool_call(tool_call: &ToolCall) -> Option<String> {
+    // Try to parse arguments as JSON
+    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
+        // Common field names for file path in read/view tools
+        if let Some(path) = args
+            .get("filePath")
+            .or(args.get("file_path"))
+            .or(args.get("path"))
+            .or(args.get("file"))
+            .or(args.get("target"))
+            .and_then(|v| v.as_str())
+        {
+            return Some(path.to_string());
+        }
+    }
+
+    // Fallback: try to extract from raw arguments string
+    let args_str = &tool_call.function.arguments;
+
+    // Try simple patterns like filePath:"..." or path:"..."
+    for pattern in &["filePath", "file_path", "path", "file"] {
+        if let Some(start) = args_str.find(&format!("\"{}\"", pattern)) {
+            let after_key = &args_str[start + pattern.len() + 2..];
+            // Skip to the value (after colon and possible whitespace/quotes)
+            if let Some(colon_pos) = after_key.find(':') {
+                let after_colon = after_key[colon_pos + 1..].trim_start();
+                if after_colon.starts_with('"') {
+                    let value_start = 1;
+                    if let Some(end_quote) = after_colon[value_start..].find('"') {
+                        return Some(after_colon[value_start..value_start + end_quote].to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }

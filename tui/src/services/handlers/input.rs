@@ -123,18 +123,24 @@ pub fn handle_input_submitted_event(
             // Get the first tool from the ordered list
             if let Some((first_tool, is_approved)) = tools_status.first() {
                 // Compare with dialog_command to determine action
-                if let Some(dialog_command) = &state.dialog_command
-                    && first_tool == dialog_command
+                if let Some(dialog_command) = state.dialog_command.clone()
+                    && first_tool == &dialog_command
                 {
                     state
                         .session_tool_calls_queue
                         .insert(dialog_command.id.clone(), ToolCallStatus::Executed);
                     if *is_approved {
+                        // Update run_command block to Running state before execution starts
+                        super::dialog::update_run_command_to_running(state, &dialog_command);
                         // Fire accept tool
                         let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                     } else {
-                        // Fire handle reject
-                        let _ = input_tx.try_send(InputEvent::HandleReject(None, true, None));
+                        // Fire handle reject with message
+                        let _ = input_tx.try_send(InputEvent::HandleReject(
+                            Some("Tool call rejected".to_string()),
+                            true,
+                            None,
+                        ));
                     }
                 }
             }
@@ -155,7 +161,7 @@ pub fn handle_input_submitted_event(
     }
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    else if state.show_side_panel && state.text_area.text().is_empty() {
+    else if state.show_side_panel && !state.is_dialog_open && state.text_area.text().is_empty() {
         let current = state
             .side_panel_section_collapsed
             .get(&state.side_panel_focus)
@@ -368,7 +374,9 @@ fn handle_input_submitted(
 
     if state.show_sessions_dialog {
         let selected = &state.sessions[state.session_selected];
-        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected.id.to_string()));
+        let selected_id = selected.id.to_string();
+        let selected_title = selected.title.clone();
+        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
         state.message_tool_calls = None;
         state.message_approved_tools.clear();
         state.message_rejected_tools.clear();
@@ -376,6 +384,14 @@ fn handle_input_submitted(
         state.session_tool_calls_queue.clear();
         state.toggle_approved_message = true;
         state.messages.clear();
+
+        // Reset scroll state to show bottom when messages are loaded
+        state.scroll = 0;
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
+
+        // Invalidate caches
+        crate::services::message::invalidate_message_lines_cache(state);
 
         // Reset usage for the switched session
         state.total_session_usage = LLMTokenUsage {
@@ -391,7 +407,7 @@ fn handle_input_submitted(
             prompt_tokens_details: None,
         };
 
-        render_system_message(state, &format!("Switching to session . {}", selected.title));
+        render_system_message(state, &format!("Switching to session . {}", selected_title));
         state.show_sessions_dialog = false;
     } else if state.is_dialog_open {
         state.toggle_approved_message = true;
