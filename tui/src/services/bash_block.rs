@@ -1764,11 +1764,9 @@ pub fn render_run_command_block(
     let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
 
     // Build title spans - suffix gets special color for error states
-    let title_border = if !title_suffix.is_empty() && suffix_color.is_some() {
+    let title_border = if let Some(color) = suffix_color {
         // Split rendering: "Run Command" in white, suffix in special color
-        let suffix_style = Style::default()
-            .fg(suffix_color.unwrap())
-            .add_modifier(Modifier::BOLD);
+        let suffix_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
         Line::from(vec![
             Span::styled("╭─", Style::default().fg(border_color)),
             Span::styled(
@@ -1865,87 +1863,85 @@ pub fn render_run_command_block(
         }
     }
 
-    // Add result section if we have result content
-    if let Some(result_content) = result {
-        if !result_content.is_empty() {
-            // Check if this is an error state (no "Result:" label, colored message)
-            let is_error_state = matches!(
-                state,
-                RunCommandState::Error
-                    | RunCommandState::Cancelled
-                    | RunCommandState::Rejected
-                    | RunCommandState::Skipped
-            );
+    // Add result section if we have non-empty result content
+    if let Some(result_content) = result.filter(|s| !s.is_empty()) {
+        // Check if this is an error state (no "Result:" label, colored message)
+        let is_error_state = matches!(
+            state,
+            RunCommandState::Error
+                | RunCommandState::Cancelled
+                | RunCommandState::Rejected
+                | RunCommandState::Skipped
+        );
 
-            // Message color for error states
-            let error_message_color = match state {
-                RunCommandState::Skipped => Color::Yellow,
-                _ => Color::LightRed,
-            };
+        // Message color for error states
+        let error_message_color = match state {
+            RunCommandState::Skipped => Color::Yellow,
+            _ => Color::LightRed,
+        };
 
-            // Empty line separator
-            // Line structure: "│" (1) + spaces (inner_width + 2) + "│" (1) = inner_width + 4
+        // Empty line separator
+        // Line structure: "│" (1) + spaces (inner_width + 2) + "│" (1) = inner_width + 4
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" ".repeat(inner_width + 2)),
+            Span::styled("│", Style::default().fg(border_color)),
+        ]));
+
+        // Only show "Result:" label for non-error states
+        if !is_error_state {
+            // Result: label
+            // Line structure: "│" (1) + " " (1) + label + padding + " " (1) + "│" (1)
+            // So: content + padding = inner_width
+            let result_label = "Result:";
+            let label_padding = inner_width.saturating_sub(result_label.len());
             formatted_lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(border_color)),
-                Span::from(" ".repeat(inner_width + 2)),
-                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    result_label.to_string(),
+                    Style::default()
+                        .fg(term_color(Color::White))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::from(" ".repeat(label_padding)),
+                Span::styled(" │", Style::default().fg(border_color)),
             ]));
+        }
 
-            // Only show "Result:" label for non-error states
-            if !is_error_state {
-                // Result: label
-                // Line structure: "│" (1) + " " (1) + label + padding + " " (1) + "│" (1)
-                // So: content + padding = inner_width
-                let result_label = "Result:";
-                let label_padding = inner_width.saturating_sub(result_label.len());
+        // Strip ANSI codes, preprocess, and word-wrap the result content
+        let cleaned_result = strip_ansi_codes(result_content).to_string();
+        let preprocessed = preprocess_terminal_output(&cleaned_result);
+
+        // Determine text color based on state
+        let text_color = if is_error_state {
+            error_message_color
+        } else {
+            AdaptiveColors::text()
+        };
+
+        // Process each line from the preprocessed result
+        for source_line in preprocessed.lines() {
+            if source_line.is_empty() {
+                // Empty line
                 formatted_lines.push(Line::from(vec![
                     Span::styled("│", Style::default().fg(border_color)),
-                    Span::from(" "),
-                    Span::styled(
-                        result_label.to_string(),
-                        Style::default()
-                            .fg(term_color(Color::White))
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::from(" ".repeat(label_padding)),
-                    Span::styled(" │", Style::default().fg(border_color)),
+                    Span::from(" ".repeat(inner_width + 2)),
+                    Span::styled("│", Style::default().fg(border_color)),
                 ]));
-            }
-
-            // Strip ANSI codes, preprocess, and word-wrap the result content
-            let cleaned_result = strip_ansi_codes(result_content).to_string();
-            let preprocessed = preprocess_terminal_output(&cleaned_result);
-
-            // Determine text color based on state
-            let text_color = if is_error_state {
-                error_message_color
             } else {
-                AdaptiveColors::text()
-            };
-
-            // Process each line from the preprocessed result
-            for source_line in preprocessed.lines() {
-                if source_line.is_empty() {
-                    // Empty line
+                // Word-wrap this line
+                let wrapped = wrap_text_by_word(source_line, inner_width);
+                for line_text in wrapped {
+                    let line_width = calculate_display_width(&line_text);
+                    let padding = inner_width.saturating_sub(line_width);
                     formatted_lines.push(Line::from(vec![
                         Span::styled("│", Style::default().fg(border_color)),
-                        Span::from(" ".repeat(inner_width + 2)),
-                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::styled(line_text, Style::default().fg(text_color)),
+                        Span::from(" ".repeat(padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
                     ]));
-                } else {
-                    // Word-wrap this line
-                    let wrapped = wrap_text_by_word(source_line, inner_width);
-                    for line_text in wrapped {
-                        let line_width = calculate_display_width(&line_text);
-                        let padding = inner_width.saturating_sub(line_width);
-                        formatted_lines.push(Line::from(vec![
-                            Span::styled("│", Style::default().fg(border_color)),
-                            Span::from(" "),
-                            Span::styled(line_text, Style::default().fg(text_color)),
-                            Span::from(" ".repeat(padding)),
-                            Span::styled(" │", Style::default().fg(border_color)),
-                        ]));
-                    }
                 }
             }
         }
@@ -1967,21 +1963,4 @@ pub fn render_run_command_block(
         .collect();
 
     owned_lines
-}
-
-/// Helper to truncate a string to a given display width
-fn truncate_to_width(s: &str, max_width: usize) -> String {
-    let mut result = String::new();
-    let mut current_width = 0;
-
-    for ch in s.chars() {
-        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-        if current_width + char_width > max_width {
-            break;
-        }
-        result.push(ch);
-        current_width += char_width;
-    }
-
-    result
 }

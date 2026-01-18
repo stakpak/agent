@@ -633,10 +633,10 @@ pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
         width
     };
 
-    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache {
-        if cached_key == cache_key {
-            return Some(cached_lines.len());
-        }
+    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
+        && cached_key == cache_key
+    {
+        return Some(cached_lines.len());
     }
     None
 }
@@ -657,23 +657,22 @@ pub fn get_visible_lines_arc(
     let generation = state.cache_generation;
 
     // FAST PATH: Check if visible lines cache is still valid
-    if let Some(ref cache) = state.visible_lines_cache {
-        if cache.scroll == start
-            && cache.width == width
-            && cache.height == count
-            && cache.source_generation == generation
-        {
-            // Perfect cache hit - return Arc without any cloning
-            return cache.lines.clone();
-        }
+    if let Some(ref cache) = state.visible_lines_cache
+        && cache.scroll == start
+        && cache.width == width
+        && cache.height == count
+        && cache.source_generation == generation
+    {
+        // Perfect cache hit - return Arc without any cloning
+        return cache.lines.clone();
     }
 
     // MEDIUM PATH: Assembled cache is valid, just need to slice
     let visible = if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
         let end = (start + count).min(cached_lines.len());
         let mut visible = Vec::with_capacity(count);
-        for i in start..end {
-            visible.push(cached_lines[i].clone());
+        for line in cached_lines.iter().take(end).skip(start) {
+            visible.push(line.clone());
         }
         // Pad with empty lines if needed
         while visible.len() < count {
@@ -715,8 +714,8 @@ pub fn get_visible_lines_owned(
     if let Some((_, ref cached_lines, _)) = state.assembled_lines_cache {
         let end = (start + count).min(cached_lines.len());
         let mut visible = Vec::with_capacity(count);
-        for i in start..end {
-            visible.push(cached_lines[i].clone());
+        for line in cached_lines.iter().take(end).skip(start) {
+            visible.push(line.clone());
         }
         // Pad with empty lines if needed
         while visible.len() < count {
@@ -738,10 +737,10 @@ fn ensure_cache_populated(state: &mut AppState, width: usize) {
         width
     };
 
-    if let Some((cached_key, _, _)) = &state.assembled_lines_cache {
-        if *cached_key == cache_key {
-            return; // Cache is valid
-        }
+    if let Some((cached_key, _, _)) = &state.assembled_lines_cache
+        && *cached_key == cache_key
+    {
+        return; // Cache is valid
     }
 
     // Cache miss - need to rebuild
@@ -769,11 +768,11 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
         width
     };
 
-    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache {
-        if cached_key == cache_key {
-            // Cache hit - return immediately without any processing
-            return cached_lines.clone();
-        }
+    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
+        && cached_key == cache_key
+    {
+        // Cache hit - return immediately without any processing
+        return cached_lines.clone();
     }
 
     // SLOW PATH: Need to rebuild (cache was invalidated or width changed)
@@ -806,13 +805,14 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
         let content_hash = hash_message_content(&msg.content);
 
         // Check if we have a valid cached render for this message
-        if let Some(cached) = state.per_message_cache.get(&msg.id) {
-            if cached.width == width && cached.content_hash == content_hash {
-                // Cache hit! Reuse rendered lines
-                cache_hits += 1;
-                all_processed_lines.extend(cached.rendered_lines.iter().cloned());
-                continue;
-            }
+        if let Some(cached) = state.per_message_cache.get(&msg.id)
+            && cached.width == width
+            && cached.content_hash == content_hash
+        {
+            // Cache hit! Reuse rendered lines
+            cache_hits += 1;
+            all_processed_lines.extend(cached.rendered_lines.iter().cloned());
+            continue;
         }
 
         // Cache miss - render this single message
@@ -904,27 +904,26 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             cleaned = strip_markdown_delimiters(&cleaned);
 
             // Remove agent_mode tags
-            if let Some(start) = cleaned.find("<agent_mode>") {
-                if let Some(end) = cleaned.find("</agent_mode>") {
-                    cleaned.replace_range(start..end + "</agent_mode>".len(), "");
-                }
+            if let Some(start) = cleaned.find("<agent_mode>")
+                && let Some(end) = cleaned.find("</agent_mode>")
+            {
+                cleaned.replace_range(start..end + "</agent_mode>".len(), "");
             }
 
             // Remove checkpoint_id tags and surrounding newlines
-            if let Some(start) = cleaned.find("<checkpoint_id>") {
-                if let Some(end) = cleaned.find("</checkpoint_id>") {
-                    let before_checkpoint = &cleaned[..start];
-                    let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
+            if let Some(start) = cleaned.find("<checkpoint_id>")
+                && let Some(end) = cleaned.find("</checkpoint_id>")
+            {
+                let before_checkpoint = &cleaned[..start];
+                let after_checkpoint = &cleaned[end + "</checkpoint_id>".len()..];
 
-                    let cleaned_before =
-                        if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
-                            stripped
-                        } else {
-                            before_checkpoint
-                        };
+                let cleaned_before = if let Some(stripped) = before_checkpoint.strip_suffix('\n') {
+                    stripped
+                } else {
+                    before_checkpoint
+                };
 
-                    cleaned = format!("{}{}", cleaned_before, after_checkpoint);
-                }
+                cleaned = format!("{}{}", cleaned_before, after_checkpoint);
             }
 
             let borrowed_lines =

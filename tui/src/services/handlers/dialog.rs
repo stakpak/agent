@@ -123,7 +123,7 @@ pub fn handle_esc(
                 }
 
                 let command =
-                    crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
+                    crate::services::handlers::shell::extract_command_from_tool_call(tool_call)
                         .unwrap_or_else(|_| "unknown command".to_string());
 
                 // Determine state: Skipped (yellow) or Rejected (red)
@@ -141,8 +141,8 @@ pub fn handle_esc(
                 ));
             } else {
                 // For other tools, use the old renderer
-                let truncated_command = extract_truncated_command_arguments(&tool_call, None);
-                let title = get_command_type_name(&tool_call);
+                let truncated_command = extract_truncated_command_arguments(tool_call, None);
+                let title = get_command_type_name(tool_call);
                 let rendered_lines =
                     render_bash_block_rejected(&truncated_command, &title, message.clone(), color);
                 state.messages.push(Message {
