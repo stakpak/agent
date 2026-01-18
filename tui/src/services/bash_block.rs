@@ -100,7 +100,7 @@ fn calculate_display_width(text: &str) -> usize {
     stripped.width()
 }
 
-// Add this improved simple text wrapping function
+// Add this improved simple text wrapping function (character-based)
 fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
     if text.is_empty() {
         return vec![String::new()];
@@ -126,6 +126,63 @@ fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
 
     if !current_line.is_empty() {
         lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
+// Word-based text wrapping function
+fn wrap_text_by_word(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let stripped = strip_ansi_codes(text);
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for word in stripped.split_inclusive(|c: char| c.is_whitespace()) {
+        let word_width = calculate_display_width(word);
+
+        if current_width + word_width > width && !current_line.is_empty() {
+            // Word doesn't fit, start new line
+            lines.push(current_line.trim_end().to_string());
+            current_line.clear();
+            current_width = 0;
+        }
+
+        // If a single word is longer than width, we need to break it
+        if word_width > width && current_line.is_empty() {
+            // Break the long word by character
+            let mut word_part = String::new();
+            let mut part_width = 0;
+            for ch in word.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if part_width + char_width > width && !word_part.is_empty() {
+                    lines.push(word_part);
+                    word_part = String::new();
+                    part_width = 0;
+                }
+                word_part.push(ch);
+                part_width += char_width;
+            }
+            if !word_part.is_empty() {
+                current_line = word_part;
+                current_width = part_width;
+            }
+        } else {
+            current_line.push_str(word);
+            current_width += word_width;
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line.trim_end().to_string());
     }
 
     if lines.is_empty() {
@@ -1621,4 +1678,310 @@ pub fn render_collapsed_command_message(
         Some(colors),
         Some(terminal_width),
     )
+}
+
+/// State for the unified run command block
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunCommandState {
+    /// Initial state - waiting for user approval (Reset dot)
+    Pending,
+    /// Running state - command is executing (Yellow dot, "Running...")
+    Running,
+    /// Completed successfully (Green dot)
+    Completed,
+    /// Failed/Error state (LightRed dot)
+    Error,
+    /// Cancelled by user (LightRed dot)
+    Cancelled,
+    /// Rejected by user (LightRed dot)
+    Rejected,
+    /// Skipped due to sequential execution failure (Yellow dot)
+    Skipped,
+}
+
+/// Renders a unified run command block with consistent appearance across all states.
+///
+/// Layout:
+/// ```
+/// ╭─● Run Command ──────────────────────────────────────╮
+/// │ $ command --args here wrapped nicely                │
+/// │   continuation of long command                      │
+/// │                                                     │
+/// │ Result:                                             │
+/// │   output line 1                                     │
+/// │   output line 2                                     │
+/// ╰─────────────────────────────────────────────────────╯
+/// ```
+///
+/// - Pending: Reset dot, no result section
+/// - Running: Yellow dot + " - Running...", streaming result
+/// - Completed: Green dot, final result
+/// - Error: Red dot, error message
+pub fn render_run_command_block(
+    command: &str,
+    result: Option<&str>,
+    state: RunCommandState,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Border color: DarkGray for error/cancelled/rejected/skipped states, Gray otherwise
+    let border_color = match state {
+        RunCommandState::Error
+        | RunCommandState::Cancelled
+        | RunCommandState::Rejected
+        | RunCommandState::Skipped => Color::DarkGray,
+        _ => term_color(Color::Gray),
+    };
+
+    // Dot color and title suffix based on state
+    // For error states, both dot and suffix text are LightRed
+    // For skipped, both dot and suffix text are Yellow
+    let (dot_color, title_suffix, suffix_color) = match state {
+        RunCommandState::Pending => (term_color(Color::Reset), "", None),
+        RunCommandState::Running => (Color::Yellow, " - Running...", None),
+        RunCommandState::Completed => (Color::LightGreen, "", None),
+        RunCommandState::Error => (Color::LightRed, " - Errored", Some(Color::LightRed)),
+        RunCommandState::Cancelled => (Color::LightRed, " - Cancelled", Some(Color::LightRed)),
+        RunCommandState::Rejected => (Color::LightRed, " - Rejected", Some(Color::LightRed)),
+        RunCommandState::Skipped => (Color::Yellow, " - Skipped", Some(Color::Yellow)),
+    };
+
+    // Title structure: "╭─" + "●" + " Run Command" + suffix + " " + dashes + "╮"
+    let base_title = "Run Command";
+    let title_text = format!("{}{}", base_title, title_suffix);
+    // Title border parts: "╭─" (2) + "●" (1) + " title " (title_text.len + 2) + dashes + "╮" (1)
+    // Total should equal inner_width + 4
+    // So: 2 + 1 + (title_text.len + 2) + dashes + 1 = inner_width + 4
+    // dashes = inner_width + 4 - 2 - 1 - title_text.len - 2 - 1 = inner_width - title_text.len - 2
+    let title_display_len = calculate_display_width(&title_text);
+    let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
+
+    // Build title spans - suffix gets special color for error states
+    let title_border = if !title_suffix.is_empty() && suffix_color.is_some() {
+        // Split rendering: "Run Command" in white, suffix in special color
+        let suffix_style = Style::default()
+            .fg(suffix_color.unwrap())
+            .add_modifier(Modifier::BOLD);
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", base_title),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("{} ", title_suffix.trim_start()), suffix_style),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    } else {
+        // Single color rendering for all text
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", title_text),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    // Render command with $ prefix
+    // Line structure: "│" (1) + " " (1) + content + padding + " " (1) + "│" (1) = inner_width + 4
+    // So: content + padding = inner_width
+    let command_with_prefix = format!("$ {}", command);
+
+    // Available width for content = inner_width (we have 1 space padding on each side)
+    let max_content_width = inner_width;
+    let wrapped_lines = wrap_text_by_word(&command_with_prefix, max_content_width);
+
+    for (i, wrapped_line) in wrapped_lines.iter().enumerate() {
+        let line_display_width = calculate_display_width(wrapped_line);
+        // padding = max_content_width - content_width
+        let padding_needed = max_content_width.saturating_sub(line_display_width);
+
+        // First line has "$ " in magenta, continuation lines are plain
+        if i == 0 && wrapped_line.starts_with("$ ") {
+            let cmd_part = &wrapped_line[2..]; // Skip "$ "
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    "$ ".to_string(),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    cmd_part.to_string(),
+                    Style::default().fg(AdaptiveColors::text()),
+                ),
+                Span::from(" ".repeat(padding_needed)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    wrapped_line.clone(),
+                    Style::default().fg(AdaptiveColors::text()),
+                ),
+                Span::from(" ".repeat(padding_needed)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+        }
+    }
+
+    // Add result section if we have result content
+    if let Some(result_content) = result {
+        if !result_content.is_empty() {
+            // Check if this is an error state (no "Result:" label, colored message)
+            let is_error_state = matches!(
+                state,
+                RunCommandState::Error
+                    | RunCommandState::Cancelled
+                    | RunCommandState::Rejected
+                    | RunCommandState::Skipped
+            );
+
+            // Message color for error states
+            let error_message_color = match state {
+                RunCommandState::Skipped => Color::Yellow,
+                _ => Color::LightRed,
+            };
+
+            // Empty line separator
+            // Line structure: "│" (1) + spaces (inner_width + 2) + "│" (1) = inner_width + 4
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" ".repeat(inner_width + 2)),
+                Span::styled("│", Style::default().fg(border_color)),
+            ]));
+
+            // Only show "Result:" label for non-error states
+            if !is_error_state {
+                // Result: label
+                // Line structure: "│" (1) + " " (1) + label + padding + " " (1) + "│" (1)
+                // So: content + padding = inner_width
+                let result_label = "Result:";
+                let label_padding = inner_width.saturating_sub(result_label.len());
+                formatted_lines.push(Line::from(vec![
+                    Span::styled("│", Style::default().fg(border_color)),
+                    Span::from(" "),
+                    Span::styled(
+                        result_label.to_string(),
+                        Style::default()
+                            .fg(term_color(Color::White))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::from(" ".repeat(label_padding)),
+                    Span::styled(" │", Style::default().fg(border_color)),
+                ]));
+            }
+
+            // Strip ANSI codes, preprocess, and word-wrap the result content
+            let cleaned_result = strip_ansi_codes(result_content).to_string();
+            let preprocessed = preprocess_terminal_output(&cleaned_result);
+
+            // Determine text color based on state
+            let text_color = if is_error_state {
+                error_message_color
+            } else {
+                AdaptiveColors::text()
+            };
+
+            // Process each line from the preprocessed result
+            for source_line in preprocessed.lines() {
+                if source_line.is_empty() {
+                    // Empty line
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" ".repeat(inner_width + 2)),
+                        Span::styled("│", Style::default().fg(border_color)),
+                    ]));
+                } else {
+                    // Word-wrap this line
+                    let wrapped = wrap_text_by_word(source_line, inner_width);
+                    for line_text in wrapped {
+                        let line_width = calculate_display_width(&line_text);
+                        let padding = inner_width.saturating_sub(line_width);
+                        formatted_lines.push(Line::from(vec![
+                            Span::styled("│", Style::default().fg(border_color)),
+                            Span::from(" "),
+                            Span::styled(line_text, Style::default().fg(text_color)),
+                            Span::from(" ".repeat(padding)),
+                            Span::styled(" │", Style::default().fg(border_color)),
+                        ]));
+                    }
+                }
+            }
+        }
+    }
+
+    formatted_lines.push(bottom_border);
+
+    // Convert to owned lines
+    let owned_lines: Vec<Line<'static>> = formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+
+    owned_lines
+}
+
+/// Helper to truncate a string to a given display width
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    let mut result = String::new();
+    let mut current_width = 0;
+
+    for ch in s.chars() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if current_width + char_width > max_width {
+            break;
+        }
+        result.push(ch);
+        current_width += char_width;
+    }
+
+    result
 }

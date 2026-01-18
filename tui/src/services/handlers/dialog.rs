@@ -67,7 +67,15 @@ pub fn handle_esc_event(
             output_tx,
             input_tx,
         };
-        handle_esc(state, &channels, cancel_tx, None, true, None);
+        // Provide default rejection message when user presses ESC
+        handle_esc(
+            state,
+            &channels,
+            cancel_tx,
+            Some("Tell stakpak what to do differently".to_string()),
+            true,
+            None,
+        );
     }
 }
 
@@ -101,15 +109,51 @@ pub fn handle_esc(
             let _ = channels
                 .output_tx
                 .try_send(OutputEvent::RejectTool(tool_call.clone(), should_stop));
-            let truncated_command = extract_truncated_command_arguments(tool_call, None);
-            let title = get_command_type_name(tool_call);
-            let rendered_lines =
-                render_bash_block_rejected(&truncated_command, &title, message.clone(), color);
-            state.messages.push(Message {
-                id: Uuid::new_v4(),
-                content: MessageContent::StyledBlock(rendered_lines),
-                is_collapsed: None,
-            });
+
+            let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+            if tool_name == "run_command" {
+                // For run_command, remove the pending unified block and add rejected unified block
+                // Remove pending message by tool_call_id
+                if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
+                    state.messages.retain(|m| m.id != tool_call_uuid);
+                }
+                // Also remove by pending_bash_message_id
+                if let Some(pending_id) = state.pending_bash_message_id {
+                    state.messages.retain(|m| m.id != pending_id);
+                }
+
+                let command =
+                    crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
+                        .unwrap_or_else(|_| "unknown command".to_string());
+
+                // Determine state: Skipped (yellow) or Rejected (red)
+                let run_state = if color == Some(Color::Yellow) {
+                    crate::services::bash_block::RunCommandState::Skipped
+                } else {
+                    crate::services::bash_block::RunCommandState::Rejected
+                };
+
+                state.messages.push(Message::render_run_command_block(
+                    command,
+                    message.clone(), // Use rejection message as result
+                    run_state,
+                    None,
+                ));
+            } else {
+                // For other tools, use the old renderer
+                let truncated_command = extract_truncated_command_arguments(&tool_call, None);
+                let title = get_command_type_name(&tool_call);
+                let rendered_lines =
+                    render_bash_block_rejected(&truncated_command, &title, message.clone(), color);
+                state.messages.push(Message {
+                    id: Uuid::new_v4(),
+                    content: MessageContent::StyledBlock(rendered_lines),
+                    is_collapsed: None,
+                });
+            }
+            // Invalidate cache and scroll to bottom to show the updated block
+            crate::services::message::invalidate_message_lines_cache(state);
+            state.stay_at_bottom = true;
         }
         state.is_dialog_open = false;
         state.dialog_command = None;
@@ -194,37 +238,71 @@ pub fn handle_show_confirmation_dialog(
         .map(|status| status == &ToolCallStatus::Executed)
         .unwrap_or(false)
     {
-        let truncated_command = extract_truncated_command_arguments(&tool_call, None);
-        let title = get_command_type_name(&tool_call);
-        let rendered_lines = render_bash_block_rejected(
-            &truncated_command,
-            &title,
-            Some("Tool call already executed".to_string()),
-            None,
-        );
-        state.messages.push(Message {
-            id: Uuid::new_v4(),
-            content: MessageContent::StyledBlock(rendered_lines),
-            is_collapsed: None,
-        });
+        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+        if tool_name == "run_command" {
+            // Use unified block for run_command
+            let command =
+                crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
+                    .unwrap_or_else(|_| "unknown command".to_string());
+            state.messages.push(Message::render_run_command_block(
+                command,
+                Some("Tool call already executed".to_string()),
+                crate::services::bash_block::RunCommandState::Error,
+                None,
+            ));
+        } else {
+            let truncated_command = extract_truncated_command_arguments(&tool_call, None);
+            let title = get_command_type_name(&tool_call);
+            let rendered_lines = render_bash_block_rejected(
+                &truncated_command,
+                &title,
+                Some("Tool call already executed".to_string()),
+                None,
+            );
+            state.messages.push(Message {
+                id: Uuid::new_v4(),
+                content: MessageContent::StyledBlock(rendered_lines),
+                is_collapsed: None,
+            });
+        }
         state.is_dialog_open = false;
         state.dialog_command = None;
         return;
     }
 
     state.dialog_command = Some(tool_call.clone());
-    if crate::utils::strip_tool_name(&tool_call.function.name) == "run_command" {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "run_command" {
         state.latest_tool_call = Some(tool_call.clone());
     }
     let is_auto_approved = state.auto_approve_manager.should_auto_approve(&tool_call);
 
     // Tool call is pending - create pending border block and check if we should show popup
-    let message_id = Uuid::new_v4();
-    state.messages.push(Message::render_pending_border_block(
-        tool_call.clone(),
-        is_auto_approved,
-        Some(message_id),
-    ));
+    // For run_command, try to use tool_call.id as UUID so removal logic in event_loop works
+    let message_id = if tool_name == "run_command" {
+        Uuid::parse_str(&tool_call.id).unwrap_or_else(|_| Uuid::new_v4())
+    } else {
+        Uuid::new_v4()
+    };
+
+    // Use unified run command block for run_command tool calls
+    if tool_name == "run_command" {
+        // Extract command from tool call arguments
+        let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call)
+            .unwrap_or_else(|_| "unknown command".to_string());
+        state.messages.push(Message::render_run_command_block(
+            command,
+            None, // No result yet
+            crate::services::bash_block::RunCommandState::Pending,
+            Some(message_id),
+        ));
+    } else {
+        state.messages.push(Message::render_pending_border_block(
+            tool_call.clone(),
+            is_auto_approved,
+            Some(message_id),
+        ));
+    }
     state.pending_bash_message_id = Some(message_id);
 
     state.dialog_command = Some(tool_call.clone());

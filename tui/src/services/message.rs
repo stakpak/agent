@@ -58,6 +58,13 @@ pub enum MessageContent {
         Option<BubbleColors>,
         usize, // Width
     ),
+    /// Unified run command block - shows command, state, and result in one bordered box
+    /// (command: String, result: Option<String>, state: RunCommandState)
+    RenderRunCommandBlock(
+        String,
+        Option<String>,
+        crate::services::bash_block::RunCommandState,
+    ),
 }
 
 /// Compute a hash of the MessageContent for cache invalidation.
@@ -167,6 +174,15 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
             title.hash(&mut hasher);
             lines.len().hash(&mut hasher);
             width.hash(&mut hasher);
+        }
+        MessageContent::RenderRunCommandBlock(command, result, state) => {
+            16u8.hash(&mut hasher);
+            command.hash(&mut hasher);
+            if let Some(r) = result {
+                r.len().hash(&mut hasher);
+            }
+            // Hash state as discriminant
+            std::mem::discriminant(state).hash(&mut hasher);
         }
     }
 
@@ -376,6 +392,21 @@ impl Message {
             content: MessageContent::RenderFullContentMessage(tool_call_result),
             // is_collapsed: Some(true) means it shows in full screen popup only
             is_collapsed: Some(true),
+        }
+    }
+
+    /// Create a unified run command block message
+    /// Shows command, state indicator, and optional result in one bordered box
+    pub fn render_run_command_block(
+        command: String,
+        result: Option<String>,
+        state: crate::services::bash_block::RunCommandState,
+        message_id: Option<Uuid>,
+    ) -> Self {
+        Message {
+            id: message_id.unwrap_or_else(Uuid::new_v4),
+            content: MessageContent::RenderRunCommandBlock(command, result, state),
+            is_collapsed: None,
         }
     }
 }
@@ -1120,6 +1151,16 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
         }
+        MessageContent::RenderRunCommandBlock(command, result, state) => {
+            let rendered = crate::services::bash_block::render_run_command_block(
+                command,
+                result.as_deref(),
+                state.clone(),
+                width,
+            );
+            let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.extend(convert_to_owned_lines(borrowed));
+        }
     }
 
     lines
@@ -1686,6 +1727,17 @@ fn get_wrapped_message_lines_internal(
                     title,
                     content,
                     colors.clone(),
+                    width,
+                );
+                let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                let owned_lines = convert_to_owned_lines(borrowed_lines);
+                all_lines.extend(owned_lines);
+            }
+            MessageContent::RenderRunCommandBlock(command, result, state) => {
+                let rendered_lines = crate::services::bash_block::render_run_command_block(
+                    command,
+                    result.as_deref(),
+                    state.clone(),
                     width,
                 );
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);

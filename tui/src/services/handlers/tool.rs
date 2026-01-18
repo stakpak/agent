@@ -77,24 +77,55 @@ pub fn handle_stream_tool_result(
         .or_default()
         .push_str(&format!("{}\n", progress.message));
 
-    // 2. Remove the old message with this id (if any)
+    // 2. Check if this is a run_command - get command from the pending message or dialog_command
+    let is_run_command = state
+        .dialog_command
+        .as_ref()
+        .map(|tc| crate::utils::strip_tool_name(&tc.function.name) == "run_command")
+        .unwrap_or(false);
+
+    let command_str = if is_run_command {
+        state
+            .dialog_command
+            .as_ref()
+            .and_then(|tc| extract_command_from_tool_call(tc).ok())
+    } else {
+        None
+    };
+
+    // 3. Remove the pending message with pending_bash_message_id (not the streaming message id)
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+    // Also remove any old streaming message with this id
     state.messages.retain(|m| m.id != tool_call_id);
 
-    // 3. Get the buffer content for rendering (clone to String)
+    // 4. Get the buffer content for rendering (clone to String)
     let buffer_content = state
         .streaming_tool_results
         .get(&tool_call_id)
         .cloned()
         .unwrap_or_default();
 
-    state.messages.push(Message::render_streaming_border_block(
-        &buffer_content,
-        "Tool Streaming",
-        "Result",
-        None,
-        "Streaming",
-        Some(tool_call_id),
-    ));
+    // 5. Use unified run command block for run_command, otherwise use the default streaming block
+    if is_run_command {
+        let cmd = command_str.unwrap_or_else(|| "command".to_string());
+        state.messages.push(Message::render_run_command_block(
+            cmd,
+            Some(buffer_content),
+            crate::services::bash_block::RunCommandState::Running,
+            Some(tool_call_id),
+        ));
+    } else {
+        state.messages.push(Message::render_streaming_border_block(
+            &buffer_content,
+            "Tool Streaming",
+            "Result",
+            None,
+            "Streaming",
+            Some(tool_call_id),
+        ));
+    }
     invalidate_message_lines_cache(state);
 
     // If content changed while user is scrolled up, mark it

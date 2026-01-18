@@ -133,8 +133,12 @@ pub fn handle_input_submitted_event(
                         // Fire accept tool
                         let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
                     } else {
-                        // Fire handle reject
-                        let _ = input_tx.try_send(InputEvent::HandleReject(None, true, None));
+                        // Fire handle reject with message
+                        let _ = input_tx.try_send(InputEvent::HandleReject(
+                            Some("Tool call rejected".to_string()),
+                            true,
+                            None,
+                        ));
                     }
                 }
             }

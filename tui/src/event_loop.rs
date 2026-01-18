@@ -189,6 +189,14 @@ pub async fn run_tui(
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        clear_streaming_tool_results(&mut state);
+
+                       // For run_command, also remove any message that matches the tool call ID
+                       // (handles case where streaming message uses tool_call_id directly)
+                       // The tool call ID is a String, but message IDs are Uuid
+                       if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
+                           state.messages.retain(|m| m.id != tool_call_uuid);
+                       }
+
                        state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
                        let tool_name = crate::utils::strip_tool_name(&tool_call_result.call.function.name);
@@ -196,35 +204,66 @@ pub async fn run_tui(
                        if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_name == "run_command" {
                            state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
-                      if tool_call_result.status == ToolCallResultStatus::Cancelled || tool_call_result.status == ToolCallResultStatus::Error {
-                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                       state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                       // Determine the state for run_command tools
+                       let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
+                       let is_error = tool_call_result.status == ToolCallResultStatus::Error;
 
-                      }else {
-                       match tool_name {
-                           "str_replace" | "create" => {
-                               // TUI: Show diff result block with yellow border (is_collapsed: None)
-                               state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                               // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
-                               state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                       if (is_cancelled || is_error) && tool_name != "run_command" {
+                           // For non-run_command tools with cancelled/error, use old renderer
+                           state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                           state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                       } else {
+                           match tool_name {
+                               "str_replace" | "create" => {
+                                   // TUI: Show diff result block with yellow border (is_collapsed: None)
+                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                               }
+                               "run_command_task" => {
+                                   // TUI: bordered result block (is_collapsed: None)
+                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   // Full screen popup: full content without border (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
+                               "run_command" => {
+                                   // Use unified run command block with appropriate state
+                                   let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
+                                       .unwrap_or_else(|_| "command".to_string());
+                                   let run_state = if is_error {
+                                       crate::services::bash_block::RunCommandState::Error
+                                   } else if is_cancelled {
+                                       // Cancelled could be user rejection or actual cancellation
+                                       // Use Cancelled for now (user pressed ESC during execution)
+                                       crate::services::bash_block::RunCommandState::Cancelled
+                                   } else {
+                                       crate::services::bash_block::RunCommandState::Completed
+                                   };
+                                   state.messages.push(Message::render_run_command_block(
+                                       command,
+                                       Some(tool_call_result.result.clone()),
+                                       run_state,
+                                       None,
+                                   ));
+                                   // Full screen popup: full content (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
+                               _ => {
+                                   // TUI: collapsed command message - last 3 lines (is_collapsed: None)
+                                   state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
+                                   // Full screen popup: full content (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
                            }
-                          "run_command_task" => {
-                              // TUI: bordered result block (is_collapsed: None)
-                              state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
-                              // Full screen popup: full content without border (is_collapsed: Some(true))
-                              state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                          }
-                           _ => {
-                               // TUI: collapsed command message - last 3 lines (is_collapsed: None)
-                               state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
-                               // Full screen popup: full content (is_collapsed: Some(true))
-                               state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+
+                           // Handle file changes for the Changeset (only for non-cancelled/error)
+                           if !is_cancelled && !is_error {
+                               handle_tool_result(&mut state, tool_call_result.clone());
                            }
                        }
-
-                       // Handle file changes for the Changeset
-                       handle_tool_result(&mut state, tool_call_result.clone());
-                       }
+                       // Invalidate cache and scroll to bottom to show the result
+                       crate::services::message::invalidate_message_lines_cache(&mut state);
+                       state.stay_at_bottom = true;
                    }
                    if let InputEvent::ToggleMouseCapture = event {
                        #[cfg(unix)]
