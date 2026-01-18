@@ -30,26 +30,38 @@ pub fn handle_stream_tool_result(
     const INTERACTIVE_STALL_MARKER: &str = "__INTERACTIVE_STALL__";
     if progress.message.contains(INTERACTIVE_STALL_MARKER) {
         // Extract the message content (everything after the marker)
-        let mut stall_message = progress
+        let stall_message = progress
             .message
             .replace(INTERACTIVE_STALL_MARKER, "")
             .trim_start_matches(':')
             .trim()
             .to_string();
 
-        stall_message = format!(" {}", stall_message);
-
-        // Update the pending bash message to show stall warning
+        // Update the pending/running bash message to show stall warning
         if let Some(pending_id) = state.pending_bash_message_id {
             for msg in &mut state.messages {
                 if msg.id == pending_id {
-                    // Update to the stall warning variant
-                    if let crate::services::message::MessageContent::RenderPendingBorderBlock(
-                        tc,
-                        auto,
-                    ) = &msg.content
-                    {
-                        msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, stall_message.clone());
+                    // Update to the stall warning variant - handle both old and new block types
+                    match &msg.content {
+                        crate::services::message::MessageContent::RenderPendingBorderBlock(
+                            tc,
+                            auto,
+                        ) => {
+                            msg.content = crate::services::message::MessageContent::RenderPendingBorderBlockWithStallWarning(tc.clone(), *auto, format!(" {}", stall_message));
+                        }
+                        crate::services::message::MessageContent::RenderRunCommandBlock(
+                            command,
+                            result,
+                            _run_state,
+                        ) => {
+                            // Update to RunningWithStallWarning state
+                            msg.content = crate::services::message::MessageContent::RenderRunCommandBlock(
+                                command.clone(),
+                                result.clone(),
+                                crate::services::bash_block::RunCommandState::RunningWithStallWarning(stall_message.clone()),
+                            );
+                        }
+                        _ => {}
                     }
                     break;
                 }

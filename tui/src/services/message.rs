@@ -427,6 +427,17 @@ impl Message {
             is_collapsed: None,
         }
     }
+
+    /// Create a view file block message for the full screen popup (no borders)
+    /// Shows a compact display with file icon, "View", file path, and line count
+    pub fn render_view_file_block_popup(file_path: String, total_lines: usize) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content: MessageContent::RenderViewFileBlock(file_path, total_lines),
+            // is_collapsed: Some(true) means it shows in full screen popup only
+            is_collapsed: Some(true),
+        }
+    }
 }
 
 pub fn get_wrapped_plain_lines<'a>(
@@ -1176,11 +1187,28 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 width,
             );
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
             lines.extend(convert_to_owned_lines(borrowed));
+            // Add spacing after run command block
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
         }
         MessageContent::RenderViewFileBlock(file_path, total_lines) => {
-            let rendered =
-                crate::services::bash_block::render_view_file_block(file_path, *total_lines, width);
+            // Use no-border version for popup (is_collapsed: Some(true))
+            let rendered = if msg.is_collapsed == Some(true) {
+                crate::services::bash_block::render_view_file_block_no_border(
+                    file_path,
+                    *total_lines,
+                    width,
+                )
+            } else {
+                crate::services::bash_block::render_view_file_block(file_path, *total_lines, width)
+            };
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
         }
@@ -1768,11 +1796,20 @@ fn get_wrapped_message_lines_internal(
                 all_lines.extend(owned_lines);
             }
             MessageContent::RenderViewFileBlock(file_path, total_lines) => {
-                let rendered_lines = crate::services::bash_block::render_view_file_block(
-                    file_path,
-                    *total_lines,
-                    width,
-                );
+                // Use no-border version for popup (is_collapsed: Some(true))
+                let rendered_lines = if msg.is_collapsed == Some(true) {
+                    crate::services::bash_block::render_view_file_block_no_border(
+                        file_path,
+                        *total_lines,
+                        width,
+                    )
+                } else {
+                    crate::services::bash_block::render_view_file_block(
+                        file_path,
+                        *total_lines,
+                        width,
+                    )
+                };
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);

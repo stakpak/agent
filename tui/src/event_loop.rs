@@ -226,38 +226,63 @@ pub async fn run_tui(
                                    // Full screen popup: full content without border (is_collapsed: Some(true))
                                    state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
-                               "run_command" => {
-                                   // Use unified run command block with appropriate state
-                                   let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
-                                       .unwrap_or_else(|_| "command".to_string());
-                                   let run_state = if is_error {
-                                       crate::services::bash_block::RunCommandState::Error
-                                   } else if is_cancelled {
-                                       // Cancelled could be user rejection or actual cancellation
-                                       // Use Cancelled for now (user pressed ESC during execution)
-                                       crate::services::bash_block::RunCommandState::Cancelled
-                                   } else {
-                                       crate::services::bash_block::RunCommandState::Completed
-                                   };
-                                   state.messages.push(Message::render_run_command_block(
-                                       command,
-                                       Some(tool_call_result.result.clone()),
-                                       run_state,
-                                       None,
-                                   ));
-                                   // Full screen popup: full content (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                               }
-                               "read" | "view" | "read_file" => {
-                                   // View file tool - show compact view with file icon and line count
-                                   // Extract file path from tool call arguments
-                                   let file_path = crate::services::handlers::tool::extract_file_path_from_tool_call(&tool_call_result.call)
-                                       .unwrap_or_else(|| "file".to_string());
-                                   let total_lines = tool_call_result.result.lines().count();
-                                   state.messages.push(Message::render_view_file_block(file_path, total_lines));
-                                   // Full screen popup: full content (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
-                               }
+                                "run_command" => {
+                                    // Use unified run command block with appropriate state
+                                    let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
+                                        .unwrap_or_else(|_| "command".to_string());
+                                    let run_state = if is_error {
+                                        crate::services::bash_block::RunCommandState::Error
+                                    } else if is_cancelled {
+                                        // Cancelled could be user rejection or actual cancellation
+                                        // Use Cancelled for now (user pressed ESC during execution)
+                                        crate::services::bash_block::RunCommandState::Cancelled
+                                    } else {
+                                        crate::services::bash_block::RunCommandState::Completed
+                                    };
+
+                                    let run_cmd_msg = Message::render_run_command_block(
+                                        command,
+                                        Some(tool_call_result.result.clone()),
+                                        run_state,
+                                        None,
+                                    );
+                                    let popup_msg = Message::render_full_content_message(tool_call_result.clone());
+
+                                    // If shell is visible/running, insert cancelled block BEFORE the shell message
+                                    // so the order is: cancelled command -> shell box
+                                    if is_cancelled && state.shell_popup_visible {
+                                        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                                            // Find the position of the shell message
+                                            if let Some(pos) = state.messages.iter().position(|m| m.id == shell_msg_id) {
+                                                // Insert cancelled block and popup before shell message
+                                                state.messages.insert(pos, popup_msg);
+                                                state.messages.insert(pos, run_cmd_msg);
+                                            } else {
+                                                // Shell message not found, just push normally
+                                                state.messages.push(run_cmd_msg);
+                                                state.messages.push(popup_msg);
+                                            }
+                                        } else {
+                                            // No shell message ID, just push normally
+                                            state.messages.push(run_cmd_msg);
+                                            state.messages.push(popup_msg);
+                                        }
+                                    } else {
+                                        // Normal case: just push to the end
+                                        state.messages.push(run_cmd_msg);
+                                        state.messages.push(popup_msg);
+                                    }
+                                }
+                                "read" | "view" | "read_file" => {
+                                    // View file tool - show compact view with file icon and line count
+                                    // Extract file path from tool call arguments
+                                    let file_path = crate::services::handlers::tool::extract_file_path_from_tool_call(&tool_call_result.call)
+                                        .unwrap_or_else(|| "file".to_string());
+                                    let total_lines = tool_call_result.result.lines().count();
+                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines));
+                                    // Full screen popup: same compact view without borders
+                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines));
+                                }
                                _ => {
                                    // TUI: collapsed command message - last 3 lines (is_collapsed: None)
                                    state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));

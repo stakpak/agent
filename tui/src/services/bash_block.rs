@@ -1756,6 +1756,62 @@ pub fn render_view_file_block(
     vec![top_border, content_line, bottom_border]
 }
 
+/// Renders a compact view file block without borders (for full screen popup)
+/// Format: 📄 View path/to/file.rs - 123 lines
+pub fn render_view_file_block_no_border(
+    file_path: &str,
+    total_lines: usize,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 2 {
+        terminal_width - 2
+    } else {
+        40
+    };
+
+    let icon = "📄";
+    let title = "View";
+    let lines_text = format!("- {} lines", total_lines);
+
+    // Calculate display widths
+    let icon_width = calculate_display_width(icon);
+    let title_width = calculate_display_width(title);
+    let path_width = calculate_display_width(file_path);
+    let lines_text_width = calculate_display_width(&lines_text);
+
+    // Total content: icon + " " + title + " " + path + " " + lines_text
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+
+    // Check if we need to truncate the path
+    let (display_path, _display_path_width) = if total_content_width > content_width {
+        // Need to truncate path
+        let available_for_path = content_width
+            .saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+        let truncated = truncate_path_to_width(file_path, available_for_path);
+        let w = calculate_display_width(&truncated);
+        (truncated, w)
+    } else {
+        (file_path.to_string(), path_width)
+    };
+
+    let content_line = Line::from(vec![
+        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::from(" "),
+        Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::from(" "),
+        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::from(" "),
+        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+    ]);
+
+    vec![content_line]
+}
+
 /// Truncate a file path to fit within a given display width
 fn truncate_path_to_width(path: &str, max_width: usize) -> String {
     let path_width = calculate_display_width(path);
@@ -1795,6 +1851,8 @@ pub enum RunCommandState {
     Pending,
     /// Running state - command is executing (Yellow dot, "Running...")
     Running,
+    /// Running with stall warning - command may be waiting for input (Yellow dot, warning message)
+    RunningWithStallWarning(String),
     /// Completed successfully (Green dot)
     Completed,
     /// Failed/Error state (LightRed dot)
@@ -1851,14 +1909,34 @@ pub fn render_run_command_block(
     // Dot color and title suffix based on state
     // For error states, both dot and suffix text are LightRed
     // For running/skipped, both dot and suffix text are Yellow
-    let (dot_color, title_suffix, suffix_color) = match state {
-        RunCommandState::Pending => (term_color(Color::Reset), "", None),
-        RunCommandState::Running => (Color::Yellow, " - Running...", Some(Color::Yellow)),
-        RunCommandState::Completed => (Color::LightGreen, "", None),
-        RunCommandState::Error => (Color::LightRed, " - Errored", Some(Color::LightRed)),
-        RunCommandState::Cancelled => (Color::LightRed, " - Cancelled", Some(Color::LightRed)),
-        RunCommandState::Rejected => (Color::LightRed, " - Rejected", Some(Color::LightRed)),
-        RunCommandState::Skipped => (Color::Yellow, " - Skipped", Some(Color::Yellow)),
+    let (dot_color, title_suffix, suffix_color) = match &state {
+        RunCommandState::Pending => (term_color(Color::Reset), "".to_string(), None),
+        RunCommandState::Running => (
+            Color::Yellow,
+            " - Running...".to_string(),
+            Some(Color::Yellow),
+        ),
+        RunCommandState::RunningWithStallWarning(msg) => {
+            // Show the stall warning message in the title
+            (Color::Yellow, format!(" - {}", msg), Some(Color::Yellow))
+        }
+        RunCommandState::Completed => (Color::LightGreen, "".to_string(), None),
+        RunCommandState::Error => (
+            Color::LightRed,
+            " - Errored".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Cancelled => (
+            Color::LightRed,
+            " - Cancelled".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Rejected => (
+            Color::LightRed,
+            " - Rejected".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Skipped => (Color::Yellow, " - Skipped".to_string(), Some(Color::Yellow)),
     };
 
     // Title structure: "╭─" + "●" + " Run Command" + suffix + " " + dashes + "╮"
