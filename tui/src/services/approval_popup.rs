@@ -74,6 +74,8 @@ pub struct PopupService {
     is_maximized: bool,
     /// Per-tab scroll positions for smart scrolling
     tab_scroll_positions: Vec<Option<usize>>,
+    /// Cached input area for position calculation (to avoid recalculating every frame)
+    cached_input_area: Option<ratatui::layout::Rect>,
 }
 
 impl Default for PopupService {
@@ -92,6 +94,7 @@ impl PopupService {
             terminal_size: ratatui::layout::Rect::new(0, 0, 80, 24), // Default terminal size
             is_maximized: false,
             tab_scroll_positions: Vec::new(),
+            cached_input_area: None,
         }
     }
 
@@ -113,6 +116,7 @@ impl PopupService {
             terminal_size: term_rect,
             is_maximized: false,
             tab_scroll_positions: vec![None; tool_call_infos.len()],
+            cached_input_area: None,
         };
 
         // Create the popup with the actual content
@@ -288,17 +292,74 @@ impl PopupService {
     /// Update popup size when terminal is resized
     pub fn update_terminal_size(&mut self, new_size: ratatui::layout::Rect) {
         self.terminal_size = new_size;
+        // Position will be updated by update_position_for_input_area
+    }
 
-        // Recalculate popup size based on new terminal dimensions
-        let (width_percent, height_percent) =
-            self.calculate_dynamic_popup_size(&self.tool_calls, new_size);
+    /// Update popup position to be anchored at the bottom of the terminal
+    /// This positions the popup at the very bottom, overlaying the input area and hint
+    /// Uses caching to avoid expensive recalculations on every frame
+    pub fn update_position_for_input_area(
+        &mut self,
+        terminal_size: ratatui::layout::Rect,
+        input_area: ratatui::layout::Rect,
+    ) {
+        // Check if we need to recalculate (terminal size or input area changed)
+        let needs_recalc =
+            self.terminal_size != terminal_size || self.cached_input_area != Some(input_area);
+
+        if !needs_recalc {
+            return; // Position is already correct, skip expensive calculation
+        }
+
+        self.terminal_size = terminal_size;
+        self.cached_input_area = Some(input_area);
+
+        if self.is_maximized {
+            // Full screen when maximized - use absolute positioning
+            self.popup.config_mut().position = PopupPosition::Absolute {
+                x: 0,
+                y: 0,
+                width: terminal_size.width,
+                height: terminal_size.height,
+            };
+            return;
+        }
+
+        // Fallback to centered responsive if input_area is invalid (e.g., sessions dialog is open)
+        if input_area.width == 0 || input_area.height == 0 {
+            let (width_percent, height_percent) =
+                self.calculate_dynamic_popup_size(&self.tool_calls, terminal_size);
+            self.popup.config_mut().position = PopupPosition::Responsive {
+                width_percent,
+                height_percent,
+                min_width: 80,
+                min_height: 15,
+            };
+            return;
+        }
+
+        // Calculate the width to match the input area (full width minus margins)
+        let popup_width = input_area.width;
+        let left_margin = input_area.x;
+
+        // Bottom offset of 0 means the popup's bottom edge touches the terminal's bottom edge
+        let bottom_offset = 0u16;
+
+        // Calculate dynamic height based on content
+        let (_, height_percent) =
+            self.calculate_dynamic_popup_size(&self.tool_calls, terminal_size);
+
+        // Calculate actual height, but cap it so popup doesn't go above terminal top
+        let max_available_height = terminal_size.height; // Full terminal height available
+        let desired_height = (terminal_size.height as f32 * height_percent) as u16;
+        let popup_height = desired_height.min(max_available_height).max(15); // Minimum height of 15
 
         // Update the popup's position configuration
-        self.popup.config_mut().position = PopupPosition::Responsive {
-            width_percent,
-            height_percent,
-            min_width: 80,
-            min_height: 15,
+        self.popup.config_mut().position = PopupPosition::BottomAnchored {
+            left_margin,
+            bottom_offset,
+            width: popup_width,
+            height: popup_height,
         };
     }
 
@@ -563,6 +624,8 @@ impl PopupService {
             self.popup.set_selected_tab(self.selected_index);
             // Make sure the popup stays visible after recreation
             self.popup.show();
+            // Invalidate position cache so it gets recalculated on next render
+            self.cached_input_area = None;
         }
     }
 

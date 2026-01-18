@@ -171,6 +171,35 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
+    } else if state.approval_bar.is_visible() {
+        // Show approval bar hints
+        let spans_vec = if state.approval_bar.is_esc_pending() {
+            // After first ESC: show confirmation hint
+            vec![
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::styled(
+                    " show approval bar . ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled("Esc", Style::default().fg(Color::Red)),
+                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+            ]
+        } else {
+            // Normal approval bar hints
+            vec![
+                Span::styled("←→", Style::default().fg(Color::Cyan)),
+                Span::styled(" navigate . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Space", Style::default().fg(Color::Cyan)),
+                Span::styled(" toggle . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::styled(" accept all . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Esc", Style::default().fg(Color::Red)),
+                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+            ]
+        };
+        let hint =
+            Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
+        f.render_widget(hint, area);
     } else if !state.show_sessions_dialog && !state.is_dialog_open {
         let status_color = Color::DarkGray;
 

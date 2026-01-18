@@ -76,17 +76,9 @@ pub fn handle_esc_event(
         state.show_collapsed_messages = false;
         return;
     }
-    if state.approval_popup.is_visible() {
-        state.approval_popup.escape();
-        state.toggle_approved_message = false;
-    } else {
-        state.message_rejected_tools = state
-            .approval_popup
-            .get_approved_tool_calls()
-            .into_iter()
-            .cloned()
-            .collect();
-        state.message_approved_tools.clear();
+
+    // Common handling for rejection
+    if !state.approval_popup.is_visible() || state.approval_popup.is_visible() {
         state.message_tool_calls = None;
         state.tool_call_execution_order.clear();
         // Store the latest tool call for potential retry (only for run_command)
@@ -105,7 +97,7 @@ pub fn handle_esc_event(
             state,
             &channels,
             cancel_tx,
-            Some("Tell stakpak what to do differently".to_string()),
+            Some("Tool calls rejected".to_string()),
             true,
             None,
         );
@@ -173,7 +165,15 @@ pub fn handle_esc(
                     None,
                 ));
             } else {
-                // For other tools, use the old renderer
+                // For other tools, remove the pending block first
+                if let Ok(tool_call_uuid) = Uuid::parse_str(&tool_call.id) {
+                    state.messages.retain(|m| m.id != tool_call_uuid);
+                }
+                if let Some(pending_id) = state.pending_bash_message_id {
+                    state.messages.retain(|m| m.id != pending_id);
+                }
+
+                // Then add the rejected block
                 let truncated_command = extract_truncated_command_arguments(tool_call, None);
                 let title = get_command_type_name(tool_call);
                 let rendered_lines =
@@ -260,7 +260,7 @@ pub fn handle_show_confirmation_dialog(
     tool_call: stakpak_shared::models::integrations::openai::ToolCall,
     input_tx: &Sender<InputEvent>,
     output_tx: &Sender<OutputEvent>,
-    terminal_size: Size,
+    _terminal_size: Size,
 ) {
     if state.latest_tool_call.is_some() && state.show_shell_mode {
         return;
@@ -339,7 +339,11 @@ pub fn handle_show_confirmation_dialog(
     state.pending_bash_message_id = Some(message_id);
 
     state.dialog_command = Some(tool_call.clone());
-    state.is_dialog_open = true;
+    // Only set is_dialog_open if NOT using the new approval bar flow
+    // When toggle_approved_message is true, we use the approval bar instead
+    if !state.toggle_approved_message {
+        state.is_dialog_open = true;
+    }
     state.loading = false;
     state.dialog_focused = false;
 
@@ -373,6 +377,9 @@ pub fn handle_show_confirmation_dialog(
         } else {
             None
         };
+
+        // Set is_dialog_open so handle_esc can process the rejection
+        state.is_dialog_open = true;
 
         let _ = input_tx_clone.try_send(InputEvent::HandleReject(
             Some(message.to_string()),
@@ -422,10 +429,35 @@ pub fn handle_show_confirmation_dialog(
         vec![tool_call.clone()]
     };
 
-    // Tool call is pending - check if we should show popup first
-    use crate::services::approval_popup::PopupService;
+    // Tool call is pending - add to approval bar (inline approval)
     if !tool_calls.is_empty() && state.toggle_approved_message {
-        state.approval_popup = PopupService::new_with_tool_calls(tool_calls.clone(), terminal_size);
+        let was_empty = state.approval_bar.actions().is_empty();
+
+        // Only add tools that aren't already in the bar
+        for tc in tool_calls {
+            let already_in_bar = state
+                .approval_bar
+                .actions()
+                .iter()
+                .any(|a| a.tool_call.id == tc.id);
+            if !already_in_bar {
+                state.approval_bar.add_action(tc);
+            }
+        }
+
+        // If we just added tools to an empty bar, the first one's pending block
+        // is already displayed above. For subsequent tools added, we don't create
+        // new pending blocks - the bar navigation will handle switching between them.
+        if !was_empty {
+            // Remove the pending block we just created since it's not the selected one
+            if let Some(pending_id) = state.pending_bash_message_id {
+                state.messages.retain(|m| m.id != pending_id);
+                state.pending_bash_message_id = None;
+            }
+            // The bar already has a selected tool showing its pending block
+            // so we don't need to create another one
+            invalidate_message_lines_cache(state);
+        }
     }
 }
 

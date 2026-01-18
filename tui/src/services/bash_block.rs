@@ -1868,7 +1868,7 @@ pub enum RunCommandState {
 /// Renders a unified run command block with consistent appearance across all states.
 ///
 /// Layout:
-/// ```
+/// ```text
 /// ╭─● Run Command ──────────────────────────────────────╮
 /// │ $ command --args here wrapped nicely                │
 /// │   continuation of long command                      │

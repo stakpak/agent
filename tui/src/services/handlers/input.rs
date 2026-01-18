@@ -83,6 +83,76 @@ pub fn handle_input_submitted_event(
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
         return;
     }
+    // Handle approval bar submission (inline approval)
+    // Enter key: approve all pending tools and execute
+    if state.approval_bar.is_visible() {
+        use crate::app::ToolCallStatus;
+
+        // Update approved and rejected tool calls from bar (same pattern as approval_popup)
+        state.message_approved_tools = state
+            .approval_bar
+            .get_approved_tool_calls()
+            .into_iter()
+            .cloned()
+            .collect();
+        state.message_rejected_tools = state
+            .approval_bar
+            .get_rejected_tool_calls()
+            .into_iter()
+            .cloned()
+            .collect();
+
+        // Process tools in order using message_tool_calls (same pattern as approval_popup)
+        if let Some(tool_calls) = &state.message_tool_calls.clone() {
+            for tool_call in tool_calls {
+                let is_approved = state.message_approved_tools.contains(tool_call);
+                let status = if is_approved {
+                    ToolCallStatus::Approved
+                } else {
+                    ToolCallStatus::Rejected
+                };
+                state.tool_call_execution_order.push(tool_call.id.clone());
+                state
+                    .session_tool_calls_queue
+                    .insert(tool_call.id.clone(), status);
+            }
+
+            // Always execute the FIRST tool, regardless of which tab is selected
+            // User pressing Enter means "I'm done reviewing, start execution from the beginning"
+            if let Some(first_tool) = tool_calls.first() {
+                // Set dialog_command to the first tool for proper processing
+                state.dialog_command = Some(first_tool.clone());
+                state
+                    .session_tool_calls_queue
+                    .insert(first_tool.id.clone(), ToolCallStatus::Executed);
+
+                let is_approved = state.message_approved_tools.contains(first_tool);
+                if is_approved {
+                    // Update run_command block to Running state
+                    super::dialog::update_run_command_to_running(state, first_tool);
+                    let _ = output_tx.try_send(OutputEvent::AcceptTool(first_tool.clone()));
+                } else {
+                    // Fire handle reject - set is_dialog_open for handle_esc to work
+                    state.is_dialog_open = true;
+                    let _ = input_tx.try_send(InputEvent::HandleReject(
+                        Some("Tool call rejected".to_string()),
+                        true,
+                        None,
+                    ));
+                }
+            }
+        }
+
+        // Clear state (same as approval_popup)
+        state.message_tool_calls = None;
+        state.is_dialog_open = false;
+
+        // Clear the approval bar
+        state.approval_bar.clear();
+        return;
+    }
+
+    // Handle old approval popup (for backward compatibility)
     if state.approval_popup.is_visible() {
         // Update approved and rejected tool calls from popup
         state.message_approved_tools = state

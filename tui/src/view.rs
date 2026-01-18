@@ -86,6 +86,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Calculate shell popup height (goes above input)
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
+    // Calculate approval bar height
+    let approval_bar_height = state.approval_bar.calculate_height();
+
     // Hide input when shell popup is expanded (takes over input)
     let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
         0 // Hide input when popup is expanded
@@ -93,7 +96,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         input_height
     };
 
-    // Layout: [messages][loading_line][dialog_margin][dialog][shell_popup][input][dropdown][hint]
+    // Layout: [messages][loading_line][dialog_margin][dialog][shell_popup][approval_bar][input][dropdown][hint]
     let mut constraints = vec![
         Constraint::Min(1),    // messages
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
@@ -102,6 +105,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     ];
     if !state.show_sessions_dialog {
         constraints.push(Constraint::Length(shell_popup_height)); // shell popup (0 if hidden)
+        constraints.push(Constraint::Length(approval_bar_height)); // approval bar (0 if hidden)
         constraints.push(Constraint::Length(effective_input_height));
         constraints.push(Constraint::Length(dropdown_height));
     }
@@ -140,12 +144,19 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         width: 0,
         height: 0,
     };
+    let mut approval_bar_area = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
     let hint_area = chunks.last().copied().unwrap_or(message_area);
 
     if !state.show_sessions_dialog {
         shell_popup_area = chunks[4]; // Shell popup between dialog and input
-        input_area = chunks[5]; // Input after shell popup
-        dropdown_area = chunks.get(6).copied().unwrap_or(input_area);
+        approval_bar_area = chunks[5]; // Approval bar after shell popup
+        input_area = chunks[6]; // Input after approval bar
+        dropdown_area = chunks.get(7).copied().unwrap_or(input_area);
     }
 
     let message_area_width = padded_message_area.width as usize;
@@ -184,6 +195,16 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.shell_popup_visible && state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
     } else if !state.show_sessions_dialog {
+        // Render approval bar above input (if visible)
+        if state.approval_bar.is_visible() {
+            let padded_approval_bar_area = Rect {
+                x: approval_bar_area.x + 1,
+                y: approval_bar_area.y,
+                width: approval_bar_area.width.saturating_sub(2),
+                height: approval_bar_area.height,
+            };
+            state.approval_bar.render(f, padded_approval_bar_area);
+        }
         // Don't render input when sessions dialog is visible
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
@@ -209,6 +230,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     // Render approval popup to ensure it appears on top of everything
     if state.approval_popup.is_visible() {
+        // Update popup position to be anchored above the input area
+        state
+            .approval_popup
+            .update_position_for_input_area(f.area(), input_area);
         state.approval_popup.render(f, f.area());
     }
 

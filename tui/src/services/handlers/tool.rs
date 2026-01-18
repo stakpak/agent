@@ -618,3 +618,108 @@ pub fn extract_file_path_from_tool_call(tool_call: &ToolCall) -> Option<String> 
 
     None
 }
+
+// ========== Approval Bar Handlers ==========
+
+/// Handle approve all in approval bar
+pub fn handle_approval_bar_approve_all(state: &mut AppState) {
+    state.approval_bar.approve_all();
+}
+
+/// Handle reject all in approval bar
+pub fn handle_approval_bar_reject_all(state: &mut AppState) {
+    state.approval_bar.reject_all();
+}
+
+/// Handle select action by index (1-based)
+pub fn handle_approval_bar_select_action(state: &mut AppState, index: usize) {
+    let old_index = state.approval_bar.selected_index();
+    state.approval_bar.select_action(index);
+    if old_index != state.approval_bar.selected_index() {
+        update_pending_tool_display(state);
+    }
+}
+
+/// Handle approve selected action
+pub fn handle_approval_bar_approve_selected(state: &mut AppState) {
+    state.approval_bar.approve_selected();
+}
+
+/// Handle reject selected action
+pub fn handle_approval_bar_reject_selected(state: &mut AppState) {
+    state.approval_bar.reject_selected();
+}
+
+/// Handle toggle selected action (space key)
+pub fn handle_approval_bar_toggle_selected(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
+    state.approval_bar.toggle_selected();
+    // Update the display to reflect the new status
+    update_pending_tool_display(state);
+}
+
+/// Handle next action navigation (right arrow)
+pub fn handle_approval_bar_next_action(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
+    state.approval_bar.select_next();
+    update_pending_tool_display(state);
+}
+
+/// Handle prev action navigation (left arrow)
+pub fn handle_approval_bar_prev_action(state: &mut AppState, _input_tx: &Sender<InputEvent>) {
+    state.approval_bar.select_prev();
+    update_pending_tool_display(state);
+}
+
+/// Handle collapse/escape
+pub fn handle_approval_bar_collapse(state: &mut AppState) {
+    // Reject all pending tools and clear
+    state.approval_bar.reject_all();
+    state.approval_bar.clear();
+}
+
+/// Update the pending tool display in messages area based on selected tab
+fn update_pending_tool_display(state: &mut AppState) {
+    // Remove any existing pending tool block
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+
+    // Get the currently selected tool call
+    if let Some(action) = state.approval_bar.selected_action() {
+        let tool_call = &action.tool_call;
+        let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+
+        // Determine the approval state for display
+        let auto_approve = action.status == crate::services::approval_bar::ApprovalStatus::Approved;
+
+        // Create the appropriate pending block based on tool type
+        if tool_name == "run_command" {
+            let command = super::shell::extract_command_from_tool_call(tool_call)
+                .unwrap_or_else(|_| "unknown command".to_string());
+
+            let run_state = match action.status {
+                crate::services::approval_bar::ApprovalStatus::Approved => {
+                    crate::services::bash_block::RunCommandState::Pending // Still pending execution
+                }
+                crate::services::approval_bar::ApprovalStatus::Rejected => {
+                    crate::services::bash_block::RunCommandState::Rejected
+                }
+            };
+
+            let msg = Message::render_run_command_block(command, None, run_state, None);
+            state.pending_bash_message_id = Some(msg.id);
+            state.messages.push(msg);
+        } else {
+            // For other tools, use the standard pending block
+            let msg = Message::render_pending_border_block(tool_call.clone(), auto_approve, None);
+            state.pending_bash_message_id = Some(msg.id);
+            state.messages.push(msg);
+        }
+
+        // Update dialog_command to the selected tool
+        state.dialog_command = Some(tool_call.clone());
+    }
+
+    // Invalidate cache and scroll to bottom
+    invalidate_message_lines_cache(state);
+    state.stay_at_bottom = true;
+}
