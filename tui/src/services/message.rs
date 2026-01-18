@@ -518,7 +518,7 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
 
 // New function that does all the heavy processing once and caches the result
 pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Line<'static>> {
-    use crate::services::message_pattern::{process_checkpoint_patterns, spans_to_string};
+    use crate::services::message_pattern::spans_to_string;
 
     let all_lines: Vec<(Line, Style)> = get_wrapped_message_lines(messages, width);
 
@@ -528,13 +528,9 @@ pub fn get_processed_message_lines(messages: &[Message], width: usize) -> Vec<Li
 
     for (line, _style) in all_lines.iter() {
         let line_text = spans_to_string(line);
+        // Skip checkpoint_id lines entirely - don't display them in the TUI
         if line_text.contains("<checkpoint_id>") {
-            processed_lines.push(Line::from(""));
-            let processed = process_checkpoint_patterns(&[(line.clone(), Style::default())], width);
-            for (processed_line, _) in processed {
-                processed_lines.push(processed_line);
-            }
-            processed_lines.push(Line::from(""));
+            continue;
         } else {
             // local_context and rulebooks are stripped earlier in Plain message processing
             if line_text.trim() == "SPACING_MARKER" {
