@@ -1165,7 +1165,7 @@ SAFETY NOTES:
                             stall_notified = true;
                             // Send stall notification - don't require pattern matching for now
                             // Just notify that command is taking a while with no output
-                            let stall_msg = "__INTERACTIVE_STALL__: Command has no output for 5 seconds. if it's stuck use ctrl+r";
+                            let stall_msg = "__INTERACTIVE_STALL__: Running for 5s . ctrl+r to re-run in shell mode";
                             let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                                 progress_token: ProgressToken(NumberOrString::Number(0)),
                                 progress: 50.0,
