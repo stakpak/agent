@@ -458,7 +458,7 @@ impl PopupService {
 
         // Create popup configuration with tabs using responsive positioning
         let mut config = PopupConfig::new()
-            .title("Permission Required")
+            .title("Approval Required")
             .title_alignment(popup_widget::Alignment::Left)
             .title_style(
                 Style::default()
@@ -576,7 +576,7 @@ impl PopupService {
     /// Create an empty popup (used as placeholder)
     fn create_empty_popup() -> PopupWidget {
         let config = PopupConfig::new()
-            .title("Permission Required")
+            .title("Approval Required")
             .title_style(
                 Style::default()
                     .fg(Color::White)

@@ -5,7 +5,7 @@
 //!
 //! Design:
 //! ```text
-//! ┌─ Permission Required ────────────────────────────────────────────────────┐
+//! ┌─ Approval Required ──────────────────────────────────────────────────────┐
 //! │ ✓ Run Command   ✓ Create   ✓ Str Replace             space · ←→ · enter │
 //! └──────────────────────────────────────────────────────────────────────────┘
 //! ```
@@ -365,7 +365,7 @@ impl ApprovalBar {
         let num_content_lines = lines.len();
 
         // Title
-        let title = " Permission Required ";
+        let title = " Approval Required ";
         let title_len = title.len();
 
         // Top border with title

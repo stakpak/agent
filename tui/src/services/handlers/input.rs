@@ -29,6 +29,10 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
         }
         return; // Consume all input when popup is visible
     }
+    if state.approval_bar.is_visible() {
+        // Block all typing when approval bar is visible
+        return;
+    }
     if state.show_shortcuts_popup {
         // Handle search input for command palette / shortcuts
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchInputChanged(c));
@@ -48,6 +52,10 @@ pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Send
 
 /// Handle InputBackspace event - routes to appropriate handler based on popup state
 pub fn handle_input_backspace_event(state: &mut AppState, input_tx: &Sender<InputEvent>) {
+    if state.approval_bar.is_visible() {
+        // Block backspace when approval bar is visible
+        return;
+    }
     if state.show_shortcuts_popup {
         let _ = input_tx.try_send(InputEvent::CommandPaletteSearchBackspace);
         return;
