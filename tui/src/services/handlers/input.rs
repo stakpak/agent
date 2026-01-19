@@ -185,6 +185,11 @@ pub fn handle_input_submitted_event(
                     .insert(first_tool.id.clone(), ToolCallStatus::Executed);
 
                 let is_approved = state.message_approved_tools.contains(first_tool);
+
+                // Update the pending display to show the first tool (which is being executed)
+                // This ensures the UI shows the correct tool as "running", not the selected one
+                super::dialog::update_pending_tool_to_first(state, first_tool, is_approved);
+
                 if is_approved {
                     // Update run_command block to Running state
                     super::dialog::update_run_command_to_running(state, first_tool);

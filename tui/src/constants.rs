@@ -2,7 +2,7 @@
 pub const INTERACTIVE_COMMANDS: [&str; 2] = ["ssh", "sudo"];
 
 // ========== UI & Scrolling Constants ==========
-pub const SCROLL_LINES: usize = 3;
+pub const SCROLL_LINES: usize = 1;
 pub const SCROLL_BUFFER_LINES: usize = 2;
 pub const DROPDOWN_MAX_HEIGHT: usize = 8;
 pub const MAX_PASTE_CHAR_COUNT: usize = 1000;

@@ -719,7 +719,9 @@ fn update_pending_tool_display(state: &mut AppState) {
         state.dialog_command = Some(tool_call.clone());
     }
 
-    // Invalidate cache and scroll to bottom
+    // Invalidate cache so the new pending message is rendered
     invalidate_message_lines_cache(state);
-    state.stay_at_bottom = true;
+
+    // Don't auto-scroll - let user control scroll position
+    state.stay_at_bottom = false;
 }

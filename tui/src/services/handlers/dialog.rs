@@ -47,6 +47,44 @@ pub fn update_run_command_to_running(state: &mut AppState, tool_call: &ToolCall)
     }
 }
 
+/// Update the pending tool display to show the first tool (which is being executed)
+/// This ensures the UI shows the correct tool when execution starts, not the currently selected one
+pub fn update_pending_tool_to_first(
+    state: &mut AppState,
+    first_tool: &ToolCall,
+    is_approved: bool,
+) {
+    // Remove any existing pending tool block
+    if let Some(pending_id) = state.pending_bash_message_id {
+        state.messages.retain(|m| m.id != pending_id);
+    }
+
+    let tool_name = crate::utils::strip_tool_name(&first_tool.function.name);
+
+    // Create the appropriate pending block based on tool type
+    if tool_name == "run_command" {
+        let command = super::shell::extract_command_from_tool_call(first_tool)
+            .unwrap_or_else(|_| "unknown command".to_string());
+
+        let run_state = if is_approved {
+            crate::services::bash_block::RunCommandState::Running
+        } else {
+            crate::services::bash_block::RunCommandState::Rejected
+        };
+
+        let msg = Message::render_run_command_block(command, None, run_state, None);
+        state.pending_bash_message_id = Some(msg.id);
+        state.messages.push(msg);
+    } else {
+        // For other tools (str_replace, create, etc.), use the standard pending block
+        let msg = Message::render_pending_border_block(first_tool.clone(), is_approved, None);
+        state.pending_bash_message_id = Some(msg.id);
+        state.messages.push(msg);
+    }
+
+    invalidate_message_lines_cache(state);
+}
+
 /// Handle ESC event (routes to appropriate handler)
 pub fn handle_esc_event(
     state: &mut AppState,

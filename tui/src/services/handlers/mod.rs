@@ -165,6 +165,10 @@ pub fn update(
                             .insert(first_tool.id.clone(), crate::app::ToolCallStatus::Executed);
 
                         let is_approved = state.message_approved_tools.contains(first_tool);
+
+                        // Update the pending display to show the first tool (which is being executed)
+                        dialog::update_pending_tool_to_first(state, first_tool, is_approved);
+
                         if is_approved {
                             // Update run_command block to Running state
                             dialog::update_run_command_to_running(state, first_tool);

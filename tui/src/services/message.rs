@@ -660,12 +660,16 @@ pub fn get_wrapped_message_lines(
 
 /// Get the total number of cached lines without cloning.
 /// This is useful for scroll calculations where we only need the count.
+#[allow(dead_code)]
 pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
-    let cache_key = if state.shell_popup_visible {
-        width + 100000
-    } else {
-        width
-    };
+    // Use consistent cache key calculation with get_wrapped_message_lines_cached
+    let mut cache_key = width;
+    if state.shell_popup_visible {
+        cache_key += 100000;
+    }
+    if state.show_side_panel {
+        cache_key += 200000;
+    }
 
     if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
         && cached_key == cache_key
@@ -806,8 +810,8 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
         cache_key += 200000;
     }
 
-    if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
-        && cached_key == cache_key
+    if let Some((cached_key, cached_lines, _)) = &state.assembled_lines_cache
+        && *cached_key == cache_key
     {
         // Cache hit - return immediately without any processing
         return cached_lines.clone();

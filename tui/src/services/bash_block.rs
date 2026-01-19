@@ -980,14 +980,9 @@ pub fn render_bash_block(
     output: &str,
     _accepted: bool,
     terminal_width: usize,
-    is_auto_approved: bool,
+    _is_auto_approved: bool,
 ) -> Vec<Line<'static>> {
-    let (command, outside_title, mut bubble_title, colors) =
-        extract_bash_block_info(tool_call, output);
-
-    if is_auto_approved {
-        bubble_title = format!("{} - Auto-approved tool", bubble_title).to_string();
-    }
+    let (command, outside_title, bubble_title, colors) = extract_bash_block_info(tool_call, output);
 
     render_styled_block_ansi_to_tui(
         &command,

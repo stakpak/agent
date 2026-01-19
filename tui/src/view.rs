@@ -244,16 +244,18 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
 fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
-    // Ensure cache is populated and get all lines (returns reference to cached data)
-    let all_lines = get_wrapped_message_lines_cached(state, width);
-    let total_lines = all_lines.len();
+    let processed_lines = get_wrapped_message_lines_cached(state, width);
+    let total_lines = processed_lines.len();
 
     // Handle edge case where we have no content
     if total_lines == 0 {
+        let message_widget =
+            Paragraph::new(Vec::<Line>::new()).wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(message_widget, area);
         return;
     }
 
-    // Use consistent scroll calculation with buffer (matching update.rs)
+    // Use consistent scroll calculation with buffer
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Calculate scroll position - ensure it doesn't exceed max_scroll
@@ -263,9 +265,19 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         state.scroll.min(max_scroll)
     };
 
-    // Use Ratatui's built-in scroll - no manual slicing/cloning needed!
-    // The scroll() method efficiently skips lines during rendering.
-    let message_widget = Paragraph::new(all_lines).scroll((scroll as u16, 0));
+    // Create visible lines with pre-allocated capacity for better performance
+    let mut visible_lines = Vec::with_capacity(height);
+
+    for i in 0..height {
+        let line_index = scroll + i;
+        if line_index < processed_lines.len() {
+            visible_lines.push(processed_lines[line_index].clone());
+        } else {
+            visible_lines.push(Line::from(""));
+        }
+    }
+
+    let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
 }
 

@@ -6,8 +6,7 @@ use crate::app::AppState;
 use crate::constants::SCROLL_LINES;
 use crate::services::commands::filter_commands;
 use crate::services::message::{
-    get_cached_line_count, get_wrapped_collapsed_message_lines_cached,
-    get_wrapped_message_lines_cached,
+    get_wrapped_collapsed_message_lines_cached, get_wrapped_message_lines_cached,
 };
 
 /// Updates helper dropdown scroll position to keep selected item visible
@@ -330,12 +329,14 @@ fn handle_scroll_down(state: &mut AppState, message_area_height: usize, message_
             state.collapsed_messages_scroll = max_scroll;
         }
     } else {
-        // Use efficient cached line count (avoids cloning the vector)
-        let total_lines = get_cached_line_count(state, message_area_width).unwrap_or_else(|| {
+        // Use cached line count instead of recalculating every scroll
+        let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+            cached_lines.len()
+        } else {
             // Fallback: calculate once and cache
             let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
             all_lines.len()
-        });
+        };
 
         let max_scroll = total_lines.saturating_sub(message_area_height);
         if state.scroll + SCROLL_LINES < max_scroll {
@@ -375,12 +376,14 @@ pub fn handle_page_down(
     message_area_width: usize,
 ) {
     state.stay_at_bottom = false; // unlock from bottom
-    // Use efficient cached line count (avoids cloning the vector)
-    let total_lines = get_cached_line_count(state, message_area_width).unwrap_or_else(|| {
+    // Use cached line count instead of recalculating every page operation
+    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+        cached_lines.len()
+    } else {
         // Fallback: calculate once and cache
         let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
         all_lines.len()
-    });
+    };
 
     let max_scroll = total_lines.saturating_sub(message_area_height);
     let page = std::cmp::max(1, message_area_height);
@@ -403,12 +406,14 @@ pub fn handle_page_down(
 
 /// Adjust scroll position based on state
 pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    // Use efficient cached line count (avoids cloning the vector)
-    let total_lines = get_cached_line_count(state, message_area_width).unwrap_or_else(|| {
+    // Use cached line count instead of recalculating every adjustment
+    let total_lines = if let Some((_, _, cached_lines)) = &state.message_lines_cache {
+        cached_lines.len()
+    } else {
         // Fallback: calculate once and cache
         let all_lines = get_wrapped_message_lines_cached(state, message_area_width);
         all_lines.len()
-    });
+    };
 
     let max_scroll = total_lines.saturating_sub(message_area_height);
     if state.stay_at_bottom {
