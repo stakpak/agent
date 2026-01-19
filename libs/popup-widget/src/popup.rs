@@ -883,6 +883,7 @@ impl PopupWidget {
                 // For responsive positioning, use a reasonable default terminal width
                 (120.0 * width_percent) as usize
             }
+            PopupPosition::BottomAnchored { width, .. } => *width as usize,
         };
 
         // Calculate inner width based on popup width minus borders and padding

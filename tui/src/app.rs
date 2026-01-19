@@ -5,6 +5,7 @@ pub use events::{InputEvent, OutputEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
 pub use types::*;
 
+use crate::services::approval_bar::ApprovalBar;
 use crate::services::approval_popup::PopupService;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
@@ -129,6 +130,7 @@ pub struct AppState {
     pub dialog_message_id: Option<Uuid>,
     pub dialog_focused: bool,
     pub approval_popup: PopupService,
+    pub approval_bar: ApprovalBar,
     pub message_tool_calls: Option<Vec<ToolCall>>,
     pub message_approved_tools: Vec<ToolCall>,
     pub message_rejected_tools: Vec<ToolCall>,
@@ -386,6 +388,7 @@ impl AppState {
             has_user_messages: false,
             message_tool_calls: None,
             approval_popup: PopupService::new(),
+            approval_bar: ApprovalBar::new(),
             message_approved_tools: Vec::new(),
             message_rejected_tools: Vec::new(),
             toggle_approved_message: true,

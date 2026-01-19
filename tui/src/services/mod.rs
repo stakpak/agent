@@ -1,3 +1,4 @@
+pub mod approval_bar;
 pub mod approval_popup;
 pub mod auto_approve;
 pub mod bash_block;

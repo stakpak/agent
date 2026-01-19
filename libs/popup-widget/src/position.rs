@@ -26,6 +26,18 @@ pub enum PopupPosition {
         min_width: u16,
         min_height: u16,
     },
+    /// Bottom-anchored popup that sits above a specified bottom offset
+    /// Used for popups that should appear above the input area
+    BottomAnchored {
+        /// Horizontal margin from left edge (x position)
+        left_margin: u16,
+        /// Distance from the bottom of the terminal
+        bottom_offset: u16,
+        /// Width of the popup
+        width: u16,
+        /// Height of the popup
+        height: u16,
+    },
 }
 
 impl PopupPosition {
@@ -85,6 +97,25 @@ impl PopupPosition {
                     y,
                     width,
                     height,
+                }
+            }
+            PopupPosition::BottomAnchored {
+                left_margin,
+                bottom_offset,
+                width,
+                height,
+            } => {
+                // Position popup so its bottom edge is at (terminal_height - bottom_offset)
+                // The popup grows upward from the bottom
+                let y = terminal_size
+                    .height
+                    .saturating_sub(*bottom_offset)
+                    .saturating_sub(*height);
+                Rect {
+                    x: *left_margin,
+                    y,
+                    width: *width,
+                    height: *height,
                 }
             }
         }
