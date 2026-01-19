@@ -888,11 +888,12 @@ pub fn render_styled_header_and_borders(
 
 /// Render file diff for full screen popup - shows diff lines with context
 /// Uses the same diff-only approach as the TUI view for consistency
+/// Returns None if there's no diff to show (e.g., old_str not found)
 pub fn render_file_diff_full(
     tool_call: &ToolCall,
     terminal_width: usize,
     do_show: Option<bool>,
-) -> Vec<Line<'static>> {
+) -> Option<Vec<Line<'static>>> {
     // Get diff lines - use the truncated version which starts from first change
     // but we'll show all diff lines without truncation for the full screen view
     let (_truncated_diff_lines, full_diff_lines) =
@@ -900,15 +901,13 @@ pub fn render_file_diff_full(
 
     let title: String = get_command_type_name(tool_call);
 
-    // Use full diff lines for the fullscreen popup - no truncation needed here
-    let diff_content = if !full_diff_lines.is_empty() {
-        full_diff_lines
-    } else {
-        vec![]
-    };
+    // If diff is empty, return None to signal caller should use fallback rendering
+    if full_diff_lines.is_empty() {
+        return None;
+    }
 
-    if diff_content.is_empty() && !do_show.unwrap_or(false) {
-        return Vec::new();
+    if !do_show.unwrap_or(false) {
+        return Some(Vec::new());
     }
 
     // render header dot - don't show path since it's already in the diff content header line
@@ -927,15 +926,17 @@ pub fn render_file_diff_full(
         Some(terminal_width),
     ));
     result.push(spacing_marker.clone());
-    result.extend(diff_content);
+    result.extend(full_diff_lines);
+    result.push(spacing_marker); // Add spacing marker at the end
 
-    result
+    Some(result)
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
     let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
     if tool_name == "str_replace" || tool_name == "create" {
-        let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
+        // Use full diff (not truncated) for pending approval blocks
+        let (_, mut diff_lines) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
         if diff_lines.is_empty() {
@@ -1032,7 +1033,8 @@ pub fn render_markdown_block(
 
 /// Render str_replace/create results - clean diff view without borders
 /// Uses the same approach as fullscreen popup for consistency
-pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Vec<Line<'static>> {
+/// Returns None if there's no diff (fallback to standard result rendering)
+pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Option<Vec<Line<'static>>> {
     // Use the same clean diff rendering as the fullscreen popup
     render_file_diff_full(tool_call, width, Some(true))
 }
@@ -1059,10 +1061,32 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
         );
     }
 
-    // Handle str_replace/create with diff-only content and yellow borders
+    // Handle str_replace/create with diff-only content
+    // If render_diff_result_block returns None (no diff), fall through to standard rendering
     let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
     if tool_name == "str_replace" || tool_name == "create" {
-        return render_diff_result_block(&tool_call, width);
+        // Check for rejected/cancelled in result text
+        if result.contains("TOOL_CALL_REJECTED") {
+            return render_bash_block_rejected(
+                &command_args,
+                &title,
+                Some("Rejected by user".to_string()),
+                None,
+            );
+        }
+        if result.contains("TOOL_CALL_CANCELLED") {
+            return render_bash_block_rejected(
+                &command_args,
+                &title,
+                Some("Interrupted by user".to_string()),
+                None,
+            );
+        }
+
+        if let Some(diff_lines) = render_diff_result_block(&tool_call, width) {
+            return diff_lines;
+        }
+        // Fall through to standard result rendering if no diff
     }
 
     if command_args.contains(".md") && is_collapsed {
@@ -1483,7 +1507,7 @@ fn render_styled_header_with_dot(
 
     if wrapped_lines.len() <= 1 {
         // Single line - command fits on one line with title
-        result_lines.push(Line::from(vec![
+        let mut spans = vec![
             Span::styled(
                 "● ",
                 Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
@@ -1494,11 +1518,15 @@ fn render_styled_header_with_dot(
                     .fg(colors.title)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
+        ];
+        // Only add command in parentheses if it's not empty
+        if !command_name.is_empty() {
+            spans.push(Span::styled(
                 format!(" ({})", command_name),
                 Style::default().fg(colors.command),
-            ),
-        ]));
+            ));
+        }
+        result_lines.push(Line::from(spans));
     } else {
         // Multi-line - need to wrap
         // First line: title + start of command
@@ -1765,7 +1793,7 @@ pub fn render_view_file_block_no_border(
         40
     };
 
-    let icon = "Stack";
+    let icon = "";
     let title = "View";
     let lines_text = format!("- {} lines", total_lines);
 

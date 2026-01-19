@@ -13,7 +13,7 @@ pub fn preview_str_replace_editor_style(
     replace_all: bool,
     terminal_width: usize,
     diff_type: &str,
-) -> Result<(Vec<Line<'static>>, usize, usize, usize), std::io::Error> {
+) -> Result<(Vec<Line<'static>>, usize, usize, usize, usize), std::io::Error> {
     // Read the current file content
     let original_content = match diff_type {
         "str_replace" => fs::read_to_string(file_path)?,
@@ -37,6 +37,7 @@ pub fn preview_str_replace_editor_style(
     let mut deletions = 0;
     let mut insertions = 0;
     let mut first_change_index = None;
+    let mut last_change_index = 0usize;
 
     let mut old_line_num = 0;
     let mut new_line_num = 0;
@@ -167,6 +168,8 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
+                    // Track last change index (will be updated after adding lines)
+                    last_change_index = lines.len();
                     let prefix_width = 4 + 1 + 5 + 3; // old_num + space + empty + marker
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
@@ -242,6 +245,8 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
+                    // Track last change index (will be updated after adding lines)
+                    last_change_index = lines.len();
                     let prefix_width = 5 + 4 + 1 + 3; // empty + line_num + space + marker
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
@@ -318,6 +323,8 @@ pub fn preview_str_replace_editor_style(
                     }
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
+                    // Track last change index (will be updated after adding lines)
+                    last_change_index = lines.len();
                     let prefix_width = 4 + 1 + 5 + 3; // old_num + space + empty + marker
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
@@ -383,6 +390,8 @@ pub fn preview_str_replace_editor_style(
                     new_line_num += 1;
                     insertions += 1;
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
+                    // Track last change index (will be updated after adding lines)
+                    last_change_index = lines.len();
                     let prefix_width = 5 + 4 + 1 + 3; // empty + line_num + space + marker
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
 
@@ -446,11 +455,18 @@ pub fn preview_str_replace_editor_style(
         }
     }
 
+    // Update last_change_index to point to the last line (after all changes have been processed)
+    // It currently points to the start of the last change block, but we need the end
+    if !lines.is_empty() {
+        last_change_index = lines.len().saturating_sub(1);
+    }
+
     Ok((
         lines,
         deletions,
         insertions,
         first_change_index.unwrap_or(0),
+        last_change_index,
     ))
 }
 
@@ -458,116 +474,9 @@ pub fn render_file_diff_block(
     tool_call: &ToolCall,
     terminal_width: usize,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .unwrap_or_else(|_| serde_json::json!({}));
-
-    let old_str = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-    let new_str = if crate::utils::strip_tool_name(&tool_call.function.name) == "create" {
-        args.get("file_text").and_then(|v| v.as_str()).unwrap_or("")
-    } else {
-        args.get("new_str").and_then(|v| v.as_str()).unwrap_or("")
-    };
-    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-    let replace_all = args
-        .get("replace_all")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    // Now you can use these variables with preview_str_replace_editor_style
-    let (diff_lines, deletions, insertions, first_change_index) = preview_str_replace_editor_style(
-        path,
-        old_str,
-        new_str,
-        replace_all,
-        terminal_width,
-        crate::utils::strip_tool_name(&tool_call.function.name),
-    )
-    .unwrap_or_else(|_| (vec![Line::from("Failed to generate diff preview")], 0, 0, 0));
-
-    let mut lines = Vec::new();
-
-    if deletions == 0 && insertions == 0 {
-        return (vec![], vec![]);
-    }
-
-    // let title = if tool_call.function.name == "create" {
-    //     "Create"
-    // } else {
-    //     "Editing"
-    // };
-    // // Add header
-    // lines.push(Line::from(vec![Span::styled(
-    //     format!(
-    //         "{} {} file",
-    //         title,
-    //         if deletions > 0 || insertions > 0 {
-    //             "1"
-    //         } else {
-    //             "0"
-    //         }
-    //     )
-    //     .to_string(),
-    //     Style::default().fg(AdaptiveColors::text()),
-    // )]));
-
-    // Add file path with changes summary
-    lines.push(Line::from(vec![
-        Span::styled(
-            "1/1 ".to_string(),
-            Style::default().fg(AdaptiveColors::text()),
-        ),
-        Span::styled(
-            path.to_string(),
-            Style::default()
-                .fg(AdaptiveColors::text())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" +{}", insertions).to_string(),
-            Style::default().fg(Color::Green),
-        ),
-        Span::styled(
-            format!(" -{}", deletions).to_string(),
-            Style::default().fg(Color::Red),
-        ),
-    ]));
-
-    // lines.push(Line::from("")); // Empty line
-
-    let mut truncated_diff_lines;
-    let mut full_diff_lines = diff_lines.clone();
-
-    // Count how many lines we have from the first change to the end
-    let change_lines_count = diff_lines.len() - first_change_index;
-
-    if change_lines_count > 10 {
-        // Start from the first change line instead of first 3 lines
-        let change_lines = diff_lines[first_change_index..first_change_index + 10].to_vec();
-        let remaining_count = change_lines_count - 10;
-
-        // Add truncation message
-        let truncation_line = Line::from(vec![Span::styled(
-            format!(
-                "... truncated ({} more lines) . ctrl+t to review",
-                remaining_count
-            ),
-            Style::default().fg(Color::Yellow),
-        )]);
-
-        // Combine change lines + truncation message for truncated version
-        truncated_diff_lines = change_lines;
-        // truncated_diff_lines.push(Line::from(""));
-        truncated_diff_lines.push(truncation_line);
-    } else {
-        // Show all change lines
-        let change_lines = diff_lines[first_change_index..].to_vec();
-        truncated_diff_lines = change_lines;
-    }
-
-    truncated_diff_lines = [lines.clone(), truncated_diff_lines].concat();
-    full_diff_lines = [lines, full_diff_lines].concat();
-
-    (truncated_diff_lines, full_diff_lines)
+    // Use the same diff-only approach as render_file_diff_block_from_args
+    // This shows only the actual changes (old_str vs new_str), not the whole file
+    render_file_diff_block_from_args(tool_call, terminal_width)
 }
 
 /// Generate a diff directly from old_str and new_str without reading from file.
@@ -576,7 +485,7 @@ pub fn preview_diff_from_strings(
     old_str: &str,
     new_str: &str,
     terminal_width: usize,
-) -> (Vec<Line<'static>>, usize, usize, usize) {
+) -> (Vec<Line<'static>>, usize, usize, usize, usize) {
     // Create a line-by-line diff directly from the strings
     let diff = TextDiff::from_lines(old_str, new_str);
 
@@ -584,6 +493,7 @@ pub fn preview_diff_from_strings(
     let mut deletions = 0;
     let mut insertions = 0;
     let mut first_change_index = None;
+    let mut last_change_index = 0usize;
 
     let mut old_line_num = 0;
     let mut new_line_num = 0;
@@ -701,6 +611,7 @@ pub fn preview_diff_from_strings(
                     if first_change_index.is_none() {
                         first_change_index = Some(lines.len());
                     }
+                    last_change_index = lines.len();
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
                     let prefix_width = 4 + 1 + 5 + 3;
@@ -771,6 +682,7 @@ pub fn preview_diff_from_strings(
                     if first_change_index.is_none() {
                         first_change_index = Some(lines.len());
                     }
+                    last_change_index = lines.len();
 
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
                     let prefix_width = 5 + 4 + 1 + 3;
@@ -842,6 +754,7 @@ pub fn preview_diff_from_strings(
                     if first_change_index.is_none() {
                         first_change_index = Some(lines.len());
                     }
+                    last_change_index = lines.len();
 
                     let line_content = diff.old_slices()[old_range.start + idx].trim_end();
                     let prefix_width = 4 + 1 + 5 + 3;
@@ -908,6 +821,7 @@ pub fn preview_diff_from_strings(
                 for idx in 0..new_range.len() {
                     new_line_num += 1;
                     insertions += 1;
+                    last_change_index = lines.len();
                     let line_content = diff.new_slices()[new_range.start + idx].trim_end();
                     let prefix_width = 5 + 4 + 1 + 3;
                     let wrapped_content = wrap_content(line_content, terminal_width, prefix_width);
@@ -972,11 +886,17 @@ pub fn preview_diff_from_strings(
         }
     }
 
+    // Update last_change_index to point to the last line (after all changes have been processed)
+    if !lines.is_empty() {
+        last_change_index = lines.len().saturating_sub(1);
+    }
+
     (
         lines,
         deletions,
         insertions,
         first_change_index.unwrap_or(0),
+        last_change_index,
     )
 }
 
@@ -1004,7 +924,7 @@ pub fn render_file_diff_block_from_args(
     }
 
     // Generate diff directly from the strings
-    let (diff_lines, deletions, insertions, first_change_index) =
+    let (diff_lines, deletions, insertions, first_change_index, last_change_index) =
         preview_diff_from_strings(old_str, new_str, terminal_width);
 
     if deletions == 0 && insertions == 0 {
@@ -1032,14 +952,22 @@ pub fn render_file_diff_block_from_args(
         Span::styled(format!(" -{}", deletions), Style::default().fg(Color::Red)),
     ]));
 
-    let mut truncated_diff_lines;
-    let mut full_diff_lines = diff_lines.clone();
+    // Extract only the changed range (from first change to last change)
+    let change_range_end = (last_change_index + 1).min(diff_lines.len());
+    let full_change_lines = if first_change_index < change_range_end {
+        diff_lines[first_change_index..change_range_end].to_vec()
+    } else {
+        diff_lines.clone()
+    };
 
-    // Count how many lines we have from the first change to the end
-    let change_lines_count = diff_lines.len() - first_change_index;
+    let mut truncated_diff_lines;
+
+    // Count how many lines in the change range
+    let change_lines_count = full_change_lines.len();
 
     if change_lines_count > 10 {
-        let change_lines = diff_lines[first_change_index..first_change_index + 10].to_vec();
+        // Show first 10 lines of changes
+        let change_lines = full_change_lines[..10].to_vec();
         let remaining_count = change_lines_count - 10;
 
         let truncation_line = Line::from(vec![Span::styled(
@@ -1053,12 +981,12 @@ pub fn render_file_diff_block_from_args(
         truncated_diff_lines = change_lines;
         truncated_diff_lines.push(truncation_line);
     } else {
-        let change_lines = diff_lines[first_change_index..].to_vec();
-        truncated_diff_lines = change_lines;
+        // Show all change lines
+        truncated_diff_lines = full_change_lines.clone();
     }
 
     truncated_diff_lines = [lines.clone(), truncated_diff_lines].concat();
-    full_diff_lines = [lines, full_diff_lines].concat();
+    let full_diff_lines = [lines, full_change_lines].concat();
 
     (truncated_diff_lines, full_diff_lines)
 }

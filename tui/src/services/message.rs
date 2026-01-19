@@ -1081,12 +1081,12 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
         }
         MessageContent::RenderCollapsedMessage(tool_call) => {
             let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
-            if tool_name == "str_replace" || tool_name == "create" {
-                let rendered = render_file_diff_full(tool_call, width, Some(true));
-                if !rendered.is_empty() {
-                    let borrowed = get_wrapped_styled_block_lines(&rendered, width);
-                    lines.extend(convert_to_owned_lines(borrowed));
-                }
+            if (tool_name == "str_replace" || tool_name == "create")
+                && let Some(rendered) = render_file_diff_full(tool_call, width, Some(true))
+                && !rendered.is_empty()
+            {
+                let borrowed = get_wrapped_styled_block_lines(&rendered, width);
+                lines.extend(convert_to_owned_lines(borrowed));
             }
         }
         MessageContent::RenderCommandCollapsedResult(tool_call_result) => {
@@ -1668,13 +1668,14 @@ fn get_wrapped_message_lines_internal(
 
             MessageContent::RenderCollapsedMessage(tool_call) => {
                 let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
-                if tool_name == "str_replace" || tool_name == "create" {
-                    let rendered_lines = render_file_diff_full(tool_call, width, Some(true));
-                    if !rendered_lines.is_empty() {
-                        let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
-                        let owned_lines = convert_to_owned_lines(borrowed_lines);
-                        all_lines.extend(owned_lines);
-                    }
+                if (tool_name == "str_replace" || tool_name == "create")
+                    && let Some(rendered_lines) =
+                        render_file_diff_full(tool_call, width, Some(true))
+                    && !rendered_lines.is_empty()
+                {
+                    let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
+                    let owned_lines = convert_to_owned_lines(borrowed_lines);
+                    all_lines.extend(owned_lines);
                 }
             }
 
@@ -2100,7 +2101,9 @@ pub fn extract_command_purpose(command: &str, outside_title: &str) -> String {
 pub fn get_command_type_name(tool_call: &ToolCall) -> String {
     match crate::utils::strip_tool_name(&tool_call.function.name) {
         "create_file" => "Create file".to_string(),
+        "create" => "Create".to_string(),
         "edit_file" => "Edit file".to_string(),
+        "str_replace" => "Str Replace".to_string(),
         "run_command" => "Run command".to_string(),
         "read_file" => "Read file".to_string(),
         "delete_file" => "Delete file".to_string(),

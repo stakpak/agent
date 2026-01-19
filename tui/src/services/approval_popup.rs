@@ -831,7 +831,7 @@ impl PopupService {
             .unwrap_or(false);
 
         // Get the first change index from the diff
-        let (_, _, _, first_change_index) = preview_str_replace_editor_style(
+        let (_, _, _, first_change_index, _) = preview_str_replace_editor_style(
             path,
             old_str,
             new_str,

@@ -113,7 +113,8 @@ pub fn update(
 
     // Intercept keys for Approval Bar (inline approval)
     // Controls: ←→ navigate, Space toggle, Enter confirm all, Esc reject all
-    if state.approval_bar.is_visible() {
+    // Don't intercept if collapsed messages popup is showing
+    if state.approval_bar.is_visible() && !state.show_collapsed_messages {
         match event {
             InputEvent::HandleEsc => {
                 if !state.approval_bar.is_esc_pending() {

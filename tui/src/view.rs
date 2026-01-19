@@ -204,15 +204,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     // === POPUPS - rendered last to appear on top of side panel ===
 
-    // Render approval popup to ensure it appears on top of everything
-    if state.approval_popup.is_visible() {
-        // Update popup position to be anchored above the input area
-        state
-            .approval_popup
-            .update_position_for_input_area(f.area(), input_area);
-        state.approval_popup.render(f, f.area());
-    }
-
     // Render profile switcher
     if state.show_profile_switcher {
         crate::services::profile_switcher::render_profile_switcher_popup(f, state);
