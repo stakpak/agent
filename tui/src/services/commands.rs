@@ -536,6 +536,7 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.message_rejected_tools.clear();
     state.tool_call_execution_order.clear();
     state.session_tool_calls_queue.clear();
+    state.approval_bar.clear();
     state.toggle_approved_message = true;
 
     state.messages.clear();

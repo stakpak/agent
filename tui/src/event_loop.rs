@@ -181,7 +181,6 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-
                        crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_file_search_results();
                        terminal.draw(|f| view(f, &mut state))?;

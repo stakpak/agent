@@ -88,13 +88,12 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let approval_bar_visible = state.approval_bar.is_visible();
 
     // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
-    let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
-        0 // Hide input when popup is expanded
-    } else if approval_bar_visible {
-        0 // Hide input when approval bar is visible
-    } else {
-        input_height
-    };
+    let effective_input_height =
+        if (state.shell_popup_visible && state.shell_popup_expanded) || approval_bar_visible {
+            0
+        } else {
+            input_height
+        };
 
     // Hide dropdown when approval bar is visible
     let effective_dropdown_height = if approval_bar_visible {
@@ -103,12 +102,18 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         dropdown_height
     };
 
-    // Layout: [messages][loading_line][shell_popup][input][dropdown][hint]
-    // Note: approval bar is rendered inside messages area, right after last message
+    // Layout: [messages][loading_line][shell_popup][approval_bar][input][dropdown][hint]
+    let effective_approval_bar_height = if approval_bar_visible {
+        approval_bar_height
+    } else {
+        0
+    };
+
     let constraints = vec![
-        Constraint::Min(1),    // messages (includes approval bar when visible)
+        Constraint::Min(1),                                // messages
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
         Constraint::Length(shell_popup_height), // shell popup (0 if hidden)
+        Constraint::Length(effective_approval_bar_height), // approval bar (0 if hidden)
         Constraint::Length(effective_input_height), // input (0 when approval bar visible)
         Constraint::Length(effective_dropdown_height), // dropdown (0 when approval bar visible)
         Constraint::Length(hint_height), // hint
@@ -121,9 +126,10 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let message_area = chunks[0];
     let loading_area = chunks[1]; // Reserved line for loading indicator
     let shell_popup_area = chunks[2];
-    let input_area = chunks[3];
-    let dropdown_area = chunks[4];
-    let hint_area = chunks[5];
+    let approval_bar_area = chunks[3];
+    let input_area = chunks[4];
+    let dropdown_area = chunks[5];
+    let hint_area = chunks[6];
 
     // Create padded message area for content rendering
     let padded_message_area = Rect {
@@ -136,8 +142,7 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
-    // render_messages returns the y position after the last message line (for approval bar positioning)
-    let last_message_y = render_messages(
+    render_messages(
         f,
         state,
         padded_message_area,
@@ -145,20 +150,15 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
-    // Render approval bar right after the last message (if visible)
+    // Render approval bar in its dedicated area (if visible)
     if approval_bar_visible {
-        // Position approval bar with minimal gap (1 line spacing from last message)
-        let approval_bar_y = last_message_y.saturating_sub(1);
-        let approval_bar_render_area = Rect {
-            x: padded_message_area.x,
-            y: approval_bar_y,
-            width: padded_message_area.width,
-            height: approval_bar_height,
+        let padded_approval_bar_area = Rect {
+            x: approval_bar_area.x + 1,
+            y: approval_bar_area.y,
+            width: approval_bar_area.width.saturating_sub(2),
+            height: approval_bar_area.height,
         };
-        // Only render if there's room
-        if approval_bar_y + approval_bar_height <= message_area.y + message_area.height {
-            state.approval_bar.render(f, approval_bar_render_area);
-        }
+        state.approval_bar.render(f, padded_approval_bar_area);
     }
 
     // Render shell popup above input area (if visible)
@@ -250,15 +250,7 @@ fn calculate_input_lines(state: &AppState, width: usize) -> usize {
     state.text_area.desired_height(available_width as u16) as usize
 }
 
-/// Renders messages and returns the y position right after the last visible message line.
-/// This is used for positioning the approval bar.
-fn render_messages(
-    f: &mut Frame,
-    state: &mut AppState,
-    area: Rect,
-    width: usize,
-    height: usize,
-) -> u16 {
+fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize, height: usize) {
     f.render_widget(ratatui::widgets::Clear, area);
 
     // Ensure cache is populated and get all lines (returns reference to cached data)
@@ -267,7 +259,7 @@ fn render_messages(
 
     // Handle edge case where we have no content
     if total_lines == 0 {
-        return area.y;
+        return;
     }
 
     // Use consistent scroll calculation with buffer (matching update.rs)
@@ -282,13 +274,8 @@ fn render_messages(
 
     // Use Ratatui's built-in scroll - no manual slicing/cloning needed!
     // The scroll() method efficiently skips lines during rendering.
-    let message_widget = Paragraph::new(all_lines.clone()).scroll((scroll as u16, 0));
+    let message_widget = Paragraph::new(all_lines).scroll((scroll as u16, 0));
     f.render_widget(message_widget, area);
-
-    // Calculate the y position after the last visible message line
-    // visible_lines = min(total_lines - scroll, height)
-    let visible_lines = total_lines.saturating_sub(scroll).min(height);
-    area.y + visible_lines as u16
 }
 
 fn render_collapsed_messages_popup(f: &mut Frame, state: &mut AppState) {
