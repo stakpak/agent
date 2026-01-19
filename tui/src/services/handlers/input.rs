@@ -10,8 +10,9 @@ use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::clipboard_paste::{normalize_pasted_path, paste_image_to_temp_png};
 use crate::services::commands::{CommandContext, execute_command};
 use crate::services::file_search::handle_file_selection;
-use crate::services::helper_block::render_system_message;
-use crate::services::helper_block::{push_clear_message, push_error_message, push_styled_message};
+use crate::services::helper_block::{
+    push_clear_message, push_error_message, push_styled_message, render_system_message,
+};
 use crate::services::message::{BubbleColors, Message, MessageContent};
 use ratatui::style::{Color, Style};
 use stakpak_shared::models::llm::LLMTokenUsage;
@@ -71,13 +72,61 @@ pub fn handle_input_submitted_event(
         let _ = input_tx.try_send(InputEvent::ProfileSwitcherSelect);
         return;
     }
-    if state.show_shortcuts_popup
-        && state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Commands
-    {
-        // Execute the selected command
-        use super::tool::execute_command_palette_selection;
-        execute_command_palette_selection(state, input_tx, output_tx);
-        return;
+    if state.show_shortcuts_popup {
+        match state.shortcuts_popup_mode {
+            crate::app::ShortcutsPopupMode::Commands => {
+                // Execute the selected command
+                use super::tool::execute_command_palette_selection;
+                execute_command_palette_selection(state, input_tx, output_tx);
+                return;
+            }
+            crate::app::ShortcutsPopupMode::Sessions => {
+                // Select the session and resume it
+                if !state.sessions.is_empty() && state.session_selected < state.sessions.len() {
+                    let selected = &state.sessions[state.session_selected];
+                    let selected_id = selected.id.to_string();
+                    let selected_title = selected.title.clone();
+                    let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
+
+                    // Reset state for new session
+                    state.message_tool_calls = None;
+                    state.message_approved_tools.clear();
+                    state.message_rejected_tools.clear();
+                    state.tool_call_execution_order.clear();
+                    state.session_tool_calls_queue.clear();
+                    state.toggle_approved_message = true;
+                    state.messages.clear();
+                    state.scroll = 0;
+                    state.scroll_to_bottom = true;
+                    state.stay_at_bottom = true;
+                    crate::services::message::invalidate_message_lines_cache(state);
+
+                    // Reset usage
+                    state.total_session_usage = LLMTokenUsage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        total_tokens: 0,
+                        prompt_tokens_details: None,
+                    };
+                    state.current_message_usage = LLMTokenUsage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        total_tokens: 0,
+                        prompt_tokens_details: None,
+                    };
+
+                    render_system_message(
+                        state,
+                        &format!("Switching to session . {}", selected_title),
+                    );
+                    state.show_shortcuts_popup = false;
+                }
+                return;
+            }
+            crate::app::ShortcutsPopupMode::Shortcuts => {
+                // Shortcuts tab doesn't have enter action, just ignore
+            }
+        }
     }
     if state.show_rulebook_switcher {
         let _ = input_tx.try_send(InputEvent::RulebookSwitcherConfirm);
@@ -225,13 +274,9 @@ pub fn handle_input_submitted_event(
         return;
     }
 
-    // Sessions dialog takes priority over side panel
-    if state.show_sessions_dialog {
-        // Let handle_input_submitted process it
-    }
     // If side panel is visible and input is empty, Enter toggles the focused section
     // This is safe because empty input has nothing to submit anyway
-    else if state.show_side_panel && !state.is_dialog_open && state.text_area.text().is_empty() {
+    if state.show_side_panel && !state.is_dialog_open && state.text_area.text().is_empty() {
         let current = state
             .side_panel_section_collapsed
             .get(&state.side_panel_focus)
@@ -259,7 +304,7 @@ pub fn handle_input_submitted_event(
 pub fn handle_input_changed(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
     state.show_shortcuts = false;
 
-    if c == '$' && state.input().is_empty() && !state.show_sessions_dialog {
+    if c == '$' && state.input().is_empty() {
         state.text_area.set_text("");
         // Shell mode toggle will be handled by shell module
         use super::shell;
@@ -442,44 +487,7 @@ fn handle_input_submitted(
         return;
     }
 
-    if state.show_sessions_dialog {
-        let selected = &state.sessions[state.session_selected];
-        let selected_id = selected.id.to_string();
-        let selected_title = selected.title.clone();
-        let _ = output_tx.try_send(OutputEvent::SwitchToSession(selected_id));
-        state.message_tool_calls = None;
-        state.message_approved_tools.clear();
-        state.message_rejected_tools.clear();
-        state.tool_call_execution_order.clear();
-        state.session_tool_calls_queue.clear();
-        state.toggle_approved_message = true;
-        state.messages.clear();
-
-        // Reset scroll state to show bottom when messages are loaded
-        state.scroll = 0;
-        state.scroll_to_bottom = true;
-        state.stay_at_bottom = true;
-
-        // Invalidate caches
-        crate::services::message::invalidate_message_lines_cache(state);
-
-        // Reset usage for the switched session
-        state.total_session_usage = LLMTokenUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            prompt_tokens_details: None,
-        };
-        state.current_message_usage = LLMTokenUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            prompt_tokens_details: None,
-        };
-
-        render_system_message(state, &format!("Switching to session . {}", selected_title));
-        state.show_sessions_dialog = false;
-    } else if state.is_dialog_open {
+    if state.is_dialog_open {
         state.toggle_approved_message = true;
         state.approval_popup.toggle();
         state.is_dialog_open = true;

@@ -1,8 +1,9 @@
-//! Unified Commands & Shortcuts Popup
+//! Unified Commands, Shortcuts & Sessions Popup
 //!
 //! This module provides a unified popup with:
 //! - Commands section: Searchable and triggerable command palette items
 //! - Shortcuts section: Read-only keyboard shortcuts grouped by category
+//! - Sessions section: List of previous sessions to resume
 
 use ratatui::{
     Frame,
@@ -206,7 +207,7 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     };
 
     // Render title inside the popup
-    let title = " Commands & Shortcuts ";
+    let title = " Command Palette";
     let title_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
@@ -214,10 +215,11 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
     let title_paragraph = Paragraph::new(title_line);
 
     // Render tabs
-    let tab_titles = vec![" Commands ", " Shortcuts "];
+    let tab_titles = vec![" Commands ", " Shortcuts ", " Sessions "];
     let selected_tab = match state.shortcuts_popup_mode {
         ShortcutsPopupMode::Commands => 0,
         ShortcutsPopupMode::Shortcuts => 1,
+        ShortcutsPopupMode::Sessions => 2,
     };
     let tabs = Tabs::new(tab_titles)
         .select(selected_tab)
@@ -268,6 +270,28 @@ pub fn render_shortcuts_popup(f: &mut Frame, state: &mut crate::app::AppState) {
             f.render_widget(tabs, chunks[1]);
             // spacer at chunks[2] is empty
             render_shortcuts_section(f, state, chunks[3], chunks[4], chunks[5], chunks[6], area);
+        }
+        ShortcutsPopupMode::Sessions => {
+            // Sessions mode: Title, Tabs, Spacer, Search, Spacer2, Content, Scroll, Help
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Title
+                    Constraint::Length(1), // Tabs
+                    Constraint::Length(1), // Spacer
+                    Constraint::Length(1), // Search
+                    Constraint::Length(1), // Spacer between search and list
+                    Constraint::Min(3),    // Content (sessions list)
+                    Constraint::Length(1), // Scroll indicators
+                    Constraint::Length(1), // Help text
+                ])
+                .split(inner_area);
+
+            f.render_widget(title_paragraph, chunks[0]);
+            f.render_widget(tabs, chunks[1]);
+            // spacer at chunks[2] is empty
+            // spacer at chunks[4] is empty (between search and list)
+            render_sessions_section(f, state, chunks[3], chunks[5], chunks[6], chunks[7]);
         }
     }
 
@@ -650,6 +674,177 @@ fn render_shortcuts_section(
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
         Span::styled(" scroll", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("tab", Style::default().fg(Color::DarkGray)),
+        Span::styled(" switch", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(" close", Style::default().fg(Color::Cyan)),
+    ]));
+
+    f.render_widget(help, help_area);
+}
+
+fn render_sessions_section(
+    f: &mut Frame,
+    state: &mut crate::app::AppState,
+    search_area: Rect,
+    content_area: Rect,
+    scroll_area: Rect,
+    help_area: Rect,
+) {
+    // Render search input (reuse command_palette_search since tabs are mutually exclusive)
+    let search_term = &state.command_palette_search;
+    let search_prompt = ">";
+    let cursor = "|";
+    let placeholder = "Type to filter sessions";
+
+    let search_spans = if search_term.is_empty() {
+        vec![
+            Span::raw(" "),
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+        ]
+    } else {
+        vec![
+            Span::raw(" "),
+            Span::styled(search_prompt, Style::default().fg(Color::Magenta)),
+            Span::raw(" "),
+            Span::styled(
+                search_term.clone(),
+                Style::default()
+                    .fg(Color::Reset)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(cursor, Style::default().fg(Color::Cyan)),
+        ]
+    };
+
+    f.render_widget(Paragraph::new(Line::from(search_spans)), search_area);
+
+    // Filter sessions by search term
+    let search_lower = search_term.to_lowercase();
+    let filtered_sessions: Vec<(usize, &crate::app::SessionInfo)> = state
+        .sessions
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| search_term.is_empty() || s.title.to_lowercase().contains(&search_lower))
+        .collect();
+
+    let total_filtered = filtered_sessions.len();
+    let height = content_area.height as usize;
+
+    if filtered_sessions.is_empty() {
+        // Show empty state message
+        let empty_message = if state.sessions.is_empty() {
+            " No sessions available"
+        } else {
+            " No sessions match your search"
+        };
+        let empty_widget = Paragraph::new(Line::from(vec![Span::styled(
+            empty_message,
+            Style::default().fg(Color::DarkGray),
+        )]));
+        f.render_widget(empty_widget, content_area);
+        f.render_widget(Paragraph::new(""), scroll_area);
+    } else {
+        // Ensure session_selected is within bounds of filtered list
+        let selected_in_filtered = state.session_selected.min(total_filtered.saturating_sub(1));
+
+        // Calculate scroll position based on selected item
+        let max_scroll = total_filtered.saturating_sub(height);
+        let scroll = if selected_in_filtered >= height {
+            (selected_in_filtered - height + 1).min(max_scroll)
+        } else {
+            0
+        };
+
+        // Determine which sessions to show
+        let visible_end = (scroll + height).min(total_filtered);
+
+        let has_content_above = scroll > 0;
+        let has_content_below = visible_end < total_filtered;
+
+        // Build visible lines
+        let mut visible_lines: Vec<Line> = Vec::new();
+
+        // Add top arrow if there's content above
+        if has_content_above {
+            visible_lines.push(Line::from(vec![Span::styled(
+                " ▲",
+                Style::default().fg(Color::DarkGray),
+            )]));
+        }
+
+        // Create session items for visible range
+        for (_filtered_idx, (original_idx, session)) in filtered_sessions
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(height)
+        {
+            let formatted_datetime = if let Ok(dt) =
+                chrono::DateTime::parse_from_rfc3339(&session.updated_at.replace(" UTC", "+00:00"))
+            {
+                dt.format("%Y-%m-%d %H:%M").to_string()
+            } else {
+                let parts = session.updated_at.split('T').collect::<Vec<_>>();
+                let date = parts.first().unwrap_or(&"");
+                let time = parts.get(1).and_then(|t| t.split('.').next()).unwrap_or("");
+                format!("{} {}", date, time)
+            };
+
+            let text = format!(" {} . {}", formatted_datetime, session.title);
+            let is_selected = *original_idx == state.session_selected;
+
+            let (fg, bg) = if is_selected {
+                (Color::Black, Color::Cyan)
+            } else {
+                (Color::Reset, Color::Reset)
+            };
+
+            let style = if is_selected {
+                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(fg).bg(bg)
+            };
+
+            visible_lines.push(Line::from(vec![Span::styled(text, style)]));
+        }
+
+        let content_paragraph = Paragraph::new(visible_lines);
+        f.render_widget(content_paragraph, content_area);
+
+        // Scroll indicators - only show when there are hidden items
+        if has_content_above || has_content_below {
+            let mut indicator_spans = vec![];
+
+            // Show cumulative count: how many items visible from top up to bottom of visible area
+            let cumulative_count = visible_end;
+
+            indicator_spans.push(Span::styled(
+                format!(" ({}/{})", cumulative_count, total_filtered),
+                Style::default().fg(Color::Reset),
+            ));
+
+            if has_content_below {
+                indicator_spans.push(Span::styled(" ▼", Style::default().fg(Color::DarkGray)));
+            }
+
+            let indicator_paragraph = Paragraph::new(Line::from(indicator_spans));
+            f.render_widget(indicator_paragraph, scroll_area);
+        }
+    }
+
+    // Help text
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" ↑/↓", Style::default().fg(Color::DarkGray)),
+        Span::styled(" navigate", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("enter", Style::default().fg(Color::DarkGray)),
+        Span::styled(" select", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
         Span::styled("tab", Style::default().fg(Color::DarkGray)),
         Span::styled(" switch", Style::default().fg(Color::Cyan)),

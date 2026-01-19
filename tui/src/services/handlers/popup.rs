@@ -159,7 +159,6 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     // Clear dialog state
     state.is_dialog_open = false;
     state.dialog_command = None;
-    state.show_sessions_dialog = false;
     state.show_shortcuts = false;
     state.show_collapsed_messages = false;
     state.approval_popup = PopupService::new();
@@ -361,6 +360,19 @@ pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char
     if state.show_shortcuts_popup {
         state.command_palette_search.push(c);
         state.command_palette_selected = 0;
+        // Also reset session selection to first matching result
+        if state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_search.to_lowercase();
+            if let Some(first_match) = state
+                .sessions
+                .iter()
+                .enumerate()
+                .find(|(_, s)| s.title.to_lowercase().contains(&search_lower))
+                .map(|(i, _)| i)
+            {
+                state.session_selected = first_match;
+            }
+        }
     }
 }
 
@@ -369,6 +381,22 @@ pub fn handle_command_palette_search_backspace(state: &mut AppState) {
     if state.show_shortcuts_popup && !state.command_palette_search.is_empty() {
         state.command_palette_search.pop();
         state.command_palette_selected = 0;
+        // Also reset session selection to first matching result
+        if state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_search.to_lowercase();
+            if let Some(first_match) = state
+                .sessions
+                .iter()
+                .enumerate()
+                .find(|(_, s)| {
+                    state.command_palette_search.is_empty()
+                        || s.title.to_lowercase().contains(&search_lower)
+                })
+                .map(|(i, _)| i)
+            {
+                state.session_selected = first_match;
+            }
+        }
     }
 }
 

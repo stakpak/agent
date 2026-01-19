@@ -115,11 +115,12 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    // Handle tab switching in unified shortcuts popup
+    // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
     if state.show_shortcuts_popup {
         state.shortcuts_popup_mode = match state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
-            crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Commands,
+            crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
+            crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
         };
         return;
     }
@@ -257,7 +258,7 @@ pub fn handle_toggle_mouse_capture(state: &mut AppState) {
 
 /// Handle set sessions event
 pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::SessionInfo>) {
-    // Terminate any active shell before showing sessions dialog
+    // Terminate any active shell before showing sessions popup
     if let Some(cmd) = &state.active_shell_command {
         let _ = cmd.kill();
     }
@@ -274,7 +275,10 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.text_area.set_shell_mode(false);
 
     state.sessions = sessions;
-    state.show_sessions_dialog = true;
+    state.session_selected = 0; // Reset selection to first item
+    // Open unified popup at Sessions tab instead of separate sessions dialog
+    state.show_shortcuts_popup = true;
+    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
 /// Handle start loading operation event

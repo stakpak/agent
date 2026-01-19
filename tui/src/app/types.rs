@@ -154,12 +154,13 @@ pub enum ToolCallStatus {
     Pending,
 }
 
-/// Mode for the unified shortcuts/commands popup
+/// Mode for the unified shortcuts/commands/sessions popup
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ShortcutsPopupMode {
     #[default]
     Commands,
     Shortcuts,
+    Sessions,
 }
 
 #[derive(Debug)]
