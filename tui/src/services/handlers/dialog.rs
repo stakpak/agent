@@ -130,9 +130,7 @@ pub fn handle_esc(
     }
 
     state.is_streaming = false;
-    if state.show_sessions_dialog {
-        state.show_sessions_dialog = false;
-    } else if state.show_collapsed_messages {
+    if state.show_collapsed_messages {
         state.show_collapsed_messages = false;
     } else if state.show_helper_dropdown {
         state.show_helper_dropdown = false;

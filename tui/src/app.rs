@@ -135,9 +135,8 @@ pub struct AppState {
     pub toggle_approved_message: bool,
     pub show_shortcuts: bool,
 
-    // ========== Sessions Dialog State ==========
+    // ========== Sessions State ==========
     pub sessions: Vec<SessionInfo>,
-    pub show_sessions_dialog: bool,
     pub session_selected: usize,
     pub account_info: String,
 
@@ -314,7 +313,6 @@ impl AppState {
             loading_type: LoadingType::Llm,
             spinner_frame: 0,
             sessions: Vec::new(),
-            show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
             pending_bash_message_id: None,

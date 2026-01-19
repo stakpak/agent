@@ -184,8 +184,13 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
             if let Some(r) = result {
                 r.len().hash(&mut hasher);
             }
-            // Hash state as discriminant
+            // Hash state discriminant and inner value for stall warning
             std::mem::discriminant(state).hash(&mut hasher);
+            if let crate::services::bash_block::RunCommandState::RunningWithStallWarning(msg) =
+                state
+            {
+                msg.hash(&mut hasher);
+            }
         }
         MessageContent::RenderViewFileBlock(file_path, total_lines) => {
             17u8.hash(&mut hasher);
@@ -789,13 +794,17 @@ fn ensure_cache_populated(state: &mut AppState, width: usize) {
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
     // FAST PATH: If assembled cache exists and width matches, return it immediately.
     // The cache is explicitly invalidated when messages change, so if it exists, it's valid.
-    // We encode shell_popup_visible in the width by adding a large offset when true.
-    // This ensures the cache is invalidated when shell popup visibility changes.
-    let cache_key = if state.shell_popup_visible {
-        width + 100000
-    } else {
-        width
-    };
+    // We encode visibility states in the cache key to ensure cache invalidation when they change:
+    // - shell_popup_visible: adds 100000
+    // - show_side_panel: adds 200000
+    // This ensures the cache is invalidated when these visibility states change.
+    let mut cache_key = width;
+    if state.shell_popup_visible {
+        cache_key += 100000;
+    }
+    if state.show_side_panel {
+        cache_key += 200000;
+    }
 
     if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
         && cached_key == cache_key

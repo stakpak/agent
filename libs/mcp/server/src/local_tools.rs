@@ -1110,9 +1110,9 @@ SAFETY NOTES:
         let mut result = String::new();
         let progress_id = Uuid::new_v4();
 
-        // Stall detection: track last output time and whether we've sent stall notification
+        // Stall detection: track last output time and stall start time for incrementing counter
         let mut last_output_time = std::time::Instant::now();
-        let mut stall_notified = false;
+        let mut stall_start_time: Option<std::time::Instant> = None;
         const STALL_TIMEOUT_SECS: u64 = 5;
 
         // Helper function to stream output and wait for process completion
@@ -1127,7 +1127,7 @@ SAFETY NOTES:
                         Ok(Ok(0)) => break, // EOF
                         Ok(Ok(_)) => {
                             last_output_time = std::time::Instant::now();
-                            stall_notified = false;
+                            stall_start_time = None; // Reset stall tracking on output
                             let line = $buf.trim_end_matches('\n').to_string();
                             $buf.clear();
                             result.push_str(&format!("{}\n", line));
@@ -1161,18 +1161,26 @@ SAFETY NOTES:
 
                     _ = stall_check_interval.tick() => {
                         // Check for stall condition: no output for 5 seconds
-                        if !stall_notified && last_output_time.elapsed().as_secs() >= STALL_TIMEOUT_SECS {
-                            stall_notified = true;
-                            // Send stall notification - don't require pattern matching for now
-                            // Just notify that command is taking a while with no output
-                            let stall_msg = "__INTERACTIVE_STALL__: Running for 5s . ctrl+r to re-run in shell mode";
+                        let elapsed_since_output = last_output_time.elapsed().as_secs();
+                        if elapsed_since_output >= STALL_TIMEOUT_SECS {
+                            // Initialize stall start time on first detection
+                            if stall_start_time.is_none() {
+                                stall_start_time = Some(std::time::Instant::now());
+                            }
+
+                            // Calculate running time (stall duration + initial 5s threshold)
+                            let stall_duration = stall_start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+                            let running_secs = STALL_TIMEOUT_SECS + stall_duration;
+
+                            // Send stall notification with incrementing counter
+                            let stall_msg = format!("__INTERACTIVE_STALL__: Running for {}s . ctrl+r to re-run in shell mode", running_secs);
                             let _ = ctx.peer.notify_progress(ProgressNotificationParam {
                                 progress_token: ProgressToken(NumberOrString::Number(0)),
                                 progress: 50.0,
                                 total: Some(100.0),
                                 message: Some(serde_json::to_string(&ToolCallResultProgress {
                                     id: progress_id,
-                                    message: stall_msg.to_string(),
+                                    message: stall_msg,
                                 }).unwrap_or_default()),
                             }).await;
                         }

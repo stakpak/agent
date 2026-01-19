@@ -28,7 +28,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
+    if state.show_shell_mode && !state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
             Style::default().fg(AdaptiveColors::dark_magenta()),
@@ -48,7 +48,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget =
             Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
+    } else if !state.is_dialog_open && state.input().is_empty() {
         let context_info = state
             .llm_model
             .as_ref()
@@ -171,7 +171,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-    } else if !state.show_sessions_dialog && !state.is_dialog_open {
+    } else if !state.is_dialog_open {
         let status_color = Color::DarkGray;
 
         // detect if terminal is vscode
