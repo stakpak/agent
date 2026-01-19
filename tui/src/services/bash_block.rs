@@ -898,10 +898,6 @@ pub fn render_file_diff_full(
     let (_truncated_diff_lines, full_diff_lines) =
         render_file_diff_block_from_args(tool_call, terminal_width);
 
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .unwrap_or_else(|_| serde_json::json!({}));
-    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-
     let title: String = get_command_type_name(tool_call);
 
     // Use full diff lines for the fullscreen popup - no truncation needed here
@@ -915,13 +911,13 @@ pub fn render_file_diff_full(
         return Vec::new();
     }
 
-    // render header dot
+    // render header dot - don't show path since it's already in the diff content header line
     let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
 
     let mut result = vec![spacing_marker.clone()];
     result.extend(render_styled_header_with_dot(
         &title,
-        path,
+        "", // Hide path here - it's shown in the diff content below
         Some(LinesColors {
             dot: Color::LightGreen,
             title: Color::White,
@@ -1681,7 +1677,7 @@ pub fn render_collapsed_command_message(
 }
 
 /// Renders a compact view file result block with borders
-/// Format: 📄 View path/to/file.rs - 123 lines
+/// Format: View path/to/file.rs - 123 lines
 pub fn render_view_file_block(
     file_path: &str,
     total_lines: usize,
@@ -1695,7 +1691,7 @@ pub fn render_view_file_block(
     let inner_width = content_width;
 
     let border_color = Color::DarkGray;
-    let icon = "📄";
+    let icon = "";
     let title = "View";
     let lines_text = format!("- {} lines", total_lines);
 
@@ -1757,7 +1753,7 @@ pub fn render_view_file_block(
 }
 
 /// Renders a compact view file block without borders (for full screen popup)
-/// Format: 📄 View path/to/file.rs - 123 lines
+/// Format: Stack View path/to/file.rs - 123 lines
 pub fn render_view_file_block_no_border(
     file_path: &str,
     total_lines: usize,
@@ -1769,7 +1765,7 @@ pub fn render_view_file_block_no_border(
         40
     };
 
-    let icon = "📄";
+    let icon = "Stack";
     let title = "View";
     let lines_text = format!("- {} lines", total_lines);
 
