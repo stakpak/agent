@@ -313,7 +313,7 @@ fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, St
 
     let mut lines = Vec::new();
     let accent_color = Color::DarkGray;
-    let text_color = Color::Reset;
+    let text_color = AdaptiveColors::user_text();
 
     // The bar takes 2 chars "┃ ", so content width is width - 2
     let content_width = width.saturating_sub(2).max(10);
@@ -1053,6 +1053,11 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             for line in borrowed_lines {
                 lines.push((convert_line_to_owned(line), *style));
             }
+            // Add extra space after assistant message
+            lines.push((
+                Line::from(vec![Span::from("SPACING_MARKER")]),
+                Style::default(),
+            ));
         }
         MessageContent::Plain(text, style) => {
             let mut cleaned = text.to_string();

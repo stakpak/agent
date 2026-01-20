@@ -85,7 +85,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 left_spans.push(Span::styled(
                     format!("{} {}", spinner, spinner_text),
                     Style::default()
-                        .fg(Color::LightRed)
+                        .fg(AdaptiveColors::orange())
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 ));
 
