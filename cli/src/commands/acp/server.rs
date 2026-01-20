@@ -1587,9 +1587,7 @@ impl acp::Agent for StakpakAcpAgent {
             // Validate the API key format
             if !api_key.starts_with("stkpk_api") {
                 log::error!("Invalid API key format received");
-                return Err(
-                    acp::Error::auth_required().data("Invalid API key format".to_string())
-                );
+                return Err(acp::Error::auth_required().data("Invalid API key format".to_string()));
             }
 
             // Save the API key to config
@@ -1637,9 +1635,8 @@ impl acp::Agent for StakpakAcpAgent {
         // Check if we have a valid API key
         // First check in-memory config, then reload from disk (in case authenticate() saved a new key),
         // finally check environment variable
-        let has_api_key = self.config.api_key.is_some()
-            || std::env::var("STAKPAK_API_KEY").is_ok()
-            || {
+        let has_api_key =
+            self.config.api_key.is_some() || std::env::var("STAKPAK_API_KEY").is_ok() || {
                 // Try to reload config from disk to pick up newly saved API key from authenticate()
                 match crate::config::AppConfig::load(&self.config.profile_name, None::<&str>) {
                     Ok(fresh_config) => {
