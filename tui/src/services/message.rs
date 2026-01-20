@@ -276,31 +276,33 @@ pub struct Message {
     pub is_collapsed: Option<bool>,
 }
 
-/// Strip <local_context>...</local_context> and <rulebooks>...</rulebooks> blocks from user message display
+/// Tags to strip from user message display
+const HIDDEN_XML_TAGS: &[&str] = &["local_context", "rulebooks", "agent_mode", "agents_md"];
+
+/// Strip XML-style blocks from text (e.g., <tag>...</tag>)
+fn strip_xml_block(text: &mut String, tag: &str) {
+    let open_tag = format!("<{}>", tag);
+    let close_tag = format!("</{}>", tag);
+
+    while let Some(start) = text.find(&open_tag) {
+        if let Some(end) = text.find(&close_tag) {
+            let end_pos = end + close_tag.len();
+            *text = format!("{}{}", &text[..start], &text[end_pos..]);
+        } else {
+            break;
+        }
+    }
+}
+
+/// Strip hidden XML blocks from user message display
 fn strip_context_blocks(text: &str) -> String {
     let mut result = text.to_string();
 
-    // Strip <local_context>...</local_context> blocks
-    while let Some(start) = result.find("<local_context>") {
-        if let Some(end) = result.find("</local_context>") {
-            let end_pos = end + "</local_context>".len();
-            result = format!("{}{}", &result[..start], &result[end_pos..]);
-        } else {
-            break;
-        }
+    for tag in HIDDEN_XML_TAGS {
+        strip_xml_block(&mut result, tag);
     }
 
-    // Strip <rulebooks>...</rulebooks> blocks
-    while let Some(start) = result.find("<rulebooks>") {
-        if let Some(end) = result.find("</rulebooks>") {
-            let end_pos = end + "</rulebooks>".len();
-            result = format!("{}{}", &result[..start], &result[end_pos..]);
-        } else {
-            break;
-        }
-    }
-
-    // Trim leading/trailing whitespace and collapse multiple newlines
+    // Trim leading/trailing whitespace
     result.trim().to_string()
 }
 
