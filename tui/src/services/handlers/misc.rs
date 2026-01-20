@@ -55,15 +55,7 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
 /// Handle resized event
 pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
-    let old_terminal_size = state.terminal_size;
     state.terminal_size = Size { width, height };
-
-    // Recreate the approval popup if it's visible and terminal size changed
-    if state.approval_popup.is_visible() && old_terminal_size != state.terminal_size {
-        state
-            .approval_popup
-            .recreate_with_terminal_size(state.terminal_size);
-    }
 
     // Resize shell parser
     // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)

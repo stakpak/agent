@@ -22,14 +22,11 @@ use uuid::Uuid;
 
 /// Handle InputChanged event - routes to appropriate handler based on popup state
 pub fn handle_input_changed_event(state: &mut AppState, c: char, input_tx: &Sender<InputEvent>) {
-    if state.approval_popup.is_visible() {
+    if state.approval_bar.is_visible() {
         if c == ' ' {
-            state.approval_popup.toggle_approval_status();
+            state.approval_bar.toggle_selected();
             return;
         }
-        return; // Consume all input when popup is visible
-    }
-    if state.approval_bar.is_visible() {
         // Block all typing when approval bar is visible
         return;
     }
@@ -146,7 +143,7 @@ pub fn handle_input_submitted_event(
     if state.approval_bar.is_visible() {
         use crate::app::ToolCallStatus;
 
-        // Update approved and rejected tool calls from bar (same pattern as approval_popup)
+        // Update approved and rejected tool calls from bar
         state.message_approved_tools = state
             .approval_bar
             .get_approved_tool_calls()
@@ -160,7 +157,7 @@ pub fn handle_input_submitted_event(
             .cloned()
             .collect();
 
-        // Process tools in order using message_tool_calls (same pattern as approval_popup)
+        // Process tools in order using message_tool_calls
         if let Some(tool_calls) = &state.message_tool_calls.clone() {
             for tool_call in tool_calls {
                 let is_approved = state.message_approved_tools.contains(tool_call);
@@ -206,85 +203,12 @@ pub fn handle_input_submitted_event(
             }
         }
 
-        // Clear state (same as approval_popup)
+        // Clear state
         state.message_tool_calls = None;
         state.is_dialog_open = false;
 
         // Clear the approval bar
         state.approval_bar.clear();
-        return;
-    }
-
-    // Handle old approval popup (for backward compatibility)
-    if state.approval_popup.is_visible() {
-        // Update approved and rejected tool calls from popup
-        state.message_approved_tools = state
-            .approval_popup
-            .get_approved_tool_calls()
-            .into_iter()
-            .cloned()
-            .collect();
-        state.message_rejected_tools = state
-            .approval_popup
-            .get_rejected_tool_calls()
-            .into_iter()
-            .cloned()
-            .collect();
-
-        // Create tools_status maintaining the original order from message_tool_calls
-        use crate::app::ToolCallStatus;
-        use stakpak_shared::models::integrations::openai::ToolCall;
-        if let Some(tool_calls) = &state.message_tool_calls {
-            let tools_status: Vec<(ToolCall, bool)> = tool_calls
-                .iter()
-                .map(|tool_call| {
-                    let is_approved = state.message_approved_tools.contains(tool_call);
-                    let is_rejected = state.message_rejected_tools.contains(tool_call);
-                    let status = if is_approved {
-                        ToolCallStatus::Approved
-                    } else {
-                        ToolCallStatus::Rejected
-                    };
-                    state.tool_call_execution_order.push(tool_call.id.clone());
-                    state
-                        .session_tool_calls_queue
-                        .insert(tool_call.id.clone(), status);
-                    (tool_call.clone(), is_approved && !is_rejected)
-                })
-                .collect();
-
-            // Get the first tool from the ordered list
-            if let Some((first_tool, is_approved)) = tools_status.first() {
-                // Compare with dialog_command to determine action
-                if let Some(dialog_command) = state.dialog_command.clone()
-                    && first_tool == &dialog_command
-                {
-                    state
-                        .session_tool_calls_queue
-                        .insert(dialog_command.id.clone(), ToolCallStatus::Executed);
-                    if *is_approved {
-                        // Update run_command block to Running state before execution starts
-                        super::dialog::update_run_command_to_running(state, &dialog_command);
-                        // Fire accept tool
-                        let _ = output_tx.try_send(OutputEvent::AcceptTool(dialog_command.clone()));
-                    } else {
-                        // Fire handle reject with message
-                        let _ = input_tx.try_send(InputEvent::HandleReject(
-                            Some("Tool call rejected".to_string()),
-                            true,
-                            None,
-                        ));
-                    }
-                }
-            }
-        }
-
-        // Clear message_tool_calls to prevent further ShowConfirmationDialog calls
-        // This prevents the race condition where individual tool calls try to show dialogs
-        state.message_tool_calls = None;
-        state.is_dialog_open = false;
-
-        state.approval_popup.escape();
         return;
     }
 
@@ -503,7 +427,6 @@ fn handle_input_submitted(
 
     if state.is_dialog_open {
         state.toggle_approved_message = true;
-        state.approval_popup.toggle();
         state.is_dialog_open = true;
         state.dialog_selected = 0;
         state.dialog_focused = false;
@@ -1095,20 +1018,20 @@ pub fn handle_input_cursor_next_word(state: &mut AppState) {
         .set_cursor(state.text_area.end_of_next_word());
 }
 
-/// Handle cursor left movement (with approval popup check)
+/// Handle cursor left movement (with approval bar check)
 pub fn handle_cursor_left(state: &mut AppState) {
-    if state.approval_popup.is_visible() {
-        state.approval_popup.prev_tab();
-        return; // Event was consumed by popup
+    if state.approval_bar.is_visible() {
+        state.approval_bar.select_prev();
+        return; // Event was consumed by approval bar
     }
     state.text_area.move_cursor_left();
 }
 
-/// Handle cursor right movement (with approval popup check)
+/// Handle cursor right movement (with approval bar check)
 pub fn handle_cursor_right(state: &mut AppState) {
-    if state.approval_popup.is_visible() {
-        state.approval_popup.next_tab();
-        return; // Event was consumed by popup
+    if state.approval_bar.is_visible() {
+        state.approval_bar.select_next();
+        return; // Event was consumed by approval bar
     }
     state.text_area.move_cursor_right();
 }

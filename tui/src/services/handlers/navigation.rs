@@ -179,11 +179,6 @@ pub fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
-    // Check if approval popup is visible and should consume the event
-    if state.approval_popup.is_visible() {
-        state.approval_popup.scroll_up();
-        return; // Event was consumed by popup
-    }
 
     // Handle different UI states
     if state.show_helper_dropdown {
@@ -270,11 +265,7 @@ pub fn handle_down_navigation(
         } else {
             state.rulebook_switcher_selected = 0;
         }
-    }
-    // Check if approval popup is visible and should consume the event
-    if state.approval_popup.is_visible() {
-        state.approval_popup.scroll_down();
-        return; // Event was consumed by popup
+        return;
     }
 
     // Handle different UI states

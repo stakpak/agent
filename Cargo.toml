@@ -30,7 +30,6 @@ stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.14" }
 stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.14" }
 stakpak-tui = { path = "tui", version = "0.3.14" }
 stakpak-shared = { path = "libs/shared", version = "0.3.14" }
-popup-widget = { package = "stakpak-popup-widget", path = "libs/popup-widget", version = "0.3.14" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }

@@ -5584,14 +5584,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "stakpak-popup-widget"
-version = "0.3.14"
-dependencies = [
- "crossterm 0.29.0",
- "ratatui",
-]
-
-[[package]]
 name = "stakpak-shared"
 version = "0.3.14"
 dependencies = [
@@ -5659,7 +5651,6 @@ dependencies = [
  "shlex",
  "similar",
  "stakpak-api",
- "stakpak-popup-widget",
  "stakpak-shared",
  "syntect",
  "tempfile",

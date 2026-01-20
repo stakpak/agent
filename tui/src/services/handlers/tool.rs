@@ -260,27 +260,28 @@ pub fn handle_interactive_stall_detected(
 
 /// Handle toggle approval status event
 pub fn handle_toggle_approval_status(state: &mut AppState) {
-    state.approval_popup.toggle_approval_status();
+    state.approval_bar.toggle_selected();
 }
 
-/// Handle approval popup next tab event
+/// Handle approval bar next tab event
 pub fn handle_approval_popup_next_tab(state: &mut AppState) {
-    state.approval_popup.next_tab();
+    state.approval_bar.select_next();
 }
 
-/// Handle approval popup prev tab event
+/// Handle approval bar prev tab event
 pub fn handle_approval_popup_prev_tab(state: &mut AppState) {
-    state.approval_popup.prev_tab();
+    state.approval_bar.select_prev();
 }
 
-/// Handle approval popup toggle approval event
+/// Handle approval bar toggle approval event
 pub fn handle_approval_popup_toggle_approval(state: &mut AppState) {
-    state.approval_popup.toggle_approval_status();
+    state.approval_bar.toggle_selected();
 }
 
-/// Handle approval popup escape event
+/// Handle approval bar escape event (reject all)
 pub fn handle_approval_popup_escape(state: &mut AppState) {
-    state.approval_popup.escape();
+    state.approval_bar.reject_all();
+    state.approval_bar.clear();
 }
 
 /// Clear streaming tool results

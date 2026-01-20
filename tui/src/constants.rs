@@ -6,7 +6,6 @@ pub const SCROLL_LINES: usize = 1;
 pub const SCROLL_BUFFER_LINES: usize = 2;
 pub const DROPDOWN_MAX_HEIGHT: usize = 8;
 pub const MAX_PASTE_CHAR_COUNT: usize = 1000;
-pub const APPROVAL_POPUP_WIDTH_PERCENT: f32 = 0.8;
 
 // ========== Error Messages ==========
 pub const EXCEEDED_API_LIMIT_ERROR: &str = "Exceeded API limit";

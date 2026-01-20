@@ -124,10 +124,10 @@ pub fn update(
                     return;
                 }
 
-                // Second ESC: reject all tools - mirrors what approval_popup does on Enter
+                // Second ESC: reject all tools
                 state.approval_bar.reject_all();
 
-                // Update approved and rejected tool calls from bar (same pattern as approval_popup)
+                // Update approved and rejected tool calls from bar
                 state.message_approved_tools = state
                     .approval_bar
                     .get_approved_tool_calls()
@@ -141,7 +141,7 @@ pub fn update(
                     .cloned()
                     .collect();
 
-                // Process tools in order (same pattern as approval_popup)
+                // Process tools in order
                 if let Some(tool_calls) = &state.message_tool_calls.clone() {
                     for tool_call in tool_calls {
                         let is_approved = state.message_approved_tools.contains(tool_call);
@@ -229,7 +229,7 @@ pub fn update(
     if state.show_shell_mode
         && state.active_shell_command.is_some()
         && !state.is_dialog_open
-        && !state.approval_popup.is_visible()
+        && !state.approval_bar.is_visible()
         && !state.shell_loading
     {
         match event {

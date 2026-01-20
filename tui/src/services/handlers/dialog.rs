@@ -116,30 +116,28 @@ pub fn handle_esc_event(
     }
 
     // Common handling for rejection
-    if !state.approval_popup.is_visible() || state.approval_popup.is_visible() {
-        state.message_tool_calls = None;
-        state.tool_call_execution_order.clear();
-        // Store the latest tool call for potential retry (only for run_command)
-        if let Some(tool_call) = &state.dialog_command
-            && crate::utils::strip_tool_name(&tool_call.function.name) == "run_command"
-        {
-            state.latest_tool_call = Some(tool_call.clone());
-        }
-
-        let channels = EventChannels {
-            output_tx,
-            input_tx,
-        };
-        // Provide default rejection message when user presses ESC
-        handle_esc(
-            state,
-            &channels,
-            cancel_tx,
-            Some("Tool calls rejected".to_string()),
-            true,
-            None,
-        );
+    state.message_tool_calls = None;
+    state.tool_call_execution_order.clear();
+    // Store the latest tool call for potential retry (only for run_command)
+    if let Some(tool_call) = &state.dialog_command
+        && crate::utils::strip_tool_name(&tool_call.function.name) == "run_command"
+    {
+        state.latest_tool_call = Some(tool_call.clone());
     }
+
+    let channels = EventChannels {
+        output_tx,
+        input_tx,
+    };
+    // Provide default rejection message when user presses ESC
+    handle_esc(
+        state,
+        &channels,
+        cancel_tx,
+        Some("Tool calls rejected".to_string()),
+        true,
+        None,
+    );
 }
 
 /// Handle ESC key press
