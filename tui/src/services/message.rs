@@ -38,6 +38,8 @@ pub enum MessageContent {
     StyledBlock(Vec<Line<'static>>),
     Markdown(String),
     PlainText(String),
+    /// User message with special rendering (cyan bar prefix, word wrapping)
+    UserMessage(String),
     RenderPendingBorderBlock(ToolCall, bool),
     RenderPendingBorderBlockWithStallWarning(ToolCall, bool, String),
     RenderStreamingBorderBlock(String, String, String, Option<BubbleColors>, String),
@@ -197,6 +199,10 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
             file_path.hash(&mut hasher);
             total_lines.hash(&mut hasher);
         }
+        MessageContent::UserMessage(text) => {
+            18u8.hash(&mut hasher);
+            text.hash(&mut hasher);
+        }
     }
 
     hasher.finish()
@@ -270,6 +276,77 @@ pub struct Message {
     pub is_collapsed: Option<bool>,
 }
 
+/// Strip <local_context>...</local_context> and <rulebooks>...</rulebooks> blocks from user message display
+fn strip_context_blocks(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Strip <local_context>...</local_context> blocks
+    while let Some(start) = result.find("<local_context>") {
+        if let Some(end) = result.find("</local_context>") {
+            let end_pos = end + "</local_context>".len();
+            result = format!("{}{}", &result[..start], &result[end_pos..]);
+        } else {
+            break;
+        }
+    }
+
+    // Strip <rulebooks>...</rulebooks> blocks
+    while let Some(start) = result.find("<rulebooks>") {
+        if let Some(end) = result.find("</rulebooks>") {
+            let end_pos = end + "</rulebooks>".len();
+            result = format!("{}{}", &result[..start], &result[end_pos..]);
+        } else {
+            break;
+        }
+    }
+
+    // Trim leading/trailing whitespace and collapse multiple newlines
+    result.trim().to_string()
+}
+
+/// Render user message with cyan bar prefix and proper word wrapping
+fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, Style)> {
+    use ratatui::text::{Line, Span};
+    use textwrap::{Options, wrap};
+
+    let mut lines = Vec::new();
+    let accent_color = Color::Cyan;
+    let text_color = Color::White;
+
+    // The bar takes 2 chars "┃ ", so content width is width - 2
+    let content_width = width.saturating_sub(2).max(10);
+
+    // Process each paragraph (split by newlines)
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            // Empty line - just the bar
+            lines.push((
+                Line::from(vec![Span::styled(
+                    "┃ ".to_string(),
+                    Style::default().fg(accent_color),
+                )]),
+                Style::default(),
+            ));
+        } else {
+            // Wrap the paragraph text
+            let wrap_options = Options::new(content_width);
+            let wrapped = wrap(paragraph, wrap_options);
+
+            for wrapped_line in wrapped {
+                lines.push((
+                    Line::from(vec![
+                        Span::styled("┃ ".to_string(), Style::default().fg(accent_color)),
+                        Span::styled(wrapped_line.to_string(), Style::default().fg(text_color)),
+                    ]),
+                    Style::default(),
+                ));
+            }
+        }
+    }
+
+    lines
+}
+
 impl Message {
     pub fn info(text: impl Into<String>, style: Option<Style>) -> Self {
         Message {
@@ -281,13 +358,14 @@ impl Message {
             is_collapsed: None,
         }
     }
-    pub fn user(text: impl Into<String>, style: Option<Style>) -> Self {
+    pub fn user(text: impl Into<String>, _style: Option<Style>) -> Self {
+        let text_str = text.into();
+        // Strip <local_context>...</local_context> and <rulebooks>...</rulebooks> blocks from display
+        let display_text = strip_context_blocks(&text_str);
+
         Message {
             id: Uuid::new_v4(),
-            content: MessageContent::Plain(
-                format!("→ {}", text.into()),
-                style.unwrap_or(Style::default().fg(AdaptiveColors::text())),
-            ),
+            content: MessageContent::UserMessage(display_text),
             is_collapsed: None,
         }
     }
@@ -1173,6 +1251,11 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
             let owned_line = Line::from(vec![Span::styled(text.clone(), Style::default())]);
             lines.push((owned_line, Style::default()));
         }
+        MessageContent::UserMessage(text) => {
+            // Render user message with cyan bar prefix and proper word wrapping
+            let rendered = render_user_message_lines(text, width);
+            lines.extend(rendered);
+        }
         MessageContent::BashBubble {
             title,
             content,
@@ -1775,6 +1858,11 @@ fn get_wrapped_message_lines_internal(
             MessageContent::PlainText(text) => {
                 let owned_line = Line::from(vec![Span::styled(text.clone(), Style::default())]);
                 all_lines.push((owned_line, Style::default()));
+            }
+            MessageContent::UserMessage(text) => {
+                // Render user message with cyan bar prefix and proper word wrapping
+                let rendered = render_user_message_lines(text, width);
+                all_lines.extend(rendered);
             }
             MessageContent::BashBubble {
                 title,
