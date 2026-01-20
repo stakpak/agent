@@ -458,8 +458,7 @@ impl ShellSession for LocalShellSession {
 
                         // Send partial lines after debounce delay
                         // This makes progress bars, prompts, etc. appear naturally
-                        if !pending_partial.is_empty()
-                            && last_send.elapsed() >= PARTIAL_LINE_DELAY
+                        if !pending_partial.is_empty() && last_send.elapsed() >= PARTIAL_LINE_DELAY
                         {
                             let _ = tx
                                 .send(OutputChunk {
