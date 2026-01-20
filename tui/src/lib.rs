@@ -21,7 +21,7 @@ use std::io;
 pub use terminal::TerminalGuard;
 pub use view::view;
 
-use crate::services::message::Message;
+use crate::services::message::{Message, invalidate_message_lines_cache};
 
 pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
     state.mouse_capture_enabled = !state.mouse_capture_enabled;
@@ -49,6 +49,9 @@ pub fn toggle_mouse_capture(state: &mut AppState) -> io::Result<()> {
         Some(Style::default().fg(color)),
     ));
     state.messages.push(Message::info("SPACING_MARKER", None));
+
+    // Invalidate cache so the new messages are rendered
+    invalidate_message_lines_cache(state);
 
     Ok(())
 }
