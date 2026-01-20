@@ -357,6 +357,14 @@ impl ShellSession for LocalShellSession {
         let handle = tokio::spawn(async move {
             let mut output = String::new();
             let mut last_streamed_len = 0usize; // Track what we've already streamed
+            let mut pending_partial = String::new(); // Buffer for incomplete lines
+            let mut last_send = Instant::now();
+
+            // Debounce: send partial content after this delay if no newline arrives
+            // This makes progress bars, prompts, etc. appear naturally
+            const PARTIAL_LINE_DELAY: Duration = Duration::from_millis(100);
+            // Minimum time between sends to avoid overwhelming the TUI (~60fps)
+            const MIN_SEND_INTERVAL: Duration = Duration::from_millis(16);
 
             loop {
                 if start.elapsed() > timeout_duration {
@@ -407,40 +415,80 @@ impl ShellSession for LocalShellSession {
                                 .await;
                             return Err(ShellSessionError::SessionClosed);
                         }
-                        if data.is_empty() {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
-                            continue;
+
+                        let has_new_data = !data.is_empty();
+
+                        if has_new_data {
+                            let chunk = String::from_utf8_lossy(&data);
+                            output.push_str(&chunk);
                         }
 
-                        let chunk = String::from_utf8_lossy(&data);
-                        output.push_str(&chunk);
-
-                        // Clean the entire accumulated output and stream only new complete lines
-                        // This ensures consistent cleaning and avoids flickering from partial lines
+                        // Clean accumulated output
                         let cleaned_so_far =
                             clean_shell_output(&output, &command_owned, &marker_clone);
+
                         if cleaned_so_far.len() > last_streamed_len {
                             let new_content = &cleaned_so_far[last_streamed_len..];
-                            // Only stream complete lines to avoid flicker
+
+                            // Check for complete lines
                             if let Some(last_newline) = new_content.rfind('\n') {
                                 let complete_lines = &new_content[..=last_newline];
-                                if !complete_lines.trim().is_empty() {
+                                let remainder = &new_content[last_newline + 1..];
+
+                                // Send complete lines immediately (respecting min interval)
+                                if !complete_lines.trim().is_empty()
+                                    && last_send.elapsed() >= MIN_SEND_INTERVAL
+                                {
                                     let _ = tx
                                         .send(OutputChunk {
                                             text: complete_lines.to_string(),
                                             is_final: false,
                                         })
                                         .await;
+                                    last_send = Instant::now();
                                 }
-                                // Update to include only the complete lines we streamed
+
                                 last_streamed_len += last_newline + 1;
+                                pending_partial = remainder.to_string();
+                            } else {
+                                // No newline - accumulate as pending partial
+                                pending_partial = new_content.to_string();
                             }
+                        }
+
+                        // Send partial lines after debounce delay
+                        // This makes progress bars, prompts, etc. appear naturally
+                        if !pending_partial.is_empty()
+                            && last_send.elapsed() >= PARTIAL_LINE_DELAY
+                        {
+                            let _ = tx
+                                .send(OutputChunk {
+                                    text: std::mem::take(&mut pending_partial),
+                                    is_final: false,
+                                })
+                                .await;
+                            last_streamed_len = cleaned_so_far.len();
+                            last_send = Instant::now();
                         }
 
                         // Check for marker completion
                         let marker_count = output.matches(&marker_clone).count();
                         if marker_count >= 2 {
+                            // Send any remaining partial content
+                            if !pending_partial.is_empty() {
+                                let _ = tx
+                                    .send(OutputChunk {
+                                        text: pending_partial,
+                                        is_final: false,
+                                    })
+                                    .await;
+                            }
                             break;
+                        }
+
+                        // Adaptive sleep: shorter when actively receiving data
+                        if !has_new_data {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
                         }
                     }
                     Ok(Err(e)) => {
