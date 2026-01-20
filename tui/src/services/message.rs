@@ -954,6 +954,24 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
         all_processed_lines.extend(rendered_lines);
     }
 
+    // Collapse consecutive empty lines (max 2 consecutive empty lines)
+    let mut collapsed_lines: Vec<Line<'static>> = Vec::with_capacity(all_processed_lines.len());
+    let mut consecutive_empty = 0;
+    for line in all_processed_lines {
+        let is_empty = line.spans.is_empty()
+            || (line.spans.len() == 1 && line.spans[0].content.trim().is_empty());
+        if is_empty {
+            consecutive_empty += 1;
+            if consecutive_empty <= 2 {
+                collapsed_lines.push(line);
+            }
+        } else {
+            consecutive_empty = 0;
+            collapsed_lines.push(line);
+        }
+    }
+    let mut all_processed_lines = collapsed_lines;
+
     // Add trailing empty lines if we have content
     if !all_processed_lines.is_empty() {
         all_processed_lines.push(Line::from(""));

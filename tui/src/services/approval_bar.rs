@@ -49,13 +49,14 @@ impl ApprovalAction {
             "str_replace" => "Str Replace",
             "edit_file" | "replace_file_content" => "Edit",
             "read" | "read_file" | "view_file" => "Read",
-            "delete_file" | "remove_file" => "Delete",
+            "delete_file" | "remove_file" | "remove" => "Delete",
             "list_directory" | "list_dir" => "List Dir",
             "search_files" => "Search",
             "grep" => "Grep",
             "find" => "Find",
             "glob" => "Glob",
             "bash" => "Bash",
+            "get_pak_content" => "Get Pak Content",
             _ => tool_name,
         }
         .to_string();
@@ -250,19 +251,20 @@ impl ApprovalBar {
     }
 
     /// Calculate the height needed for rendering
-    /// Returns: top border (1) + content lines + bottom border (1)
+    /// Returns: top border (1) + content lines (with spacing) + empty line (1) + footer (1) + bottom border (1)
     pub fn calculate_height(&self) -> u16 {
         if !self.is_visible() {
             return 0;
         }
-        // For now, cap at reasonable height - will be calculated properly in render
-        // Top border + up to 3 content lines + bottom border
-        4
+        // For now, estimate max height needed
+        // Top border (1) + up to 3 button rows with spacing (5) + empty line (1) + footer (1) + bottom border (1) = 9
+        // But cap at reasonable height
+        8
     }
 
     /// Render the approval bar with wrapping support
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        if !self.is_visible() || area.height < 3 {
+        if !self.is_visible() || area.height < 4 {
             return;
         }
 
@@ -272,84 +274,75 @@ impl ApprovalBar {
         let border_color = Color::DarkGray;
         let inner_width = area.width.saturating_sub(2) as usize;
 
-        // Help text (shown on first line)
-        let help_text = "space · ←→ · enter";
-        let help_len = help_text.len();
+        // Available width for tabs (full inner width, tabs wrap to next line)
+        let tab_width = inner_width.saturating_sub(2); // just margins
 
-        // Available width for tabs on first line (need room for help text)
-        let first_line_tab_width = inner_width.saturating_sub(help_len + 4); // 2 spaces padding + 2 for margins
-        // Available width for tabs on subsequent lines
-        let other_line_tab_width = inner_width.saturating_sub(2); // just margins
-
-        // Build lines of tabs
+        // Build lines of tabs with popup-style buttons
         let mut lines: Vec<Vec<Span>> = Vec::new();
         let mut current_line: Vec<Span> = Vec::new();
         let mut current_width = 0;
-        let mut is_first_line = true;
 
         for (idx, action) in self.actions.iter().enumerate() {
             let is_selected = idx == self.selected_index;
 
-            // Status indicator color (always green for approved, red for rejected)
+            // Status indicator (checkmark or X)
             let (indicator, indicator_color) = match action.status {
                 ApprovalStatus::Approved => ("✓", Color::Green),
                 ApprovalStatus::Rejected => ("✗", Color::Red),
             };
 
-            // Text color: white if selected, dark gray otherwise
-            let text_color = if is_selected {
-                Color::White
-            } else {
-                Color::DarkGray
-            };
-
-            // Calculate total width: "✓ Run Command" + separator
-            let tab_len = 2 + action.label.chars().count(); // icon + space + label
-            let separator_len = if current_line.is_empty() { 0 } else { 3 }; // "   " between tabs
-            let needed_width = tab_len + separator_len;
+            // Calculate button width: " ✓ Label " with spaces
+            let button_text = format!(" {} {} ", indicator, action.label);
+            let button_width = button_text.chars().count();
+            let separator_len = if current_line.is_empty() { 0 } else { 1 }; // " " between buttons
+            let needed_width = button_width + separator_len;
 
             // Check if we need to wrap to next line
-            let max_width = if is_first_line {
-                first_line_tab_width
-            } else {
-                other_line_tab_width
-            };
-            if !current_line.is_empty() && current_width + needed_width > max_width {
+            if !current_line.is_empty() && current_width + needed_width > tab_width {
                 // Start a new line
                 lines.push(current_line);
                 current_line = Vec::new();
                 current_width = 0;
-                is_first_line = false;
             }
 
-            // Add separator between tabs (not at start of line)
+            // Add separator between buttons (not at start of line)
             if !current_line.is_empty() {
-                current_line.push(Span::styled("   ", Style::default()));
-                current_width += 3;
+                current_line.push(Span::raw(" "));
+                current_width += 1;
             }
 
-            // Icon style: always colored (green/red), bold if selected
-            let icon_style = if is_selected {
-                Style::default()
-                    .fg(indicator_color)
-                    .add_modifier(Modifier::BOLD)
+            // Style like approval popup tabs
+            if is_selected {
+                // Selected: black text on cyan background
+                // First render the background with indicator colored
+                current_line.push(Span::styled(
+                    " ",
+                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                ));
+                current_line.push(Span::styled(
+                    indicator,
+                    Style::default().fg(indicator_color).bg(Color::Cyan),
+                ));
+                current_line.push(Span::styled(
+                    format!(" {} ", action.label),
+                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                ));
             } else {
-                Style::default().fg(indicator_color)
-            };
-
-            // Label style: white if selected, dark gray otherwise, bold+underlined if selected
-            let label_style = if is_selected {
-                Style::default()
-                    .fg(text_color)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else {
-                Style::default().fg(text_color)
-            };
-
-            // Add icon and label as separate spans
-            current_line.push(Span::styled(indicator, icon_style));
-            current_line.push(Span::styled(format!(" {}", action.label), label_style));
-            current_width += tab_len;
+                // Unselected: white text on dark background (Indexed 235)
+                current_line.push(Span::styled(
+                    " ",
+                    Style::default().fg(Color::White).bg(Color::Indexed(235)),
+                ));
+                current_line.push(Span::styled(
+                    indicator,
+                    Style::default().fg(indicator_color).bg(Color::Indexed(235)),
+                ));
+                current_line.push(Span::styled(
+                    format!(" {} ", action.label),
+                    Style::default().fg(Color::White).bg(Color::Indexed(235)),
+                ));
+            }
+            current_width += button_width;
         }
 
         // Don't forget the last line
@@ -361,8 +354,6 @@ impl ApprovalBar {
         if lines.is_empty() {
             lines.push(Vec::new());
         }
-
-        let num_content_lines = lines.len();
 
         // Title
         let title = " Approval Required ";
@@ -391,11 +382,29 @@ impl ApprovalBar {
             Rect::new(area.x, area.y, area.width, 1),
         );
 
-        // Render content lines
+        // Render content lines (tabs/buttons) with spacing between rows
+        let mut current_y = area.y + 1;
         for (line_idx, tab_spans) in lines.iter().enumerate() {
-            let y = area.y + 1 + line_idx as u16;
-            if y >= area.y + area.height.saturating_sub(1) {
-                break; // No room for more content lines
+            if current_y >= area.y + area.height.saturating_sub(3) {
+                break; // Leave room for empty line, footer and bottom border
+            }
+
+            // Add empty line before each button row (except the first)
+            if line_idx > 0 {
+                let spacing_line = Line::from(vec![
+                    Span::styled("│", Style::default().fg(border_color)),
+                    Span::raw(" ".repeat(inner_width)),
+                    Span::styled("│", Style::default().fg(border_color)),
+                ]);
+                f.render_widget(
+                    Paragraph::new(spacing_line),
+                    Rect::new(area.x, current_y, area.width, 1),
+                );
+                current_y += 1;
+
+                if current_y >= area.y + area.height.saturating_sub(3) {
+                    break;
+                }
             }
 
             // Calculate content width for this line
@@ -405,31 +414,74 @@ impl ApprovalBar {
             line_spans.push(Span::raw(" ")); // space after left border
             line_spans.extend(tab_spans.clone());
 
-            // Add help text on first line, padding on others
-            if line_idx == 0 {
-                let padding = inner_width.saturating_sub(content_width + help_len - 4);
-                line_spans.push(Span::raw(" ".repeat(padding)));
-                line_spans.push(Span::styled(
-                    help_text,
-                    Style::default().fg(Color::DarkGray),
-                ));
-            } else {
-                let padding = inner_width.saturating_sub(content_width + 2);
-                line_spans.push(Span::raw(" ".repeat(padding)));
-            }
-
+            // Padding to fill the rest of the line
+            let padding = inner_width.saturating_sub(content_width + 2);
+            line_spans.push(Span::raw(" ".repeat(padding)));
             line_spans.push(Span::raw(" ")); // space before right border
             line_spans.push(Span::styled("│", Style::default().fg(border_color)));
 
             f.render_widget(
                 Paragraph::new(Line::from(line_spans)),
-                Rect::new(area.x, y, area.width, 1),
+                Rect::new(area.x, current_y, area.width, 1),
+            );
+            current_y += 1;
+        }
+
+        // Empty line between buttons and footer
+        let empty_line_y = current_y;
+        if empty_line_y < area.y + area.height.saturating_sub(2) {
+            let empty_line = Line::from(vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::raw(" ".repeat(inner_width)),
+                Span::styled("│", Style::default().fg(border_color)),
+            ]);
+            f.render_widget(
+                Paragraph::new(empty_line),
+                Rect::new(area.x, empty_line_y, area.width, 1),
+            );
+        }
+
+        // Footer line with controls
+        let footer_y = empty_line_y + 1;
+        if footer_y < area.y + area.height.saturating_sub(1) {
+            // Build footer controls with same style as approval popup
+            let footer_controls = vec![
+                Span::styled("space", Style::default().fg(Color::Cyan)),
+                Span::styled(" toggle", Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled("←→", Style::default().fg(Color::Cyan)),
+                Span::styled(" navigate", Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled("enter", Style::default().fg(Color::Cyan)),
+                Span::styled(" submit", Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled("esc", Style::default().fg(Color::Cyan)),
+                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+            ];
+
+            let footer_content_width: usize = footer_controls
+                .iter()
+                .map(|s| s.content.chars().count())
+                .sum();
+
+            let mut footer_spans = vec![Span::styled("│", Style::default().fg(border_color))];
+            footer_spans.push(Span::raw(" ")); // space after left border
+            footer_spans.extend(footer_controls);
+
+            // Padding to fill the rest of the line
+            let padding = inner_width.saturating_sub(footer_content_width + 2);
+            footer_spans.push(Span::raw(" ".repeat(padding)));
+            footer_spans.push(Span::raw(" ")); // space before right border
+            footer_spans.push(Span::styled("│", Style::default().fg(border_color)));
+
+            f.render_widget(
+                Paragraph::new(Line::from(footer_spans)),
+                Rect::new(area.x, footer_y, area.width, 1),
             );
         }
 
         // Bottom border
-        let bottom_y =
-            area.y + 1 + num_content_lines.min(area.height.saturating_sub(2) as usize) as u16;
+        let bottom_y = footer_y + 1;
         if bottom_y < area.y + area.height {
             let bottom_line = Line::from(vec![
                 Span::styled("└", Style::default().fg(border_color)),
