@@ -370,3 +370,60 @@ pub async fn prompt_for_api_key(config: &mut AppConfig) {
         render_and_save_api_key(&key, config).await;
     }
 }
+
+/// Perform API key authentication via browser redirect (for ACP Agent Auth).
+///
+/// This function is designed for programmatic use (no terminal interaction).
+/// It starts a local callback server, opens the browser for authentication,
+/// and waits for the API key to be returned via the callback.
+///
+/// Returns the API key on success, or an error message on failure.
+pub async fn authenticate_with_browser_redirect() -> Result<String, String> {
+    let (port, mut api_key_receiver, server_handle, port_error) = start_callback_server().await;
+
+    if port_error {
+        return Err("Could not start local callback server for authentication".to_string());
+    }
+
+    let redirect_uri = format!("http://localhost:{}", port);
+    let auth_url = format!(
+        "{}?redirect=true&response_type=code&client_id={}&redirect_uri={}",
+        GENERATE_API_KEY_URL, CLIENT_ID, redirect_uri
+    );
+
+    // Try to open browser - log but don't fail if it doesn't work
+    // (the auth URL will be available in logs for manual access)
+    if open::that(&auth_url).is_err() {
+        log::warn!(
+            "Could not open browser automatically. Auth URL: {}",
+            auth_url
+        );
+    } else {
+        log::info!("Opened browser for authentication");
+    }
+
+    // Wait for callback with timeout (2 minutes)
+    let timeout = tokio::time::sleep(std::time::Duration::from_secs(120));
+    tokio::pin!(timeout);
+
+    let result = tokio::select! {
+        Some(key) = api_key_receiver.recv() => {
+            log::info!("Received API key via local callback");
+            // Clean up the key (remove quotes if present from JSON parsing)
+            let clean_key = key.trim().trim_matches('"').to_string();
+            if clean_key.starts_with("stkpk_api") {
+                Ok(clean_key)
+            } else {
+                Err(format!("Invalid API key format received: {}", clean_key))
+            }
+        }
+        _ = &mut timeout => {
+            Err("Authentication timed out after 2 minutes".to_string())
+        }
+    };
+
+    // Clean up the server
+    server_handle.abort();
+
+    result
+}
