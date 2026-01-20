@@ -1537,13 +1537,14 @@ impl acp::Agent for StakpakAcpAgent {
             *caps = args.client_capabilities.clone();
         }
 
-        // If no API key, provide an auth method that links to GitHub
+        // If no API key, provide an auth method for browser-based authentication
+        // This implements ACP Agent Auth - the agent handles the OAuth-like flow internally
         let auth_methods = if self.config.api_key.is_none() {
             vec![acp::AuthMethod::new(
-                acp::AuthMethodId::new("github"),
-                "Use STAKPAK_API_KEY",
+                acp::AuthMethodId::new("stakpak"),
+                "Login to Stakpak",
             )
-            .description("Required setting `STAKPAK_API_KEY` in your environment. Get your API key from https://stakpak.dev")]
+            .description("Authenticate via browser to get your Stakpak API key. A browser window will open for you to sign in.")]
         } else {
             Vec::new()
         };
@@ -1569,37 +1570,62 @@ impl acp::Agent for StakpakAcpAgent {
     ) -> Result<acp::AuthenticateResponse, acp::Error> {
         log::info!("Received authenticate request {args:?}");
 
-        // Handle GitHub authentication method - check for STAKPAK_API_KEY environment variable
-        if args.method_id.0.to_string() == "github" {
+        let method_id = args.method_id.0.to_string();
+
+        // Handle Stakpak authentication via browser redirect (ACP Agent Auth)
+        if method_id == "stakpak" {
+            log::info!("Stakpak auth method selected, initiating browser-based authentication");
+
+            // Perform browser-based authentication
+            let api_key = crate::apikey_auth::authenticate_with_browser_redirect()
+                .await
+                .map_err(|e| {
+                    log::error!("Browser authentication failed: {}", e);
+                    acp::Error::auth_required().data(e)
+                })?;
+
+            // Validate the API key format
+            if !api_key.starts_with("stkpk_api") {
+                log::error!("Invalid API key format received");
+                return Err(
+                    acp::Error::auth_required().data("Invalid API key format".to_string())
+                );
+            }
+
+            // Save the API key to config
+            let mut config = self.config.clone();
+            config.api_key = Some(api_key.clone());
+            config.save().map_err(|e| {
+                log::error!("Failed to save API key to config: {}", e);
+                acp::Error::internal_error().data(format!("Failed to save config: {}", e))
+            })?;
+
+            log::info!("Authentication successful, API key saved to config");
+            return Ok(acp::AuthenticateResponse::new());
+        }
+
+        // Legacy support: check for STAKPAK_API_KEY environment variable
+        if method_id == "github" {
             log::info!(
-                "GitHub auth method selected, checking for STAKPAK_API_KEY environment variable"
+                "Legacy github auth method selected, checking for STAKPAK_API_KEY environment variable"
             );
             match std::env::var("STAKPAK_API_KEY") {
                 Ok(_api_key) => {
                     log::info!("STAKPAK_API_KEY found in environment");
-                    // The config is already checked at initialization and will pick up the env var
-                    // if it was available when the agent started. Since we can't modify self.config
-                    // here (it's &self), we'll rely on the environment variable being available
-                    // for subsequent operations. The next check will verify if we have an API key.
+                    return Ok(acp::AuthenticateResponse::new());
                 }
                 Err(_) => {
                     log::error!("STAKPAK_API_KEY environment variable is not set");
                     return Err(
-                        acp::Error::internal_error().data("STAKPAK_API_KEY is not set".to_string())
+                        acp::Error::auth_required().data("STAKPAK_API_KEY is not set. Use the 'stakpak' auth method for browser-based authentication.".to_string())
                     );
                 }
             }
         }
 
-        // Check if we have a valid API key
-        if self.config.api_key.is_none() {
-            log::error!("API key is missing - authentication required");
-            return Err(acp::Error::auth_required().data(
-                "Authentication required. Please visit https://github.com/stakpak/zed-stakpak-agent-server for more information.".to_string()
-            ));
-        }
-
-        Ok(acp::AuthenticateResponse::new())
+        // Unknown auth method
+        log::error!("Unknown authentication method: {}", method_id);
+        Err(acp::Error::invalid_params().data(format!("Unknown auth method: {}", method_id)))
     }
 
     async fn new_session(
@@ -1609,10 +1635,29 @@ impl acp::Agent for StakpakAcpAgent {
         log::info!("Received new session request {args:?}");
 
         // Check if we have a valid API key
-        if self.config.api_key.is_none() {
+        // First check in-memory config, then reload from disk (in case authenticate() saved a new key),
+        // finally check environment variable
+        let has_api_key = self.config.api_key.is_some()
+            || std::env::var("STAKPAK_API_KEY").is_ok()
+            || {
+                // Try to reload config from disk to pick up newly saved API key from authenticate()
+                match crate::config::AppConfig::load(&self.config.profile_name, None::<&str>) {
+                    Ok(fresh_config) => {
+                        if fresh_config.api_key.is_some() {
+                            log::info!("Found API key in refreshed config from disk");
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false,
+                }
+            };
+
+        if !has_api_key {
             log::error!("API key is missing - authentication required");
             return Err(acp::Error::auth_required().data(
-                "Authentication required. Please visit https://github.com/stakpak/agent for more information.".to_string()
+                "Authentication required. Use the 'stakpak' auth method to authenticate via browser.".to_string()
             ));
         }
 
