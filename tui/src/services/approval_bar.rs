@@ -42,24 +42,18 @@ impl ApprovalAction {
     pub fn new(tool_call: ToolCall) -> Self {
         let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
 
-        // Proper display name for the tool
-        let label = match tool_name {
-            "run_command" => "Run Command",
-            "create" | "create_file" | "write_to_file" => "Create",
-            "str_replace" => "Str Replace",
-            "edit_file" | "replace_file_content" => "Edit",
-            "read" | "read_file" | "view_file" => "Read",
-            "delete_file" | "remove_file" | "remove" => "Delete",
-            "list_directory" | "list_dir" => "List Dir",
-            "search_files" => "Search",
-            "grep" => "Grep",
-            "find" => "Find",
-            "glob" => "Glob",
-            "bash" => "Bash",
-            "get_pak_content" => "Get Pak Content",
-            _ => tool_name,
-        }
-        .to_string();
+        // Convert snake_case to Title Case (e.g., "get_pak_content" -> "Get Pak Content")
+        let label = tool_name
+            .split('_')
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
 
         Self {
             tool_call,
