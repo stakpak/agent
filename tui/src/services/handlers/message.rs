@@ -85,12 +85,14 @@ pub fn handle_stream_message(
 
 /// Handle adding user message
 pub fn handle_add_user_message(state: &mut AppState, s: String) {
-    // Add spacing before user message if not the first message
+    // Add extra spacing before user message if not the first message
     if !state.messages.is_empty() {
+        state.messages.push(Message::plain_text(""));
         state.messages.push(Message::plain_text(""));
     }
     state.messages.push(Message::user(s, None));
-    // Add spacing after user message
+    // Add extra spacing after user message
+    state.messages.push(Message::plain_text(""));
     state.messages.push(Message::plain_text(""));
 
     // Invalidate cache since messages changed

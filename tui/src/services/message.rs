@@ -310,8 +310,8 @@ fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, St
     use textwrap::{Options, wrap};
 
     let mut lines = Vec::new();
-    let accent_color = Color::Cyan;
-    let text_color = Color::White;
+    let accent_color = Color::DarkGray;
+    let text_color = Color::Reset;
 
     // The bar takes 2 chars "┃ ", so content width is width - 2
     let content_width = width.saturating_sub(2).max(10);

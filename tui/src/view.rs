@@ -1,4 +1,4 @@
-use crate::app::{AppState, LoadingType};
+use crate::app::AppState;
 use crate::constants::{DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -13,8 +13,8 @@ use crate::services::side_panel;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Color, Style},
+    text::Line,
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -410,35 +410,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
-    // Always render this line - shows spinner when loading on left, tokens always on right (if > 0)
-    let mut left_spans = Vec::new();
-
-    // Left side: spinner (if loading)
-    if state.loading {
-        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-        let spinner_text = if state.loading_type == LoadingType::Sessions {
-            "Loading sessions..."
-        } else {
-            "Stakpaking..."
-        };
-
-        left_spans.push(Span::styled(
-            format!("{} {}", spinner, spinner_text),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        ));
-
-        if state.loading_type == LoadingType::Llm {
-            left_spans.push(Span::styled(
-                " - esc to cancel",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-    }
-
-    let widget =
-        Paragraph::new(Line::from(left_spans)).wrap(ratatui::widgets::Wrap { trim: false });
-    f.render_widget(widget, area);
+    // Loading spinner is now shown in the hint area below input
+    // This area is kept for potential future use (e.g., token count display)
+    let _ = (f, state, area);
 }
