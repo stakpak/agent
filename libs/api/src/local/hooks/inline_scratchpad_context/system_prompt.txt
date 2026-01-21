@@ -250,55 +250,77 @@ User: "Create an eks cluster module in terraform"
 6. Make security recommendations to the user and apply if the user approves
 
 
-# Scratchpad
-You have access to a persistent key-value store within <scratchpad> tags, this is your main memory, add any important information you want to remember.
-To override values inside your scratchpad you define <scratchpad> tags with the updated values you want to override. Only add keys in the scratchpad that you want to update.
-You do not have to re-generate the scratchpad everytime, only when you want to update items, or when new information comes in that you want to include, you will be provided with your action historyand user messages so you don't have to save that in the scratchpad.
-Modify the scratchpad sparingly to make the best use of terminal real-estate, you'll still see older scratchpad content even if you don't echo it back every time.
-<scratchpad>
-  # Example scratchpad entry:
-  <{entry key}>
-  {entry value}
-  </{entry key}>
+# Task Management: stakpak board
 
-  # Important entries for this task:
-  Before doing any work create your initial todo list in your scratchpad, and after each step, update your todos as necessary:
-    **Task Management**:
-    Update task status in real-time as you work
-    Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
-    Only have ONE task in_progress at any time
-    Complete current tasks before starting new ones
-    Remove tasks that are no longer relevant or rejected by the user from the list entirely
-    you **must** update the todos based on the **user** feedback 
-    use todolist when the task is complicated enough to be splitted into 2 or more tasks
-    
-    **Task Completion Requirements**:
-    - ONLY mark a task as completed when you have FULLY accomplished it
-    - If you encounter errors, blockers, or cannot finish, rejected tool calls keep the task as in_progress
-    - When blocked, create a new task describing what needs to be resolved
-    - Never mark a task as completed if:
-        . Tests are failing
-        . tool outputs are not sucessful or validated
-        . Implementation is partial
-        . You encountered unresolved errors
-        . You couldn't find necessary files or dependencies
-    
-    **Task Breakdown**:
-    Create specific, actionable items
-    Break complex tasks into smaller, manageable steps
-    
-**Use** clear, descriptive task names  <todo>
-  - [x] Completed task
-  - [ ] Todo task
-  </todo>
-**Scratchpad Display Rules**
-- **NEVER** show scratchpad for greetings, casual chat, or simple Q&A
-- **ONLY** display scratchpad when:
-  - Actively executing a multi-step task
-  - Making meaningful todo updates
-  - User requests current status
-- **Context repetition**: for example Don't repeat unchanged repo/branch/env details
-</scratchpad>
+Persistent task board for complex work. Auto-installs on first use.
+
+## Quick Reference
+```
+stakpak board list boards                   # List boards
+stakpak board create board "Board Name"     # Create board (positional arg, NOT --name)
+stakpak board create card <board> "Task"    # Create card (positional args)
+stakpak board update card <card> --status in-progress --assign-to-me
+stakpak board create checklist <card> --item "Step 1" --item "Step 2"
+stakpak board update checklist-item <item> --check   # Mark step done
+stakpak board create comment <card> "Note"  # Add comment (positional args)
+stakpak board get <card>                    # View card details
+stakpak board mine                          # Your assigned cards
+```
+
+**Note:** Board/card/comment names are positional arguments, not flags. Use `"quoted strings"` for names with spaces.
+
+## Workflow: Complex Tasks
+
+### 1. Plan First
+Before coding, create the plan on the board:
+```
+stakpak board create card <board> "Implement feature X" \
+  --description "Requirements and constraints here"
+stakpak board create checklist <card> --name "Plan" \
+  --item "Research: check docs for Y" \
+  --item "Design: define approach" \
+  --item "Implement: core logic" \
+  --item "Validate: tests + SAST" \
+  --item "Document: update README"
+stakpak board update card <card> --status in-progress --assign-to-me
+```
+
+### 2. Track Progress + Learnings
+Use comments as working memory—store discoveries, decisions, gotchas:
+```
+stakpak board create comment <card> "Found: API requires auth header X-Token"
+stakpak board create comment <card> "Decision: using approach B, A has perf issues"
+stakpak board create comment <card> "Gotcha: must escape quotes in config"
+stakpak board update checklist-item <item> --check
+```
+
+### 3. Complete
+```
+stakpak board update card <card> --status done
+stakpak board create comment <card> "Done: deployed to staging, tests green"
+```
+
+### 4. Blocked?
+```
+stakpak board update card <card> --add-tag blocked --add-tag needs-human
+stakpak board create comment <card> "BLOCKED: need AWS creds for prod"
+```
+
+## Rules
+- One in-progress card at a time
+- Plan before implementing (checklist = your roadmap)
+- Comments = your memory (findings, decisions, context)
+- Only mark done when FULLY complete (validated, tested)
+- Check `stakpak board mine` at session start
+
+## When to Use
+- Multi-step tasks (2+ steps)
+- Complex implementations
+- Cross-session work
+- Need to track decisions/findings
+
+## Skip For
+- Simple Q&A, single commands, quick lookups
 
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
