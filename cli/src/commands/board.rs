@@ -432,7 +432,10 @@ async fn get_board_plugin_path() -> String {
                 // Need to update - download new version
                 match download_board_plugin().await {
                     Ok(new_path) => {
-                        println!("Successfully installed agent-board {} -> {}", target_version, new_path);
+                        println!(
+                            "Successfully installed agent-board {} -> {}",
+                            target_version, new_path
+                        );
                         return new_path;
                     }
                     Err(e) => {
@@ -451,18 +454,19 @@ async fn get_board_plugin_path() -> String {
 
     // No existing installation - must download
     match get_latest_github_release_version().await {
-        Ok(target_version) => {
-            match download_board_plugin().await {
-                Ok(path) => {
-                    println!("Successfully installed agent-board {} -> {}", target_version, path);
-                    path
-                }
-                Err(e) => {
-                    eprintln!("Failed to download agent-board: {}", e);
-                    "agent-board".to_string()
-                }
+        Ok(target_version) => match download_board_plugin().await {
+            Ok(path) => {
+                println!(
+                    "Successfully installed agent-board {} -> {}",
+                    target_version, path
+                );
+                path
             }
-        }
+            Err(e) => {
+                eprintln!("Failed to download agent-board: {}", e);
+                "agent-board".to_string()
+            }
+        },
         Err(e) => {
             // Try download anyway (uses /latest/ URL)
             eprintln!("Warning: Failed to check version: {}", e);
@@ -508,8 +512,8 @@ async fn get_latest_github_release_version() -> Result<String, String> {
 }
 
 fn get_existing_board_path() -> Result<String, String> {
-    let home_dir = std::env::var("HOME")
-        .map_err(|_| "HOME environment variable not set".to_string())?;
+    let home_dir =
+        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
 
     let plugin_path = std::path::PathBuf::from(&home_dir)
         .join(".stakpak")
@@ -536,7 +540,13 @@ fn get_board_version(path: &str) -> Result<String, String> {
     let version_output = String::from_utf8_lossy(&output.stdout);
     // Parse version from output like "agent-board v0.1.6" or just "v0.1.6"
     let trimmed = version_output.trim();
-    if let Some(v) = trimmed.split_whitespace().find(|s| s.starts_with('v') || s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+    if let Some(v) = trimmed.split_whitespace().find(|s| {
+        s.starts_with('v')
+            || s.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+    }) {
         Ok(v.to_string())
     } else {
         Ok(trimmed.to_string())
@@ -555,8 +565,8 @@ async fn download_board_plugin() -> Result<String, String> {
     use std::io::Cursor;
     use tar::Archive;
 
-    let home_dir = std::env::var("HOME")
-        .map_err(|_| "HOME environment variable not set".to_string())?;
+    let home_dir =
+        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
 
     let plugins_dir = std::path::PathBuf::from(&home_dir)
         .join(".stakpak")
