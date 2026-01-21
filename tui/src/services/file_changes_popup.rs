@@ -12,30 +12,18 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-/// Helper to start centering the rect
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
 pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
-    // Calculate popup size: Height a bit more (30 -> 40), Width less (60 -> 50)
-    let area = centered_rect(50, 40, f.area());
+    // Calculate popup size: Height 40%, Width 50% but at least 80 columns
+    let area = {
+        const MIN_POPUP_WIDTH: u16 = 80;
+        let terminal_area = f.area();
+        let width =
+            std::cmp::max(terminal_area.width / 2, MIN_POPUP_WIDTH).min(terminal_area.width);
+        let height = terminal_area.height * 40 / 100;
+        let x = (terminal_area.width.saturating_sub(width)) / 2;
+        let y = (terminal_area.height.saturating_sub(height)) / 2;
+        Rect::new(x, y, width, height)
+    };
 
     f.render_widget(Clear, area);
 
@@ -287,16 +275,16 @@ pub fn render_file_changes_popup(f: &mut Frame, state: &AppState) {
     // Updated shortcuts: Ctrl+X revert single, Ctrl+Z revert all, Ctrl+N open editor
     let footer_text = vec![
         Span::raw(" "),
-        Span::styled("↑/↓", Style::default().fg(Color::Yellow)),
-        Span::raw(": Navigate  "),
-        Span::styled("Ctrl+x", Style::default().fg(Color::Green)),
-        Span::raw(": Revert  "),
-        Span::styled("Ctrl+z", Style::default().fg(Color::Magenta)),
-        Span::raw(": Revert All  "),
-        Span::styled("Ctrl+n", Style::default().fg(Color::Blue)),
-        Span::raw(": Edit  "),
-        Span::styled("Esc", Style::default().fg(Color::Red)),
-        Span::raw(": Close"),
+        Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
+        Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+x", Style::default().fg(Color::Cyan)),
+        Span::styled(": Revert  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+z", Style::default().fg(Color::Cyan)),
+        Span::styled(": Revert All  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Ctrl+n", Style::default().fg(Color::Cyan)),
+        Span::styled(": Edit  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(Color::Cyan)),
+        Span::styled(": Close", Style::default().fg(Color::DarkGray)),
     ];
 
     let footer =

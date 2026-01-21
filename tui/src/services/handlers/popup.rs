@@ -3,7 +3,6 @@
 //! Handles all popup-related events including profile switcher, rulebook switcher, command palette, shortcuts, collapsed messages, and context popup.
 
 use crate::app::{AppState, OutputEvent};
-use crate::services::approval_popup::PopupService;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
@@ -47,7 +46,7 @@ pub fn handle_show_profile_switcher(state: &mut AppState) {
     // Don't show profile switcher if input is blocked or dialog is open
     if state.profile_switching_in_progress
         || state.is_dialog_open
-        || state.approval_popup.is_visible()
+        || state.approval_bar.is_visible()
     {
         return;
     }
@@ -159,10 +158,9 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     // Clear dialog state
     state.is_dialog_open = false;
     state.dialog_command = None;
-    state.show_sessions_dialog = false;
     state.show_shortcuts = false;
     state.show_collapsed_messages = false;
-    state.approval_popup = PopupService::new();
+    state.approval_bar.clear();
 
     // Clear retry state
     state.retry_attempts = 0;
@@ -214,7 +212,7 @@ pub fn handle_show_rulebook_switcher(state: &mut AppState, output_tx: &Sender<Ou
     // Don't show rulebook switcher if input is blocked or dialog is open
     if state.profile_switching_in_progress
         || state.is_dialog_open
-        || state.approval_popup.is_visible()
+        || state.approval_bar.is_visible()
     {
         return;
     }
@@ -344,7 +342,7 @@ pub fn handle_show_command_palette(state: &mut AppState) {
     // Don't show if input is blocked or dialog is open
     if state.profile_switching_in_progress
         || state.is_dialog_open
-        || state.approval_popup.is_visible()
+        || state.approval_bar.is_visible()
     {
         return;
     }
@@ -361,6 +359,19 @@ pub fn handle_command_palette_search_input_changed(state: &mut AppState, c: char
     if state.show_shortcuts_popup {
         state.command_palette_search.push(c);
         state.command_palette_selected = 0;
+        // Also reset session selection to first matching result
+        if state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_search.to_lowercase();
+            if let Some(first_match) = state
+                .sessions
+                .iter()
+                .enumerate()
+                .find(|(_, s)| s.title.to_lowercase().contains(&search_lower))
+                .map(|(i, _)| i)
+            {
+                state.session_selected = first_match;
+            }
+        }
     }
 }
 
@@ -369,6 +380,22 @@ pub fn handle_command_palette_search_backspace(state: &mut AppState) {
     if state.show_shortcuts_popup && !state.command_palette_search.is_empty() {
         state.command_palette_search.pop();
         state.command_palette_selected = 0;
+        // Also reset session selection to first matching result
+        if state.shortcuts_popup_mode == crate::app::ShortcutsPopupMode::Sessions {
+            let search_lower = state.command_palette_search.to_lowercase();
+            if let Some(first_match) = state
+                .sessions
+                .iter()
+                .enumerate()
+                .find(|(_, s)| {
+                    state.command_palette_search.is_empty()
+                        || s.title.to_lowercase().contains(&search_lower)
+                })
+                .map(|(i, _)| i)
+            {
+                state.session_selected = first_match;
+            }
+        }
     }
 }
 
@@ -379,7 +406,7 @@ pub fn handle_show_shortcuts(state: &mut AppState) {
     // Don't show shortcuts popup if input is blocked or dialog is open
     if state.profile_switching_in_progress
         || state.is_dialog_open
-        || state.approval_popup.is_visible()
+        || state.approval_bar.is_visible()
         || state.show_profile_switcher
     {
         return;
@@ -408,13 +435,7 @@ pub fn handle_toggle_collapsed_messages(
     message_area_height: usize,
     message_area_width: usize,
 ) {
-    // If approval popup is visible, toggle its maximize state instead
-    if state.approval_popup.is_visible() {
-        state.approval_popup.toggle_maximize();
-        return;
-    }
-
-    // Otherwise, handle collapsed messages popup as usual
+    // Handle collapsed messages popup
     state.show_collapsed_messages = !state.show_collapsed_messages;
     if state.show_collapsed_messages {
         // Calculate scroll position to show the top of the last message
@@ -544,7 +565,7 @@ pub fn handle_side_panel_mouse_click(state: &mut AppState, col: u16, row: u16) {
 pub fn handle_show_file_changes_popup(state: &mut AppState) {
     if state.profile_switching_in_progress
         || state.is_dialog_open
-        || state.approval_popup.is_visible()
+        || state.approval_bar.is_visible()
     {
         return;
     }

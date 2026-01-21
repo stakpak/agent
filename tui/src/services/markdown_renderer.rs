@@ -1497,11 +1497,29 @@ impl MarkdownRenderer {
             )])],
 
             MarkdownComponent::Paragraph(text) => {
-                vec![Line::from(vec![Span::styled(text, self.style.text_style)])]
+                // Wrap text to content width if available
+                if let Some(width) = self.content_width {
+                    let wrapped = self.wrap_text(&text, width);
+                    wrapped
+                        .into_iter()
+                        .map(|line| Line::from(vec![Span::styled(line, self.style.text_style)]))
+                        .collect()
+                } else {
+                    vec![Line::from(vec![Span::styled(text, self.style.text_style)])]
+                }
             }
 
             MarkdownComponent::PlainText(text) => {
-                vec![Line::from(vec![Span::styled(text, self.style.text_style)])]
+                // Wrap text to content width if available
+                if let Some(width) = self.content_width {
+                    let wrapped = self.wrap_text(&text, width);
+                    wrapped
+                        .into_iter()
+                        .map(|line| Line::from(vec![Span::styled(line, self.style.text_style)]))
+                        .collect()
+                } else {
+                    vec![Line::from(vec![Span::styled(text, self.style.text_style)])]
+                }
             }
 
             MarkdownComponent::Word(text) => {
@@ -1511,9 +1529,71 @@ impl MarkdownRenderer {
             MarkdownComponent::EmptyLine => vec![Line::from("")],
 
             MarkdownComponent::MixedContent(spans) => {
-                vec![Line::from(spans)]
+                // Wrap mixed content (text with inline formatting like bold/code) to content width
+                if let Some(width) = self.content_width {
+                    self.wrap_mixed_content(spans, width)
+                } else {
+                    vec![Line::from(spans)]
+                }
             }
         }
+    }
+
+    /// Wrap mixed content (spans with different styles) to fit within width
+    fn wrap_mixed_content(&self, spans: Vec<Span<'static>>, width: usize) -> Vec<Line<'static>> {
+        let mut result_lines: Vec<Line<'static>> = Vec::new();
+        let mut current_line_spans: Vec<Span<'static>> = Vec::new();
+        let mut current_line_width = 0usize;
+
+        for span in spans {
+            let span_text = span.content.to_string();
+            let span_style = span.style;
+
+            // Split span text into words
+            let words: Vec<&str> = span_text.split_inclusive(char::is_whitespace).collect();
+
+            for word in words {
+                let word_width = self.display_width(word);
+
+                if current_line_width + word_width > width && current_line_width > 0 {
+                    // Start a new line
+                    if !current_line_spans.is_empty() {
+                        result_lines.push(Line::from(current_line_spans));
+                        current_line_spans = Vec::new();
+                        current_line_width = 0;
+                    }
+                }
+
+                // Handle words longer than width by breaking them
+                if word_width > width {
+                    let broken = self.break_long_word(word, width);
+                    for (i, chunk) in broken.into_iter().enumerate() {
+                        if i > 0 && !current_line_spans.is_empty() {
+                            result_lines.push(Line::from(current_line_spans));
+                            current_line_spans = Vec::new();
+                            current_line_width = 0;
+                        }
+                        let chunk_width = self.display_width(&chunk);
+                        current_line_spans.push(Span::styled(chunk, span_style));
+                        current_line_width += chunk_width;
+                    }
+                } else {
+                    current_line_spans.push(Span::styled(word.to_string(), span_style));
+                    current_line_width += word_width;
+                }
+            }
+        }
+
+        // Don't forget the last line
+        if !current_line_spans.is_empty() {
+            result_lines.push(Line::from(current_line_spans));
+        }
+
+        if result_lines.is_empty() {
+            result_lines.push(Line::from(""));
+        }
+
+        result_lines
     }
 
     // Try to apply syntax highlighting if the feature is available

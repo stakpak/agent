@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::constants::{EXCEEDED_API_LIMIT_ERROR, EXCEEDED_API_LIMIT_ERROR_MESSAGE};
-use crate::services::message::{Message, MessageContent};
+use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use stakpak_shared::models::integrations::openai::AgentModel;
@@ -95,6 +95,7 @@ pub fn push_status_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_usage_message(state: &mut AppState) {
@@ -187,6 +188,7 @@ pub fn push_usage_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn format_number_with_separator(n: u32) -> String {
@@ -225,6 +227,7 @@ pub fn push_memorize_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_model_message(state: &mut AppState) {
@@ -254,6 +257,7 @@ pub fn push_model_message(state: &mut AppState) {
         content: MessageContent::Styled(Line::from(line)),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_help_message(state: &mut AppState) {
@@ -361,6 +365,7 @@ pub fn push_help_message(state: &mut AppState) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn render_system_message(state: &mut AppState, msg: &str) {
@@ -386,6 +391,7 @@ pub fn render_system_message(state: &mut AppState, msg: &str) {
         content: MessageContent::StyledBlock(lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option<bool>) {
@@ -435,6 +441,7 @@ pub fn push_error_message(state: &mut AppState, error: &str, remove_flag: Option
         content: MessageContent::StyledBlock(owned_lines),
         is_collapsed: None,
     });
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_styled_message(
@@ -449,6 +456,7 @@ pub fn push_styled_message(
         Span::styled(message.to_string(), Style::default().fg(color)),
     ]);
     state.messages.push(Message::styled(line));
+    invalidate_message_lines_cache(state);
 }
 
 pub fn version_message(latest_version: Option<String>) -> Message {
@@ -569,6 +577,7 @@ pub fn push_clear_message(state: &mut AppState) {
     state.show_helper_dropdown = false;
     let welcome_msg = welcome_messages(state.latest_version.clone(), state);
     state.messages.extend(welcome_msg);
+    invalidate_message_lines_cache(state);
 }
 
 pub fn handle_errors(error: String) -> String {
@@ -615,6 +624,7 @@ pub fn push_issue_message(state: &mut AppState) {
             state.messages.push(message);
         }
     }
+    invalidate_message_lines_cache(state);
 }
 
 pub fn push_support_message(state: &mut AppState) {
@@ -645,4 +655,5 @@ pub fn push_support_message(state: &mut AppState) {
             state.messages.push(message);
         }
     }
+    invalidate_message_lines_cache(state);
 }

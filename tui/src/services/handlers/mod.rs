@@ -111,11 +111,125 @@ pub fn update(
         }
     }
 
+    // Intercept keys for Approval Bar (inline approval)
+    // Controls: ←→ navigate, Space toggle, Enter confirm all, Esc reject all
+    // Don't intercept if collapsed messages popup is showing
+    if state.approval_bar.is_visible() && !state.show_collapsed_messages {
+        match event {
+            InputEvent::HandleEsc => {
+                if !state.approval_bar.is_esc_pending() {
+                    // First ESC: show hint and set is_dialog_open
+                    state.approval_bar.set_esc_pending(true);
+                    state.is_dialog_open = true;
+                    return;
+                }
+
+                // Second ESC: reject all tools
+                state.approval_bar.reject_all();
+
+                // Update approved and rejected tool calls from bar
+                state.message_approved_tools = state
+                    .approval_bar
+                    .get_approved_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                state.message_rejected_tools = state
+                    .approval_bar
+                    .get_rejected_tool_calls()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+
+                // Process tools in order
+                if let Some(tool_calls) = &state.message_tool_calls.clone() {
+                    for tool_call in tool_calls {
+                        let is_approved = state.message_approved_tools.contains(tool_call);
+                        let status = if is_approved {
+                            crate::app::ToolCallStatus::Approved
+                        } else {
+                            crate::app::ToolCallStatus::Rejected
+                        };
+                        state.tool_call_execution_order.push(tool_call.id.clone());
+                        state
+                            .session_tool_calls_queue
+                            .insert(tool_call.id.clone(), status);
+                    }
+
+                    // Always execute the FIRST tool, regardless of which tab is selected
+                    if let Some(first_tool) = tool_calls.first() {
+                        // Set dialog_command to the first tool for proper processing
+                        state.dialog_command = Some(first_tool.clone());
+                        state
+                            .session_tool_calls_queue
+                            .insert(first_tool.id.clone(), crate::app::ToolCallStatus::Executed);
+
+                        let is_approved = state.message_approved_tools.contains(first_tool);
+
+                        // Update the pending display to show the first tool (which is being executed)
+                        dialog::update_pending_tool_to_first(state, first_tool, is_approved);
+
+                        if is_approved {
+                            // Update run_command block to Running state
+                            dialog::update_run_command_to_running(state, first_tool);
+                            let _ = output_tx.try_send(OutputEvent::AcceptTool(first_tool.clone()));
+                        } else {
+                            // Fire handle reject - keep is_dialog_open true so it renders properly
+                            state.is_dialog_open = true;
+                            let _ = input_tx.try_send(InputEvent::HandleReject(
+                                Some("Tool call rejected".to_string()),
+                                true,
+                                None,
+                            ));
+                        }
+                    }
+                }
+
+                // Clear message_tool_calls but DON'T clear is_dialog_open yet
+                // HandleReject will clear it after rendering
+                state.message_tool_calls = None;
+
+                // Clear the approval bar
+                state.approval_bar.clear();
+
+                return;
+            }
+            InputEvent::InputChanged(' ') => {
+                // Space: toggle approve/reject for selected
+                tool::handle_approval_bar_toggle_selected(state, input_tx);
+                return;
+            }
+            InputEvent::CursorLeft => {
+                // Left arrow: select previous tab and update message display
+                tool::handle_approval_bar_prev_action(state, input_tx);
+                return;
+            }
+            InputEvent::CursorRight => {
+                // Right arrow: select next tab and update message display
+                tool::handle_approval_bar_next_action(state, input_tx);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                // If ESC was pending, Enter cancels it and goes back to showing the bar
+                if state.approval_bar.is_esc_pending() {
+                    state.approval_bar.set_esc_pending(false);
+                    state.is_dialog_open = false;
+                    return;
+                }
+                // Otherwise, confirm all and execute (handled in input.rs)
+                // Let it pass through to handle_input_submitted_event
+            }
+            _ => {
+                // Let other events pass through to normal handling
+            }
+        }
+    }
+
     // Intercept keys for Shell Mode (only when not loading)
     if state.show_shell_mode
         && state.active_shell_command.is_some()
         && !state.is_dialog_open
-        && !state.approval_popup.is_visible()
+        && !state.approval_bar.is_visible()
         && !state.shell_loading
     {
         match event {
@@ -370,6 +484,31 @@ pub fn update(
         }
         InputEvent::ApprovalPopupEscape => {
             tool::handle_approval_popup_escape(state);
+        }
+        // Approval bar handlers
+        InputEvent::ApprovalBarApproveAll => {
+            tool::handle_approval_bar_approve_all(state);
+        }
+        InputEvent::ApprovalBarRejectAll => {
+            tool::handle_approval_bar_reject_all(state);
+        }
+        InputEvent::ApprovalBarSelectAction(index) => {
+            tool::handle_approval_bar_select_action(state, index);
+        }
+        InputEvent::ApprovalBarApproveSelected => {
+            tool::handle_approval_bar_approve_selected(state);
+        }
+        InputEvent::ApprovalBarRejectSelected => {
+            tool::handle_approval_bar_reject_selected(state);
+        }
+        InputEvent::ApprovalBarNextAction => {
+            tool::handle_approval_bar_next_action(state, input_tx);
+        }
+        InputEvent::ApprovalBarPrevAction => {
+            tool::handle_approval_bar_prev_action(state, input_tx);
+        }
+        InputEvent::ApprovalBarCollapse => {
+            tool::handle_approval_bar_collapse(state);
         }
         // Shell handlers
         InputEvent::RunShellCommand(command) => {

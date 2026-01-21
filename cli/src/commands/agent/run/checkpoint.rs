@@ -122,15 +122,31 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         }
     }
 
+    // Find the last assistant message that has tool_calls
+    // This handles the case where the checkpoint might have messages after the assistant's tool call
     let tool_calls = checkpoint_messages
-        .last()
-        .filter(|msg| msg.role == Role::Assistant)
+        .iter()
+        .rev()
+        .find(|msg| msg.role == Role::Assistant && msg.tool_calls.is_some())
         .and_then(|msg| msg.tool_calls.as_ref());
 
-    Ok((
-        checkpoint_messages.clone(),
-        tool_calls.map(|t| t.to_vec()).unwrap_or_default(),
-    ))
+    // Filter out tool calls that already have results (Role::Tool messages)
+    let executed_tool_ids: std::collections::HashSet<String> = checkpoint_messages
+        .iter()
+        .filter(|msg| msg.role == Role::Tool)
+        .filter_map(|msg| msg.tool_call_id.clone())
+        .collect();
+
+    let pending_tool_calls: Vec<ToolCall> = tool_calls
+        .map(|tcs| {
+            tcs.iter()
+                .filter(|tc| !executed_tool_ids.contains(&tc.id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((checkpoint_messages.clone(), pending_tool_calls))
 }
 
 pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {

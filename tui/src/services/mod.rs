@@ -1,4 +1,4 @@
-pub mod approval_popup;
+pub mod approval_bar;
 pub mod auto_approve;
 pub mod bash_block;
 pub mod changeset;
@@ -20,7 +20,7 @@ pub mod message_pattern;
 pub mod placeholder_prompts;
 pub mod profile_switcher;
 pub mod rulebook_switcher;
-pub mod sessions_dialog;
+
 pub mod shell_mode;
 pub mod shell_popup;
 pub mod shortcuts_popup;
