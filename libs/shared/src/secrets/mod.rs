@@ -1482,4 +1482,87 @@ export PORT=3000
         assert_eq!(second_result.redacted_string, first_result.redacted_string);
         assert!(second_result.redaction_map.is_empty());
     }
+
+    #[test]
+    fn test_huawei_cloud_credentials_detection() {
+        // Test Huawei Cloud credentials in CSV format
+        // Using obviously fake test values (TESTHUAWEI prefix) to avoid GitHub push protection
+        let csv_content = r#"User Name,Access Key Id,Secret Access Key
+terraform,TESTHUAWEIKEY1234567,TestHuaweiSecretKey1234567890abcdefghij"#;
+
+        let result = redact_secrets(csv_content, None, &HashMap::new(), false);
+
+        println!("Input: {}", csv_content);
+        println!("Redacted: {}", result.redacted_string);
+        println!("Mapping: {:?}", result.redaction_map);
+
+        // Should detect both AK and SK
+        assert!(
+            !result.redaction_map.is_empty(),
+            "Should detect Huawei credentials"
+        );
+
+        // Verify AK is redacted (20 char uppercase alphanumeric)
+        assert!(
+            !result.redacted_string.contains("TESTHUAWEIKEY1234567"),
+            "AK should be redacted"
+        );
+
+        // Verify SK is redacted (40 char alphanumeric)
+        assert!(
+            !result
+                .redacted_string
+                .contains("TestHuaweiSecretKey1234567890abcdefghij"),
+            "SK should be redacted"
+        );
+
+        // Verify redaction keys are present
+        assert!(
+            result.redacted_string.contains("[REDACTED_SECRET:huawei-"),
+            "Should contain Huawei redaction markers"
+        );
+    }
+
+    #[test]
+    fn test_huawei_access_key_id_pattern() {
+        // Test AK detection with "Access Key Id" keyword
+        // Using obviously fake test value to avoid GitHub push protection
+        // Must be exactly 20 chars to match the regex pattern
+        let input = "Access Key Id: TESTHWCLOUD123456789";
+        let result = redact_secrets(input, None, &HashMap::new(), false);
+
+        println!("Input: {}", input);
+        println!("Redacted: {}", result.redacted_string);
+
+        assert!(
+            !result.redaction_map.is_empty(),
+            "Should detect Huawei AK with 'Access Key Id' keyword"
+        );
+        assert!(
+            !result.redacted_string.contains("TESTHWCLOUD123456789"),
+            "AK should be redacted"
+        );
+    }
+
+    #[test]
+    fn test_huawei_secret_access_key_pattern() {
+        // Test SK detection with "Secret Access Key" keyword
+        // Using obviously fake test value to avoid GitHub push protection
+        let input = "Secret Access Key: TestHwCloudSecretKey12345678901234567890";
+        let result = redact_secrets(input, None, &HashMap::new(), false);
+
+        println!("Input: {}", input);
+        println!("Redacted: {}", result.redacted_string);
+
+        assert!(
+            !result.redaction_map.is_empty(),
+            "Should detect Huawei SK with 'Secret Access Key' keyword"
+        );
+        assert!(
+            !result
+                .redacted_string
+                .contains("TestHwCloudSecretKey12345678901234567890"),
+            "SK should be redacted"
+        );
+    }
 }
