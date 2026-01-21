@@ -107,21 +107,24 @@ pub struct CheckpointState {
 // Request Types
 // =============================================================================
 
-/// Request to create a session or add a checkpoint
+/// Request to create a session (with initial checkpoint state)
 #[derive(Debug, Serialize)]
 pub struct CreateSessionRequest {
-    /// Optional session ID (if adding checkpoint to existing session)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<Uuid>,
-    /// Session title (for new sessions)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    /// Session title
+    pub title: String,
     /// Session visibility
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<SessionVisibility>,
     /// Working directory
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Initial checkpoint state with messages
+    pub state: CheckpointState,
+}
+
+/// Request to create a checkpoint (for subsequent checkpoints)
+#[derive(Debug, Serialize)]
+pub struct CreateCheckpointRequest {
     /// Checkpoint state with messages
     pub state: CheckpointState,
     /// Parent checkpoint ID (for branching)
@@ -168,10 +171,16 @@ pub struct ListCheckpointsQuery {
 // Response Types
 // =============================================================================
 
-/// Response from creating a session/checkpoint
+/// Response from creating a session
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionResponse {
     pub session_id: Uuid,
+    pub checkpoint: Checkpoint,
+}
+
+/// Response from creating a checkpoint
+#[derive(Debug, Deserialize)]
+pub struct CreateCheckpointResponse {
     pub checkpoint: Checkpoint,
 }
 

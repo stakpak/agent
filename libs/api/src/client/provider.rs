@@ -9,7 +9,8 @@ use crate::AgentProvider;
 use crate::local::db;
 use crate::models::*;
 use crate::stakpak::{
-    CheckpointState, CreateSessionRequest, ListCheckpointsQuery, ListSessionsQuery,
+    CheckpointState, CreateCheckpointRequest, CreateSessionRequest, ListCheckpointsQuery,
+    ListSessionsQuery,
 };
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -680,7 +681,25 @@ impl AgentClient {
         }
 
         // Create new session
-        let title = self.generate_session_title(messages).await?;
+        // Generate title with fallback - don't fail session creation if title generation fails
+        let title = match self.generate_session_title(messages).await {
+            Ok(title) => title,
+            Err(_) => {
+                // Extract first few words from user message as fallback title
+                messages
+                    .iter()
+                    .find(|m| m.role == Role::User)
+                    .and_then(|m| m.content.as_ref())
+                    .map(|c| {
+                        let text = c.to_string();
+                        text.split_whitespace()
+                            .take(5)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_else(|| "New Session".to_string())
+            }
+        };
 
         // Get current working directory
         let cwd = std::env::current_dir()
@@ -688,17 +707,17 @@ impl AgentClient {
             .map(|p| p.to_string_lossy().to_string());
 
         if let Some(api) = &self.stakpak_api {
-            // Create via Stakpak API
-            let mut request = CreateSessionRequest::new_session(
+            // Create session via Stakpak API (includes initial checkpoint)
+            let mut session_request = CreateSessionRequest::new(
                 title,
                 CheckpointState {
                     messages: messages.to_vec(),
                 },
             );
             if let Some(cwd) = cwd {
-                request = request.with_cwd(cwd);
+                session_request = session_request.with_cwd(cwd);
             }
-            let response = api.create_session(&request).await?;
+            let response = api.create_session(&session_request).await?;
 
             Ok(RunAgentOutput {
                 checkpoint: AgentCheckpointListItem {
@@ -766,14 +785,13 @@ impl AgentClient {
     ) -> Result<RunAgentOutput, String> {
         if let Some(api) = &self.stakpak_api {
             // Add checkpoint via Stakpak API
+            let checkpoint_request = CreateCheckpointRequest::new(CheckpointState {
+                messages: new_messages.clone(),
+            })
+            .with_parent(checkpoint_info.checkpoint.id);
+
             let response = api
-                .create_session(&CreateSessionRequest::add_checkpoint(
-                    checkpoint_info.session.id,
-                    CheckpointState {
-                        messages: new_messages.clone(),
-                    },
-                    Some(checkpoint_info.checkpoint.id),
-                ))
+                .create_checkpoint(checkpoint_info.session.id, &checkpoint_request)
                 .await?;
 
             Ok(RunAgentOutput {
@@ -841,7 +859,7 @@ impl AgentClient {
             .map_err(|e| e.to_string())?
             .ok()?;
 
-        let input = if let Some(llm_input) = ctx.state.llm_input.clone() {
+        let mut input = if let Some(llm_input) = ctx.state.llm_input.clone() {
             llm_input
         } else {
             return Err(
@@ -849,6 +867,12 @@ impl AgentClient {
                     .to_string(),
             );
         };
+
+        // Inject session_id header if available
+        if let Some(session_id) = ctx.session_id {
+            let headers = input.headers.get_or_insert_with(std::collections::HashMap::new);
+            headers.insert("X-Session-Id".to_string(), session_id.to_string());
+        }
 
         let (response_message, usage) = if let Some(tx) = stream_channel_tx {
             // Streaming mode
@@ -860,6 +884,7 @@ impl AgentClient {
                 tools: input.tools,
                 stream_channel_tx: internal_tx,
                 provider_options: input.provider_options,
+                headers: input.headers,
             };
 
             let stakai = self.stakai.clone();
@@ -951,6 +976,7 @@ impl AgentClient {
             max_tokens: 100,
             tools: None,
             provider_options: None,
+            headers: None,
         };
 
         let response = self.stakai.chat(input).await.map_err(|e| e.to_string())?;

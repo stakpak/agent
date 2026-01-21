@@ -3,10 +3,10 @@
 //! Provides access to Stakpak's non-inference APIs.
 
 use super::{
-    CheckpointState, CreateSessionRequest, CreateSessionResponse, GetCheckpointResponse,
-    GetSessionResponse, ListCheckpointsQuery, ListCheckpointsResponse, ListSessionsQuery,
-    ListSessionsResponse, SessionVisibility, StakpakApiConfig, UpdateSessionRequest,
-    UpdateSessionResponse, models::*,
+    CheckpointState, CreateCheckpointRequest, CreateCheckpointResponse, CreateSessionRequest,
+    CreateSessionResponse, GetCheckpointResponse, GetSessionResponse, ListCheckpointsQuery,
+    ListCheckpointsResponse, ListSessionsQuery, ListSessionsResponse, SessionVisibility,
+    StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, models::*,
 };
 use crate::models::{
     CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook, RuleBook,
@@ -72,12 +72,29 @@ impl StakpakApiClient {
     // Session APIs - New /v1/sessions endpoints
     // =========================================================================
 
-    /// Create a new session or add a checkpoint to an existing session
+    /// Create a new session
     pub async fn create_session(
         &self,
         req: &CreateSessionRequest,
     ) -> Result<CreateSessionResponse, String> {
         let url = format!("{}/v1/sessions", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .json(req)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.handle_response(response).await
+    }
+
+    /// Create a checkpoint for a session
+    pub async fn create_checkpoint(
+        &self,
+        session_id: Uuid,
+        req: &CreateCheckpointRequest,
+    ) -> Result<CreateCheckpointResponse, String> {
+        let url = format!("{}/v1/sessions/{}/checkpoints", self.base_url, session_id);
         let response = self
             .client
             .post(&url)
@@ -430,35 +447,17 @@ impl StakpakApiClient {
 }
 
 // =============================================================================
-// Builder helpers for creating sessions
+// Builder helpers for creating sessions and checkpoints
 // =============================================================================
 
 impl CreateSessionRequest {
-    /// Create a new session with the given title and state
-    pub fn new_session(title: impl Into<String>, state: CheckpointState) -> Self {
+    /// Create a new session request with initial state
+    pub fn new(title: impl Into<String>, state: CheckpointState) -> Self {
         Self {
-            session_id: None,
-            title: Some(title.into()),
+            title: title.into(),
             visibility: Some(SessionVisibility::Private),
             cwd: None,
             state,
-            parent_id: None,
-        }
-    }
-
-    /// Add a checkpoint to an existing session
-    pub fn add_checkpoint(
-        session_id: Uuid,
-        state: CheckpointState,
-        parent_id: Option<Uuid>,
-    ) -> Self {
-        Self {
-            session_id: Some(session_id),
-            title: None,
-            visibility: None,
-            cwd: None,
-            state,
-            parent_id,
         }
     }
 
@@ -471,6 +470,22 @@ impl CreateSessionRequest {
     /// Set visibility
     pub fn with_visibility(mut self, visibility: SessionVisibility) -> Self {
         self.visibility = Some(visibility);
+        self
+    }
+}
+
+impl CreateCheckpointRequest {
+    /// Create a new checkpoint request
+    pub fn new(state: CheckpointState) -> Self {
+        Self {
+            state,
+            parent_id: None,
+        }
+    }
+
+    /// Set the parent checkpoint ID (for branching)
+    pub fn with_parent(mut self, parent_id: Uuid) -> Self {
+        self.parent_id = Some(parent_id);
         self
     }
 }

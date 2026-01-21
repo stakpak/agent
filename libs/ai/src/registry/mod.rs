@@ -27,11 +27,6 @@ impl ProviderRegistry {
 
     /// Get a provider by ID
     pub fn get_provider(&self, id: &str) -> Result<Arc<dyn Provider>> {
-        eprintln!(
-            "[DEBUG] Looking for provider: '{}', available: {:?}",
-            id,
-            self.providers.keys().collect::<Vec<_>>()
-        );
         self.providers
             .get(id)
             .cloned()

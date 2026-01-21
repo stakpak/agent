@@ -64,12 +64,6 @@ impl Provider for StakpakProvider {
         // Stakpak uses OpenAI-compatible API, reuse OpenAI conversion
         let openai_req = to_openai_request(&request, false);
 
-        eprintln!("[DEBUG] Stakpak generate URL: {}", url);
-        eprintln!(
-            "[DEBUG] Stakpak generate request: {}",
-            serde_json::to_string_pretty(&openai_req).unwrap_or_default()
-        );
-
         let headers = self.build_headers(request.options.headers.as_ref());
 
         let response = self
@@ -98,12 +92,6 @@ impl Provider for StakpakProvider {
 
         // Stakpak uses OpenAI-compatible API, reuse OpenAI conversion
         let openai_req = to_openai_request(&request, true);
-
-        eprintln!("[DEBUG] Stakpak stream URL: {}", url);
-        eprintln!(
-            "[DEBUG] Stakpak stream request: {}",
-            serde_json::to_string_pretty(&openai_req).unwrap_or_default()
-        );
 
         let headers = self.build_headers(request.options.headers.as_ref());
 

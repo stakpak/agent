@@ -12,7 +12,7 @@ use crate::models::llm::{
 use futures::StreamExt;
 use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
-    GenerateResponse, GoogleOptions, Inference, InferenceConfig, Message, MessageContent,
+    GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
     OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions, Tool,
     ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
     registry::ProviderRegistry,
@@ -604,6 +604,15 @@ impl StakAIClient {
             }
         }
 
+        // Add custom headers if present
+        if let Some(headers) = &input.headers {
+            let mut stakai_headers = Headers::new();
+            for (key, value) in headers {
+                stakai_headers.insert(key, value);
+            }
+            options = options.headers(stakai_headers);
+        }
+
         // Convert provider options if present
         let provider_options = input
             .provider_options
@@ -639,6 +648,15 @@ impl StakAIClient {
             for tool in tools {
                 options = options.add_tool(to_stakai_tool(tool));
             }
+        }
+
+        // Add custom headers if present
+        if let Some(headers) = &input.headers {
+            let mut stakai_headers = Headers::new();
+            for (key, value) in headers {
+                stakai_headers.insert(key, value);
+            }
+            options = options.headers(stakai_headers);
         }
 
         // Convert provider options if present

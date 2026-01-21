@@ -489,6 +489,9 @@ pub struct LLMInput {
     pub tools: Option<Vec<LLMTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_options: Option<LLMProviderOptions>,
+    /// Custom headers to pass to the inference provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug)]
@@ -499,6 +502,8 @@ pub struct LLMStreamInput {
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
     pub provider_options: Option<LLMProviderOptions>,
+    /// Custom headers to pass to the inference provider
+    pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 impl From<&LLMStreamInput> for LLMInput {
@@ -509,6 +514,7 @@ impl From<&LLMStreamInput> for LLMInput {
             max_tokens: value.max_tokens,
             tools: value.tools.clone(),
             provider_options: value.provider_options.clone(),
+            headers: value.headers.clone(),
         }
     }
 }
