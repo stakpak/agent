@@ -88,6 +88,15 @@ pub enum InputEvent {
     ApprovalPopupToggleApproval,
     ApprovalPopupSubmit,
     ApprovalPopupEscape,
+    // Approval bar events (inline approval)
+    ApprovalBarApproveAll,
+    ApprovalBarRejectAll,
+    ApprovalBarSelectAction(usize),
+    ApprovalBarApproveSelected,
+    ApprovalBarRejectSelected,
+    ApprovalBarNextAction,
+    ApprovalBarPrevAction,
+    ApprovalBarCollapse,
     // Profile switcher events
     ShowProfileSwitcher,
     ProfilesLoaded(Vec<String>, String),

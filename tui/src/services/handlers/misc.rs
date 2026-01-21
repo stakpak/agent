@@ -55,15 +55,7 @@ pub fn handle_error(state: &mut AppState, err: String) {
 
 /// Handle resized event
 pub fn handle_resized(state: &mut AppState, width: u16, height: u16) {
-    let old_terminal_size = state.terminal_size;
     state.terminal_size = Size { width, height };
-
-    // Recreate the approval popup if it's visible and terminal size changed
-    if state.approval_popup.is_visible() && old_terminal_size != state.terminal_size {
-        state
-            .approval_popup
-            .recreate_with_terminal_size(state.terminal_size);
-    }
 
     // Resize shell parser
     // We reserve space for borders (4 columns for side borders/padding, 2 rows for top/bottom borders)
@@ -115,11 +107,12 @@ pub fn handle_auto_approve_current_tool(state: &mut AppState) {
 
 /// Handle tab event
 pub fn handle_tab(state: &mut AppState, message_area_height: usize, message_area_width: usize) {
-    // Handle tab switching in unified shortcuts popup
+    // Handle tab switching in unified shortcuts popup (Commands -> Shortcuts -> Sessions -> Commands)
     if state.show_shortcuts_popup {
         state.shortcuts_popup_mode = match state.shortcuts_popup_mode {
             crate::app::ShortcutsPopupMode::Commands => crate::app::ShortcutsPopupMode::Shortcuts,
-            crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Commands,
+            crate::app::ShortcutsPopupMode::Shortcuts => crate::app::ShortcutsPopupMode::Sessions,
+            crate::app::ShortcutsPopupMode::Sessions => crate::app::ShortcutsPopupMode::Commands,
         };
         return;
     }
@@ -257,7 +250,7 @@ pub fn handle_toggle_mouse_capture(state: &mut AppState) {
 
 /// Handle set sessions event
 pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::SessionInfo>) {
-    // Terminate any active shell before showing sessions dialog
+    // Terminate any active shell before showing sessions popup
     if let Some(cmd) = &state.active_shell_command {
         let _ = cmd.kill();
     }
@@ -274,7 +267,10 @@ pub fn handle_set_sessions(state: &mut AppState, sessions: Vec<crate::app::Sessi
     state.text_area.set_shell_mode(false);
 
     state.sessions = sessions;
-    state.show_sessions_dialog = true;
+    state.session_selected = 0; // Reset selection to first item
+    // Open unified popup at Sessions tab instead of separate sessions dialog
+    state.show_shortcuts_popup = true;
+    state.shortcuts_popup_mode = crate::app::ShortcutsPopupMode::Sessions;
 }
 
 /// Handle start loading operation event
@@ -289,14 +285,32 @@ pub fn handle_start_loading_operation(
 
 /// Handle end loading operation event
 pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app::LoadingOperation) {
+    // Check if this is a checkpoint resume before consuming operation
+    let is_checkpoint_resume = matches!(operation, crate::app::LoadingOperation::CheckpointResume);
+
     state.loading_manager.end_operation(operation);
     state.loading = state.loading_manager.is_loading();
     state.loading_type = state.loading_manager.get_loading_type();
+
+    // After checkpoint resume completes, ensure we scroll to show the latest messages
+    if is_checkpoint_resume {
+        state.scroll_to_bottom = true;
+        state.stay_at_bottom = true;
+        // Invalidate cache to ensure fresh render with correct scroll
+        crate::services::message::invalidate_message_lines_cache(state);
+    }
 }
 
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
     state.messages.push(Message::assistant(None, msg, None));
+
+    // Invalidate cache since messages changed
+    crate::services::message::invalidate_message_lines_cache(state);
+
+    // Scroll to bottom to show the new message
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
 
     // Auto-show side panel on first message (assistant)
     state.auto_show_side_panel();

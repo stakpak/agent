@@ -138,6 +138,36 @@ pub fn handle_up_navigation(state: &mut AppState) {
                 // Scroll shortcuts content
                 state.shortcuts_scroll = state.shortcuts_scroll.saturating_sub(SCROLL_LINES);
             }
+            crate::app::ShortcutsPopupMode::Sessions => {
+                // Navigate filtered sessions list
+                let search_lower = state.command_palette_search.to_lowercase();
+                let filtered_indices: Vec<usize> = state
+                    .sessions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| {
+                        state.command_palette_search.is_empty()
+                            || s.title.to_lowercase().contains(&search_lower)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+
+                if !filtered_indices.is_empty() {
+                    // Find current position in filtered list
+                    let current_pos = filtered_indices
+                        .iter()
+                        .position(|&i| i == state.session_selected)
+                        .unwrap_or(0);
+
+                    // Move up in filtered list
+                    let new_pos = if current_pos > 0 {
+                        current_pos - 1
+                    } else {
+                        filtered_indices.len() - 1
+                    };
+                    state.session_selected = filtered_indices[new_pos];
+                }
+            }
         }
         return;
     }
@@ -149,18 +179,9 @@ pub fn handle_up_navigation(state: &mut AppState) {
         }
         return;
     }
-    // Check if approval popup is visible and should consume the event
-    if state.approval_popup.is_visible() {
-        state.approval_popup.scroll_up();
-        return; // Event was consumed by popup
-    }
 
     // Handle different UI states
-    if state.show_sessions_dialog {
-        if state.session_selected > 0 {
-            state.session_selected -= 1;
-        }
-    } else if state.show_helper_dropdown {
+    if state.show_helper_dropdown {
         handle_dropdown_up(state);
     } else if state.is_dialog_open && state.dialog_focused {
         // Handle dialog navigation only when dialog is focused
@@ -205,6 +226,36 @@ pub fn handle_down_navigation(
                 // Scroll shortcuts content
                 state.shortcuts_scroll = state.shortcuts_scroll.saturating_add(SCROLL_LINES);
             }
+            crate::app::ShortcutsPopupMode::Sessions => {
+                // Navigate filtered sessions list
+                let search_lower = state.command_palette_search.to_lowercase();
+                let filtered_indices: Vec<usize> = state
+                    .sessions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| {
+                        state.command_palette_search.is_empty()
+                            || s.title.to_lowercase().contains(&search_lower)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+
+                if !filtered_indices.is_empty() {
+                    // Find current position in filtered list
+                    let current_pos = filtered_indices
+                        .iter()
+                        .position(|&i| i == state.session_selected)
+                        .unwrap_or(0);
+
+                    // Move down in filtered list
+                    let new_pos = if current_pos < filtered_indices.len() - 1 {
+                        current_pos + 1
+                    } else {
+                        0
+                    };
+                    state.session_selected = filtered_indices[new_pos];
+                }
+            }
         }
         return;
     }
@@ -214,19 +265,11 @@ pub fn handle_down_navigation(
         } else {
             state.rulebook_switcher_selected = 0;
         }
-    }
-    // Check if approval popup is visible and should consume the event
-    if state.approval_popup.is_visible() {
-        state.approval_popup.scroll_down();
-        return; // Event was consumed by popup
+        return;
     }
 
     // Handle different UI states
-    if state.show_sessions_dialog {
-        if state.session_selected + 1 < state.sessions.len() {
-            state.session_selected += 1;
-        }
-    } else if state.show_helper_dropdown {
+    if state.show_helper_dropdown {
         handle_dropdown_down(state);
     } else if state.is_dialog_open && state.dialog_focused {
         // Handle dialog navigation only when dialog is focused

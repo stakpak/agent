@@ -1,4 +1,4 @@
-use crate::services::detect_term::{detect_terminal, should_use_rgb_colors};
+use crate::services::detect_term::detect_terminal;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
 use crate::{app::AppState, services::detect_term::AdaptiveColors};
 use ratatui::{
@@ -28,7 +28,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    if state.show_shell_mode && !state.is_dialog_open && !state.show_sessions_dialog {
+    if state.show_shell_mode && !state.is_dialog_open {
         let hint = Paragraph::new(Span::styled(
             "Shell mode is on   Esc to exit",
             Style::default().fg(AdaptiveColors::dark_magenta()),
@@ -48,7 +48,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let shortcuts_widget =
             Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
         f.render_widget(shortcuts_widget, area);
-    } else if !state.show_sessions_dialog && !state.is_dialog_open && state.input().is_empty() {
+    } else if !state.is_dialog_open && state.input().is_empty() {
         let context_info = state
             .llm_model
             .as_ref()
@@ -60,31 +60,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         let approaching_max = (state.total_session_usage.total_tokens as f64 / max_tokens as f64)
             >= context_info.approach_warning_threshold;
 
-        if state.latest_tool_call.is_some() && !high_cost_warning && !approaching_max {
-            // Create a line with both hints - shortcuts on left, retry on right
-            let shortcuts_text = "$ shell | / commands | ctrl+s shortcuts";
-            let retry_text = "ctrl+r to retry last command in shell mode";
-
-            // Calculate spacing to align retry hint to the right
-            let total_width = area.width as usize;
-            let shortcuts_len = shortcuts_text.len();
-            let retry_len = retry_text.len();
-            let spacing = total_width.saturating_sub(shortcuts_len + retry_len);
-
-            let retry_color = if should_use_rgb_colors() {
-                Color::Yellow
-            } else {
-                Color::Cyan
-            };
-            let spans = vec![
-                Span::styled(shortcuts_text, Style::default().fg(Color::Cyan)),
-                Span::styled(" ".repeat(spacing), Style::default()),
-                Span::styled(retry_text, Style::default().fg(retry_color)),
-            ];
-
-            let hint = Paragraph::new(Line::from(spans));
-            f.render_widget(hint, area);
-        } else {
+        {
             #[cfg(unix)]
             let select_hint = if state.mouse_capture_enabled {
                 "Fn/Option/Shift + drag to select"
@@ -92,41 +68,45 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 ""
             };
 
-            // Create spans for left and right alignment on first line
-            let left_text = "$ shell | / commands | ctrl+s shortcuts";
+            // Helper text for the right side
+            let helper_text = "$ shell | / commands | ctrl+s shortcuts";
 
-            // Calculate spacing to align profile info to the right
+            // Left side: loader if loading, otherwise empty
+            let mut left_spans = Vec::new();
+            if state.loading {
+                let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
+                let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
+                let spinner_text = if state.loading_type == crate::app::LoadingType::Sessions {
+                    "Loading sessions..."
+                } else {
+                    "Stakpaking..."
+                };
 
-            let right_text_content = {
-                let mut s = String::new();
+                left_spans.push(Span::styled(
+                    format!("{} {}", spinner, spinner_text),
+                    Style::default()
+                        .fg(AdaptiveColors::orange())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
 
-                // Add profile info only if side panel is hidden
-                if !state.show_side_panel {
-                    s.push_str("profile ");
-                    s.push_str(&state.current_profile_name);
+                if state.loading_type == crate::app::LoadingType::Llm {
+                    left_spans.push(Span::styled(
+                        " - esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    ));
                 }
+            }
 
-                // Add rulebooks info
-                s.push_str(" | ctrl+y side panel");
-                s
-            };
-
-            let right_style = Style::default().fg(Color::DarkGray);
-
-            // Left side content
-            let left_spans = vec![Span::styled(
-                left_text,
+            // Right side: helper text (always on right), plus profile info if side panel hidden
+            let mut right_spans = vec![Span::styled(
+                helper_text,
                 Style::default().fg(Color::DarkGray),
             )];
 
-            // Right side content
-            let mut right_spans = vec![];
-
-            if high_cost_warning || approaching_max {
-                right_spans.push(Span::styled(right_text_content, right_style));
-            } else if !state.show_side_panel {
+            // Add profile info only if side panel is hidden and not loading heavily
+            if !state.show_side_panel && !high_cost_warning && !approaching_max {
                 right_spans.push(Span::styled(
-                    "profile ",
+                    " | profile ",
                     Style::default().fg(Color::DarkGray),
                 ));
                 right_spans.push(Span::styled(
@@ -139,7 +119,7 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 ));
             }
 
-            // Render both aligned to opposite sides
+            // Render left (loader) and right (helper text) aligned to opposite sides
             let left_widget =
                 Paragraph::new(Line::from(left_spans)).alignment(ratatui::layout::Alignment::Left);
             let right_widget = Paragraph::new(Line::from(right_spans))
@@ -172,7 +152,36 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-    } else if !state.show_sessions_dialog && !state.is_dialog_open {
+    } else if state.approval_bar.is_visible() {
+        // Show approval bar hints
+        let spans_vec = if state.approval_bar.is_esc_pending() {
+            // After first ESC: show confirmation hint
+            vec![
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::styled(
+                    " show approval bar . ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled("Esc", Style::default().fg(Color::Red)),
+                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+            ]
+        } else {
+            // Normal approval bar hints
+            vec![
+                Span::styled("←→", Style::default().fg(Color::Cyan)),
+                Span::styled(" navigate . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Space", Style::default().fg(Color::Cyan)),
+                Span::styled(" toggle . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::styled(" accept all . ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Esc", Style::default().fg(Color::Red)),
+                Span::styled(" reject all", Style::default().fg(Color::DarkGray)),
+            ]
+        };
+        let hint =
+            Paragraph::new(Line::from(spans_vec)).alignment(ratatui::layout::Alignment::Right);
+        f.render_widget(hint, area);
+    } else if !state.is_dialog_open {
         let status_color = Color::DarkGray;
 
         // detect if terminal is vscode
@@ -187,10 +196,10 @@ pub fn render_hint_or_shortcuts(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(hint, area);
     } else if state.is_dialog_open {
         let mut spans_vec = vec![];
-        if !state.approval_popup.is_visible() && state.message_tool_calls.is_some() {
+        if !state.approval_bar.is_visible() && state.message_tool_calls.is_some() {
             spans_vec.push(Span::styled("Enter", Style::default().fg(Color::Cyan)));
             spans_vec.push(Span::styled(
-                " show approval popup . ",
+                " show approval bar . ",
                 Style::default().fg(Color::Reset),
             ));
             spans_vec.push(Span::styled("Esc", Style::default().fg(Color::Red)));

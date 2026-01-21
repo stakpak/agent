@@ -1,4 +1,4 @@
-use crate::app::{AppState, LoadingType};
+use crate::app::AppState;
 use crate::constants::{DROPDOWN_MAX_HEIGHT, SCROLL_BUFFER_LINES};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_dropdown::{render_file_search_dropdown, render_helper_dropdown};
@@ -7,14 +7,14 @@ use crate::services::message::{
     get_wrapped_collapsed_message_lines_cached, get_wrapped_message_lines_cached,
 };
 use crate::services::message_pattern::spans_to_string;
-use crate::services::sessions_dialog::render_sessions_dialog;
+
 use crate::services::shell_popup;
 use crate::services::side_panel;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Color, Style},
+    text::Line,
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -80,32 +80,44 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         margin_height
     };
 
-    let dialog_height = if state.show_sessions_dialog { 11 } else { 0 };
-    let dialog_margin = if state.show_sessions_dialog { 2 } else { 0 };
-
     // Calculate shell popup height (goes above input)
     let shell_popup_height = shell_popup::calculate_popup_height(state, main_area.height);
 
-    // Hide input when shell popup is expanded (takes over input)
-    let effective_input_height = if state.shell_popup_visible && state.shell_popup_expanded {
-        0 // Hide input when popup is expanded
+    // Calculate approval bar height
+    let approval_bar_height = state.approval_bar.calculate_height();
+    let approval_bar_visible = state.approval_bar.is_visible();
+
+    // Hide input when shell popup is expanded (takes over input) or when approval bar is visible
+    let effective_input_height =
+        if (state.shell_popup_visible && state.shell_popup_expanded) || approval_bar_visible {
+            0
+        } else {
+            input_height
+        };
+
+    // Hide dropdown when approval bar is visible
+    let effective_dropdown_height = if approval_bar_visible {
+        0
     } else {
-        input_height
+        dropdown_height
     };
 
-    // Layout: [messages][loading_line][dialog_margin][dialog][shell_popup][input][dropdown][hint]
-    let mut constraints = vec![
-        Constraint::Min(1),    // messages
+    // Layout: [messages][loading_line][shell_popup][approval_bar][input][dropdown][hint]
+    let effective_approval_bar_height = if approval_bar_visible {
+        approval_bar_height
+    } else {
+        0
+    };
+
+    let constraints = vec![
+        Constraint::Min(1),                                // messages
         Constraint::Length(1), // reserved line for loading indicator (also shows tokens)
-        Constraint::Length(dialog_margin),
-        Constraint::Length(dialog_height),
+        Constraint::Length(shell_popup_height), // shell popup (0 if hidden)
+        Constraint::Length(effective_approval_bar_height), // approval bar (0 if hidden)
+        Constraint::Length(effective_input_height), // input (0 when approval bar visible)
+        Constraint::Length(effective_dropdown_height), // dropdown (0 when approval bar visible)
+        Constraint::Length(hint_height), // hint
     ];
-    if !state.show_sessions_dialog {
-        constraints.push(Constraint::Length(shell_popup_height)); // shell popup (0 if hidden)
-        constraints.push(Constraint::Length(effective_input_height));
-        constraints.push(Constraint::Length(dropdown_height));
-    }
-    constraints.push(Constraint::Length(hint_height)); // Always include hint height (may be 0)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -113,6 +125,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
 
     let message_area = chunks[0];
     let loading_area = chunks[1]; // Reserved line for loading indicator
+    let shell_popup_area = chunks[2];
+    let approval_bar_area = chunks[3];
+    let input_area = chunks[4];
+    let dropdown_area = chunks[5];
+    let hint_area = chunks[6];
 
     // Create padded message area for content rendering
     let padded_message_area = Rect {
@@ -121,32 +138,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         width: message_area.width.saturating_sub(2),
         height: message_area.height,
     };
-
-    let mut input_area = Rect {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    };
-    let mut dropdown_area = Rect {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    };
-    let mut shell_popup_area = Rect {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    };
-    let hint_area = chunks.last().copied().unwrap_or(message_area);
-
-    if !state.show_sessions_dialog {
-        shell_popup_area = chunks[4]; // Shell popup between dialog and input
-        input_area = chunks[5]; // Input after shell popup
-        dropdown_area = chunks.get(6).copied().unwrap_or(input_area);
-    }
 
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
@@ -159,8 +150,19 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
         message_area_height,
     );
 
+    // Render approval bar in its dedicated area (if visible)
+    if approval_bar_visible {
+        let padded_approval_bar_area = Rect {
+            x: approval_bar_area.x + 1,
+            y: approval_bar_area.y,
+            width: approval_bar_area.width.saturating_sub(2),
+            height: approval_bar_area.height,
+        };
+        state.approval_bar.render(f, padded_approval_bar_area);
+    }
+
     // Render shell popup above input area (if visible)
-    if state.shell_popup_visible && !state.show_sessions_dialog {
+    if state.shell_popup_visible {
         let padded_shell_popup_area = Rect {
             x: shell_popup_area.x + 1,
             y: shell_popup_area.y,
@@ -183,14 +185,14 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     } else if state.is_dialog_open {
     } else if state.shell_popup_visible && state.shell_popup_expanded {
         // Don't render input when popup is expanded - popup takes over input
-    } else if !state.show_sessions_dialog {
-        // Don't render input when sessions dialog is visible
+    } else if !approval_bar_visible {
+        // Only render input/dropdown when approval bar is NOT visible
         render_multiline_input(f, state, input_area);
         render_helper_dropdown(f, state, dropdown_area);
         render_file_search_dropdown(f, state, dropdown_area);
     }
-    // Render hint/shortcuts if not hiding for dropdown and not showing collapsed messages (unless dialog is open)
-    if !state.show_helper_dropdown && !state.show_collapsed_messages {
+    // Render hint/shortcuts if not hiding for dropdown, not showing collapsed messages, and not showing approval bar
+    if !state.show_helper_dropdown && !state.show_collapsed_messages && !approval_bar_visible {
         let padded_hint_area = Rect {
             x: hint_area.x + 1,
             y: hint_area.y,
@@ -201,16 +203,6 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     }
 
     // === POPUPS - rendered last to appear on top of side panel ===
-
-    // Render sessions dialog (on top of side panel)
-    if state.show_sessions_dialog {
-        render_sessions_dialog(f, state);
-    }
-
-    // Render approval popup to ensure it appears on top of everything
-    if state.approval_popup.is_visible() {
-        state.approval_popup.render(f, f.area());
-    }
 
     // Render profile switcher
     if state.show_profile_switcher {
@@ -263,7 +255,7 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         return;
     }
 
-    // Use consistent scroll calculation with buffer (matching update.rs)
+    // Use consistent scroll calculation with buffer
     let max_scroll = total_lines.saturating_sub(height.saturating_sub(SCROLL_BUFFER_LINES));
 
     // Calculate scroll position - ensure it doesn't exceed max_scroll
@@ -284,8 +276,6 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
-
-    // Add a space after the last message if we have content
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);
@@ -420,41 +410,7 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn render_loading_indicator(f: &mut Frame, state: &mut AppState, area: Rect) {
-    // Always render this line - shows spinner when loading on left, tokens always on right (if > 0)
-    let mut left_spans = Vec::new();
-
-    // Left side: spinner (if loading)
-    if state.loading {
-        let spinner_chars = ["▄▀", "▐▌", "▀▄", "▐▌"];
-        let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
-        let spinner_text = if state.loading_type == LoadingType::Sessions {
-            "Loading sessions..."
-        } else {
-            "Stakpaking..."
-        };
-
-        left_spans.push(Span::styled(
-            format!("{} {}", spinner, spinner_text),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        ));
-
-        if state.loading_type == LoadingType::Llm {
-            left_spans.push(Span::styled(
-                " - esc to cancel",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-    }
-
-    let mut final_spans = Vec::new();
-
-    if !state.show_sessions_dialog {
-        final_spans.extend(left_spans);
-    }
-
-    let widget =
-        Paragraph::new(Line::from(final_spans)).wrap(ratatui::widgets::Wrap { trim: false });
-    f.render_widget(widget, area);
+    // Loading spinner is now shown in the hint area below input
+    // This area is kept for potential future use (e.g., token count display)
+    let _ = (f, state, area);
 }

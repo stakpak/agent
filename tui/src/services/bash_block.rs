@@ -1,11 +1,8 @@
 use super::message::{extract_full_command_arguments, extract_truncated_command_arguments};
-use crate::app::AppState;
 use crate::services::detect_term::AdaptiveColors;
-use crate::services::file_diff::render_file_diff_block;
+use crate::services::file_diff::{render_file_diff_block, render_file_diff_block_from_args};
 use crate::services::markdown_renderer::render_markdown_to_lines;
-use crate::services::message::{
-    BubbleColors, Message, MessageContent, extract_command_purpose, get_command_type_name,
-};
+use crate::services::message::{BubbleColors, extract_command_purpose, get_command_type_name};
 use ansi_to_tui::IntoText;
 use console::strip_ansi_codes;
 use ratatui::style::{Color, Modifier, Style};
@@ -16,7 +13,6 @@ use stakpak_shared::models::integrations::openai::{
 };
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
-use uuid::Uuid;
 
 #[allow(dead_code)]
 pub enum ContentAlignment {
@@ -104,7 +100,7 @@ fn calculate_display_width(text: &str) -> usize {
     stripped.width()
 }
 
-// Add this improved simple text wrapping function
+// Add this improved simple text wrapping function (character-based)
 fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
     if text.is_empty() {
         return vec![String::new()];
@@ -130,6 +126,63 @@ fn wrap_text_simple_unicode(text: &str, width: usize) -> Vec<String> {
 
     if !current_line.is_empty() {
         lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
+// Word-based text wrapping function
+fn wrap_text_by_word(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let stripped = strip_ansi_codes(text);
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for word in stripped.split_inclusive(|c: char| c.is_whitespace()) {
+        let word_width = calculate_display_width(word);
+
+        if current_width + word_width > width && !current_line.is_empty() {
+            // Word doesn't fit, start new line
+            lines.push(current_line.trim_end().to_string());
+            current_line.clear();
+            current_width = 0;
+        }
+
+        // If a single word is longer than width, we need to break it
+        if word_width > width && current_line.is_empty() {
+            // Break the long word by character
+            let mut word_part = String::new();
+            let mut part_width = 0;
+            for ch in word.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if part_width + char_width > width && !word_part.is_empty() {
+                    lines.push(word_part);
+                    word_part = String::new();
+                    part_width = 0;
+                }
+                word_part.push(ch);
+                part_width += char_width;
+            }
+            if !word_part.is_empty() {
+                current_line = word_part;
+                current_width = part_width;
+            }
+        } else {
+            current_line.push_str(word);
+            current_width += word_width;
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line.trim_end().to_string());
     }
 
     if lines.is_empty() {
@@ -409,7 +462,7 @@ pub fn render_styled_block_ansi_to_tui(
 }
 
 /// Simple text formatting function that processes content and wraps it to fit terminal width
-/// This is a stripped-down version of render_styled_block_ansi_to_tui without borders or styling
+/// This is a stripped-down version of RenderCommandCollapsedResult without borders or styling
 pub fn format_text_content(content: &str, terminal_width: usize) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
         terminal_width - 4
@@ -550,25 +603,180 @@ pub fn extract_bash_block_info(
     (command, outside_title, bubble_title, colors)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn render_styled_block(
+/// Render a streaming block showing only the last 3 lines with a "ctrl+t to expand" hint
+/// This is used for run_command tool calls that are actively streaming output
+pub fn render_streaming_block_compact(
     content: &str,
-    outside_title: &str,
     bubble_title: &str,
     colors: Option<BubbleColors>,
     terminal_width: usize,
-    tool_type: &str,
 ) -> Vec<Line<'static>> {
-    // Just delegate to the ANSI-aware version
-    render_styled_block_ansi_to_tui(
-        content,
-        outside_title,
-        bubble_title,
-        colors,
-        terminal_width,
-        tool_type,
-        None,
-    )
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Determine colors
+    let (border_color, _title_color, content_color) = if let Some(ref c) = colors {
+        (c.border_color, c.title_color, c.content_color)
+    } else {
+        (Color::DarkGray, Color::DarkGray, Color::DarkGray)
+    };
+
+    // Create colored borders
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    // Strip ANSI codes for title border calculation
+    let stripped_title = strip_ansi_codes(bubble_title);
+    let title_border = {
+        let title_width = calculate_display_width(&stripped_title);
+        if title_width <= inner_width {
+            let remaining_dashes = inner_width + 2 - title_width;
+            Line::from(vec![Span::styled(
+                format!("╭{}{}", bubble_title, "─".repeat(remaining_dashes)) + "╮",
+                Style::default().fg(border_color),
+            )])
+        } else {
+            let mut truncated_chars = String::new();
+            let mut current_width = 0;
+            for ch in stripped_title.chars() {
+                let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if current_width + char_width <= inner_width {
+                    truncated_chars.push(ch);
+                    current_width += char_width;
+                } else {
+                    break;
+                }
+            }
+            Line::from(vec![Span::styled(
+                format!("╭{}─╮", truncated_chars),
+                Style::default().fg(border_color),
+            )])
+        }
+    };
+
+    // Preprocess content to handle terminal control sequences
+    let preprocessed_content = preprocess_terminal_output(content);
+
+    // Split into lines and take only the last 3
+    let all_content_lines: Vec<&str> = preprocessed_content.lines().collect();
+
+    let content_joined_lines = all_content_lines.join("\n");
+    let ratatui_text = content_joined_lines
+        .clone()
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::from(content_joined_lines.clone()));
+
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    let line_indent = "  ";
+
+    for text_line in ratatui_text.lines {
+        if text_line.spans.is_empty() {
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(format!(" {}", " ".repeat(inner_width))),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+            continue;
+        }
+
+        let display_width: usize = text_line
+            .spans
+            .iter()
+            .map(|span| calculate_display_width(&span.content))
+            .sum();
+
+        let content_display_width = display_width + line_indent.len();
+
+        if content_display_width <= inner_width {
+            let padding_needed = inner_width - content_display_width;
+            let mut line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(format!(" {}", line_indent)),
+            ];
+            for s in &text_line.spans {
+                line_spans.push(Span::styled(
+                    s.content.clone(),
+                    Style::default().fg(content_color),
+                ));
+            }
+            line_spans.push(Span::from(" ".repeat(padding_needed)));
+            line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            // Line needs wrapping - use available width minus indentation
+            let available_for_content = inner_width - line_indent.len();
+            let original_line: String = text_line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            let wrapped_lines = wrap_ansi_text(&original_line, available_for_content);
+
+            for wrapped_line in wrapped_lines {
+                let wrapped_ratatui = wrapped_line
+                    .clone()
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::from(wrapped_line.clone()));
+
+                if let Some(first_line) = wrapped_ratatui.lines.first() {
+                    let wrapped_display_width: usize = first_line
+                        .spans
+                        .iter()
+                        .map(|span| calculate_display_width(&span.content))
+                        .sum();
+
+                    let total_content_width = wrapped_display_width + line_indent.len();
+                    let padding_needed = inner_width.saturating_sub(total_content_width);
+                    let mut line_spans = vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(format!(" {}", line_indent)),
+                    ];
+                    for s in &first_line.spans {
+                        line_spans.push(Span::styled(
+                            s.content.clone(),
+                            Style::default().fg(content_color),
+                        ));
+                    }
+                    line_spans.push(Span::from(" ".repeat(padding_needed)));
+                    line_spans.push(Span::styled(" │", Style::default().fg(border_color)));
+                    formatted_lines.push(Line::from(line_spans));
+                }
+            }
+        }
+    }
+
+    formatted_lines.push(bottom_border);
+
+    let mut owned_lines: Vec<Line<'static>> = Vec::new();
+    owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+
+    let final_lines: Vec<Line<'static>> = formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+
+    owned_lines.extend(final_lines);
+    owned_lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
+    owned_lines
 }
 
 pub fn render_styled_header_and_borders(
@@ -678,46 +886,57 @@ pub fn render_styled_header_and_borders(
     result
 }
 
+/// Render file diff for full screen popup - shows diff lines with context
+/// Uses the same diff-only approach as the TUI view for consistency
+/// Returns None if there's no diff to show (e.g., old_str not found)
 pub fn render_file_diff_full(
     tool_call: &ToolCall,
     terminal_width: usize,
     do_show: Option<bool>,
-) -> Vec<Line<'static>> {
-    let (_diff_lines, mut full_diff_lines) = render_file_diff_block(tool_call, terminal_width);
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
-        .unwrap_or_else(|_| serde_json::json!({}));
-    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+) -> Option<Vec<Line<'static>>> {
+    // Get diff lines - use the truncated version which starts from first change
+    // but we'll show all diff lines without truncation for the full screen view
+    let (_truncated_diff_lines, full_diff_lines) =
+        render_file_diff_block_from_args(tool_call, terminal_width);
 
-    if full_diff_lines.is_empty() && !do_show.unwrap_or(false) {
-        return Vec::new();
+    let title: String = get_command_type_name(tool_call);
+
+    // If diff is empty, return None to signal caller should use fallback rendering
+    if full_diff_lines.is_empty() {
+        return None;
     }
-    // render header dot
+
+    if !do_show.unwrap_or(false) {
+        return Some(Vec::new());
+    }
+
+    // render header dot - don't show path since it's already in the diff content header line
     let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
 
-    full_diff_lines = [
-        vec![spacing_marker.clone()],
-        render_styled_header_with_dot(
-            "Str Replace",
-            path,
-            Some(LinesColors {
-                dot: Color::Magenta,
-                title: Color::Yellow,
-                command: AdaptiveColors::text(),
-                message: Color::LightGreen,
-            }),
-        ),
-        vec![spacing_marker.clone()],
-        full_diff_lines,
-    ]
-    .concat();
+    let mut result = vec![spacing_marker.clone()];
+    result.extend(render_styled_header_with_dot(
+        &title,
+        "", // Hide path here - it's shown in the diff content below
+        Some(LinesColors {
+            dot: Color::LightGreen,
+            title: Color::White,
+            command: AdaptiveColors::text(),
+            message: Color::LightGreen,
+        }),
+        Some(terminal_width),
+    ));
+    result.push(spacing_marker.clone());
+    result.extend(full_diff_lines);
+    result.push(spacing_marker); // Add spacing marker at the end
 
-    full_diff_lines
+    Some(result)
 }
 
 pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line<'static>> {
     let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
     if tool_name == "str_replace" || tool_name == "create" {
-        let (mut diff_lines, _) = render_file_diff_block(tool_call, terminal_width);
+        // Use full diff (not truncated) for pending approval blocks
+        let (_, mut diff_lines) = render_file_diff_block(tool_call, terminal_width);
         // render header dot
         let spacing_marker = Line::from(vec![Span::from("SPACING_MARKER")]);
         if diff_lines.is_empty() {
@@ -733,9 +952,15 @@ pub fn render_file_diff(tool_call: &ToolCall, terminal_width: usize) -> Vec<Line
         let title = get_command_type_name(tool_call);
 
         let formatted_title = format!(" {} ", title);
+        let colors = Some(BubbleColors {
+            border_color: Color::DarkGray,
+            title_color: term_color(Color::Reset),
+            content_color: Color::Reset,
+            tool_type: title,
+        });
 
         let result =
-            render_styled_header_and_borders(&formatted_title, diff_lines, None, terminal_width);
+            render_styled_header_and_borders(&formatted_title, diff_lines, colors, terminal_width);
 
         let adjusted_result = [
             vec![spacing_marker.clone()],
@@ -755,14 +980,9 @@ pub fn render_bash_block(
     output: &str,
     _accepted: bool,
     terminal_width: usize,
-    is_auto_approved: bool,
+    _is_auto_approved: bool,
 ) -> Vec<Line<'static>> {
-    let (command, outside_title, mut bubble_title, colors) =
-        extract_bash_block_info(tool_call, output);
-
-    if is_auto_approved {
-        bubble_title = format!("{} - Auto-approved tool", bubble_title).to_string();
-    }
+    let (command, outside_title, bubble_title, colors) = extract_bash_block_info(tool_call, output);
 
     render_styled_block_ansi_to_tui(
         &command,
@@ -787,11 +1007,12 @@ pub fn render_markdown_block(
         &title,
         &command_args,
         Some(LinesColors {
-            dot: Color::Magenta,
-            title: Color::Yellow,
+            dot: Color::LightGreen,
+            title: Color::White,
             command: AdaptiveColors::text(),
             message: Color::LightGreen,
         }),
+        None, // No width available here
     ));
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
     let content_lines = render_markdown_to_lines(&processed_result.to_string()).unwrap_or_default();
@@ -805,6 +1026,14 @@ pub fn render_markdown_block(
     lines
 }
 
+/// Render str_replace/create results - clean diff view without borders
+/// Uses the same approach as fullscreen popup for consistency
+/// Returns None if there's no diff (fallback to standard result rendering)
+pub fn render_diff_result_block(tool_call: &ToolCall, width: usize) -> Option<Vec<Line<'static>>> {
+    // Use the same clean diff rendering as the fullscreen popup
+    render_file_diff_full(tool_call, width, Some(true))
+}
+
 pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> Vec<Line<'static>> {
     let tool_call = tool_call_result.call.clone();
     let result = tool_call_result.result.clone();
@@ -813,7 +1042,7 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
     let title: String = get_command_type_name(&tool_call);
     let command_args = extract_truncated_command_arguments(&tool_call, None);
 
-    let is_collapsed = is_collapsed_tool_call(&tool_call) && result.lines().count() > 3;
+    let is_collapsed = is_collapsed_tool_call(&tool_call);
 
     if tool_call_status == ToolCallResultStatus::Error {
         return render_bash_block_rejected(&command_args, &title, Some(result.to_string()), None);
@@ -825,6 +1054,34 @@ pub fn render_result_block(tool_call_result: &ToolCallResult, width: usize) -> V
             Some("Interrupted by user".to_string()),
             None,
         );
+    }
+
+    // Handle str_replace/create with diff-only content
+    // If render_diff_result_block returns None (no diff), fall through to standard rendering
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "str_replace" || tool_name == "create" {
+        // Check for rejected/cancelled in result text
+        if result.contains("TOOL_CALL_REJECTED") {
+            return render_bash_block_rejected(
+                &command_args,
+                &title,
+                Some("Rejected by user".to_string()),
+                None,
+            );
+        }
+        if result.contains("TOOL_CALL_CANCELLED") {
+            return render_bash_block_rejected(
+                &command_args,
+                &title,
+                Some("Interrupted by user".to_string()),
+                None,
+            );
+        }
+
+        if let Some(diff_lines) = render_diff_result_block(&tool_call, width) {
+            return diff_lines;
+        }
+        // Fall through to standard result rendering if no diff
     }
 
     if command_args.contains(".md") && is_collapsed {
@@ -1193,7 +1450,7 @@ pub fn render_bash_block_rejected(
         command: AdaptiveColors::text(),
         message: c,
     });
-    render_styled_lines(command_name, title, message, colors)
+    render_styled_lines(command_name, title, message, colors, None)
 }
 
 #[derive(Clone)]
@@ -1204,10 +1461,21 @@ pub struct LinesColors {
     pub message: Color,
 }
 
+/// Public version of render_styled_header_with_dot for use in message.rs
+pub fn render_styled_header_with_dot_public(
+    title: &str,
+    command_name: &str,
+    colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
+) -> Vec<Line<'static>> {
+    render_styled_header_with_dot(title, command_name, colors, terminal_width)
+}
+
 fn render_styled_header_with_dot(
     title: &str,
     command_name: &str,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -1215,23 +1483,86 @@ fn render_styled_header_with_dot(
         command: AdaptiveColors::text(),
         message: Color::LightRed,
     });
-    vec![Line::from(vec![
-        Span::styled(
-            "● ",
-            Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            title.to_string(),
-            Style::default()
-                .fg(colors.title)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" ({})", command_name),
-            Style::default().fg(colors.command),
-        ),
-        Span::styled("...", Style::default().fg(colors.command)),
-    ])]
+
+    // Use actual terminal width if provided, otherwise fall back to 100
+    let max_line_width: usize = terminal_width.unwrap_or(100);
+    // First line prefix: "● " (2) + title + " (" (2)
+    let first_line_prefix_len: usize = 2 + title.chars().count() + 2;
+    // Continuation line prefix: just some indentation (2 spaces)
+    let continuation_indent = "  ";
+    let continuation_prefix_len: usize = continuation_indent.len();
+
+    // Calculate available width for command on first line
+    let first_line_available = max_line_width.saturating_sub(first_line_prefix_len + 1); // +1 for closing paren
+
+    // Wrap the command text
+    let wrapped_lines = wrap_text_simple_unicode(command_name, first_line_available);
+
+    let mut result_lines = Vec::new();
+
+    if wrapped_lines.len() <= 1 {
+        // Single line - command fits on one line with title
+        let mut spans = vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                title.to_string(),
+                Style::default()
+                    .fg(colors.title)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+        // Only add command in parentheses if it's not empty
+        if !command_name.is_empty() {
+            spans.push(Span::styled(
+                format!(" ({})", command_name),
+                Style::default().fg(colors.command),
+            ));
+        }
+        result_lines.push(Line::from(spans));
+    } else {
+        // Multi-line - need to wrap
+        // First line: title + start of command
+        result_lines.push(Line::from(vec![
+            Span::styled(
+                "● ",
+                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                title.to_string(),
+                Style::default()
+                    .fg(colors.title)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({}", wrapped_lines.first().unwrap_or(&String::new())),
+                Style::default().fg(colors.command),
+            ),
+        ]));
+
+        // Middle lines - use wider width since we only have the indent
+        let continuation_available = max_line_width.saturating_sub(continuation_prefix_len);
+        let remaining_text: String = wrapped_lines[1..].join(" ");
+        let rewrapped = wrap_text_simple_unicode(&remaining_text, continuation_available);
+
+        for (i, line) in rewrapped.iter().enumerate() {
+            let is_last = i == rewrapped.len() - 1;
+            let line_content = if is_last {
+                format!("{})", line)
+            } else {
+                line.clone()
+            };
+
+            result_lines.push(Line::from(vec![
+                Span::from(continuation_indent.to_string()),
+                Span::styled(line_content, Style::default().fg(colors.command)),
+            ]));
+        }
+    }
+
+    result_lines
 }
 
 pub fn render_styled_lines(
@@ -1239,6 +1570,18 @@ pub fn render_styled_lines(
     title: &str,
     message: Option<String>,
     colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
+) -> Vec<Line<'static>> {
+    render_styled_lines_with_content(command_name, title, None, message, colors, terminal_width)
+}
+
+pub fn render_styled_lines_with_content(
+    command_name: &str,
+    title: &str,
+    content: Option<Vec<Line<'static>>>,
+    message: Option<String>,
+    colors: Option<LinesColors>,
+    terminal_width: Option<usize>,
 ) -> Vec<Line<'static>> {
     let colors = colors.unwrap_or(LinesColors {
         dot: Color::LightRed,
@@ -1251,66 +1594,26 @@ pub fn render_styled_lines(
 
     lines.push(Line::from(vec![Span::from("SPACING_MARKER")]));
 
-    // Handle multi-line command name if needed
-    let title_with_args = format!("{} ({})", title, command_name);
-    let max_width = 120; // Reasonable max width for rejected commands
+    // Always use single-line truncated header - command stays on same line as title
+    lines.extend(render_styled_header_with_dot(
+        title,
+        command_name,
+        Some(colors.clone()),
+        terminal_width,
+    ));
 
-    if title_with_args.len() <= max_width {
-        // Single line
-        lines.extend(render_styled_header_with_dot(
-            title,
-            command_name,
-            Some(colors.clone()),
-        ));
-    } else {
-        // Multi-line - title on first line, arguments on subsequent lines
-        lines.push(Line::from(vec![
-            Span::styled(
-                "● ",
-                Style::default().fg(colors.dot).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(term_color(Color::White))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-
-        // Split command arguments into multiple lines
-        // Calculate proper indentation to align under the command name
-        let title_indent = 2 + title.len(); // "● " + title length
-        let args_prefix = " ".repeat(title_indent); // Align directly under the command name
-        let args_available_width = max_width - title_indent;
-
-        let wrapped_args = wrap_text_simple_unicode(command_name, args_available_width);
-
-        for (i, arg_line) in wrapped_args.iter().enumerate() {
-            if i == 0 {
-                // First line of arguments
-                lines.push(Line::from(vec![
-                    Span::from(args_prefix.clone()),
-                    Span::styled(
-                        format!("({}", arg_line),
-                        Style::default().fg(colors.command),
-                    ),
-                ]));
-            } else {
-                // Continuation lines
-                lines.push(Line::from(vec![
-                    Span::from(args_prefix.clone()),
-                    Span::styled(arg_line.clone(), Style::default().fg(colors.command)),
-                ]));
+    // Render optional content lines between header and message
+    if let Some(content_lines) = content {
+        for content_line in content_lines {
+            // Build spans with indentation prefix and DarkGray color
+            // Strip leading whitespace from each span and add consistent 3-space indent
+            let mut styled_spans: Vec<Span<'static>> = Vec::new();
+            styled_spans.push(Span::styled("  ", Style::default())); // 3-space indent
+            for span in content_line.spans.into_iter() {
+                let trimmed = span.content.trim_start().to_string();
+                styled_spans.push(Span::styled(trimmed, Style::default().fg(Color::DarkGray)));
             }
-        }
-
-        // Close the parentheses on the last line if we had multiple lines
-        if wrapped_args.len() > 1
-            && let Some(last_line) = lines.last_mut()
-            && let Some(last_content_span) = last_line.spans.last_mut()
-            && last_content_span.style.fg == Some(Color::Gray)
-        {
-            last_content_span.content = format!("{})", last_content_span.content).into();
+            lines.push(Line::from(styled_spans));
         }
     }
 
@@ -1354,41 +1657,524 @@ pub fn render_refreshed_terminal_bubble(
     render_styled_header_and_borders(title, content.to_vec(), colors, terminal_width)
 }
 
-pub fn is_collapsed_tool_call(_tool_call: &ToolCall) -> bool {
-    // let tool_call_name = crate::utils::strip_tool_name(&tool_call.function.name);
-    // let tool_calls = [
-    //     "view",
-    //     "search_memory",
-    //     "search_docs",
-    //     "read_rulebook",
-    //     "local_code_search",
-    // ];
-    // if tool_calls.contains(&tool_call_name) {
-    //     return true;
-    // }
-    // collapse all tool calls
+pub fn is_collapsed_tool_call(tool_call: &ToolCall) -> bool {
+    let tool_name = crate::utils::strip_tool_name(&tool_call.function.name);
+    if tool_name == "run_command_task" {
+        return false;
+    }
     true
 }
 
-pub fn render_collapsed_result_block(tool_call_result: &ToolCallResult, state: &mut AppState) {
-    let is_collapsed = is_collapsed_tool_call(&tool_call_result.call)
-        && tool_call_result.result.lines().count() > 3;
+pub fn render_collapsed_command_message(
+    tool_call_result: &ToolCallResult,
+    lines: Vec<Line<'static>>,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
     let result = tool_call_result.result.clone();
     let command_args = extract_truncated_command_arguments(&tool_call_result.call, None);
     let title = get_command_type_name(&tool_call_result.call);
-    if is_collapsed {
-        let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
-        let colors = LinesColors {
-            dot: Color::LightGreen,
-            title: term_color(Color::White),
-            command: AdaptiveColors::text(),
-            message: AdaptiveColors::text(),
-        };
-        let lines = render_styled_lines(&command_args, &title, Some(message), Some(colors));
-        state.messages.push(Message {
-            id: Uuid::new_v4(),
-            content: MessageContent::StyledBlock(lines),
-            is_collapsed: None,
-        });
+
+    let message = format!("Read {} lines (ctrl+t to expand)", result.lines().count());
+    let colors = LinesColors {
+        dot: Color::LightGreen,
+        title: term_color(Color::White),
+        command: AdaptiveColors::text(),
+        message: AdaptiveColors::text(),
+    };
+
+    // if lines are more than 3 lines get the last 3 lines
+    let lines = if lines.len() > 3 {
+        lines[lines.len() - 3..].to_vec()
+    } else {
+        lines
+    };
+
+    render_styled_lines_with_content(
+        &command_args,
+        &title,
+        Some(lines),
+        Some(message),
+        Some(colors),
+        Some(terminal_width),
+    )
+}
+
+/// Renders a compact view file result block with borders
+/// Format: View path/to/file.rs - 123 lines
+pub fn render_view_file_block(
+    file_path: &str,
+    total_lines: usize,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+
+    let border_color = Color::DarkGray;
+    let icon = "";
+    let title = "View";
+    let lines_text = format!("- {} lines", total_lines);
+
+    // Calculate display widths
+    let icon_width = calculate_display_width(icon);
+    let title_width = calculate_display_width(title);
+    let path_width = calculate_display_width(file_path);
+    let lines_text_width = calculate_display_width(&lines_text);
+
+    // Total content: icon + " " + title + " " + path + " " + lines_text
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+
+    // Check if we need to truncate the path
+    let (display_path, display_path_width) = if total_content_width > inner_width {
+        // Need to truncate path
+        let available_for_path =
+            inner_width.saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+        let truncated = truncate_path_to_width(file_path, available_for_path);
+        let w = calculate_display_width(&truncated);
+        (truncated, w)
+    } else {
+        (file_path.to_string(), path_width)
+    };
+
+    let actual_content_width =
+        icon_width + 1 + title_width + 1 + display_path_width + 1 + lines_text_width;
+    let padding = inner_width.saturating_sub(actual_content_width);
+
+    let content_line = Line::from(vec![
+        Span::styled("│", Style::default().fg(border_color)),
+        Span::from(" "),
+        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::from(" "),
+        Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::from(" "),
+        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::from(" "),
+        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+        Span::from(" ".repeat(padding)),
+        Span::styled(" │", Style::default().fg(border_color)),
+    ]);
+
+    let horizontal_line = "─".repeat(inner_width + 2);
+    let top_border = Line::from(vec![Span::styled(
+        format!("╭{}╮", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    vec![top_border, content_line, bottom_border]
+}
+
+/// Renders a compact view file block without borders (for full screen popup)
+/// Format: Stack View path/to/file.rs - 123 lines
+pub fn render_view_file_block_no_border(
+    file_path: &str,
+    total_lines: usize,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 2 {
+        terminal_width - 2
+    } else {
+        40
+    };
+
+    let icon = "";
+    let title = "View";
+    let lines_text = format!("- {} lines", total_lines);
+
+    // Calculate display widths
+    let icon_width = calculate_display_width(icon);
+    let title_width = calculate_display_width(title);
+    let path_width = calculate_display_width(file_path);
+    let lines_text_width = calculate_display_width(&lines_text);
+
+    // Total content: icon + " " + title + " " + path + " " + lines_text
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+
+    // Check if we need to truncate the path
+    let (display_path, _display_path_width) = if total_content_width > content_width {
+        // Need to truncate path
+        let available_for_path = content_width
+            .saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+        let truncated = truncate_path_to_width(file_path, available_for_path);
+        let w = calculate_display_width(&truncated);
+        (truncated, w)
+    } else {
+        (file_path.to_string(), path_width)
+    };
+
+    let content_line = Line::from(vec![
+        Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::from(" "),
+        Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::from(" "),
+        Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
+        Span::from(" "),
+        Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
+    ]);
+
+    vec![content_line]
+}
+
+/// Truncate a file path to fit within a given display width
+fn truncate_path_to_width(path: &str, max_width: usize) -> String {
+    let path_width = calculate_display_width(path);
+    if path_width <= max_width {
+        return path.to_string();
     }
+
+    // Try to show ".../" + filename
+    if let Some(file_name) = path.rsplit('/').next() {
+        let file_name_width = calculate_display_width(file_name);
+        if file_name_width + 4 <= max_width {
+            // ".../" + filename fits
+            return format!(".../{}", file_name);
+        }
+    }
+
+    // Fall back to truncating from the start
+    let mut result = String::new();
+    let mut current_width = 3; // For "..."
+
+    for ch in path.chars().rev() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if current_width + char_width > max_width {
+            break;
+        }
+        result.insert(0, ch);
+        current_width += char_width;
+    }
+
+    format!("...{}", result)
+}
+
+/// State for the unified run command block
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunCommandState {
+    /// Initial state - waiting for user approval (Reset dot)
+    Pending,
+    /// Running state - command is executing (Yellow dot, "Running...")
+    Running,
+    /// Running with stall warning - command may be waiting for input (Yellow dot, warning message)
+    RunningWithStallWarning(String),
+    /// Completed successfully (Green dot)
+    Completed,
+    /// Failed/Error state (LightRed dot)
+    Error,
+    /// Cancelled by user (LightRed dot)
+    Cancelled,
+    /// Rejected by user (LightRed dot)
+    Rejected,
+    /// Skipped due to sequential execution failure (Yellow dot)
+    Skipped,
+}
+
+/// Renders a unified run command block with consistent appearance across all states.
+///
+/// Layout:
+/// ```text
+/// ╭─● Run Command ──────────────────────────────────────╮
+/// │ $ command --args here wrapped nicely                │
+/// │   continuation of long command                      │
+/// │                                                     │
+/// │ Result:                                             │
+/// │   output line 1                                     │
+/// │   output line 2                                     │
+/// ╰─────────────────────────────────────────────────────╯
+/// ```
+///
+/// - Pending: Reset dot, no result section
+/// - Running: Yellow dot + " - Running...", streaming result
+/// - Completed: Green dot, final result
+/// - Error: Red dot, error message
+pub fn render_run_command_block(
+    command: &str,
+    result: Option<&str>,
+    state: RunCommandState,
+    terminal_width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = if terminal_width > 4 {
+        terminal_width - 4
+    } else {
+        40
+    };
+    let inner_width = content_width;
+    let horizontal_line = "─".repeat(inner_width + 2);
+
+    // Border color: DarkGray for error/cancelled/rejected/skipped states, Gray otherwise
+    let border_color = match state {
+        RunCommandState::Error
+        | RunCommandState::Cancelled
+        | RunCommandState::Rejected
+        | RunCommandState::Skipped => Color::DarkGray,
+        _ => term_color(Color::Gray),
+    };
+
+    // Dot color and title suffix based on state
+    // For error states, both dot and suffix text are LightRed
+    // For running/skipped, both dot and suffix text are Yellow
+    let (dot_color, title_suffix, suffix_color) = match &state {
+        RunCommandState::Pending => (term_color(Color::Reset), "".to_string(), None),
+        RunCommandState::Running => (
+            Color::Yellow,
+            " - Running...".to_string(),
+            Some(Color::Yellow),
+        ),
+        RunCommandState::RunningWithStallWarning(msg) => {
+            // Show the stall warning message in the title
+            (Color::Yellow, format!(" - {}", msg), Some(Color::Yellow))
+        }
+        RunCommandState::Completed => (Color::LightGreen, "".to_string(), None),
+        RunCommandState::Error => (
+            Color::LightRed,
+            " - Errored".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Cancelled => (
+            Color::LightRed,
+            " - Cancelled".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Rejected => (
+            Color::LightRed,
+            " - Rejected".to_string(),
+            Some(Color::LightRed),
+        ),
+        RunCommandState::Skipped => (Color::Yellow, " - Skipped".to_string(), Some(Color::Yellow)),
+    };
+
+    // Title structure: "╭─" + "●" + " Run Command" + suffix + " " + dashes + "╮"
+    let base_title = "Run Command";
+    let title_text = format!("{}{}", base_title, title_suffix);
+    // Title border parts: "╭─" (2) + "●" (1) + " title " (title_text.len + 2) + dashes + "╮" (1)
+    // Total should equal inner_width + 4
+    // So: 2 + 1 + (title_text.len + 2) + dashes + 1 = inner_width + 4
+    // dashes = inner_width + 4 - 2 - 1 - title_text.len - 2 - 1 = inner_width - title_text.len - 2
+    let title_display_len = calculate_display_width(&title_text);
+    let remaining_dashes = inner_width.saturating_sub(title_display_len + 2);
+
+    // Build title spans - suffix gets special color for error states
+    let title_border = if let Some(color) = suffix_color {
+        // Split rendering: "Run Command" in white, suffix in special color
+        let suffix_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", base_title),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("{} ", title_suffix.trim_start()), suffix_style),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    } else {
+        // Single color rendering for all text
+        Line::from(vec![
+            Span::styled("╭─", Style::default().fg(border_color)),
+            Span::styled(
+                "●",
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", title_text),
+                Style::default()
+                    .fg(term_color(Color::White))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}╮", "─".repeat(remaining_dashes)),
+                Style::default().fg(border_color),
+            ),
+        ])
+    };
+
+    let bottom_border = Line::from(vec![Span::styled(
+        format!("╰{}╯", horizontal_line),
+        Style::default().fg(border_color),
+    )]);
+
+    let mut formatted_lines = Vec::new();
+    formatted_lines.push(title_border);
+
+    // Render command with $ prefix
+    // Line structure: "│" (1) + " " (1) + content + padding + " " (1) + "│" (1) = inner_width + 4
+    // So: content + padding = inner_width
+    let command_with_prefix = format!("$ {}", command);
+
+    // Available width for content = inner_width (we have 1 space padding on each side)
+    let max_content_width = inner_width;
+    let wrapped_lines = wrap_text_by_word(&command_with_prefix, max_content_width);
+
+    for (i, wrapped_line) in wrapped_lines.iter().enumerate() {
+        let line_display_width = calculate_display_width(wrapped_line);
+        // padding = max_content_width - content_width
+        let padding_needed = max_content_width.saturating_sub(line_display_width);
+
+        // First line has "$ " in magenta, continuation lines are plain
+        if i == 0 && wrapped_line.starts_with("$ ") {
+            let cmd_part = &wrapped_line[2..]; // Skip "$ "
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    "$ ".to_string(),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    cmd_part.to_string(),
+                    Style::default().fg(AdaptiveColors::text()),
+                ),
+                Span::from(" ".repeat(padding_needed)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+        } else {
+            let line_spans = vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    wrapped_line.clone(),
+                    Style::default().fg(AdaptiveColors::text()),
+                ),
+                Span::from(" ".repeat(padding_needed)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ];
+            formatted_lines.push(Line::from(line_spans));
+        }
+    }
+
+    // Add result section if we have non-empty result content
+    if let Some(result_content) = result.filter(|s| !s.is_empty()) {
+        // Check if this is an error state (no "Result:" label, colored message)
+        let is_error_state = matches!(
+            state,
+            RunCommandState::Error
+                | RunCommandState::Cancelled
+                | RunCommandState::Rejected
+                | RunCommandState::Skipped
+        );
+
+        // Replace raw status strings with friendly messages
+        let result_content = if result_content.contains("TOOL_CALL_REJECTED") {
+            "Command was rejected"
+        } else if result_content.contains("TOOL_CALL_CANCELLED") {
+            "Command was cancelled"
+        } else {
+            result_content
+        };
+
+        // Message color for error states
+        let error_message_color = match state {
+            RunCommandState::Skipped => Color::Yellow,
+            _ => Color::LightRed,
+        };
+
+        // Empty line separator
+        // Line structure: "│" (1) + spaces (inner_width + 2) + "│" (1) = inner_width + 4
+        formatted_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(border_color)),
+            Span::from(" ".repeat(inner_width + 2)),
+            Span::styled("│", Style::default().fg(border_color)),
+        ]));
+
+        // Only show "Result:" label for non-error states
+        if !is_error_state {
+            // Result: label
+            // Line structure: "│" (1) + " " (1) + label + padding + " " (1) + "│" (1)
+            // So: content + padding = inner_width
+            let result_label = "Result:";
+            let label_padding = inner_width.saturating_sub(result_label.len());
+            formatted_lines.push(Line::from(vec![
+                Span::styled("│", Style::default().fg(border_color)),
+                Span::from(" "),
+                Span::styled(
+                    result_label.to_string(),
+                    Style::default()
+                        .fg(term_color(Color::White))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::from(" ".repeat(label_padding)),
+                Span::styled(" │", Style::default().fg(border_color)),
+            ]));
+        }
+
+        // Strip ANSI codes, preprocess, and word-wrap the result content
+        let cleaned_result = strip_ansi_codes(result_content).to_string();
+        let preprocessed = preprocess_terminal_output(&cleaned_result);
+
+        // Determine text color based on state
+        let text_color = if is_error_state {
+            error_message_color
+        } else {
+            AdaptiveColors::text()
+        };
+
+        // Process each line from the preprocessed result
+        for source_line in preprocessed.lines() {
+            if source_line.is_empty() {
+                // Empty line
+                formatted_lines.push(Line::from(vec![
+                    Span::styled("│", Style::default().fg(border_color)),
+                    Span::from(" ".repeat(inner_width + 2)),
+                    Span::styled("│", Style::default().fg(border_color)),
+                ]));
+            } else {
+                // Word-wrap this line
+                let wrapped = wrap_text_by_word(source_line, inner_width);
+                for line_text in wrapped {
+                    let line_width = calculate_display_width(&line_text);
+                    let padding = inner_width.saturating_sub(line_width);
+                    formatted_lines.push(Line::from(vec![
+                        Span::styled("│", Style::default().fg(border_color)),
+                        Span::from(" "),
+                        Span::styled(line_text, Style::default().fg(text_color)),
+                        Span::from(" ".repeat(padding)),
+                        Span::styled(" │", Style::default().fg(border_color)),
+                    ]));
+                }
+            }
+        }
+    }
+
+    formatted_lines.push(bottom_border);
+
+    // Convert to owned lines
+    let owned_lines: Vec<Line<'static>> = formatted_lines
+        .into_iter()
+        .map(|line| {
+            let owned_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|span| Span::styled(span.content.into_owned(), span.style))
+                .collect();
+            Line::from(owned_spans)
+        })
+        .collect();
+
+    owned_lines
 }

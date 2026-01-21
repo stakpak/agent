@@ -10,7 +10,6 @@ homepage = { workspace = true }
 [dependencies]
 stakpak-shared = { workspace = true }
 stakpak-api = { workspace = true }
-popup-widget = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
