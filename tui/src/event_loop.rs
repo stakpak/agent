@@ -574,6 +574,11 @@ pub async fn run_tui(
         if should_quit {
             break;
         }
+        // Check if terminal clear was requested (e.g., after shell popup closes)
+        if state.needs_terminal_clear {
+            state.needs_terminal_clear = false;
+            emergency_clear_and_redraw(&mut terminal, &mut state)?;
+        }
         state.poll_file_search_results();
         state.update_session_empty_status();
         terminal.draw(|f| view(f, &mut state))?;

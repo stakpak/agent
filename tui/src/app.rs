@@ -94,6 +94,8 @@ pub struct AppState {
     pub shell_popup_visible: bool,
     pub shell_popup_expanded: bool,
     pub shell_popup_scroll: usize,
+    /// Flag to request a terminal clear and redraw (e.g., after shell popup closes)
+    pub needs_terminal_clear: bool,
     pub shell_cursor_visible: bool,
     pub shell_cursor_blink_timer: u8,
     pub active_shell_command: Option<ShellCommand>,
@@ -331,6 +333,7 @@ impl AppState {
             shell_popup_visible: false,
             shell_popup_expanded: false,
             shell_popup_scroll: 0,
+            needs_terminal_clear: false,
             shell_cursor_visible: true,
             shell_cursor_blink_timer: 0,
             active_shell_command: None,
