@@ -19,7 +19,7 @@ path = "src/lib.rs"
 [features]
 default = ["openai"]
 openai = []
-tracing = ["dep:tracing"]
+tracing = ["dep:tracing", "dep:tracing-opentelemetry"]
 
 [dependencies]
 # Async runtime
@@ -46,6 +46,7 @@ uuid = { workspace = true }
 
 # Tracing (optional, feature-gated)
 tracing = { version = "0.1", optional = true }
+tracing-opentelemetry = { version = "0.32", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

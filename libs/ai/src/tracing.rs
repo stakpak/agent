@@ -18,8 +18,10 @@
 //! | `gen_ai.usage.output_tokens` | Completion tokens |
 //! | `gen_ai.response.finish_reasons` | Array of finish reasons |
 
-use crate::types::{ContentPart, GenerateResponse, Message, ResponseContent, Role};
+use crate::types::{ContentPart, GenerateResponse, Message, ResponseContent, Role, Tool};
+use std::collections::HashMap;
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Tool call information for tracing
 #[derive(Debug, Clone)]
@@ -47,10 +49,8 @@ pub struct ToolCallInfo {
 pub fn record_input_messages(messages: &[Message]) {
     let span = Span::current();
 
-    let messages_json: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|msg| message_to_otel_format(msg))
-        .collect();
+    let messages_json: Vec<serde_json::Value> =
+        messages.iter().map(message_to_otel_format).collect();
 
     let json_str = serde_json::to_string(&messages_json).unwrap_or_default();
     span.record("gen_ai.input.messages", json_str.as_str());
@@ -222,4 +222,83 @@ fn role_to_string(role: &Role) -> &'static str {
         Role::Assistant => "assistant",
         Role::Tool => "tool",
     }
+}
+
+/// Record custom telemetry metadata as direct span attributes.
+///
+/// Each key-value pair is recorded as a separate OpenTelemetry span attribute.
+/// This allows dynamic attributes without pre-defining fields.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::collections::HashMap;
+///
+/// let mut metadata = HashMap::new();
+/// metadata.insert("user.id".to_string(), "user-123".to_string());
+/// metadata.insert("user.name".to_string(), "John Doe".to_string());
+/// metadata.insert("session.id".to_string(), "session-456".to_string());
+///
+/// record_telemetry_metadata(&metadata);
+/// // Records as direct attributes:
+/// //   user.id = "user-123"
+/// //   user.name = "John Doe"
+/// //   session.id = "session-456"
+/// ```
+pub fn record_telemetry_metadata(metadata: &HashMap<String, String>) {
+    let span = Span::current();
+
+    // Record each metadata field as a direct OpenTelemetry attribute
+    for (key, value) in metadata {
+        span.set_attribute(key.clone(), value.clone());
+    }
+}
+
+/// Record available tool definitions on the current span.
+///
+/// Records the tool definitions following the OTel GenAI tool definitions schema:
+/// ```json
+/// [
+///   {
+///     "type": "function",
+///     "name": "get_current_weather",
+///     "description": "Get the current weather in a given location",
+///     "parameters": { ... }
+///   }
+/// ]
+/// ```
+///
+/// Note: This attribute is Opt-In per the GenAI semantic conventions as it could be large.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use stakai::Tool;
+/// use serde_json::json;
+///
+/// let tools = vec![
+///     Tool::function("get_weather", "Get current weather")
+///         .parameters(json!({"type": "object", "properties": {"location": {"type": "string"}}})),
+/// ];
+///
+/// record_tool_definitions(&tools);
+/// // Records: gen_ai.tool.definitions = [{"type": "function", "name": "get_weather", ...}]
+/// ```
+pub fn record_tool_definitions(tools: &[Tool]) {
+    let span = Span::current();
+
+    let tools_json: Vec<serde_json::Value> = tools.iter().map(tool_to_otel_format).collect();
+
+    let json_str = serde_json::to_string(&tools_json).unwrap_or_default();
+    span.record("gen_ai.tool.definitions", json_str.as_str());
+}
+
+/// Convert a Tool to the OTel GenAI tool definition format
+fn tool_to_otel_format(tool: &Tool) -> serde_json::Value {
+    serde_json::json!({
+        "type": tool.tool_type,
+        "name": tool.function.name,
+        "description": tool.function.description,
+        "parameters": tool.function.parameters,
+    })
 }
