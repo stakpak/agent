@@ -55,7 +55,13 @@ pub struct AppState {
     pub messages: Vec<Message>,
     pub scroll: usize,
     pub scroll_to_bottom: bool,
+    pub scroll_to_last_message_start: bool,
     pub stay_at_bottom: bool,
+    /// Counter to block stay_at_bottom for N frames (used when scroll_to_last_message_start needs to persist)
+    pub block_stay_at_bottom_frames: u8,
+    /// When scroll is locked, this stores how many lines from the end we want to show at top of viewport
+    /// This allows us to maintain relative position even as total_lines changes
+    pub scroll_lines_from_end: Option<usize>,
     pub content_changed_while_scrolled_up: bool,
     pub message_lines_cache: Option<MessageLinesCache>,
     pub collapsed_message_lines_cache: Option<MessageLinesCache>,
@@ -297,7 +303,10 @@ impl AppState {
             messages: Vec::new(), // Will be populated after state is created
             scroll: 0,
             scroll_to_bottom: false,
+            scroll_to_last_message_start: false,
             stay_at_bottom: true,
+            block_stay_at_bottom_frames: 0,
+            scroll_lines_from_end: None,
             content_changed_while_scrolled_up: false,
             helpers: helpers.clone(),
             show_helper_dropdown: false,

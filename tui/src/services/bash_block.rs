@@ -1916,8 +1916,9 @@ pub fn render_run_command_block(
     let inner_width = content_width;
     let horizontal_line = "─".repeat(inner_width + 2);
 
-    // Border color: DarkGray for error/cancelled/rejected/skipped states, Gray otherwise
+    // Border color: Cyan for pending (preview), DarkGray for error/cancelled/rejected/skipped, Gray otherwise
     let border_color = match state {
+        RunCommandState::Pending => Color::Cyan,
         RunCommandState::Error
         | RunCommandState::Cancelled
         | RunCommandState::Rejected

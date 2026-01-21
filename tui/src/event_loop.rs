@@ -181,7 +181,38 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                       // Calculate actual message area dimensions (same as below)
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1)
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
+                       let input_height: u16 = 3;
+                       let margin_height: u16 = 2;
+                       let dropdown_showing = state.show_helper_dropdown
+                           && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
+                               || !state.filtered_files.is_empty());
+                       let dropdown_height = if dropdown_showing {
+                           state.filtered_helpers.len() as u16
+                       } else {
+                           0
+                       };
+                       let hint_height = if dropdown_showing { 0 } else { margin_height };
+                       let outer_chunks = ratatui::layout::Layout::default()
+                           .direction(ratatui::layout::Direction::Vertical)
+                           .constraints([
+                               ratatui::layout::Constraint::Min(1),
+                               ratatui::layout::Constraint::Length(1),
+                               ratatui::layout::Constraint::Length(input_height),
+                               ratatui::layout::Constraint::Length(dropdown_height),
+                               ratatui::layout::Constraint::Length(hint_height),
+                           ])
+                           .split(term_rect);
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
+                       let message_area_height = outer_chunks[0].height as usize;
+
+                       crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_file_search_results();
                        terminal.draw(|f| view(f, &mut state))?;
                        continue;

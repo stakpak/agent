@@ -85,14 +85,21 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Calculate todo content width for wrapping
     let todo_content_width = padded_area.width.saturating_sub(10) as usize; // Accounts for LEFT_PADDING + symbol + spacing
 
+    // Filter out completed todos - only show pending and in-progress
+    let visible_todos: Vec<_> = state
+        .todos
+        .iter()
+        .filter(|t| t.status != TodoStatus::Done)
+        .collect();
+
     let todos_height = if todos_collapsed {
         collapsed_height
-    } else if state.todos.is_empty() {
+    } else if visible_todos.is_empty() {
         3 // Header + "No tasks" + blank line
     } else {
         // Calculate total lines needed including wrapped lines
         let mut total_lines = 1; // Header
-        for todo in &state.todos {
+        for todo in &visible_todos {
             let wrapped_lines = wrap_text(&todo.text, todo_content_width);
             total_lines += wrapped_lines.len().max(1);
         }
@@ -318,11 +325,19 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
     let focused = state.side_panel_focus == SidePanelSection::Todos;
     let header_style = section_header_style(focused);
 
+    // Filter out completed todos - only show pending and in-progress
+    let visible_todos: Vec<_> = state
+        .todos
+        .iter()
+        .filter(|t| t.status != TodoStatus::Done)
+        .collect();
+
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
-    let count = if state.todos.is_empty() {
+    // Show count of remaining (non-completed) todos
+    let count = if visible_todos.is_empty() {
         String::new()
     } else {
-        format!(" ({})", state.todos.len())
+        format!(" ({})", visible_todos.len())
     };
 
     let header = Line::from(Span::styled(
@@ -338,7 +353,7 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
 
     let mut lines = vec![header];
 
-    if state.todos.is_empty() {
+    if visible_todos.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("{}  No tasks", LEFT_PADDING),
             Style::default()
@@ -350,9 +365,9 @@ fn render_todos_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
         let prefix_width = LEFT_PADDING.len() + 6; // "  [x] " = 6 chars
         let content_width = (area.width as usize).saturating_sub(prefix_width + 2);
 
-        for todo in &state.todos {
+        for todo in &visible_todos {
             let (symbol, symbol_color, text_color) = match todo.status {
-                TodoStatus::Done => ("[x]", Color::Green, Color::Reset),
+                TodoStatus::Done => ("[x]", Color::Green, Color::Reset), // Won't be shown but keep for completeness
                 TodoStatus::InProgress => ("[/]", Color::Yellow, Color::Reset),
                 TodoStatus::Pending => ("[ ]", Color::DarkGray, Color::DarkGray),
             };

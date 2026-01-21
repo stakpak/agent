@@ -467,16 +467,15 @@ pub fn handle_show_confirmation_dialog(
     if !tool_calls.is_empty() && state.toggle_approved_message {
         let was_empty = state.approval_bar.actions().is_empty();
 
-        // Only add tools that aren't already in the bar
+        // Add tools to the bar (add_action handles duplicate prevention internally)
         for tc in tool_calls {
-            let already_in_bar = state
-                .approval_bar
-                .actions()
-                .iter()
-                .any(|a| a.tool_call.id == tc.id);
-            if !already_in_bar {
-                state.approval_bar.add_action(tc);
-            }
+            state.approval_bar.add_action(tc);
+        }
+
+        // If this is the first time showing the approval bar, scroll to show the tool call
+        if was_empty && !state.approval_bar.actions().is_empty() {
+            state.scroll_to_last_message_start = true;
+            state.stay_at_bottom = false;
         }
 
         // If we just added tools to an empty bar, the first one's pending block
