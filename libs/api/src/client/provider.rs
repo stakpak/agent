@@ -870,7 +870,9 @@ impl AgentClient {
 
         // Inject session_id header if available
         if let Some(session_id) = ctx.session_id {
-            let headers = input.headers.get_or_insert_with(std::collections::HashMap::new);
+            let headers = input
+                .headers
+                .get_or_insert_with(std::collections::HashMap::new);
             headers.insert("X-Session-Id".to_string(), session_id.to_string());
         }
 
