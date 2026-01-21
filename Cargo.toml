@@ -14,7 +14,7 @@ default-members = ["cli"]
 
 
 [workspace.package]
-version = "0.3.13"
+version = "0.3.16"
 edition = "2024"
 description = "Stakpak: Your DevOps AI Agent. Generate infrastructure code, debug Kubernetes, configure CI/CD, automate deployments, without giving an LLM the keys to production."
 license = "Apache-2.0"
@@ -23,14 +23,13 @@ homepage = "https://stakpak.io"
 
 
 [workspace.dependencies]
-stakai = { path = "libs/ai", version = "0.3.13" }
-stakpak-api = { path = "libs/api", version = "0.3.13" }
-stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.13" }
-stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.13" }
-stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.13" }
-stakpak-tui = { path = "tui", version = "0.3.13" }
-stakpak-shared = { path = "libs/shared", version = "0.3.13" }
-popup-widget = { package = "stakpak-popup-widget", path = "libs/popup-widget", version = "0.3.13" }
+stakai = { path = "libs/ai", version = "0.3.16" }
+stakpak-api = { path = "libs/api", version = "0.3.16" }
+stakpak-mcp-server = { path = "libs/mcp/server", version = "0.3.16" }
+stakpak-mcp-client = { path = "libs/mcp/client", version = "0.3.16" }
+stakpak-mcp-proxy = { path = "libs/mcp/proxy", version = "0.3.16" }
+stakpak-tui = { path = "tui", version = "0.3.16" }
+stakpak-shared = { path = "libs/shared", version = "0.3.16" }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }

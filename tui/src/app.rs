@@ -5,7 +5,7 @@ pub use events::{InputEvent, OutputEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
 pub use types::*;
 
-use crate::services::approval_popup::PopupService;
+use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::AdaptiveColors;
@@ -64,6 +64,19 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize,
     pub collapsed_messages_selected: usize,
     pub has_user_messages: bool,
+    /// Per-message rendered line cache for efficient incremental rendering
+    pub per_message_cache: PerMessageCache,
+    /// Assembled lines cache (the final combined output of all message lines)
+    /// Format: (cache_key, lines, generation_counter)
+    pub assembled_lines_cache: Option<(usize, Vec<Line<'static>>, u64)>,
+    /// Cache for visible lines on screen (avoids cloning on every frame)
+    pub visible_lines_cache: Option<VisibleLinesCache>,
+    /// Generation counter for assembled cache (increments on each rebuild)
+    pub cache_generation: u64,
+    /// Performance metrics for render operations
+    pub render_metrics: RenderMetrics,
+    /// Last width used for rendering (to detect width changes)
+    pub last_render_width: usize,
 
     // ========== Loading State ==========
     pub loading: bool,
@@ -115,16 +128,15 @@ pub struct AppState {
     pub dialog_selected: usize,
     pub dialog_message_id: Option<Uuid>,
     pub dialog_focused: bool,
-    pub approval_popup: PopupService,
+    pub approval_bar: ApprovalBar,
     pub message_tool_calls: Option<Vec<ToolCall>>,
     pub message_approved_tools: Vec<ToolCall>,
     pub message_rejected_tools: Vec<ToolCall>,
     pub toggle_approved_message: bool,
     pub show_shortcuts: bool,
 
-    // ========== Sessions Dialog State ==========
+    // ========== Sessions State ==========
     pub sessions: Vec<SessionInfo>,
-    pub show_sessions_dialog: bool,
     pub session_selected: usize,
     pub account_info: String,
 
@@ -301,7 +313,6 @@ impl AppState {
             loading_type: LoadingType::Llm,
             spinner_frame: 0,
             sessions: Vec::new(),
-            show_sessions_dialog: false,
             session_selected: 0,
             account_info: String::new(),
             pending_bash_message_id: None,
@@ -363,12 +374,18 @@ impl AppState {
             message_lines_cache: None,
             collapsed_message_lines_cache: None,
             processed_lines_cache: None,
+            per_message_cache: HashMap::new(),
+            assembled_lines_cache: None,
+            visible_lines_cache: None,
+            cache_generation: 0,
+            render_metrics: RenderMetrics::new(),
+            last_render_width: 0,
             pending_pastes: Vec::new(),
             mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
             message_tool_calls: None,
-            approval_popup: PopupService::new(),
+            approval_bar: ApprovalBar::new(),
             message_approved_tools: Vec::new(),
             message_rejected_tools: Vec::new(),
             toggle_approved_message: true,

@@ -4,7 +4,9 @@
 
 use crate::app::AppState;
 use crate::services::helper_block::push_usage_message;
-use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
+use crate::services::message::{
+    Message, MessageContent, invalidate_message_cache, invalidate_message_lines_cache,
+};
 use stakpak_shared::models::llm::LLMTokenUsage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -32,21 +34,24 @@ pub fn handle_stream_message(
                 state.todos = extracted_todos;
             }
         }
-        invalidate_message_lines_cache(state);
 
-        // If content changed while user is scrolled up, mark it
-        if !state.stay_at_bottom {
-            state.content_changed_while_scrolled_up = true;
-        }
-
-        // During streaming, only adjust scroll if we're staying at bottom
+        // If user is scrolled up, don't invalidate cache - just mark that content changed
+        // This prevents jittery scrolling while streaming when user is reading old messages
         if state.stay_at_bottom {
+            // Use per-message cache invalidation for better performance during streaming
+            // This only invalidates the specific message that changed, not all messages
+            invalidate_message_cache(state, id);
+
+            // Adjust scroll to follow the streaming content
             let input_height = 3;
             let total_lines = state.messages.len() * 2;
             let max_visible_lines =
                 std::cmp::max(1, message_area_height.saturating_sub(input_height));
             let max_scroll = total_lines.saturating_sub(max_visible_lines);
             state.scroll = max_scroll;
+        } else {
+            // Mark that content changed while scrolled up - cache will be rebuilt when user scrolls back
+            state.content_changed_while_scrolled_up = true;
         }
         state.is_streaming = false;
     } else {
@@ -80,16 +85,22 @@ pub fn handle_stream_message(
 
 /// Handle adding user message
 pub fn handle_add_user_message(state: &mut AppState, s: String) {
-    // Add spacing before user message if not the first message
+    // Add extra spacing before user message if not the first message
     if !state.messages.is_empty() {
+        state.messages.push(Message::plain_text(""));
         state.messages.push(Message::plain_text(""));
     }
     state.messages.push(Message::user(s, None));
-    // Add spacing after user message
+    // Add extra spacing after user message
+    state.messages.push(Message::plain_text(""));
     state.messages.push(Message::plain_text(""));
 
     // Invalidate cache since messages changed
     invalidate_message_lines_cache(state);
+
+    // Scroll to bottom to show the new message
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
 }
 
 /// Handle has user message event

@@ -536,6 +536,7 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
     state.message_rejected_tools.clear();
     state.tool_call_execution_order.clear();
     state.session_tool_calls_queue.clear();
+    state.approval_bar.clear();
     state.toggle_approved_message = true;
 
     state.messages.clear();
@@ -543,6 +544,14 @@ pub fn resume_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .messages
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "Resuming last session.");
+
+    // Reset scroll state to show bottom when messages are loaded
+    state.scroll = 0;
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
+
+    // Invalidate caches
+    crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the resumed session
     state.total_session_usage = LLMTokenUsage {
@@ -575,6 +584,14 @@ pub fn new_session(state: &mut AppState, output_tx: &Sender<OutputEvent>) {
         .messages
         .extend(welcome_messages(state.latest_version.clone(), state));
     render_system_message(state, "New session started.");
+
+    // Reset scroll state
+    state.scroll = 0;
+    state.scroll_to_bottom = true;
+    state.stay_at_bottom = true;
+
+    // Invalidate caches
+    crate::services::message::invalidate_message_lines_cache(state);
 
     // Reset usage for the new session
     state.total_session_usage = LLMTokenUsage {

@@ -3,9 +3,10 @@
 use super::cache::PromptCacheRetention;
 use super::{GenerateOptions, Message};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Request for generating AI completions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerateRequest {
     /// Model identifier (can be provider-prefixed like "openai/gpt-4")
     #[serde(skip)]
@@ -21,6 +22,29 @@ pub struct GenerateRequest {
     /// Provider-specific options
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_options: Option<ProviderOptions>,
+
+    /// Custom telemetry metadata to be recorded on the span.
+    ///
+    /// When the `tracing` feature is enabled, these key-value pairs are
+    /// recorded as span attributes with the `metadata.` prefix.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::GenerateRequest;
+    /// use std::collections::HashMap;
+    ///
+    /// let mut metadata = HashMap::new();
+    /// metadata.insert("user.id".to_string(), "user-123".to_string());
+    /// metadata.insert("session.id".to_string(), "session-456".to_string());
+    ///
+    /// let request = GenerateRequest {
+    ///     telemetry_metadata: Some(metadata),
+    ///     ..Default::default()
+    /// };
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry_metadata: Option<HashMap<String, String>>,
 }
 
 /// Provider-specific options enum
@@ -180,12 +204,22 @@ impl GenerateRequest {
             messages,
             options: GenerateOptions::default(),
             provider_options: None,
+            telemetry_metadata: None,
         }
     }
 
     /// Set provider options
     pub fn with_provider_options(mut self, options: ProviderOptions) -> Self {
         self.provider_options = Some(options);
+        self
+    }
+
+    /// Set telemetry metadata
+    ///
+    /// These key-value pairs will be recorded on the tracing span when
+    /// the `tracing` feature is enabled.
+    pub fn with_telemetry_metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.telemetry_metadata = Some(metadata);
         self
     }
 }

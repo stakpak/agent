@@ -3,7 +3,6 @@
 //! Contains the main TUI event loop and related helper functions.
 
 use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
-use crate::services::bash_block::render_collapsed_result_block;
 use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::handlers::tool::{
     clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
@@ -148,6 +147,14 @@ pub async fn run_tui(
     // Main async update/view loop
     terminal.draw(|f| view(f, &mut state))?;
     let mut should_quit = false;
+
+    // Scroll batching: count consecutive scroll events to process in one frame
+    // These are reset at the start of each scroll batch
+    #[allow(unused_assignments)]
+    let mut pending_scroll_up: i32 = 0;
+    #[allow(unused_assignments)]
+    let mut pending_scroll_down: i32 = 0;
+
     loop {
         // Check if double Ctrl+C timer expired
         if state.ctrl_c_pressed_once
@@ -174,7 +181,6 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-
                        crate::services::update::update(&mut state, InputEvent::ShowConfirmationDialog(tool_call.clone()), 10, 40, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                        state.poll_file_search_results();
                        terminal.draw(|f| view(f, &mut state))?;
@@ -182,18 +188,116 @@ pub async fn run_tui(
                    }
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        clear_streaming_tool_results(&mut state);
+
+                       // For run_command, also remove any message that matches the tool call ID
+                       // (handles case where streaming message uses tool_call_id directly)
+                       // The tool call ID is a String, but message IDs are Uuid
+                       if let Ok(tool_call_uuid) = uuid::Uuid::parse_str(&tool_call_result.call.id) {
+                           state.messages.retain(|m| m.id != tool_call_uuid);
+                       }
+
                        state.session_tool_calls_queue.insert(tool_call_result.call.id.clone(), ToolCallStatus::Executed);
                        update_session_tool_calls_queue(&mut state, tool_call_result);
-                       if tool_call_result.status == ToolCallResultStatus::Cancelled && crate::utils::strip_tool_name(&tool_call_result.call.function.name) == "run_command" {
+                       let tool_name = crate::utils::strip_tool_name(&tool_call_result.call.function.name);
 
-                            state.latest_tool_call = Some(tool_call_result.call.clone());
-
+                       if tool_call_result.status == ToolCallResultStatus::Cancelled && tool_name == "run_command" {
+                           state.latest_tool_call = Some(tool_call_result.call.clone());
                        }
-                       render_collapsed_result_block(tool_call_result, &mut state);
-                       // Handle file changes for the Changeset
-                       handle_tool_result(&mut state, tool_call_result.clone());
+                       // Determine the state for run_command tools
+                       let is_cancelled = tool_call_result.status == ToolCallResultStatus::Cancelled;
+                       let is_error = tool_call_result.status == ToolCallResultStatus::Error;
 
-                       state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                       if (is_cancelled || is_error) && tool_name != "run_command" {
+                           // For non-run_command tools with cancelled/error, use old renderer
+                           state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                           state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                       } else {
+                           match tool_name {
+                               "str_replace" | "create" => {
+                                   // TUI: Show diff result block with yellow border (is_collapsed: None)
+                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                               }
+                               "run_command_task" => {
+                                   // TUI: bordered result block (is_collapsed: None)
+                                   state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
+                                   // Full screen popup: full content without border (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
+                                "run_command" => {
+                                    // Use unified run command block with appropriate state
+                                    let command = crate::services::handlers::shell::extract_command_from_tool_call(&tool_call_result.call)
+                                        .unwrap_or_else(|_| "command".to_string());
+                                    let run_state = if is_error {
+                                        crate::services::bash_block::RunCommandState::Error
+                                    } else if is_cancelled {
+                                        // Cancelled could be user rejection or actual cancellation
+                                        // Use Cancelled for now (user pressed ESC during execution)
+                                        crate::services::bash_block::RunCommandState::Cancelled
+                                    } else {
+                                        crate::services::bash_block::RunCommandState::Completed
+                                    };
+
+                                    let run_cmd_msg = Message::render_run_command_block(
+                                        command,
+                                        Some(tool_call_result.result.clone()),
+                                        run_state,
+                                        None,
+                                    );
+                                    let popup_msg = Message::render_full_content_message(tool_call_result.clone());
+
+                                    // If shell is visible/running, insert cancelled block BEFORE the shell message
+                                    // so the order is: cancelled command -> shell box
+                                    if is_cancelled && state.shell_popup_visible {
+                                        if let Some(shell_msg_id) = state.interactive_shell_message_id {
+                                            // Find the position of the shell message
+                                            if let Some(pos) = state.messages.iter().position(|m| m.id == shell_msg_id) {
+                                                // Insert cancelled block and popup before shell message
+                                                state.messages.insert(pos, popup_msg);
+                                                state.messages.insert(pos, run_cmd_msg);
+                                            } else {
+                                                // Shell message not found, just push normally
+                                                state.messages.push(run_cmd_msg);
+                                                state.messages.push(popup_msg);
+                                            }
+                                        } else {
+                                            // No shell message ID, just push normally
+                                            state.messages.push(run_cmd_msg);
+                                            state.messages.push(popup_msg);
+                                        }
+                                    } else {
+                                        // Normal case: just push to the end
+                                        state.messages.push(run_cmd_msg);
+                                        state.messages.push(popup_msg);
+                                    }
+                                }
+                                "read" | "view" | "read_file" => {
+                                    // View file tool - show compact view with file icon and line count
+                                    // Extract file path from tool call arguments
+                                    let file_path = crate::services::handlers::tool::extract_file_path_from_tool_call(&tool_call_result.call)
+                                        .unwrap_or_else(|| "file".to_string());
+                                    let total_lines = tool_call_result.result.lines().count();
+                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines));
+                                    // Full screen popup: same compact view without borders
+                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines));
+                                }
+                               _ => {
+                                   // TUI: collapsed command message - last 3 lines (is_collapsed: None)
+                                   state.messages.push(Message::render_collapsed_command_message(tool_call_result.clone()));
+                                   // Full screen popup: full content (is_collapsed: Some(true))
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
+                               }
+                           }
+
+                           // Handle file changes for the Changeset (only for non-cancelled/error)
+                           if !is_cancelled && !is_error {
+                               handle_tool_result(&mut state, tool_call_result.clone());
+                           }
+                       }
+                       // Invalidate cache and scroll to bottom to show the result
+                       crate::services::message::invalidate_message_lines_cache(&mut state);
+                       state.stay_at_bottom = true;
                    }
                    if let InputEvent::ToggleMouseCapture = event {
                        #[cfg(unix)]
@@ -205,7 +309,13 @@ pub async fn run_tui(
                        should_quit = true;
                    }
                    else {
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       // Calculate main area width accounting for side panel
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1) // side panel width + margin
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
@@ -227,7 +337,8 @@ pub async fn run_tui(
                                ratatui::layout::Constraint::Length(hint_height),
                            ])
                            .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
+                       // Subtract 2 for padding (matches view.rs padded_message_area)
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                         crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
                         state.poll_file_search_results();
@@ -283,7 +394,13 @@ pub async fn run_tui(
                 }
                    else {
                        let term_size = terminal.size()?;
-                       let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                       // Calculate main area width accounting for side panel
+                       let main_area_width = if state.show_side_panel {
+                           term_size.width.saturating_sub(32 + 1) // side panel width + margin
+                       } else {
+                           term_size.width
+                       };
+                       let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
                        let input_height = 3;
                        let margin_height = 2;
                        let dropdown_showing = state.show_helper_dropdown
@@ -305,14 +422,63 @@ pub async fn run_tui(
                                ratatui::layout::Constraint::Length(hint_height),
                            ])
                            .split(term_rect);
-                       let message_area_width = outer_chunks[0].width as usize;
+                       // Subtract 2 for padding (matches view.rs padded_message_area)
+                       let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
                        let message_area_height = outer_chunks[0].height as usize;
                     if let InputEvent::EmergencyClearTerminal = event {
                     emergency_clear_and_redraw(&mut terminal, &mut state)?;
                     continue;
                    }
-                        crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
-                        state.poll_file_search_results();
+
+                   // Batch scroll events: if this is a scroll event, drain any pending scroll events
+                   // and combine them into a single scroll operation for better performance
+                   if matches!(event, InputEvent::ScrollUp | InputEvent::ScrollDown) {
+                       pending_scroll_up = 0;
+                       pending_scroll_down = 0;
+
+                       // Count the initial event
+                       match event {
+                           InputEvent::ScrollUp => pending_scroll_up += 1,
+                           InputEvent::ScrollDown => pending_scroll_down += 1,
+                           _ => {}
+                       }
+
+                       // Drain any additional scroll events from the channel (non-blocking)
+                       let mut other_event: Option<InputEvent> = None;
+                       while let Ok(next_event) = internal_rx.try_recv() {
+                           match next_event {
+                               InputEvent::ScrollUp => pending_scroll_up += 1,
+                               InputEvent::ScrollDown => pending_scroll_down += 1,
+                               // Non-scroll event - save it for later
+                               other => {
+                                   other_event = Some(other);
+                                   break;
+                               }
+                           }
+                       }
+
+                       // Process net scroll (combine up and down into single direction)
+                       let net_scroll = pending_scroll_down - pending_scroll_up;
+                       if net_scroll > 0 {
+                           // More downs than ups - scroll down by accumulated amount
+                           for _ in 0..net_scroll {
+                               crate::services::update::update(&mut state, InputEvent::ScrollDown, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                           }
+                       } else if net_scroll < 0 {
+                           // More ups than downs - scroll up by accumulated amount
+                           for _ in 0..(-net_scroll) {
+                               crate::services::update::update(&mut state, InputEvent::ScrollUp, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                           }
+                       }
+
+                       // If we encountered a non-scroll event, process it too
+                       if let Some(other) = other_event {
+                           crate::services::update::update(&mut state, other, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                       }
+                   } else {
+                       crate::services::update::update(&mut state, event, message_area_height, message_area_width, &internal_tx, &output_tx, cancel_tx.clone(), &shell_event_tx, term_size);
+                   }
+                   state.poll_file_search_results();
 
                         // Handle pending editor open request
                          if let Some(file_path) = state.pending_editor_open.take() {

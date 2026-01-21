@@ -111,6 +111,7 @@ impl Inference {
                 "gen_ai.request.presence_penalty" = tracing::field::Empty,
                 "gen_ai.input.messages" = tracing::field::Empty,
                 "gen_ai.output.messages" = tracing::field::Empty,
+                "gen_ai.tool.definitions" = tracing::field::Empty,
                 "gen_ai.usage.input_tokens" = tracing::field::Empty,
                 "gen_ai.usage.output_tokens" = tracing::field::Empty,
                 "gen_ai.response.finish_reasons" = tracing::field::Empty,
@@ -131,6 +132,17 @@ impl Inference {
             }
             if let Some(pp) = request.options.presence_penalty {
                 span.record("gen_ai.request.presence_penalty", pp);
+            }
+
+            // Record custom telemetry metadata and tool definitions
+            {
+                let _guard = span.enter();
+                if let Some(ref metadata) = request.telemetry_metadata {
+                    gen_ai_tracing::record_telemetry_metadata(metadata);
+                }
+                if let Some(ref tools) = request.options.tools {
+                    gen_ai_tracing::record_tool_definitions(tools);
+                }
             }
 
             // Clone data needed inside the async block
@@ -244,6 +256,7 @@ impl Inference {
                 "gen_ai.request.presence_penalty" = tracing::field::Empty,
                 "gen_ai.input.messages" = tracing::field::Empty,
                 "gen_ai.output.messages" = tracing::field::Empty,
+                "gen_ai.tool.definitions" = tracing::field::Empty,
                 "gen_ai.usage.input_tokens" = tracing::field::Empty,
                 "gen_ai.usage.output_tokens" = tracing::field::Empty,
                 "gen_ai.response.finish_reasons" = tracing::field::Empty,
@@ -266,16 +279,23 @@ impl Inference {
                 span.record("gen_ai.request.presence_penalty", pp);
             }
 
-            // Record input messages as span attribute
-            let _guard = span.enter();
-            gen_ai_tracing::record_input_messages(&request.messages);
-            drop(_guard);
+            // Record input messages, custom telemetry metadata, and tool definitions
+            {
+                let _guard = span.enter();
+                gen_ai_tracing::record_input_messages(&request.messages);
+                if let Some(ref metadata) = request.telemetry_metadata {
+                    gen_ai_tracing::record_telemetry_metadata(metadata);
+                }
+                if let Some(ref tools) = request.options.tools {
+                    gen_ai_tracing::record_tool_definitions(tools);
+                }
+            }
 
             // Create the inner stream, then wrap it with our span
             let inner_stream = self.stream_internal(request).await?;
 
             // Return a stream that will record usage and completion when it finishes
-            return Ok(GenerateStream::with_span(Box::pin(inner_stream), span));
+            Ok(GenerateStream::with_span(Box::pin(inner_stream), span))
         }
 
         #[cfg(not(feature = "tracing"))]

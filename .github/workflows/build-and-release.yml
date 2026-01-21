@@ -204,7 +204,6 @@ jobs:
           publish_package stakai
           publish_package stakpak-shared
           publish_package stakpak-api
-          publish_package stakpak-popup-widget
           publish_package stakpak-mcp-client
           publish_package stakpak-mcp-server
           publish_package stakpak-mcp-proxy

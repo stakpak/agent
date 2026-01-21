@@ -379,6 +379,21 @@ impl AdaptiveColors {
             Color::LightMagenta
         }
     }
+
+    /// Get orange color - Indexed(208) for all terminals (ANSI 256 color)
+    /// Falls back to Indexed(208) even on unsupported terminals as it's widely compatible
+    pub fn orange() -> Color {
+        Color::Indexed(208) // ANSI 256 color orange, works on most terminals
+    }
+
+    /// Get user text color - Indexed(243) for supported terminals, Reset for unsupported
+    pub fn user_text() -> Color {
+        if should_use_rgb_colors() {
+            Color::Indexed(243) // ANSI 256 color gray
+        } else {
+            Color::Reset
+        }
+    }
 }
 
 #[cfg(test)]
