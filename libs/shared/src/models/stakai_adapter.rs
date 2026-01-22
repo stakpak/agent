@@ -595,6 +595,7 @@ impl StakAIClient {
             messages,
             options,
             provider_options,
+            telemetry_metadata: None,
         };
 
         let response = self.inference.generate(&request).await.map_err(|e| {
@@ -631,6 +632,7 @@ impl StakAIClient {
             messages,
             options,
             provider_options,
+            telemetry_metadata: None,
         };
 
         let mut stream = self.inference.stream(&request).await.map_err(|e| {

@@ -7,7 +7,7 @@
   </picture>
 </p>
 
-<h3 align="center">Open source AI DevOps Agent in Your Terminal</h3>
+<h3 align="center">Secure Open source AI Agent in Your Terminal</h3>
 
 <p align="center">
 Infrastructure shouldn’t be this hard. Stakpak lets developers secure, deploy, and run infra from the terminal.
