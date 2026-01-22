@@ -227,6 +227,50 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     if state.profile_switching_in_progress {
         crate::services::profile_switcher::render_profile_switch_overlay(f, state);
     }
+
+    // Render toast notification (highest z-index, always on top)
+    render_toast(f, state);
+}
+
+/// Render toast notification in top-right corner
+fn render_toast(f: &mut Frame, state: &mut AppState) {
+    // Check and clear expired toast
+    if let Some(toast) = &state.toast
+        && toast.is_expired()
+    {
+        state.toast = None;
+        return;
+    }
+
+    let Some(toast) = &state.toast else {
+        return;
+    };
+
+    let text = format!(" {} ", toast.message);
+    let text_width = text.len() as u16;
+    let screen = f.area();
+
+    // Position in top-right corner with some padding
+    let x = screen.width.saturating_sub(text_width + 2);
+    let y = 1;
+
+    let area = Rect::new(x, y, text_width, 1);
+
+    let style = match toast.style {
+        crate::services::toast::ToastStyle::Success => {
+            Style::default().bg(Color::Green).fg(Color::White)
+        }
+        crate::services::toast::ToastStyle::Error => {
+            Style::default().bg(Color::Red).fg(Color::White)
+        }
+        crate::services::toast::ToastStyle::Info => {
+            Style::default().bg(Color::Blue).fg(Color::White)
+        }
+    };
+
+    // Clear background and render toast
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(Paragraph::new(text).style(style), area);
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -276,6 +320,17 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
+
+    // Apply selection highlighting if active
+    let visible_lines = if state.selection.active {
+        crate::services::text_selection::apply_selection_highlight(
+            visible_lines,
+            &state.selection,
+            scroll,
+        )
+    } else {
+        visible_lines
+    };
 
     let message_widget = Paragraph::new(visible_lines).wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(message_widget, area);

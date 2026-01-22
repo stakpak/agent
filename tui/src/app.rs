@@ -18,7 +18,9 @@ use crate::services::shell_mode::run_background_shell_command;
 #[cfg(unix)]
 use crate::services::shell_mode::run_pty_command;
 use crate::services::shell_mode::{SHELL_PROMPT_PREFIX, ShellCommand, ShellEvent};
+use crate::services::text_selection::SelectionState;
 use crate::services::textarea::{TextArea, TextAreaState};
+use crate::services::toast::Toast;
 use ratatui::layout::Size;
 use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
@@ -205,6 +207,10 @@ pub struct AppState {
     pub shell_history_lines: Vec<ratatui::text::Line<'static>>, // Accumulated styled history
     pub interactive_shell_message_id: Option<Uuid>,
     pub shell_interaction_occurred: bool,
+
+    // ========== Text Selection State ==========
+    pub selection: SelectionState,
+    pub toast: Option<Toast>,
 
     // ========== Side Panel State ==========
     pub show_side_panel: bool,
@@ -401,6 +407,10 @@ impl AppState {
             shell_history_lines: Vec::new(),
             interactive_shell_message_id: None,
             shell_interaction_occurred: false,
+
+            // Text selection initialization
+            selection: SelectionState::default(),
+            toast: None,
 
             // Profile switcher initialization
             show_profile_switcher: false,
