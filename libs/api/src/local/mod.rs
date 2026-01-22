@@ -46,12 +46,12 @@ impl ModelSet {
 impl From<ModelOptions> for ModelSet {
     fn from(value: ModelOptions) -> Self {
         // Default models route through Stakpak provider
-        let smart_model = value.smart_model.unwrap_or_else(|| {
-            LLMModel::from("stakpak/anthropic/claude-sonnet-4-5-20250929".to_string())
-        });
-        let eco_model = value.eco_model.unwrap_or_else(|| {
-            LLMModel::from("stakpak/anthropic/claude-haiku-4-5-20250929".to_string())
-        });
+        let smart_model = value
+            .smart_model
+            .unwrap_or_else(|| LLMModel::from("stakpak/anthropic/claude-opus-4-5".to_string()));
+        let eco_model = value
+            .eco_model
+            .unwrap_or_else(|| LLMModel::from("stakpak/anthropic/claude-haiku-4-5".to_string()));
         let recovery_model = value
             .recovery_model
             .unwrap_or_else(|| LLMModel::from("stakpak/openai/gpt-4o".to_string()));

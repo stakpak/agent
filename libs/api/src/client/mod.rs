@@ -17,7 +17,7 @@ use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use libsql::Connection;
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
-use stakpak_shared::models::stakai_adapter::StakAIClient;
+use stakpak_shared::models::stakai_adapter::{get_stakai_model_string, StakAIClient};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -338,9 +338,18 @@ impl AgentClient {
 
         // If Stakpak is available, route through Stakpak provider
         if self.has_stakpak() {
+            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-sonnet-4-5")
+            let model_str = get_stakai_model_string(&base_model);
+            // Extract display name from the last segment for UI
+            let display_name = model_str
+                .rsplit('/')
+                .next()
+                .unwrap_or(&model_str)
+                .to_string();
             LLMModel::Custom {
                 provider: "stakpak".to_string(),
-                model: base_model.to_string(),
+                model: model_str,
+                name: Some(display_name),
             }
         } else {
             base_model

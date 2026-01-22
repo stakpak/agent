@@ -269,6 +269,8 @@ pub enum LLMModel {
         provider: String,
         /// Model name/path to pass to the provider API (can include nested prefixes)
         model: String,
+        /// Optional display name for the model (shown in UI instead of provider/model)
+        name: Option<String>,
     },
 }
 
@@ -287,7 +289,13 @@ impl ContextAware for LLMModel {
             LLMModel::Anthropic(model) => model.model_name(),
             LLMModel::Gemini(model) => model.model_name(),
             LLMModel::OpenAI(model) => model.model_name(),
-            LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => name
+                .clone()
+                .unwrap_or_else(|| format!("{}/{}", provider, model)),
         }
     }
 }
@@ -349,9 +357,12 @@ impl From<String> for LLMModel {
                 "google" | "gemini" => return Self::from_model_name(model),
                 // Unknown provider = custom provider (model can contain additional slashes)
                 _ => {
+                    // Extract display name from the last segment (e.g., "anthropic/claude-opus" -> "claude-opus")
+                    let display_name = model.rsplit('/').next().unwrap_or(model).to_string();
                     return LLMModel::Custom {
                         provider: provider.to_string(),
                         model: model.to_string(), // Preserves nested paths like "anthropic/claude-opus"
+                        name: Some(display_name),
                     };
                 }
             }
@@ -390,6 +401,7 @@ impl LLMModel {
             LLMModel::Custom {
                 provider: "custom".to_string(),
                 model: model.to_string(),
+                name: Some(model.to_string()), // Use model name as display name
             }
         }
     }
@@ -413,6 +425,28 @@ impl LLMModel {
             LLMModel::Custom { model, .. } => model.clone(),
         }
     }
+
+    /// Set a display name for a custom model
+    pub fn with_name(self, name: impl Into<String>) -> Self {
+        match self {
+            LLMModel::Custom {
+                provider, model, ..
+            } => LLMModel::Custom {
+                provider,
+                model,
+                name: Some(name.into()),
+            },
+            other => other, // Built-in models don't support custom names
+        }
+    }
+
+    /// Get the display name if set (for custom models only)
+    pub fn display_name(&self) -> Option<&str> {
+        match self {
+            LLMModel::Custom { name, .. } => name.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 impl Display for LLMModel {
@@ -421,7 +455,17 @@ impl Display for LLMModel {
             LLMModel::Anthropic(model) => write!(f, "{}", model),
             LLMModel::Gemini(model) => write!(f, "{}", model),
             LLMModel::OpenAI(model) => write!(f, "{}", model),
-            LLMModel::Custom { provider, model } => write!(f, "{}/{}", provider, model),
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
+                if let Some(name) = name {
+                    write!(f, "{}", name)
+                } else {
+                    write!(f, "{}/{}", provider, model)
+                }
+            }
         }
     }
 }
@@ -805,9 +849,15 @@ mod tests {
     fn test_llm_model_from_custom_provider_with_slash() {
         let model = LLMModel::from("litellm/claude-opus-4-5".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "litellm");
                 assert_eq!(model, "claude-opus-4-5");
+                // Display name is automatically extracted from last segment
+                assert_eq!(name, Some("claude-opus-4-5".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -817,9 +867,34 @@ mod tests {
     fn test_llm_model_from_ollama_provider() {
         let model = LLMModel::from("ollama/llama3".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "ollama");
                 assert_eq!(model, "llama3");
+                // Display name is automatically extracted from last segment
+                assert_eq!(name, Some("llama3".to_string()));
+            }
+            _ => panic!("Expected Custom model"),
+        }
+    }
+
+    #[test]
+    fn test_llm_model_from_nested_provider() {
+        // Test nested path like stakpak/anthropic/claude-sonnet-4-5
+        let model = LLMModel::from("stakpak/anthropic/claude-sonnet-4-5".to_string());
+        match model {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
+                assert_eq!(provider, "stakpak");
+                assert_eq!(model, "anthropic/claude-sonnet-4-5");
+                // Display name is the last segment only
+                assert_eq!(name, Some("claude-sonnet-4-5".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -864,9 +939,15 @@ mod tests {
     fn test_llm_model_unknown_model_becomes_custom() {
         let model = LLMModel::from("some-random-model".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "custom");
                 assert_eq!(model, "some-random-model");
+                // Display name is the model name itself
+                assert_eq!(name, Some("some-random-model".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -884,8 +965,28 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus".to_string(),
+            name: None,
         };
         assert_eq!(model.to_string(), "litellm/claude-opus");
+    }
+
+    #[test]
+    fn test_llm_model_display_custom_with_name() {
+        let model = LLMModel::Custom {
+            provider: "litellm".to_string(),
+            model: "claude-opus".to_string(),
+            name: Some("My Custom Model".to_string()),
+        };
+        assert_eq!(model.to_string(), "My Custom Model");
+    }
+
+    #[test]
+    fn test_llm_model_with_name() {
+        let model = LLMModel::from("ollama/llama3".to_string()).with_name("Local Llama");
+        assert_eq!(model.to_string(), "Local Llama");
+        assert_eq!(model.display_name(), Some("Local Llama"));
+        // model_id should still return the original model
+        assert_eq!(model.model_id(), "llama3");
     }
 
     #[test]
@@ -905,7 +1006,8 @@ mod tests {
         assert_eq!(
             LLMModel::Custom {
                 provider: "litellm".to_string(),
-                model: "test".to_string()
+                model: "test".to_string(),
+                name: None,
             }
             .provider_name(),
             "litellm"
@@ -917,6 +1019,7 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus-4-5".to_string(),
+            name: None,
         };
         assert_eq!(model.model_id(), "claude-opus-4-5");
     }

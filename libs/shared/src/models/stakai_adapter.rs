@@ -552,7 +552,9 @@ pub fn get_stakai_model_string(model: &LLMModel) -> String {
         LLMModel::Anthropic(m) => format!("anthropic/{}", m),
         LLMModel::Gemini(m) => format!("google/{}", m),
         LLMModel::OpenAI(m) => format!("openai/{}", m),
-        LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
+        LLMModel::Custom {
+            provider, model, ..
+        } => format!("{}/{}", provider, model),
     }
 }
 
@@ -1324,6 +1326,7 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus-4-5".to_string(),
+            name: None,
         };
         let model_str = get_stakai_model_string(&model);
         assert_eq!(model_str, "litellm/claude-opus-4-5");

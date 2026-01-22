@@ -25,6 +25,7 @@ use stakpak_shared::models::integrations::openai::{
 use stakpak_shared::models::llm::{
     GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMStreamInput,
 };
+use stakpak_shared::models::stakai_adapter::get_stakai_model_string;
 use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -943,9 +944,18 @@ impl AgentClient {
 
         // If Stakpak is available, route through it
         let model = if self.has_stakpak() {
+            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-haiku-4-5")
+            let model_str = get_stakai_model_string(&llm_model);
+            // Extract display name from the last segment for UI
+            let display_name = model_str
+                .rsplit('/')
+                .next()
+                .unwrap_or(&model_str)
+                .to_string();
             LLMModel::Custom {
                 provider: "stakpak".to_string(),
-                model: llm_model.to_string(),
+                model: model_str,
+                name: Some(display_name),
             }
         } else {
             llm_model
