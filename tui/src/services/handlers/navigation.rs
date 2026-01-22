@@ -427,13 +427,20 @@ pub fn adjust_scroll(state: &mut AppState, message_area_height: usize, message_a
         if last_message_lines == 0 {
             // Keep the flag, don't change scroll
         } else {
-            // Store how many lines from the end we want at the top of viewport
-            // We want: last_message_lines + 3 lines of context above
-            let lines_from_end = last_message_lines + 3;
+            // Calculate where the last message starts
+            let last_msg_start_line = total_lines.saturating_sub(last_message_lines);
+
+            // We want to show the START of the tool call block, with some context above if possible
+            // If the tool call is taller than viewport, show its start
+            // If it fits, show it with ~2 lines of context above
+            let context_lines = 2;
+            let scroll_target = last_msg_start_line.saturating_sub(context_lines);
+
+            // Store the target line (from start of content, not from end)
+            // We'll use lines_from_end to maintain position as content changes
+            let lines_from_end = total_lines.saturating_sub(scroll_target);
             state.scroll_lines_from_end = Some(lines_from_end);
 
-            // Calculate scroll position based on lines from end
-            let scroll_target = total_lines.saturating_sub(lines_from_end);
             state.scroll = scroll_target.min(max_scroll);
             state.scroll_to_last_message_start = false;
             // Block stay_at_bottom for a few frames to prevent override

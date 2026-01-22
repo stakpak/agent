@@ -527,8 +527,8 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
                 }
             };
 
-            // Calculate available width
-            let available_width = area.width as usize;
+            // Calculate available width (subtract 1 for right padding/border alignment)
+            let available_width = area.width.saturating_sub(1) as usize;
 
             // Format: [PREFIX] [STATE_LABEL] [NAME] ... [STATS]
             // We want the state label to be next to the name
