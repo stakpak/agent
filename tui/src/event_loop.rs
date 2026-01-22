@@ -249,7 +249,9 @@ pub async fn run_tui(
                                    // TUI: Show diff result block with yellow border (is_collapsed: None)
                                    state.messages.push(Message::render_result_border_block(tool_call_result.clone()));
                                    // Full screen popup: Show diff-only view without border (is_collapsed: Some(true))
-                                   state.messages.push(Message::render_collapsed_message(tool_call_result.call.clone()));
+                                   // Use render_full_content_message which stores the full ToolCallResult including the result
+                                   // (needed for extracting line numbers from the diff output)
+                                   state.messages.push(Message::render_full_content_message(tool_call_result.clone()));
                                }
                                "run_command_task" => {
                                    // TUI: bordered result block (is_collapsed: None)
