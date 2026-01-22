@@ -713,13 +713,18 @@ impl AppConfig {
     }
 
     /// Get Stakpak API key with resolved credentials from auth.toml fallback chain.
+    /// Returns None if the API key is empty or not set.
     pub fn get_stakpak_api_key(&self) -> Option<String> {
-        if self.api_key.is_some() {
-            return self.api_key.clone();
+        if let Some(ref key) = self.api_key {
+            if !key.is_empty() {
+                return Some(key.clone());
+            }
         }
 
         if let Some(ProviderAuth::Api { key }) = self.resolve_provider_auth("stakpak") {
-            return Some(key);
+            if !key.is_empty() {
+                return Some(key);
+            }
         }
 
         None

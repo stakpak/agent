@@ -428,7 +428,11 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                 api_key,
                 api_endpoint,
             } => {
-                inference_config = inference_config.stakpak(api_key.clone(), api_endpoint.clone());
+                // Skip if api_key is empty - stakpak is optional
+                if !api_key.is_empty() {
+                    inference_config =
+                        inference_config.stakpak(api_key.clone(), api_endpoint.clone());
+                }
             }
             ProviderConfig::Custom { .. } => {
                 // Custom providers are handled by build_provider_registry_direct
@@ -513,6 +517,10 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                 api_key,
                 api_endpoint,
             } => {
+                // Skip if api_key is empty - stakpak is optional
+                if api_key.is_empty() {
+                    continue;
+                }
                 let mut stakpak_config = StakaiStakpakConfig::new(api_key.clone());
                 if let Some(endpoint) = api_endpoint {
                     stakpak_config = stakpak_config.with_base_url(endpoint.clone());

@@ -187,31 +187,37 @@ pub struct AgentClient {
 impl AgentClient {
     /// Create a new AgentClient
     pub async fn new(config: AgentClientConfig) -> Result<Self, String> {
-        // 1. Build LLMProviderConfig with Stakpak if configured
+        // 1. Build LLMProviderConfig with Stakpak if configured (only if api_key is not empty)
         let mut providers = config.providers.clone();
         if let Some(stakpak) = &config.stakpak {
-            providers.providers.insert(
-                "stakpak".to_string(),
-                ProviderConfig::Stakpak {
-                    api_key: stakpak.api_key.clone(),
-                    api_endpoint: Some(stakpak.api_endpoint.clone()),
-                },
-            );
+            if !stakpak.api_key.is_empty() {
+                providers.providers.insert(
+                    "stakpak".to_string(),
+                    ProviderConfig::Stakpak {
+                        api_key: stakpak.api_key.clone(),
+                        api_endpoint: Some(stakpak.api_endpoint.clone()),
+                    },
+                );
+            }
         }
 
         // 2. Create StakAIClient with all providers
         let stakai = StakAIClient::new(&providers)
             .map_err(|e| format!("Failed to create StakAI client: {}", e))?;
 
-        // 3. Create StakpakApiClient if configured
+        // 3. Create StakpakApiClient if configured (only if api_key is not empty)
         let stakpak_api = if let Some(stakpak) = &config.stakpak {
-            Some(
-                StakpakApiClient::new(&StakpakApiConfig {
-                    api_key: stakpak.api_key.clone(),
-                    api_endpoint: stakpak.api_endpoint.clone(),
-                })
-                .map_err(|e| format!("Failed to create Stakpak API client: {}", e))?,
-            )
+            if !stakpak.api_key.is_empty() {
+                Some(
+                    StakpakApiClient::new(&StakpakApiConfig {
+                        api_key: stakpak.api_key.clone(),
+                        api_endpoint: stakpak.api_endpoint.clone(),
+                    })
+                    .map_err(|e| format!("Failed to create Stakpak API client: {}", e))?,
+                )
+            } else {
+                None
+            }
         } else {
             None
         };
