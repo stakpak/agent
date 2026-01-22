@@ -5,13 +5,42 @@
 //! - Updating selection during mouse drag
 //! - Ending selection and copying to clipboard on mouse release
 //! - Extracting clean text (excluding borders, decorations)
+//! - Cursor positioning in input area on click
 
 use crate::app::AppState;
 use crate::services::text_selection::{SelectionState, copy_to_clipboard, extract_selected_text};
 use crate::services::toast::Toast;
 
-/// Handle mouse drag start - begins text selection if in message area
+/// Check if coordinates are within the input area
+fn is_in_input_area(state: &AppState, col: u16, row: u16) -> bool {
+    let Some(input_area) = state.input_content_area else {
+        return false;
+    };
+
+    col >= input_area.x
+        && col < input_area.x + input_area.width
+        && row >= input_area.y
+        && row < input_area.y + input_area.height
+}
+
+/// Handle mouse drag start - begins text selection in message area or input area
 pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16, message_area_height: usize) {
+    // First check if click is in input area
+    if is_in_input_area(state, col, row) {
+        // Click was in input area - start input selection
+        if let Some(input_area) = state.input_content_area {
+            state
+                .text_area
+                .start_selection(col, row, input_area, &state.text_area_state);
+        }
+        // Clear message area selection
+        state.selection = SelectionState::default();
+        return;
+    }
+
+    // Clear any input area selection when clicking outside
+    state.text_area.clear_selection();
+
     // Check if click is within message area (top portion of screen)
     // Message area starts at row 0 and extends to message_area_height
     if row as usize >= message_area_height {
@@ -47,8 +76,19 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16, message_area_
     };
 }
 
-/// Handle mouse drag - updates selection
+/// Handle mouse drag - updates selection in message area or input area
 pub fn handle_drag(state: &mut AppState, col: u16, row: u16, message_area_height: usize) {
+    // Check if we're dragging in input area selection mode
+    if state.text_area.selection.is_active() {
+        if let Some(input_area) = state.input_content_area {
+            state
+                .text_area
+                .update_selection(col, row, input_area, &state.text_area_state);
+        }
+        return;
+    }
+
+    // Handle message area selection
     if !state.selection.active {
         return;
     }
@@ -77,6 +117,26 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16, message_area_height
 
 /// Handle mouse drag end - extracts text, copies to clipboard, shows toast
 pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16, message_area_height: usize) {
+    // Check if we're ending an input area selection
+    if state.text_area.selection.is_active() {
+        if let Some(selected_text) = state.text_area.end_selection()
+            && !selected_text.is_empty()
+        {
+            // Copy to clipboard
+            match copy_to_clipboard(&selected_text) {
+                Ok(()) => {
+                    state.toast = Some(Toast::success("Copied!"));
+                }
+                Err(e) => {
+                    log::warn!("Failed to copy to clipboard: {}", e);
+                    state.toast = Some(Toast::error("Copy failed"));
+                }
+            }
+        }
+        return;
+    }
+
+    // Handle message area selection end
     if !state.selection.active {
         return;
     }

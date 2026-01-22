@@ -31,4 +31,5 @@ pub mod textarea;
 pub mod toast;
 pub mod todo_extractor;
 pub mod update;
+pub mod widget_selection;
 pub mod wrapping;

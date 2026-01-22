@@ -242,35 +242,56 @@ fn render_toast(f: &mut Frame, state: &mut AppState) {
         return;
     }
 
-    let Some(toast) = &state.toast else {
+    let Some(_toast) = &state.toast else {
         return;
     };
 
-    let text = format!(" {} ", toast.message);
-    let text_width = text.len() as u16;
+    let text = "Copied to clipboard!";
+    let padding_x = 2;
+    let border_width = 1; // Left border using "▌"
+    let text_width = text.len() + (padding_x * 2);
     let screen = f.area();
 
-    // Position in top-right corner with some padding
-    let x = screen.width.saturating_sub(text_width + 2);
+    // Box dimensions
+    let box_width = (border_width + text_width) as u16;
+    let box_height = 3u16; // padding top + text + padding bottom
+
+    // Position in top-right corner with some margin
+    let x = screen.width.saturating_sub(box_width + 2);
     let y = 1;
 
-    let area = Rect::new(x, y, text_width, 1);
+    let area = Rect::new(x, y, box_width, box_height);
 
-    let style = match toast.style {
-        crate::services::toast::ToastStyle::Success => {
-            Style::default().bg(Color::Green).fg(Color::White)
-        }
-        crate::services::toast::ToastStyle::Error => {
-            Style::default().bg(Color::Red).fg(Color::White)
-        }
-        crate::services::toast::ToastStyle::Info => {
-            Style::default().bg(Color::Blue).fg(Color::White)
-        }
-    };
+    // Build lines: empty line, text line, empty line (vertically centered)
+    let padding_str = " ".repeat(text_width);
+    let text_line = format!("{:^width$}", text, width = text_width);
+
+    let lines = vec![
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(padding_str.clone(), Style::default().bg(Color::Black)),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(
+                text_line,
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Black)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Cyan).bg(Color::Black)),
+            ratatui::text::Span::styled(padding_str, Style::default().bg(Color::Black)),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines);
 
     // Clear background and render toast
     f.render_widget(ratatui::widgets::Clear, area);
-    f.render_widget(Paragraph::new(text).style(style), area);
+    f.render_widget(paragraph, area);
 }
 
 // Calculate how many lines the input will take up when wrapped
@@ -447,6 +468,9 @@ fn render_multiline_input(f: &mut Frame, state: &mut AppState, area: Rect) {
         width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
+
+    // Store the content area for mouse click handling
+    state.input_content_area = Some(content_area);
 
     // Render the block
     f.render_widget(block, area);

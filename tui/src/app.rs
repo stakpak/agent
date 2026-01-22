@@ -212,6 +212,10 @@ pub struct AppState {
     pub selection: SelectionState,
     pub toast: Option<Toast>,
 
+    // ========== Input Area State ==========
+    /// Stores the input area content rect for mouse click positioning
+    pub input_content_area: Option<ratatui::layout::Rect>,
+
     // ========== Side Panel State ==========
     pub show_side_panel: bool,
     pub side_panel_focus: SidePanelSection,
@@ -411,6 +415,7 @@ impl AppState {
             // Text selection initialization
             selection: SelectionState::default(),
             toast: None,
+            input_content_area: None,
 
             // Profile switcher initialization
             show_profile_switcher: false,

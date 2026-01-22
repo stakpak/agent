@@ -97,6 +97,12 @@ pub async fn run_tui(
         height: term_size.height,
     };
 
+    // Pre-initialize the gitleaks config for secret redaction
+    // This compiles all regex patterns upfront so first paste is fast
+    tokio::spawn(async move {
+        stakpak_shared::secrets::initialize_gitleaks_config(privacy_mode);
+    });
+
     // Set the current profile name and rulebook config
     state.current_profile_name = current_profile_name;
     state.rulebook_config = rulebook_config;
