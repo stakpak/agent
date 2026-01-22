@@ -17,7 +17,7 @@ use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use libsql::Connection;
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
-use stakpak_shared::models::stakai_adapter::{get_stakai_model_string, StakAIClient};
+use stakpak_shared::models::stakai_adapter::{StakAIClient, get_stakai_model_string};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -189,16 +189,16 @@ impl AgentClient {
     pub async fn new(config: AgentClientConfig) -> Result<Self, String> {
         // 1. Build LLMProviderConfig with Stakpak if configured (only if api_key is not empty)
         let mut providers = config.providers.clone();
-        if let Some(stakpak) = &config.stakpak {
-            if !stakpak.api_key.is_empty() {
-                providers.providers.insert(
-                    "stakpak".to_string(),
-                    ProviderConfig::Stakpak {
-                        api_key: stakpak.api_key.clone(),
-                        api_endpoint: Some(stakpak.api_endpoint.clone()),
-                    },
-                );
-            }
+        if let Some(stakpak) = &config.stakpak
+            && !stakpak.api_key.is_empty()
+        {
+            providers.providers.insert(
+                "stakpak".to_string(),
+                ProviderConfig::Stakpak {
+                    api_key: stakpak.api_key.clone(),
+                    api_endpoint: Some(stakpak.api_endpoint.clone()),
+                },
+            );
         }
 
         // 2. Create StakAIClient with all providers
