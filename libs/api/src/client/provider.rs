@@ -443,7 +443,15 @@ impl AgentProvider for AgentClient {
         let client = self.clone();
         let mut ctx_clone = ctx.clone();
 
+        // Spawn the completion task with proper shutdown handling
+        // The task checks if the channel is closed before each expensive operation
+        // to support graceful shutdown when the stream consumer is dropped
         tokio::spawn(async move {
+            // Check if consumer is still listening before starting
+            if tx.is_closed() {
+                return;
+            }
+
             let result = client
                 .run_agent_completion(&mut ctx_clone, Some(tx.clone()))
                 .await;
@@ -453,10 +461,25 @@ impl AgentProvider for AgentClient {
                     let _ = tx.send(Err(e)).await;
                 }
                 Ok(new_message) => {
+                    // Check if consumer is still listening before continuing
+                    if tx.is_closed() {
+                        return;
+                    }
+
                     ctx_clone.state.append_new_message(new_message.clone());
-                    let _ = tx
+                    if tx
                         .send(Ok(StreamMessage::Ctx(Box::new(ctx_clone.clone()))))
-                        .await;
+                        .await
+                        .is_err()
+                    {
+                        // Consumer dropped, exit gracefully
+                        return;
+                    }
+
+                    // Check again before expensive session update
+                    if tx.is_closed() {
+                        return;
+                    }
 
                     let output = client
                         .update_session(&current_checkpoint, ctx_clone.state.messages.clone())
