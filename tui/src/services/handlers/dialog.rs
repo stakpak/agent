@@ -372,6 +372,9 @@ pub fn handle_show_confirmation_dialog(
     }
     state.pending_bash_message_id = Some(message_id);
 
+    // Invalidate cache so the new message gets rendered
+    invalidate_message_lines_cache(state);
+
     state.dialog_command = Some(tool_call.clone());
     // Only set is_dialog_open if NOT using the new approval bar flow
     // When toggle_approved_message is true, we use the approval bar instead

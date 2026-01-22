@@ -181,32 +181,33 @@ pub async fn run_tui(
                     continue;
                    }
                    if let InputEvent::RunToolCall(tool_call) = &event {
-                       // Calculate actual message area dimensions (same as below)
+                       // Calculate actual message area dimensions (same as view.rs)
                        let main_area_width = if state.show_side_panel {
                            term_size.width.saturating_sub(32 + 1)
                        } else {
                            term_size.width
                        };
                        let term_rect = ratatui::layout::Rect::new(0, 0, main_area_width, term_size.height);
-                       let input_height: u16 = 3;
                        let margin_height: u16 = 2;
                        let dropdown_showing = state.show_helper_dropdown
                            && ((!state.filtered_helpers.is_empty() && state.input().starts_with('/'))
                                || !state.filtered_files.is_empty());
-                       let dropdown_height = if dropdown_showing {
-                           state.filtered_helpers.len() as u16
-                       } else {
-                           0
-                       };
                        let hint_height = if dropdown_showing { 0 } else { margin_height };
+
+                       // Account for approval bar height (will be shown after this tool call)
+                       // The approval bar will be visible, so input and dropdown are hidden
+                       let approval_bar_height = state.approval_bar.calculate_height().max(7); // Use expected height
+
                        let outer_chunks = ratatui::layout::Layout::default()
                            .direction(ratatui::layout::Direction::Vertical)
                            .constraints([
-                               ratatui::layout::Constraint::Min(1),
-                               ratatui::layout::Constraint::Length(1),
-                               ratatui::layout::Constraint::Length(input_height),
-                               ratatui::layout::Constraint::Length(dropdown_height),
-                               ratatui::layout::Constraint::Length(hint_height),
+                               ratatui::layout::Constraint::Min(1), // messages
+                               ratatui::layout::Constraint::Length(1), // loading
+                               ratatui::layout::Constraint::Length(0), // shell popup
+                               ratatui::layout::Constraint::Length(approval_bar_height), // approval bar
+                               ratatui::layout::Constraint::Length(0), // input (hidden when approval bar visible)
+                               ratatui::layout::Constraint::Length(0), // dropdown (hidden when approval bar visible)
+                               ratatui::layout::Constraint::Length(hint_height), // hint
                            ])
                            .split(term_rect);
                        let message_area_width = outer_chunks[0].width.saturating_sub(2) as usize;
