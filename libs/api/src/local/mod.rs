@@ -1,8 +1,11 @@
 // use crate::local::hooks::file_scratchpad_context::{
 //     FileScratchpadContextHook, FileScratchpadContextHookOptions,
 // };
-use crate::local::hooks::inline_scratchpad_context::{
-    InlineScratchpadContextHook, InlineScratchpadContextHookOptions,
+// use crate::local::hooks::inline_scratchpad_context::{
+//     InlineScratchpadContextHook, InlineScratchpadContextHookOptions,
+// };
+use crate::local::hooks::task_board_context::{
+    TaskBoardContextHook, TaskBoardContextHookOptions,
 };
 use crate::{AgentProvider, ApiStreamError, GetMyAccountResponse};
 use crate::{ListRuleBook, models::*};
@@ -152,8 +155,8 @@ impl LocalClient {
         let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
             LifecycleEvent::BeforeInference,
-            Box::new(InlineScratchpadContextHook::new(
-                InlineScratchpadContextHookOptions {
+            Box::new(TaskBoardContextHook::new(
+                TaskBoardContextHookOptions {
                     model_options: model_options.clone(),
                     history_action_message_size_limit: Some(100),
                     history_action_message_keep_last_n: Some(1),

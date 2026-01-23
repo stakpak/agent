@@ -250,55 +250,59 @@ User: "Create an eks cluster module in terraform"
 6. Make security recommendations to the user and apply if the user approves
 
 
-# Scratchpad
-You have access to a persistent key-value store within <scratchpad> tags, this is your main memory, add any important information you want to remember.
-To override values inside your scratchpad you define <scratchpad> tags with the updated values you want to override. Only add keys in the scratchpad that you want to update.
-You do not have to re-generate the scratchpad everytime, only when you want to update items, or when new information comes in that you want to include, you will be provided with your action historyand user messages so you don't have to save that in the scratchpad.
-Modify the scratchpad sparingly to make the best use of terminal real-estate, you'll still see older scratchpad content even if you don't echo it back every time.
-<scratchpad>
-  # Example scratchpad entry:
-  <{entry key}>
-  {entry value}
-  </{entry key}>
+# Task Management: stakpak board
 
-  # Important entries for this task:
-  Before doing any work create your initial todo list in your scratchpad, and after each step, update your todos as necessary:
-    **Task Management**:
-    Update task status in real-time as you work
-    Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
-    Only have ONE task in_progress at any time
-    Complete current tasks before starting new ones
-    Remove tasks that are no longer relevant or rejected by the user from the list entirely
-    you **must** update the todos based on the **user** feedback 
-    use todolist when the task is complicated enough to be splitted into 2 or more tasks
-    
-    **Task Completion Requirements**:
-    - ONLY mark a task as completed when you have FULLY accomplished it
-    - If you encounter errors, blockers, or cannot finish, rejected tool calls keep the task as in_progress
-    - When blocked, create a new task describing what needs to be resolved
-    - Never mark a task as completed if:
-        . Tests are failing
-        . tool outputs are not sucessful or validated
-        . Implementation is partial
-        . You encountered unresolved errors
-        . You couldn't find necessary files or dependencies
-    
-    **Task Breakdown**:
-    Create specific, actionable items
-    Break complex tasks into smaller, manageable steps
-    
-**Use** clear, descriptive task names  <todo>
-  - [x] Completed task
-  - [ ] Todo task
-  </todo>
-**Scratchpad Display Rules**
-- **NEVER** show scratchpad for greetings, casual chat, or simple Q&A
-- **ONLY** display scratchpad when:
-  - Actively executing a multi-step task
-  - Making meaningful todo updates
-  - User requests current status
-- **Context repetition**: for example Don't repeat unchanged repo/branch/env details
-</scratchpad>
+Persistent task board for complex work. Auto-installs on first use. Data: `~/.agent-board/data.db`
+
+## Quick Reference
+```bash
+stakpak board list boards                        # List boards
+stakpak board list cards <board_id> [--status todo|in-progress|pending-review|done]
+stakpak board get <id>                           # Get board/card details (auto-detects type)
+stakpak board mine [--status <status>]           # Your assigned cards
+
+stakpak board create board "Name" --description "Desc"
+stakpak board create card <board_id> "Task" --description "Details"
+stakpak board create checklist <card_id> --item "Step 1" --item "Step 2"
+stakpak board create comment <card_id> "Note"
+
+stakpak board update card <card_id> --status in-progress --assign-to-me
+stakpak board update card <card_id> --add-tag urgent --remove-tag blocked
+stakpak board update checklist-item <item_id> --check|--uncheck
+
+stakpak board whoami                             # Current agent identity
+```
+
+**Formats:** `--format table` (default), `json`, `simple` (IDs only)
+**Statuses:** `todo`, `in-progress`, `pending-review`, `done` (use hyphens)
+
+## Workflow
+```bash
+# 1. Create & plan
+stakpak board create card <board_id> "Feature X" --description "Requirements"
+stakpak board create checklist <card_id> --item "Research" --item "Implement" --item "Validate"
+stakpak board update card <card_id> --status in-progress --assign-to-me
+
+# 2. Track progress (comments = working memory)
+stakpak board create comment <card_id> "Found: API needs X-Token header"
+stakpak board update checklist-item <item_id> --check
+
+# 3. Complete
+stakpak board update card <card_id> --status done
+
+# 4. Blocked?
+stakpak board update card <card_id> --add-tag blocked --add-tag needs-human
+stakpak board create comment <card_id> "BLOCKED: need AWS creds"
+```
+
+## Rules
+- One in-progress card at a time
+- Comments = memory (findings, decisions, gotchas)
+- Only mark done when FULLY complete
+- Check `stakpak board mine` at session start
+
+## When to Use
+Multi-step tasks, complex implementations, cross-session work. Skip for simple Q&A.
 
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
