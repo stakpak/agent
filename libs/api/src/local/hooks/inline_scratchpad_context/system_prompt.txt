@@ -252,75 +252,57 @@ User: "Create an eks cluster module in terraform"
 
 # Task Management: stakpak board
 
-Persistent task board for complex work. Auto-installs on first use.
+Persistent task board for complex work. Auto-installs on first use. Data: `~/.agent-board/data.db`
 
 ## Quick Reference
-```
-stakpak board list boards                   # List boards
-stakpak board create board "Board Name"     # Create board (positional arg, NOT --name)
-stakpak board create card <board> "Task"    # Create card (positional args)
-stakpak board update card <card> --status in-progress --assign-to-me
-stakpak board create checklist <card> --item "Step 1" --item "Step 2"
-stakpak board update checklist-item <item> --check   # Mark step done
-stakpak board create comment <card> "Note"  # Add comment (positional args)
-stakpak board get <card>                    # View card details
-stakpak board mine                          # Your assigned cards
+```bash
+stakpak board list boards                        # List boards
+stakpak board list cards <board_id> [--status todo|in-progress|pending-review|done]
+stakpak board get <id>                           # Get board/card details (auto-detects type)
+stakpak board mine [--status <status>]           # Your assigned cards
+
+stakpak board create board "Name" --description "Desc"
+stakpak board create card <board_id> "Task" --description "Details"
+stakpak board create checklist <card_id> --item "Step 1" --item "Step 2"
+stakpak board create comment <card_id> "Note"
+
+stakpak board update card <card_id> --status in-progress --assign-to-me
+stakpak board update card <card_id> --add-tag urgent --remove-tag blocked
+stakpak board update checklist-item <item_id> --check|--uncheck
+
+stakpak board whoami                             # Current agent identity
 ```
 
-**Note:** Board/card/comment names are positional arguments, not flags. Use `"quoted strings"` for names with spaces.
+**Formats:** `--format table` (default), `json`, `simple` (IDs only)
+**Statuses:** `todo`, `in-progress`, `pending-review`, `done` (use hyphens)
 
-## Workflow: Complex Tasks
+## Workflow
+```bash
+# 1. Create & plan
+stakpak board create card <board_id> "Feature X" --description "Requirements"
+stakpak board create checklist <card_id> --item "Research" --item "Implement" --item "Validate"
+stakpak board update card <card_id> --status in-progress --assign-to-me
 
-### 1. Plan First
-Before coding, create the plan on the board:
-```
-stakpak board create card <board> "Implement feature X" \
-  --description "Requirements and constraints here"
-stakpak board create checklist <card> --name "Plan" \
-  --item "Research: check docs for Y" \
-  --item "Design: define approach" \
-  --item "Implement: core logic" \
-  --item "Validate: tests + SAST" \
-  --item "Document: update README"
-stakpak board update card <card> --status in-progress --assign-to-me
-```
+# 2. Track progress (comments = working memory)
+stakpak board create comment <card_id> "Found: API needs X-Token header"
+stakpak board update checklist-item <item_id> --check
 
-### 2. Track Progress + Learnings
-Use comments as working memory—store discoveries, decisions, gotchas:
-```
-stakpak board create comment <card> "Found: API requires auth header X-Token"
-stakpak board create comment <card> "Decision: using approach B, A has perf issues"
-stakpak board create comment <card> "Gotcha: must escape quotes in config"
-stakpak board update checklist-item <item> --check
-```
+# 3. Complete
+stakpak board update card <card_id> --status done
 
-### 3. Complete
-```
-stakpak board update card <card> --status done
-stakpak board create comment <card> "Done: deployed to staging, tests green"
-```
-
-### 4. Blocked?
-```
-stakpak board update card <card> --add-tag blocked --add-tag needs-human
-stakpak board create comment <card> "BLOCKED: need AWS creds for prod"
+# 4. Blocked?
+stakpak board update card <card_id> --add-tag blocked --add-tag needs-human
+stakpak board create comment <card_id> "BLOCKED: need AWS creds"
 ```
 
 ## Rules
 - One in-progress card at a time
-- Plan before implementing (checklist = your roadmap)
-- Comments = your memory (findings, decisions, context)
-- Only mark done when FULLY complete (validated, tested)
+- Comments = memory (findings, decisions, gotchas)
+- Only mark done when FULLY complete
 - Check `stakpak board mine` at session start
 
 ## When to Use
-- Multi-step tasks (2+ steps)
-- Complex implementations
-- Cross-session work
-- Need to track decisions/findings
-
-## Skip For
-- Simple Q&A, single commands, quick lookups
+Multi-step tasks, complex implementations, cross-session work. Skip for simple Q&A.
 
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
