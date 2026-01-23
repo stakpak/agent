@@ -7,4 +7,4 @@ mod provider;
 mod types;
 
 pub use provider::StakpakProvider;
-pub use types::StakpakConfig;
+pub use types::StakpakProviderConfig;

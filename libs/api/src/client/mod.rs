@@ -88,34 +88,10 @@ impl AgentClientConfig {
     }
 
     /// Set Stakpak configuration
+    ///
+    /// Use `StakpakConfig::new(api_key).with_endpoint(endpoint)` to configure.
     pub fn with_stakpak(mut self, config: StakpakConfig) -> Self {
         self.stakpak = Some(config);
-        self
-    }
-
-    /// Set Stakpak API key (creates StakpakConfig with default endpoint if not already set)
-    pub fn with_stakpak_key(mut self, api_key: impl Into<String>) -> Self {
-        let api_key = api_key.into();
-        match &mut self.stakpak {
-            Some(config) => config.api_key = api_key,
-            None => self.stakpak = Some(StakpakConfig::new(api_key)),
-        }
-        self
-    }
-
-    /// Set Stakpak API endpoint (creates StakpakConfig if not already set)
-    pub fn with_stakpak_endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        let endpoint = endpoint.into();
-        match &mut self.stakpak {
-            Some(config) => config.api_endpoint = endpoint,
-            None => {
-                // Create a config with empty API key - will need key later
-                self.stakpak = Some(StakpakConfig {
-                    api_key: String::new(),
-                    api_endpoint: endpoint,
-                });
-            }
-        }
         self
     }
 

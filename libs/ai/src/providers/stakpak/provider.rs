@@ -3,7 +3,7 @@
 //! Stakpak provides an OpenAI-compatible API, so we reuse the OpenAI
 //! conversion and streaming logic.
 
-use super::types::StakpakConfig;
+use super::types::StakpakProviderConfig;
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::openai::convert::{from_openai_response, to_openai_request};
@@ -18,13 +18,13 @@ use reqwest_eventsource::EventSource;
 ///
 /// Routes inference requests through Stakpak's OpenAI-compatible API.
 pub struct StakpakProvider {
-    config: StakpakConfig,
+    config: StakpakProviderConfig,
     client: Client,
 }
 
 impl StakpakProvider {
     /// Create a new Stakpak provider
-    pub fn new(config: StakpakConfig) -> Result<Self> {
+    pub fn new(config: StakpakProviderConfig) -> Result<Self> {
         if config.api_key.is_empty() {
             return Err(Error::MissingApiKey("stakpak".to_string()));
         }
@@ -35,7 +35,7 @@ impl StakpakProvider {
 
     /// Create provider from environment
     pub fn from_env() -> Result<Self> {
-        Self::new(StakpakConfig::default())
+        Self::new(StakpakProviderConfig::default())
     }
 }
 

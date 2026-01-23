@@ -1,7 +1,8 @@
 //! Client configuration
 
 use crate::providers::{
-    anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig, stakpak::StakpakConfig,
+    anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig,
+    stakpak::StakpakProviderConfig,
 };
 
 /// Configuration for the AI client
@@ -62,7 +63,7 @@ pub struct InferenceConfig {
     pub(crate) openai_config: Option<OpenAIConfig>,
     pub(crate) anthropic_config: Option<AnthropicConfig>,
     pub(crate) gemini_config: Option<GeminiConfig>,
-    pub(crate) stakpak_config: Option<StakpakConfig>,
+    pub(crate) stakpak_config: Option<StakpakProviderConfig>,
     pub(crate) client_config: ClientConfig,
 }
 
@@ -226,7 +227,7 @@ impl InferenceConfig {
     ///     .stakpak("your-api-key", Some("https://custom.stakpak.dev".to_string()));
     /// ```
     pub fn stakpak(mut self, api_key: impl Into<String>, base_url: Option<String>) -> Self {
-        let mut config = StakpakConfig::new(api_key);
+        let mut config = StakpakProviderConfig::new(api_key);
         if let Some(url) = base_url {
             config = config.with_base_url(url);
         }
@@ -234,19 +235,19 @@ impl InferenceConfig {
         self
     }
 
-    /// Configure Stakpak provider with full StakpakConfig
+    /// Configure Stakpak provider with full StakpakProviderConfig
     ///
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use stakai::{InferenceConfig, providers::stakpak::StakpakConfig};
-    /// let stakpak_config = StakpakConfig::new("your-api-key")
+    /// # use stakai::{InferenceConfig, providers::stakpak::StakpakProviderConfig};
+    /// let stakpak_config = StakpakProviderConfig::new("your-api-key")
     ///     .with_base_url("https://custom.stakpak.dev");
     ///
     /// let config = InferenceConfig::new()
     ///     .stakpak_config(stakpak_config);
     /// ```
-    pub fn stakpak_config(mut self, config: StakpakConfig) -> Self {
+    pub fn stakpak_config(mut self, config: StakpakProviderConfig) -> Self {
         self.stakpak_config = Some(config);
         self
     }

@@ -160,12 +160,13 @@ pub async fn run_interactive(
 
             // Build unified AgentClient config
             let providers = ctx_clone.get_llm_provider_config();
-            let mut client_config = AgentClientConfig::new()
-                .with_stakpak_endpoint(api_endpoint_for_client.clone())
-                .with_providers(providers);
+            let mut client_config = AgentClientConfig::new().with_providers(providers);
 
             if let Some(ref key) = api_key_for_client {
-                client_config = client_config.with_stakpak_key(key.clone());
+                client_config = client_config.with_stakpak(
+                    stakpak_api::StakpakConfig::new(key.clone())
+                        .with_endpoint(api_endpoint_for_client.clone()),
+                );
             }
             if let Some(smart_model) = &ctx_clone.smart_model {
                 client_config = client_config.with_smart_model(smart_model.clone());
@@ -1046,12 +1047,13 @@ pub async fn run_interactive(
 
             // Fetch and filter rulebooks for the new profile
             let providers = new_config.get_llm_provider_config();
-            let mut new_client_config = AgentClientConfig::new()
-                .with_stakpak_endpoint(new_config.api_endpoint.clone())
-                .with_providers(providers);
+            let mut new_client_config = AgentClientConfig::new().with_providers(providers);
 
             if let Some(api_key) = new_config.get_stakpak_api_key() {
-                new_client_config = new_client_config.with_stakpak_key(api_key);
+                new_client_config = new_client_config.with_stakpak(
+                    stakpak_api::StakpakConfig::new(api_key)
+                        .with_endpoint(new_config.api_endpoint.clone()),
+                );
             }
             if let Some(smart_model) = &new_config.smart_model {
                 new_client_config = new_client_config.with_smart_model(smart_model.clone());
@@ -1113,12 +1115,12 @@ pub async fn run_interactive(
         // Normal exit - no profile switch requested
         // Display final stats and session info
         let providers = ctx.get_llm_provider_config();
-        let mut final_client_config = AgentClientConfig::new()
-            .with_stakpak_endpoint(ctx.api_endpoint.clone())
-            .with_providers(providers);
+        let mut final_client_config = AgentClientConfig::new().with_providers(providers);
 
         if let Some(api_key) = ctx.get_stakpak_api_key() {
-            final_client_config = final_client_config.with_stakpak_key(api_key);
+            final_client_config = final_client_config.with_stakpak(
+                stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
+            );
         }
         if let Some(smart_model) = &ctx.smart_model {
             final_client_config = final_client_config.with_smart_model(smart_model.clone());

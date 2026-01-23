@@ -80,12 +80,12 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
     // Build unified AgentClient config
     let providers = ctx.get_llm_provider_config();
-    let mut client_config = AgentClientConfig::new()
-        .with_stakpak_endpoint(ctx.api_endpoint.clone())
-        .with_providers(providers);
+    let mut client_config = AgentClientConfig::new().with_providers(providers);
 
     if let Some(api_key) = ctx.get_stakpak_api_key() {
-        client_config = client_config.with_stakpak_key(api_key);
+        client_config = client_config.with_stakpak(
+            stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
+        );
     }
     if let Some(smart_model) = &ctx.smart_model {
         client_config = client_config.with_smart_model(smart_model.clone());

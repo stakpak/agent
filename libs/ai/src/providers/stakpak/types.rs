@@ -3,16 +3,19 @@
 //! Stakpak uses an OpenAI-compatible API, so we reuse OpenAI types for
 //! request/response serialization.
 
-/// Configuration for Stakpak provider
+/// Configuration for Stakpak inference provider
+///
+/// Note: This is distinct from `stakpak_api::StakpakConfig` which is used
+/// for the Stakpak API client (sessions, billing, etc.).
 #[derive(Debug, Clone)]
-pub struct StakpakConfig {
+pub struct StakpakProviderConfig {
     /// API key
     pub api_key: String,
     /// Base URL (default: https://apiv2.stakpak.dev)
     pub base_url: String,
 }
 
-impl StakpakConfig {
+impl StakpakProviderConfig {
     /// Create new config with API key
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -28,7 +31,7 @@ impl StakpakConfig {
     }
 }
 
-impl Default for StakpakConfig {
+impl Default for StakpakProviderConfig {
     fn default() -> Self {
         Self::new(std::env::var("STAKPAK_API_KEY").unwrap_or_else(|_| String::new()))
     }
