@@ -6,7 +6,7 @@ use crate::app::{AppState, OutputEvent};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
-    get_wrapped_collapsed_message_lines_cached, invalidate_message_lines_cache, Message,
+    Message, get_wrapped_collapsed_message_lines_cached, invalidate_message_lines_cache,
 };
 use ratatui::style::{Color, Style};
 use stakai::Model;

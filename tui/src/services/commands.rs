@@ -13,8 +13,8 @@ use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_status_message, push_styled_message,
-    push_support_message, push_usage_message, render_system_message, welcome_messages,
+    push_memorize_message, push_status_message, push_styled_message, push_support_message,
+    push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{Message, MessageContent};
 use crate::{InputEvent, OutputEvent};

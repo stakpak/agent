@@ -4,9 +4,9 @@ use agent_client_protocol::{self as acp, Client as AcpClient, SessionNotificatio
 use futures_util::StreamExt;
 use stakpak_api::models::ApiStreamError;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
+use stakpak_api::{Model, ModelLimit};
 use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
-use stakpak_api::{Model, ModelLimit};
 use stakpak_shared::models::integrations::openai::{
     ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
     FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, Tool, ToolCall,
@@ -92,7 +92,9 @@ impl StakpakAcpAgent {
         // Get default model - use smart_model from config or first available model
         let model = if let Some(smart_model_str) = &config.smart_model {
             // Parse the smart_model string to determine provider
-            let provider = if smart_model_str.starts_with("anthropic/") || smart_model_str.contains("claude") {
+            let provider = if smart_model_str.starts_with("anthropic/")
+                || smart_model_str.contains("claude")
+            {
                 "anthropic"
             } else if smart_model_str.starts_with("openai/") || smart_model_str.contains("gpt") {
                 "openai"

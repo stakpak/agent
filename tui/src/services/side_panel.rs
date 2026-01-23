@@ -9,11 +9,11 @@
 use crate::app::AppState;
 use crate::services::changeset::{SidePanelSection, TodoStatus};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 /// Left padding for content inside the side panel

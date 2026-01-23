@@ -680,9 +680,9 @@ impl AgentProvider for AgentClient {
         // Return all known static models directly
         // No network calls - this should always be fast
         use stakai::providers::{anthropic, gemini, openai};
-        
+
         let mut models = Vec::new();
-        
+
         // When using Stakpak API, models are routed through Stakpak
         if self.has_stakpak() {
             // Add all models with stakpak routing prefix
@@ -722,7 +722,7 @@ impl AgentProvider for AgentClient {
             models.extend(openai::models::models());
             models.extend(gemini::models::models());
         }
-        
+
         models
     }
 }

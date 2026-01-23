@@ -3,10 +3,10 @@ use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleE
 use stakpak_shared::models::integrations::openai::Role;
 use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
+use crate::local::context_managers::ContextManager;
 use crate::local::context_managers::scratchpad_context_manager::{
     ScratchpadContextManager, ScratchpadContextManagerOptions,
 };
-use crate::local::context_managers::ContextManager;
 use crate::models::AgentState;
 
 const SYSTEM_PROMPT: &str = include_str!("./system_prompt.txt");
