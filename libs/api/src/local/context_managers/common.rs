@@ -12,7 +12,10 @@ pub struct HistoryProcessingOptions {
 }
 
 /// Convert chat messages to history items with the given processing options
-pub fn messages_to_history(messages: &[ChatMessage], options: &HistoryProcessingOptions) -> Vec<HistoryItem> {
+pub fn messages_to_history(
+    messages: &[ChatMessage],
+    options: &HistoryProcessingOptions,
+) -> Vec<HistoryItem> {
     let mut history_items: Vec<HistoryItem> = Vec::new();
     let mut index = 0;
 
@@ -139,7 +142,11 @@ fn get_threshold_idx(history_items: &[HistoryItem], keep_last_n: usize) -> Optio
     action_indices.get(keep_from_action_idx).copied()
 }
 
-fn drop_older_action_results(history_items: &mut [HistoryItem], keep_last_n: usize, truncation_hint: &str) {
+fn drop_older_action_results(
+    history_items: &mut [HistoryItem],
+    keep_last_n: usize,
+    truncation_hint: &str,
+) {
     let threshold_idx = get_threshold_idx(history_items, keep_last_n);
 
     for (idx, history_item) in history_items.iter_mut().enumerate() {
@@ -150,7 +157,10 @@ fn drop_older_action_results(history_items: &mut [HistoryItem], keep_last_n: usi
             let message = if truncation_hint.is_empty() {
                 "[This result was truncated from history to conserve space]".to_string()
             } else {
-                format!("[This result was truncated from history to conserve space, {}]", truncation_hint)
+                format!(
+                    "[This result was truncated from history to conserve space, {}]",
+                    truncation_hint
+                )
             };
             *result = Some(serde_json::Value::String(message));
         }

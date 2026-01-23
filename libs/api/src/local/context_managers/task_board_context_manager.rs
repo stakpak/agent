@@ -1,4 +1,4 @@
-use super::common::{history_to_text, messages_to_history, HistoryProcessingOptions};
+use super::common::{HistoryProcessingOptions, history_to_text, messages_to_history};
 use stakpak_shared::models::{
     integrations::openai::{ChatMessage, Role},
     llm::{LLMMessage, LLMMessageContent},

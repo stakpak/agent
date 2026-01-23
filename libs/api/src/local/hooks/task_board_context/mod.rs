@@ -3,10 +3,10 @@ use stakpak_shared::hooks::{Hook, HookAction, HookContext, HookError, LifecycleE
 use stakpak_shared::models::integrations::openai::Role;
 use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
+use crate::local::context_managers::ContextManager;
 use crate::local::context_managers::task_board_context_manager::{
     TaskBoardContextManager, TaskBoardContextManagerOptions,
 };
-use crate::local::context_managers::ContextManager;
 use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
 
