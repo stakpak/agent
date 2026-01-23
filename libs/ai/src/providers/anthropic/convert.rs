@@ -1,10 +1,10 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicAuth, AnthropicCacheControl, AnthropicContent, AnthropicMessage,
+    infer_max_tokens, AnthropicAuth, AnthropicCacheControl, AnthropicContent, AnthropicMessage,
     AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSource,
     AnthropicSystemBlock, AnthropicSystemContent, AnthropicThinkingConfig as AnthropicThinking,
-    CLAUDE_CODE_SYSTEM_PREFIX, infer_max_tokens,
+    CLAUDE_CODE_SYSTEM_PREFIX,
 };
 use crate::error::{Error, Result};
 use crate::types::{
@@ -47,7 +47,7 @@ pub fn to_anthropic_request(
     let max_tokens = req
         .options
         .max_tokens
-        .unwrap_or_else(|| infer_max_tokens(&req.model));
+        .unwrap_or_else(|| infer_max_tokens(&req.model.id));
 
     // Convert tools to Anthropic format with cache control
     let tools = build_tools(&req.options.tools, &mut validator)?;
@@ -79,7 +79,7 @@ pub fn to_anthropic_request(
 
     Ok(AnthropicConversionResult {
         request: AnthropicRequest {
-            model: req.model.clone(),
+            model: req.model.id.clone(),
             messages,
             max_tokens,
             system,

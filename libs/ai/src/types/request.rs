@@ -1,16 +1,17 @@
 //! Request types for AI generation
 
 use super::cache::PromptCacheRetention;
+use super::model::Model;
 use super::{GenerateOptions, Message};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Request for generating AI completions
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateRequest {
-    /// Model identifier (can be provider-prefixed like "openai/gpt-4")
+    /// Model to use for generation
     #[serde(skip)]
-    pub model: String,
+    pub model: Model,
 
     /// Conversation messages
     pub messages: Vec<Message>,
@@ -198,9 +199,9 @@ pub struct GoogleOptions {
 
 impl GenerateRequest {
     /// Create a new request with model and messages
-    pub fn new(model: impl Into<String>, messages: Vec<Message>) -> Self {
+    pub fn new(model: Model, messages: Vec<Message>) -> Self {
         Self {
-            model: model.into(),
+            model,
             messages,
             options: GenerateOptions::default(),
             provider_options: None,

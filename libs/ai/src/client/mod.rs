@@ -6,7 +6,7 @@ mod config;
 pub use builder::ClientBuilder;
 pub use config::{ClientConfig, InferenceConfig};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::registry::ProviderRegistry;
 use crate::types::{GenerateRequest, GenerateResponse, GenerateStream};
 
@@ -98,12 +98,11 @@ impl Inference {
     pub async fn generate(&self, request: &GenerateRequest) -> Result<GenerateResponse> {
         #[cfg(feature = "tracing")]
         {
-            let (provider_id, _) = self.parse_model(&request.model)?;
             let span = tracing::info_span!(
                 "chat",
                 "gen_ai.operation.name" = "chat",
-                "gen_ai.provider.name" = %provider_id,
-                "gen_ai.request.model" = %request.model,
+                "gen_ai.provider.name" = %request.model.provider,
+                "gen_ai.request.model" = %request.model.id,
                 "gen_ai.request.temperature" = tracing::field::Empty,
                 "gen_ai.request.max_tokens" = tracing::field::Empty,
                 "gen_ai.request.top_p" = tracing::field::Empty,
@@ -188,12 +187,8 @@ impl Inference {
 
     /// Internal generate implementation
     async fn generate_internal(&self, request: &GenerateRequest) -> Result<GenerateResponse> {
-        let (provider_id, model_id) = self.parse_model(&request.model)?;
-        let provider = self.registry.get_provider(&provider_id)?;
-
-        let mut req = request.clone();
-        req.model = model_id.to_string();
-        provider.generate(req).await
+        let provider = self.registry.get_provider(&request.model.provider)?;
+        provider.generate(request.clone()).await
     }
 
     /// Generate a streaming response
@@ -243,12 +238,11 @@ impl Inference {
     pub async fn stream(&self, request: &GenerateRequest) -> Result<GenerateStream> {
         #[cfg(feature = "tracing")]
         {
-            let (provider_id, _) = self.parse_model(&request.model)?;
             let span = tracing::info_span!(
                 "chat",
                 "gen_ai.operation.name" = "chat",
-                "gen_ai.provider.name" = %provider_id,
-                "gen_ai.request.model" = %request.model,
+                "gen_ai.provider.name" = %request.model.provider,
+                "gen_ai.request.model" = %request.model.id,
                 "gen_ai.request.temperature" = tracing::field::Empty,
                 "gen_ai.request.max_tokens" = tracing::field::Empty,
                 "gen_ai.request.top_p" = tracing::field::Empty,
@@ -304,39 +298,8 @@ impl Inference {
 
     /// Internal stream implementation
     async fn stream_internal(&self, request: &GenerateRequest) -> Result<GenerateStream> {
-        let (provider_id, model_id) = self.parse_model(&request.model)?;
-        let provider = self.registry.get_provider(&provider_id)?;
-
-        let mut req = request.clone();
-        req.model = model_id.to_string();
-        provider.stream(req).await
-    }
-
-    /// Parse model string into provider and model ID
-    pub(crate) fn parse_model<'a>(&self, model: &'a str) -> Result<(String, &'a str)> {
-        if let Some((provider, model_id)) = model.split_once('/') {
-            // Explicit provider/model format
-            Ok((provider.to_string(), model_id))
-        } else {
-            // Auto-detect provider from model name
-            let provider = self.detect_provider(model)?;
-            Ok((provider, model))
-        }
-    }
-
-    /// Detect provider from model name using heuristics
-    pub(crate) fn detect_provider(&self, model: &str) -> Result<String> {
-        let model_lower = model.to_lowercase();
-
-        if model_lower.starts_with("gpt-") || model_lower.starts_with("o1-") {
-            Ok("openai".to_string())
-        } else if model_lower.starts_with("claude-") {
-            Ok("anthropic".to_string())
-        } else if model_lower.starts_with("gemini-") {
-            Ok("google".to_string())
-        } else {
-            Err(Error::UnknownProvider(model.to_string()))
-        }
+        let provider = self.registry.get_provider(&request.model.provider)?;
+        provider.stream(request.clone()).await
     }
 
     /// Get the provider registry

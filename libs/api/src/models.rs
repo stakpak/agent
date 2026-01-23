@@ -4,10 +4,9 @@ use chrono::{DateTime, Utc};
 use rmcp::model::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use stakai::Model;
 use stakpak_shared::models::{
-    integrations::openai::{
-        AgentModel, ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall,
-    },
+    integrations::openai::{ChatMessage, FunctionCall, MessageContent, Role, Tool, ToolCall},
     llm::{LLMInput, LLMMessage, LLMMessageContent, LLMMessageTypedContent, LLMTokenUsage},
 };
 use uuid::Uuid;
@@ -654,7 +653,8 @@ pub struct SlackSendMessageRequest {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AgentState {
-    pub agent_model: AgentModel,
+    /// The active model to use for inference
+    pub active_model: Model,
     pub messages: Vec<ChatMessage>,
     pub tools: Option<Vec<Tool>>,
 
@@ -704,7 +704,11 @@ impl From<&LLMOutput> for ChatMessage {
                 })
                 .collect();
 
-            if calls.is_empty() { None } else { Some(calls) }
+            if calls.is_empty() {
+                None
+            } else {
+                Some(calls)
+            }
         } else {
             None
         };
@@ -721,13 +725,9 @@ impl From<&LLMOutput> for ChatMessage {
 }
 
 impl AgentState {
-    pub fn new(
-        agent_model: AgentModel,
-        messages: Vec<ChatMessage>,
-        tools: Option<Vec<Tool>>,
-    ) -> Self {
+    pub fn new(active_model: Model, messages: Vec<ChatMessage>, tools: Option<Vec<Tool>>) -> Self {
         Self {
-            agent_model,
+            active_model,
             messages,
             tools,
             llm_input: None,
@@ -744,8 +744,8 @@ impl AgentState {
         self.tools = tools;
     }
 
-    pub fn set_agent_model(&mut self, agent_model: AgentModel) {
-        self.agent_model = agent_model;
+    pub fn set_active_model(&mut self, model: Model) {
+        self.active_model = model;
     }
 
     pub fn set_llm_input(&mut self, llm_input: Option<LLMInput>) {

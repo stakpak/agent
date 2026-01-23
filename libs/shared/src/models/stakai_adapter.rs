@@ -6,15 +6,15 @@
 use crate::models::error::{AgentError, BadRequestErrorMessage};
 use crate::models::llm::{
     GenerationDelta, GenerationDeltaToolUse, LLMChoice, LLMCompletionResponse, LLMInput,
-    LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent, LLMModel,
+    LLMMessage, LLMMessageContent, LLMMessageImageSource, LLMMessageTypedContent,
     LLMProviderConfig, LLMProviderOptions, LLMStreamInput, LLMTokenUsage, LLMTool, ProviderConfig,
 };
 use futures::StreamExt;
 use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
     GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
-    OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions, Tool,
-    ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
+    Model, OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions,
+    Tool, ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
     registry::ProviderRegistry,
 };
 
@@ -230,11 +230,11 @@ pub fn finish_reason_to_string(reason: &FinishReason) -> String {
 /// Convert CLI LLMProviderOptions to StakAI ProviderOptions
 pub fn to_stakai_provider_options(
     opts: &LLMProviderOptions,
-    model: &LLMModel,
+    model: &Model,
 ) -> Option<ProviderOptions> {
-    // Determine provider from model and options
-    match model {
-        LLMModel::Anthropic(_) => {
+    // Determine provider from model's provider field
+    match model.provider.as_str() {
+        "anthropic" => {
             if let Some(anthropic) = &opts.anthropic {
                 let thinking = anthropic
                     .thinking
@@ -249,7 +249,7 @@ pub fn to_stakai_provider_options(
                 None
             }
         }
-        LLMModel::OpenAI(_) => {
+        "openai" => {
             if let Some(openai) = &opts.openai {
                 let reasoning_effort = openai.reasoning_effort.as_ref().and_then(|e| {
                     match e.to_lowercase().as_str() {
@@ -273,14 +273,14 @@ pub fn to_stakai_provider_options(
                 None
             }
         }
-        LLMModel::Gemini(_) => opts.google.as_ref().map(|google| {
+        "google" | "gemini" => opts.google.as_ref().map(|google| {
             ProviderOptions::Google(GoogleOptions {
                 thinking_budget: google.thinking_budget,
                 cached_content: None,
             })
         }),
-        LLMModel::Custom { .. } => {
-            // For custom models, try to infer from which options are set
+        _ => {
+            // For custom/unknown providers, try to infer from which options are set
             if let Some(anthropic) = &opts.anthropic {
                 let thinking = anthropic
                     .thinking
@@ -554,16 +554,9 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     Ok(registry)
 }
 
-/// Get model string with provider prefix for StakAI
-pub fn get_stakai_model_string(model: &LLMModel) -> String {
-    match model {
-        LLMModel::Anthropic(m) => format!("anthropic/{}", m),
-        LLMModel::Gemini(m) => format!("google/{}", m),
-        LLMModel::OpenAI(m) => format!("openai/{}", m),
-        LLMModel::Custom {
-            provider, model, ..
-        } => format!("{}/{}", provider, model),
-    }
+/// Get model string for StakAI
+pub fn get_stakai_model_string(model: &Model) -> String {
+    model.id.clone()
 }
 
 /// Wrapper around StakAI Inference for CLI usage
@@ -603,7 +596,6 @@ impl StakAIClient {
 
     /// Non-streaming chat completion
     pub async fn chat(&self, input: LLMInput) -> Result<LLMCompletionResponse, AgentError> {
-        let model_string = get_stakai_model_string(&input.model);
         let messages: Vec<Message> = input.messages.iter().map(to_stakai_message).collect();
 
         let mut options = GenerateOptions::new().max_tokens(input.max_tokens);
@@ -630,7 +622,7 @@ impl StakAIClient {
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
 
         let request = GenerateRequest {
-            model: model_string.clone(),
+            model: input.model.clone(),
             messages,
             options,
             provider_options,
@@ -641,7 +633,7 @@ impl StakAIClient {
             AgentError::BadRequest(BadRequestErrorMessage::InvalidAgentInput(e.to_string()))
         })?;
 
-        Ok(from_stakai_response(response, &model_string))
+        Ok(from_stakai_response(response, &input.model.id))
     }
 
     /// Streaming chat completion
@@ -649,7 +641,6 @@ impl StakAIClient {
         &self,
         input: LLMStreamInput,
     ) -> Result<LLMCompletionResponse, AgentError> {
-        let model_string = get_stakai_model_string(&input.model);
         let messages: Vec<Message> = input.messages.iter().map(to_stakai_message).collect();
 
         let mut options = GenerateOptions::new().max_tokens(input.max_tokens);
@@ -675,8 +666,9 @@ impl StakAIClient {
             .as_ref()
             .and_then(|opts| to_stakai_provider_options(opts, &input.model));
 
+        let model_id = input.model.id.clone();
         let request = GenerateRequest {
-            model: model_string.clone(),
+            model: input.model.clone(),
             messages,
             options,
             provider_options,
@@ -814,7 +806,7 @@ impl StakAIClient {
 
         Ok(LLMCompletionResponse {
             id: uuid::Uuid::new_v4().to_string(),
-            model: model_string,
+            model: model_id,
             object: "chat.completion".to_string(),
             choices: vec![LLMChoice {
                 finish_reason: Some(finish_reason),
@@ -827,6 +819,11 @@ impl StakAIClient {
             created: chrono::Utc::now().timestamp_millis() as u64,
             usage: Some(final_usage),
         })
+    }
+
+    /// Get the provider registry for model listing
+    pub fn registry(&self) -> &ProviderRegistry {
+        self.inference.registry()
     }
 }
 

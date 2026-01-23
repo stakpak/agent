@@ -11,11 +11,11 @@ use crate::services::message_pattern::spans_to_string;
 use crate::services::shell_popup;
 use crate::services::side_panel;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
@@ -221,6 +221,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render rulebook switcher
     if state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
+    }
+
+    // Render model switcher
+    if state.show_model_switcher {
+        crate::services::model_switcher::render_model_switcher_popup(f, state);
     }
 
     // Render profile switch overlay

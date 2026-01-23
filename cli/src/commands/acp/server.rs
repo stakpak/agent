@@ -6,10 +6,11 @@ use stakpak_api::models::ApiStreamError;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use stakpak_mcp_client::McpClient;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
+use stakpak_api::{Model, ModelLimit};
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse,
-    ChatMessage, FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, Tool,
-    ToolCall, ToolCallResultProgress, ToolCallResultStatus,
+    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage,
+    FinishReason, FunctionCall, FunctionCallDelta, MessageContent, Role, Tool, ToolCall,
+    ToolCallResultProgress, ToolCallResultStatus,
 };
 use stakpak_shared::models::llm::LLMTokenUsage;
 use std::cell::Cell;
@@ -22,6 +23,8 @@ use uuid::Uuid;
 pub struct StakpakAcpAgent {
     config: AppConfig,
     client: Arc<dyn AgentProvider>,
+    /// Default model to use for chat completions
+    model: Model,
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     next_session_id: Cell<u64>,
     mcp_client: Option<Arc<McpClient>>,
@@ -86,6 +89,35 @@ impl StakpakAcpAgent {
             Arc::new(client)
         };
 
+        // Get default model - use smart_model from config or first available model
+        let model = if let Some(smart_model_str) = &config.smart_model {
+            // Parse the smart_model string to determine provider
+            let provider = if smart_model_str.starts_with("anthropic/") || smart_model_str.contains("claude") {
+                "anthropic"
+            } else if smart_model_str.starts_with("openai/") || smart_model_str.contains("gpt") {
+                "openai"
+            } else if smart_model_str.starts_with("google/") || smart_model_str.contains("gemini") {
+                "google"
+            } else {
+                "stakpak"
+            };
+            Model::custom(smart_model_str.clone(), provider)
+        } else {
+            // Use first available model from client
+            let models = client.list_models().await;
+            models.into_iter().next().unwrap_or_else(|| {
+                // Fallback default: Claude Opus via Stakpak
+                Model::new(
+                    "anthropic/claude-opus-4-5-20251101",
+                    "Claude Opus 4.5",
+                    "stakpak",
+                    true,
+                    None,
+                    ModelLimit::default(),
+                )
+            })
+        };
+
         // Initialize MCP client and tools (optional for ACP)
         let (mcp_client, mcp_tools, tools) =
             match Self::initialize_mcp_server_and_tools(&config).await {
@@ -114,6 +146,7 @@ impl StakpakAcpAgent {
         Ok(Self {
             config,
             client,
+            model,
             session_update_tx,
             next_session_id: Cell::new(0),
             mcp_client,
@@ -1081,7 +1114,7 @@ impl StakpakAcpAgent {
             id: "".to_string(),
             object: "".to_string(),
             created: 0,
-            model: AgentModel::Smart.to_string(),
+            model: "claude-sonnet-4-5".to_string(),
             choices: vec![],
             usage: LLMTokenUsage {
                 prompt_tokens: 0,
@@ -1372,6 +1405,7 @@ impl StakpakAcpAgent {
                 let agent = StakpakAcpAgent {
                     config: self.config.clone(),
                     client: self.client.clone(),
+                    model: self.model.clone(),
                     session_update_tx: tx.clone(),
                     next_session_id: self.next_session_id.clone(),
                     mcp_client,
@@ -1492,6 +1526,7 @@ impl Clone for StakpakAcpAgent {
         Self {
             config: self.config.clone(),
             client: self.client.clone(),
+            model: self.model.clone(),
             session_update_tx: self.session_update_tx.clone(),
             next_session_id: Cell::new(self.next_session_id.get()),
             mcp_client: self.mcp_client.clone(),
@@ -1736,7 +1771,7 @@ impl acp::Agent for StakpakAcpAgent {
 
         let (stream, _request_id) = self
             .client
-            .chat_completion_stream(AgentModel::Smart, messages, tools_option.clone(), None)
+            .chat_completion_stream(self.model.clone(), messages, tools_option.clone(), None)
             .await
             .map_err(|e| {
                 log::error!("Chat completion stream failed: {e}");
@@ -1932,7 +1967,7 @@ impl acp::Agent for StakpakAcpAgent {
                 let (follow_up_stream, _request_id) = self
                     .client
                     .chat_completion_stream(
-                        AgentModel::Smart,
+                        self.model.clone(),
                         current_messages.clone(),
                         tools_option.clone(),
                         None,

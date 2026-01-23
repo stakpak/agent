@@ -1,11 +1,12 @@
 //! OpenAI provider implementation
 
 use super::convert::{from_openai_response, to_openai_request};
+use super::models;
 use super::stream::create_stream;
 use super::types::{ChatCompletionResponse, OpenAIConfig};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
@@ -105,12 +106,13 @@ impl Provider for OpenAIProvider {
         create_stream(event_source).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Simplified - in production, call /v1/models endpoint
-        Ok(vec![
-            "gpt-4".to_string(),
-            "gpt-4-turbo-preview".to_string(),
-            "gpt-3.5-turbo".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Return static model definitions with full metadata
+        Ok(models::models())
+    }
+
+    async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        // Use static lookup for efficiency
+        Ok(models::get_model(id))
     }
 }

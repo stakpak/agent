@@ -1,11 +1,12 @@
 //! Gemini provider implementation
 
 use super::convert::{from_gemini_response, to_gemini_request};
+use super::models;
 use super::stream::create_stream;
 use super::types::{GeminiConfig, GeminiResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 
@@ -73,7 +74,7 @@ impl Provider for GeminiProvider {
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
-        let url = self.get_url(&request.model, false);
+        let url = self.get_url(&request.model.id, false);
         let gemini_req = to_gemini_request(&request)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
@@ -104,7 +105,7 @@ impl Provider for GeminiProvider {
     }
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
-        let url = self.get_url(&request.model, true);
+        let url = self.get_url(&request.model.id, true);
         let gemini_req = to_gemini_request(&request)?;
 
         let headers = self.build_headers(request.options.headers.as_ref());
@@ -129,13 +130,13 @@ impl Provider for GeminiProvider {
         create_stream(response).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Gemini has a models endpoint, but for simplicity return known models
-        Ok(vec![
-            "gemini-2.0-flash-exp".to_string(),
-            "gemini-1.5-pro".to_string(),
-            "gemini-1.5-flash".to_string(),
-            "gemini-1.0-pro".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Return static model definitions with full metadata
+        Ok(models::models())
+    }
+
+    async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        // Use static lookup for efficiency
+        Ok(models::get_model(id))
     }
 }

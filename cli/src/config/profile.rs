@@ -71,11 +71,22 @@ pub struct ProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic: Option<AnthropicConfig>,
 
-    /// Eco (fast/cheap) model name
+    /// User's preferred model (replaces smart_model/eco_model/recovery_model)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    // =========================================================================
+    // Legacy model fields - kept for backward compatibility during migration
+    // These are read but deprecated (will migrate to 'model' field)
+    // =========================================================================
+    /// Eco (fast/cheap) model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub eco_model: Option<String>,
-    /// Smart (capable) model name
+    /// Smart (capable) model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub smart_model: Option<String>,
-    /// Recovery model name
+    /// Recovery model name (deprecated - use 'model')
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery_model: Option<String>,
 }
 
@@ -304,6 +315,12 @@ impl ProfileConfig {
                 .gemini
                 .clone()
                 .or_else(|| other.and_then(|config| config.gemini.clone())),
+            // New unified model field
+            model: self
+                .model
+                .clone()
+                .or_else(|| other.and_then(|config| config.model.clone())),
+            // Legacy fields - merge for backward compatibility during transition
             eco_model: self
                 .eco_model
                 .clone()

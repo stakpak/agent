@@ -17,7 +17,7 @@ use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use libsql::Connection;
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
-use stakpak_shared::models::stakai_adapter::{StakAIClient, get_stakai_model_string};
+use stakpak_shared::models::stakai_adapter::StakAIClient;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -228,16 +228,11 @@ impl AgentClient {
         };
 
         // 6. Setup hook registry with context management hooks
-        let mut hook_registry = config.hook_registry.unwrap_or_default();
+        let mut hook_registry = config.hook_registry.unwrap_or_else(|| HookRegistry::default());
         hook_registry.register(
             LifecycleEvent::BeforeInference,
             Box::new(InlineScratchpadContextHook::new(
                 InlineScratchpadContextHookOptions {
-                    model_options: crate::local::ModelOptions {
-                        smart_model: model_options.smart_model.clone(),
-                        eco_model: model_options.eco_model.clone(),
-                        recovery_model: model_options.recovery_model.clone(),
-                    },
                     history_action_message_size_limit: Some(100),
                     history_action_message_keep_last_n: Some(1),
                     history_action_result_keep_last_n: Some(50),
@@ -292,50 +287,6 @@ impl AgentClient {
     /// Get the model options
     pub fn model_options(&self) -> &ModelOptions {
         &self.model_options
-    }
-
-    /// Get the model string for the given agent model type
-    ///
-    /// When Stakpak is available, routes through Stakpak provider.
-    /// Otherwise, uses direct provider.
-    pub fn get_model_string(
-        &self,
-        model: &stakpak_shared::models::integrations::openai::AgentModel,
-    ) -> LLMModel {
-        use stakpak_shared::models::integrations::openai::AgentModel;
-
-        let base_model = match model {
-            AgentModel::Smart => self.model_options.smart_model.clone().unwrap_or_else(|| {
-                LLMModel::from("anthropic/claude-sonnet-4-5-20250929".to_string())
-            }),
-            AgentModel::Eco => self.model_options.eco_model.clone().unwrap_or_else(|| {
-                LLMModel::from("anthropic/claude-haiku-4-5-20250929".to_string())
-            }),
-            AgentModel::Recovery => self
-                .model_options
-                .recovery_model
-                .clone()
-                .unwrap_or_else(|| LLMModel::from("openai/gpt-5".to_string())),
-        };
-
-        // If Stakpak is available, route through Stakpak provider
-        if self.has_stakpak() {
-            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-sonnet-4-5")
-            let model_str = get_stakai_model_string(&base_model);
-            // Extract display name from the last segment for UI
-            let display_name = model_str
-                .rsplit('/')
-                .next()
-                .unwrap_or(&model_str)
-                .to_string();
-            LLMModel::Custom {
-                provider: "stakpak".to_string(),
-                model: model_str,
-                name: Some(display_name),
-            }
-        } else {
-            base_model
-        }
     }
 }
 

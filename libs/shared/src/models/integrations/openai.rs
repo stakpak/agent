@@ -14,7 +14,7 @@ use crate::models::llm::{
 };
 use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 // =============================================================================
@@ -209,38 +209,6 @@ impl std::fmt::Display for OpenAIModel {
             OpenAIModel::GPT5 => write!(f, "gpt-5-2025-08-07"),
             OpenAIModel::GPT51 => write!(f, "gpt-5.1-2025-11-13"),
             OpenAIModel::Custom(model_name) => write!(f, "{}", model_name),
-        }
-    }
-}
-
-/// Agent model type (smart/eco/recovery)
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub enum AgentModel {
-    #[serde(rename = "smart")]
-    #[default]
-    Smart,
-    #[serde(rename = "eco")]
-    Eco,
-    #[serde(rename = "recovery")]
-    Recovery,
-}
-
-impl std::fmt::Display for AgentModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentModel::Smart => write!(f, "smart"),
-            AgentModel::Eco => write!(f, "eco"),
-            AgentModel::Recovery => write!(f, "recovery"),
-        }
-    }
-}
-
-impl From<String> for AgentModel {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "eco" => AgentModel::Eco,
-            "recovery" => AgentModel::Recovery,
-            _ => AgentModel::Smart,
         }
     }
 }
@@ -974,7 +942,7 @@ mod tests {
     #[test]
     fn test_serialize_basic_request() {
         let request = ChatCompletionRequest {
-            model: AgentModel::Smart.to_string(),
+            model: "gpt-4".to_string(),
             messages: vec![
                 ChatMessage {
                     role: Role::System,
@@ -1016,7 +984,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"smart\""));
+        assert!(json.contains("\"model\":\"gpt-4\""));
         assert!(json.contains("\"messages\":["));
         assert!(json.contains("\"role\":\"system\""));
     }

@@ -9,7 +9,7 @@ use crate::provider::Provider;
 use crate::providers::openai::convert::{from_openai_response, to_openai_request};
 use crate::providers::openai::stream::create_stream;
 use crate::providers::openai::types::ChatCompletionResponse;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
@@ -108,16 +108,49 @@ impl Provider for StakpakProvider {
         create_stream(event_source).await
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        // Stakpak supports routing to various providers
-        Ok(vec![
-            "anthropic/claude-sonnet-4-5-20250929".to_string(),
-            "anthropic/claude-haiku-4-5-20250929".to_string(),
-            "anthropic/claude-opus-4-5-20250929".to_string(),
-            "openai/gpt-5".to_string(),
-            "openai/gpt-5-mini".to_string(),
-            "google/gemini-2.5-flash".to_string(),
-            "google/gemini-2.5-pro".to_string(),
-        ])
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Stakpak routes to other providers, so aggregate models from them
+        // with stakpak/ prefix for routing
+        use crate::providers::{anthropic, gemini, openai};
+
+        let mut models = Vec::new();
+
+        // Add Anthropic models with stakpak/anthropic/ prefix
+        for model in anthropic::models::models() {
+            models.push(Model {
+                id: format!("anthropic/{}", model.id),
+                name: model.name,
+                provider: "stakpak".into(),
+                reasoning: model.reasoning,
+                cost: model.cost,
+                limit: model.limit,
+            });
+        }
+
+        // Add OpenAI models with stakpak/openai/ prefix
+        for model in openai::models::models() {
+            models.push(Model {
+                id: format!("openai/{}", model.id),
+                name: model.name,
+                provider: "stakpak".into(),
+                reasoning: model.reasoning,
+                cost: model.cost,
+                limit: model.limit,
+            });
+        }
+
+        // Add Gemini models with stakpak/google/ prefix
+        for model in gemini::models::models() {
+            models.push(Model {
+                id: format!("google/{}", model.id),
+                name: model.name,
+                provider: "stakpak".into(),
+                reasoning: model.reasoning,
+                cost: model.cost,
+                limit: model.limit,
+            });
+        }
+
+        Ok(models)
     }
 }

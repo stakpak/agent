@@ -16,16 +16,15 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
+use stakai::Model;
 use stakpak_shared::hooks::{HookContext, LifecycleEvent};
-use stakpak_shared::models::integrations::anthropic::AnthropicModel;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
+    ChatCompletionChoice, ChatCompletionResponse, ChatCompletionStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, FinishReason, MessageContent, Role, Tool,
 };
 use stakpak_shared::models::llm::{
-    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMModel, LLMStreamInput,
+    GenerationDelta, LLMInput, LLMMessage, LLMMessageContent, LLMStreamInput,
 };
-use stakpak_shared::models::stakai_adapter::get_stakai_model_string;
 use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -337,7 +336,7 @@ impl AgentProvider for AgentClient {
 
     async fn chat_completion(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
     ) -> Result<ChatCompletionResponse, String> {
@@ -380,7 +379,7 @@ impl AgentProvider for AgentClient {
                 .state
                 .llm_input
                 .as_ref()
-                .map(|llm_input| llm_input.model.clone().to_string())
+                .map(|llm_input| llm_input.model.id.clone())
                 .unwrap_or_default(),
             choices: vec![ChatCompletionChoice {
                 index: 0,
@@ -401,7 +400,7 @@ impl AgentProvider for AgentClient {
 
     async fn chat_completion_stream(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         _headers: Option<HeaderMap>,
@@ -671,6 +670,60 @@ impl AgentProvider for AgentClient {
         } else {
             Err("Slack integration requires Stakpak API key".to_string())
         }
+    }
+
+    // =========================================================================
+    // Models
+    // =========================================================================
+
+    async fn list_models(&self) -> Vec<stakai::Model> {
+        // Return all known static models directly
+        // No network calls - this should always be fast
+        use stakai::providers::{anthropic, gemini, openai};
+        
+        let mut models = Vec::new();
+        
+        // When using Stakpak API, models are routed through Stakpak
+        if self.has_stakpak() {
+            // Add all models with stakpak routing prefix
+            for model in anthropic::models::models() {
+                models.push(stakai::Model {
+                    id: format!("anthropic/{}", model.id),
+                    name: model.name,
+                    provider: "stakpak".into(),
+                    reasoning: model.reasoning,
+                    cost: model.cost,
+                    limit: model.limit,
+                });
+            }
+            for model in openai::models::models() {
+                models.push(stakai::Model {
+                    id: format!("openai/{}", model.id),
+                    name: model.name,
+                    provider: "stakpak".into(),
+                    reasoning: model.reasoning,
+                    cost: model.cost,
+                    limit: model.limit,
+                });
+            }
+            for model in gemini::models::models() {
+                models.push(stakai::Model {
+                    id: format!("google/{}", model.id),
+                    name: model.name,
+                    provider: "stakpak".into(),
+                    reasoning: model.reasoning,
+                    cost: model.cost,
+                    limit: model.limit,
+                });
+            }
+        } else {
+            // Direct provider access - return models grouped by provider
+            models.extend(anthropic::models::models());
+            models.extend(openai::models::models());
+            models.extend(gemini::models::models());
+        }
+        
+        models
     }
 }
 
@@ -958,31 +1011,15 @@ impl AgentClient {
 
     /// Generate a title for a new session
     async fn generate_session_title(&self, messages: &[ChatMessage]) -> Result<String, String> {
-        let llm_model = if let Some(eco_model) = &self.model_options.eco_model {
-            eco_model.clone()
-        } else {
-            // Try to find a suitable model
-            LLMModel::Anthropic(AnthropicModel::Claude45Haiku)
-        };
-
-        // If Stakpak is available, route through it
-        let model = if self.has_stakpak() {
-            // Get properly formatted model string with provider prefix (e.g., "anthropic/claude-haiku-4-5")
-            let model_str = get_stakai_model_string(&llm_model);
-            // Extract display name from the last segment for UI
-            let display_name = model_str
-                .rsplit('/')
-                .next()
-                .unwrap_or(&model_str)
-                .to_string();
-            LLMModel::Custom {
-                provider: "stakpak".to_string(),
-                model: model_str,
-                name: Some(display_name),
-            }
-        } else {
-            llm_model
-        };
+        // Use a default haiku model for title generation
+        let model = Model::new(
+            "claude-haiku-4-5-20250929",
+            "Claude Haiku 4.5",
+            "anthropic",
+            false,
+            None,
+            stakai::ModelLimit::default(),
+        );
 
         let llm_messages = vec![
             LLMMessage {

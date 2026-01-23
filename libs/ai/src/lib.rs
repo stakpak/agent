@@ -76,6 +76,10 @@ pub use types::{
     Message,
     MessageContent,
     MessageProviderOptions,
+    // Model types
+    Model,
+    ModelCost,
+    ModelLimit,
     OpenAIOptions,
     OutputTokenDetails,
     PromptCacheRetention,

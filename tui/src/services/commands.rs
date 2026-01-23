@@ -13,7 +13,7 @@ use crate::constants::SUMMARIZE_PROMPT_BASE;
 use crate::services::auto_approve::AutoApprovePolicy;
 use crate::services::helper_block::{
     push_clear_message, push_error_message, push_help_message, push_issue_message,
-    push_memorize_message, push_model_message, push_status_message, push_styled_message,
+    push_memorize_message, push_status_message, push_styled_message,
     push_support_message, push_usage_message, render_system_message, welcome_messages,
 };
 use crate::services::message::{Message, MessageContent};
@@ -25,7 +25,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
-use stakpak_shared::models::integrations::openai::AgentModel;
+
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::models::model_pricing::ContextAware;
 use tokio::sync::mpsc::Sender;
@@ -185,8 +185,8 @@ pub fn get_all_commands() -> Vec<Command> {
         ),
         Command::new(
             "Switch Model",
-            "Switch model (smart/eco)",
-            "/model",
+            "Switch to a different AI model",
+            "Ctrl+M",
             CommandAction::SwitchModel,
         ),
     ]
@@ -201,7 +201,7 @@ pub fn commands_to_helper_commands() -> Vec<HelperCommand> {
         },
         HelperCommand {
             command: "/model",
-            description: "Switch model (smart/eco)",
+            description: "Open model switcher to change AI model",
         },
         HelperCommand {
             command: "/clear",
@@ -301,21 +301,16 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
             ctx.state.show_helper_dropdown = false;
             Ok(())
         }
-        "/model" => match switch_model(ctx.state) {
-            Ok(()) => {
-                let _ = ctx
-                    .output_tx
-                    .try_send(OutputEvent::SwitchModel(ctx.state.agent_model.clone()));
-                push_model_message(ctx.state);
-                ctx.state.text_area.set_text("");
-                ctx.state.show_helper_dropdown = false;
-                Ok(())
-            }
-            Err(e) => {
-                push_error_message(ctx.state, &e, None);
-                Err(e)
-            }
-        },
+        "/model" => {
+            // Show model switcher popup
+            ctx.state.show_model_switcher = true;
+            ctx.state.model_switcher_selected = 0;
+            ctx.state.text_area.set_text("");
+            ctx.state.show_helper_dropdown = false;
+            // Request available models from the output handler
+            let _ = ctx.output_tx.try_send(OutputEvent::RequestAvailableModels);
+            Ok(())
+        }
         "/clear" => {
             push_clear_message(ctx.state);
             ctx.state.text_area.set_text("");
@@ -478,26 +473,6 @@ pub fn execute_command(command_id: CommandId, ctx: CommandContext) -> Result<(),
 }
 
 // ========== Helper Functions ==========
-
-pub fn switch_model(state: &mut AppState) -> Result<(), String> {
-    match state.agent_model {
-        AgentModel::Smart => {
-            // TODO: Check if context exceeds eco model context window size
-            state.agent_model = AgentModel::Eco;
-            Ok(())
-        }
-        AgentModel::Eco => {
-            // TODO: Check if context exceeds smart model context window size
-            state.agent_model = AgentModel::Smart;
-            Ok(())
-        }
-        AgentModel::Recovery => {
-            // TODO: Check if context exceeds recovery model context window size
-            state.agent_model = AgentModel::Smart;
-            Ok(())
-        }
-    }
-}
 
 /// Terminate any active shell command before switching sessions
 fn terminate_active_shell(state: &mut AppState) {

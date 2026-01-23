@@ -2,6 +2,7 @@ mod events;
 mod types;
 
 pub use events::{InputEvent, OutputEvent};
+use stakai::Model;
 use stakpak_shared::models::llm::{LLMModel, LLMTokenUsage};
 pub use types::*;
 
@@ -22,7 +23,7 @@ use crate::services::textarea::{TextArea, TextAreaState};
 use ratatui::layout::Size;
 use ratatui::text::Line;
 use stakpak_api::models::ListRuleBook;
-use stakpak_shared::models::integrations::openai::{AgentModel, ToolCall, ToolCallResult};
+use stakpak_shared::models::integrations::openai::{ToolCall, ToolCallResult};
 use stakpak_shared::secret_manager::SecretManager;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -162,6 +163,12 @@ pub struct AppState {
     pub filtered_rulebooks: Vec<ListRuleBook>,
     pub rulebook_config: Option<crate::RulebookConfig>,
 
+    // ========== Model Switcher State ==========
+    pub show_model_switcher: bool,
+    pub available_models: Vec<Model>,
+    pub model_switcher_selected: usize,
+    pub current_model: Option<Model>,
+
     // ========== Command Palette State ==========
     pub show_command_palette: bool,
     pub command_palette_selected: usize,
@@ -190,7 +197,7 @@ pub struct AppState {
     pub is_git_repo: bool,
     pub auto_approve_manager: AutoApproveManager,
     pub allowed_tools: Option<Vec<String>>,
-    pub agent_model: AgentModel,
+    pub model: Model,
     pub llm_model: Option<LLMModel>,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
@@ -240,7 +247,7 @@ pub struct AppStateOptions<'a> {
     pub auto_approve_tools: Option<&'a Vec<String>>,
     pub allowed_tools: Option<&'a Vec<String>>,
     pub input_tx: Option<mpsc::Sender<InputEvent>>,
-    pub agent_model: AgentModel,
+    pub model: Model,
     pub editor_command: Option<String>,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
@@ -282,7 +289,7 @@ impl AppState {
             auto_approve_tools,
             allowed_tools,
             input_tx,
-            agent_model,
+            model,
             editor_command,
             auth_display_info,
         } = options;
@@ -422,6 +429,12 @@ impl AppState {
             rulebook_switcher_selected: 0,
             rulebook_search_input: String::new(),
             filtered_rulebooks: Vec::new(),
+
+            // Model switcher initialization
+            show_model_switcher: false,
+            available_models: Vec::new(),
+            model_switcher_selected: 0,
+            current_model: None,
             // Command palette initialization
             show_command_palette: false,
             command_palette_selected: 0,
@@ -448,7 +461,7 @@ impl AppState {
                 prompt_tokens_details: None,
             },
             context_usage_percent: 0,
-            agent_model,
+            model,
             llm_model: None,
 
             // Side panel initialization
