@@ -1,4 +1,4 @@
-use regex::Regex;
+use super::common::{remove_xml_tag, HistoryItemActionStatus, HistoryItemContent};
 use stakpak_shared::models::{
     integrations::openai::{ChatMessage, Role},
     llm::{LLMMessage, LLMMessageContent},
@@ -357,14 +357,6 @@ impl FileScratchpadContextManager {
         content.trim().to_string()
     }
 }
-
-fn remove_xml_tag(tag_name: &str, content: &str) -> String {
-    #[allow(clippy::unwrap_used)]
-    let xml_tag_regex =
-        Regex::new(format!("<{}>(?s)(.*?)</{}>", tag_name, tag_name).as_str()).unwrap();
-    xml_tag_regex.replace_all(content, "").trim().to_string()
-}
-
 fn get_threshold_idx(history_items: &[HistoryItem], keep_last_n: usize) -> Option<usize> {
     let action_indices: Vec<usize> = history_items
         .iter()
@@ -458,6 +450,7 @@ fn drop_scratchpad_actions(
     });
 }
 
+/// Extended HistoryItem with message_index for file scratchpad context manager
 pub struct HistoryItem {
     pub index: usize,
     /// The index of the original message this history item came from
@@ -518,44 +511,6 @@ impl Display for HistoryItem {
         };
 
         Ok(())
-    }
-}
-
-pub enum HistoryItemContent {
-    Message {
-        role: Role,
-        content: String,
-    },
-    Action {
-        role: Role,
-        id: String,
-        name: String,
-        status: HistoryItemActionStatus,
-        message: Option<String>,
-        arguments: serde_json::Value,
-        result: Option<serde_json::Value>,
-    },
-}
-
-impl HistoryItemContent {
-    pub fn is_action(&self) -> bool {
-        matches!(self, HistoryItemContent::Action { .. })
-    }
-}
-
-pub enum HistoryItemActionStatus {
-    Pending,
-    Completed,
-    Aborted,
-}
-
-impl std::fmt::Display for HistoryItemActionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::Completed => write!(f, "completed"),
-            Self::Aborted => write!(f, "aborted"),
-        }
     }
 }
 
