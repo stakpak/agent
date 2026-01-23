@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::thread;
 
-/// v0.1.7 CLI structure: verb-first (list, create, update, delete, get)
+/// v0.1.10 CLI structure: verb-first (list, create, update, delete, get)
 #[derive(Subcommand, PartialEq)]
 pub enum BoardCommands {
     /// Show version information
@@ -16,16 +16,16 @@ pub enum BoardCommands {
         #[arg(short, long, default_value = "table")]
         format: String,
     },
-    /// List entities (boards, cards, agents)
+    /// List entities (boards, cards, agents, comments)
     #[command(subcommand)]
     List(ListSubcommands),
     /// Create entities (boards, cards, agents, checklists, comments)
     #[command(subcommand)]
     Create(CreateSubcommands),
-    /// Update entities (cards, agents, checklist items)
+    /// Update entities (boards, cards, agents, checklist items)
     #[command(subcommand)]
     Update(UpdateSubcommands),
-    /// Delete entities (boards, cards, agents)
+    /// Delete entities (boards, cards, agents, comments, checklist items)
     #[command(subcommand)]
     Delete(DeleteSubcommands),
     /// Show your assigned cards
@@ -75,6 +75,14 @@ pub enum ListSubcommands {
         #[arg(short, long, default_value = "table")]
         format: String,
     },
+    /// List comments on a card
+    Comments {
+        /// Card ID
+        card_id: String,
+        /// Output format: table, json, simple
+        #[arg(short, long, default_value = "table")]
+        format: String,
+    },
 }
 
 #[derive(Subcommand, PartialEq)]
@@ -120,13 +128,10 @@ pub enum CreateSubcommands {
         #[arg(short, long, default_value = "table")]
         format: String,
     },
-    /// Add a checklist to a card
+    /// Add checklist items to a card
     Checklist {
         /// Card ID
         card_id: String,
-        /// Checklist name
-        #[arg(short, long, default_value = "Tasks")]
-        name: String,
         /// Checklist items (can be repeated)
         #[arg(short, long, action = clap::ArgAction::Append)]
         item: Vec<String>,
@@ -174,6 +179,17 @@ pub enum UpdateSubcommands {
         #[arg(long, action = clap::ArgAction::Append)]
         remove_tag: Vec<String>,
     },
+    /// Update board details
+    Board {
+        /// Board ID
+        board_id: String,
+        /// Update board name
+        #[arg(long)]
+        name: Option<String>,
+        /// Update description
+        #[arg(long)]
+        description: Option<String>,
+    },
     /// Update agent details
     Agent {
         /// Agent ID
@@ -211,6 +227,16 @@ pub enum DeleteSubcommands {
     Agent {
         /// Agent ID
         agent_id: String,
+    },
+    /// Delete a comment from a card
+    Comment {
+        /// Comment ID
+        comment_id: String,
+    },
+    /// Delete a checklist item
+    ChecklistItem {
+        /// Item ID
+        item_id: String,
     },
 }
 
@@ -261,6 +287,10 @@ impl BoardCommands {
                     cmd.args(["list", "agents"]);
                     cmd.args(["--format", &format]);
                 }
+                ListSubcommands::Comments { card_id, format } => {
+                    cmd.args(["list", "comments", &card_id]);
+                    cmd.args(["--format", &format]);
+                }
             },
             BoardCommands::Create(sub) => match sub {
                 CreateSubcommands::Board {
@@ -306,12 +336,10 @@ impl BoardCommands {
                 }
                 CreateSubcommands::Checklist {
                     card_id,
-                    name,
                     item,
                     format,
                 } => {
                     cmd.args(["create", "checklist", &card_id]);
-                    cmd.args(["--name", &name]);
                     for i in item {
                         cmd.args(["--item", &i]);
                     }
@@ -360,6 +388,19 @@ impl BoardCommands {
                         cmd.args(["--remove-tag", &t]);
                     }
                 }
+                UpdateSubcommands::Board {
+                    board_id,
+                    name,
+                    description,
+                } => {
+                    cmd.args(["update", "board", &board_id]);
+                    if let Some(n) = name {
+                        cmd.args(["--name", &n]);
+                    }
+                    if let Some(d) = description {
+                        cmd.args(["--description", &d]);
+                    }
+                }
                 UpdateSubcommands::Agent { agent_id, workdir } => {
                     cmd.args(["update", "agent", &agent_id]);
                     if let Some(w) = workdir {
@@ -389,6 +430,12 @@ impl BoardCommands {
                 }
                 DeleteSubcommands::Agent { agent_id } => {
                     cmd.args(["delete", "agent", &agent_id]);
+                }
+                DeleteSubcommands::Comment { comment_id } => {
+                    cmd.args(["delete", "comment", &comment_id]);
+                }
+                DeleteSubcommands::ChecklistItem { item_id } => {
+                    cmd.args(["delete", "checklist-item", &item_id]);
                 }
             },
             BoardCommands::Mine { status, format } => {
