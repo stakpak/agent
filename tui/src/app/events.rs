@@ -146,6 +146,7 @@ pub enum InputEvent {
     MouseDragStart(u16, u16),
     MouseDrag(u16, u16),
     MouseDragEnd(u16, u16),
+    MouseMove(u16, u16),
 }
 
 #[derive(Debug)]

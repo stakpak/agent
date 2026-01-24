@@ -1,4 +1,3 @@
-use crate::AppState;
 use crate::app::RenderedMessageCache;
 use crate::services::bash_block::{
     format_text_content, render_bash_block, render_collapsed_command_message, render_file_diff,
@@ -7,6 +6,7 @@ use crate::services::bash_block::{
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
+use crate::AppState;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -309,7 +309,7 @@ fn strip_context_blocks(text: &str) -> String {
 /// Render user message with cyan bar prefix and proper word wrapping
 fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, Style)> {
     use ratatui::text::{Line, Span};
-    use textwrap::{Options, wrap};
+    use textwrap::{wrap, Options};
 
     let mut lines = Vec::new();
     let accent_color = Color::DarkGray;
@@ -922,9 +922,19 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     let estimated_lines = message_refs.len() * 10; // Rough estimate of 10 lines per message
     let mut all_processed_lines: Vec<Line<'static>> = Vec::with_capacity(estimated_lines);
 
+    // Build line-to-message mapping for click detection
+    let mut line_to_message_map: Vec<(usize, usize, Uuid, bool, String)> = Vec::new();
+
     // Process each message, using cache when available
     for msg in &message_refs {
         let content_hash = hash_message_content(&msg.content);
+        let start_line = all_processed_lines.len();
+
+        // Check if this is a user message and extract text
+        let (is_user_message, message_text) = match &msg.content {
+            MessageContent::UserMessage(text) => (true, text.clone()),
+            _ => (false, String::new()),
+        };
 
         // Check if we have a valid cached render for this message
         if let Some(cached) = state.per_message_cache.get(&msg.id)
@@ -934,43 +944,80 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
             // Cache hit! Reuse rendered lines
             cache_hits += 1;
             all_processed_lines.extend(cached.rendered_lines.iter().cloned());
-            continue;
+        } else {
+            // Cache miss - render this single message
+            cache_misses += 1;
+            let rendered_lines = render_single_message(msg, width);
+
+            // Store in per-message cache
+            state.per_message_cache.insert(
+                msg.id,
+                RenderedMessageCache {
+                    content_hash,
+                    rendered_lines: Arc::new(rendered_lines.clone()),
+                    width,
+                },
+            );
+
+            all_processed_lines.extend(rendered_lines);
         }
 
-        // Cache miss - render this single message
-        cache_misses += 1;
-        let rendered_lines = render_single_message(msg, width);
+        let end_line = all_processed_lines.len();
 
-        // Store in per-message cache
-        state.per_message_cache.insert(
-            msg.id,
-            RenderedMessageCache {
-                content_hash,
-                rendered_lines: Arc::new(rendered_lines.clone()),
-                width,
-            },
-        );
-
-        all_processed_lines.extend(rendered_lines);
+        // Only track user messages in the map (for efficiency)
+        if is_user_message && end_line > start_line {
+            line_to_message_map.push((start_line, end_line, msg.id, true, message_text));
+        }
     }
 
     // Collapse consecutive empty lines (max 2 consecutive empty lines)
+    // Also build a mapping from old line index to new line index
     let mut collapsed_lines: Vec<Line<'static>> = Vec::with_capacity(all_processed_lines.len());
+    let mut old_to_new_index: Vec<Option<usize>> = Vec::with_capacity(all_processed_lines.len());
     let mut consecutive_empty = 0;
+
     for line in all_processed_lines {
         let is_empty = line.spans.is_empty()
             || (line.spans.len() == 1 && line.spans[0].content.trim().is_empty());
         if is_empty {
             consecutive_empty += 1;
             if consecutive_empty <= 2 {
+                old_to_new_index.push(Some(collapsed_lines.len()));
                 collapsed_lines.push(line);
+            } else {
+                old_to_new_index.push(None); // This line was removed
             }
         } else {
             consecutive_empty = 0;
+            old_to_new_index.push(Some(collapsed_lines.len()));
             collapsed_lines.push(line);
         }
     }
     let mut all_processed_lines = collapsed_lines;
+
+    // Adjust line_to_message_map indices based on collapsed lines
+    let adjusted_line_to_message_map: Vec<(usize, usize, Uuid, bool, String)> = line_to_message_map
+        .into_iter()
+        .filter_map(|(start, end, id, is_user, text)| {
+            // Find the new start index (first non-None mapping at or after old start)
+            let new_start =
+                (start..end).find_map(|i| old_to_new_index.get(i).and_then(|&idx| idx))?;
+
+            // Find the new end index (last non-None mapping before old end, +1)
+            let new_end = (start..end)
+                .rev()
+                .find_map(|i| old_to_new_index.get(i).and_then(|&idx| idx))
+                .map(|i| i + 1)?;
+
+            if new_end > new_start {
+                Some((new_start, new_end, id, is_user, text))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let line_to_message_map = adjusted_line_to_message_map;
 
     // Add trailing empty lines if we have content
     if !all_processed_lines.is_empty() {
@@ -988,6 +1035,9 @@ pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> V
     // Invalidate visible lines cache since source changed
     state.visible_lines_cache = None;
     state.last_render_width = width;
+
+    // Update line-to-message map for click detection
+    state.line_to_message_map = line_to_message_map.clone();
 
     // Record performance metrics
     let render_time_us = render_start.elapsed().as_micros() as u64;

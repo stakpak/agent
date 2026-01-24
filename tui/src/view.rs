@@ -11,11 +11,11 @@ use crate::services::message_pattern::spans_to_string;
 use crate::services::shell_popup;
 use crate::services::side_panel;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
@@ -142,6 +142,9 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     let message_area_width = padded_message_area.width as usize;
     let message_area_height = message_area.height as usize;
 
+    // Store message area y offset for click detection
+    state.message_area_y = message_area.y;
+
     render_messages(
         f,
         state,
@@ -221,6 +224,11 @@ pub fn view(f: &mut Frame, state: &mut AppState) {
     // Render rulebook switcher
     if state.show_rulebook_switcher {
         crate::services::rulebook_switcher::render_rulebook_switcher_popup(f, state);
+    }
+
+    // Render message action popup
+    if state.show_message_action_popup {
+        crate::services::message_action_popup::render_message_action_popup(f, state);
     }
 
     // Render profile switch overlay
@@ -330,6 +338,12 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         state.scroll.min(max_scroll)
     };
 
+    // Debug: show area position
+    eprintln!(
+        "[RenderDebug] area.x={}, area.y={}, area.width={}, area.height={}, scroll={}",
+        area.x, area.y, area.width, area.height, scroll
+    );
+
     // Create visible lines with pre-allocated capacity for better performance
     let mut visible_lines = Vec::with_capacity(height);
 
@@ -341,6 +355,57 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             visible_lines.push(Line::from(""));
         }
     }
+
+    // Apply hover highlighting for user messages (debug feature)
+    let visible_lines = if let Some(hover_row) = state.hover_row {
+        // Subtract 2 to account for visual offset (investigating root cause)
+        let hover_row = (hover_row as usize).saturating_sub(2);
+        // Check if hover is within message area
+        if hover_row >= area.y as usize && hover_row < (area.y as usize + height) {
+            let screen_row = hover_row - area.y as usize;
+            let absolute_line = scroll + screen_row;
+
+            // Check if this line is a user message
+            let is_user_message =
+                state
+                    .line_to_message_map
+                    .iter()
+                    .any(|(start, end, _, is_user, _)| {
+                        *is_user && absolute_line >= *start && absolute_line < *end
+                    });
+
+            if is_user_message {
+                // Highlight this line with green background
+                visible_lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        if i == screen_row {
+                            Line::from(
+                                line.spans
+                                    .into_iter()
+                                    .map(|span| {
+                                        ratatui::text::Span::styled(
+                                            span.content,
+                                            span.style.bg(Color::Green),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        } else {
+                            line
+                        }
+                    })
+                    .collect()
+            } else {
+                visible_lines
+            }
+        } else {
+            visible_lines
+        }
+    } else {
+        visible_lines
+    };
 
     // Apply selection highlighting if active
     let visible_lines = if state.selection.active {

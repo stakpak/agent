@@ -6,8 +6,10 @@
 //! - Ending selection and copying to clipboard on mouse release
 //! - Extracting clean text (excluding borders, decorations)
 //! - Cursor positioning in input area on click
+//! - Showing message action popup on user message click
 
 use crate::app::AppState;
+use crate::services::message_action_popup::find_user_message_at_line;
 use crate::services::text_selection::{SelectionState, copy_to_clipboard, extract_selected_text};
 use crate::services::toast::Toast;
 
@@ -41,9 +43,10 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16, message_area_
     // Clear any input area selection when clicking outside
     state.text_area.clear_selection();
 
-    // Check if click is within message area (top portion of screen)
-    // Message area starts at row 0 and extends to message_area_height
-    if row as usize >= message_area_height {
+    // Check if click is within message area
+    // Message area starts at message_area_y and extends for message_area_height rows
+    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+    if row < state.message_area_y || row_in_message_area >= message_area_height {
         // Click is outside message area, don't start selection
         state.selection = SelectionState::default();
         return;
@@ -64,8 +67,8 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16, message_area_
         }
     }
 
-    // Convert screen row to absolute line index
-    let absolute_line = state.scroll + row as usize;
+    // Convert screen row to absolute line index (row_in_message_area already calculated above)
+    let absolute_line = state.scroll + row_in_message_area;
 
     state.selection = SelectionState {
         active: true,
@@ -94,7 +97,9 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16, message_area_height
     }
 
     // Clamp row to message area
-    let clamped_row = (row as usize).min(message_area_height.saturating_sub(1));
+    // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
+    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+    let clamped_row = row_in_message_area.min(message_area_height.saturating_sub(1));
 
     // Convert screen row to absolute line index
     let absolute_line = state.scroll + clamped_row;
@@ -116,6 +121,7 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16, message_area_height
 }
 
 /// Handle mouse drag end - extracts text, copies to clipboard, shows toast
+/// Also detects clicks on user messages to show action popup
 pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16, message_area_height: usize) {
     // Check if we're ending an input area selection
     if state.text_area.selection.is_active() {
@@ -156,8 +162,24 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16, message_area_he
     };
 
     if is_just_click {
-        // Just a click, not a selection - clear and return
+        // Just a click, not a selection - check if it's on a user message
+        // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
+        let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+        let absolute_line = state.scroll + row_in_message_area;
+
+        // Clear selection first
         state.selection = SelectionState::default();
+
+        // Check if clicking on a user message
+        if let Some((msg_id, msg_text)) = find_user_message_at_line(state, absolute_line) {
+            // Show message action popup
+            state.show_message_action_popup = true;
+            state.message_action_popup_selected = 0;
+            state.message_action_popup_position = Some((col, row));
+            state.message_action_target_message_id = Some(msg_id);
+            state.message_action_target_text = Some(msg_text);
+        }
+
         return;
     }
 

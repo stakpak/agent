@@ -63,6 +63,40 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for Message Action Popup
+    if state.show_message_action_popup {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_message_action_popup_navigate(state, -1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_message_action_popup_navigate(state, 1);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_message_action_popup_execute(state);
+                return;
+            }
+            InputEvent::MouseClick(_, _)
+            | InputEvent::MouseDragStart(_, _)
+            | InputEvent::MouseDrag(_, _)
+            | InputEvent::MouseDragEnd(_, _) => {
+                // Close popup on any mouse click/interaction
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
+
     // Intercept keys for File Changes Popup
     if state.show_file_changes_popup {
         match event {
@@ -763,6 +797,10 @@ pub fn update(
         }
         InputEvent::MouseDragEnd(col, row) => {
             text_selection::handle_drag_end(state, col, row, message_area_height);
+        }
+        InputEvent::MouseMove(_col, row) => {
+            // Track hover row for visual debugging
+            state.hover_row = Some(row);
         }
     }
 

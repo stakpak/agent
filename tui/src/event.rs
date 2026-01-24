@@ -180,6 +180,7 @@ pub fn map_crossterm_event_to_input_event(event: Event) -> Option<InputEvent> {
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
                 Some(InputEvent::MouseDragEnd(me.column, me.row))
             }
+            MouseEventKind::Moved => Some(InputEvent::MouseMove(me.column, me.row)),
             _ => None,
         },
         Event::Resize(w, h) => Some(InputEvent::Resized(w, h)),

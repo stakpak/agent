@@ -79,6 +79,9 @@ pub struct AppState {
     pub render_metrics: RenderMetrics,
     /// Last width used for rendering (to detect width changes)
     pub last_render_width: usize,
+    /// Maps line ranges to message info for click detection
+    /// Format: Vec<(start_line, end_line, message_id, is_user_message, message_text)>
+    pub line_to_message_map: Vec<(usize, usize, Uuid, bool, String)>,
 
     // ========== Loading State ==========
     pub loading: bool,
@@ -211,6 +214,15 @@ pub struct AppState {
     // ========== Text Selection State ==========
     pub selection: SelectionState,
     pub toast: Option<Toast>,
+
+    // ========== Message Action Popup State ==========
+    pub show_message_action_popup: bool,
+    pub message_action_popup_selected: usize,
+    pub message_action_popup_position: Option<(u16, u16)>, // (x, y) position for popup
+    pub message_action_target_message_id: Option<Uuid>,    // The user message being acted on
+    pub message_action_target_text: Option<String>,        // The text of the target message
+    pub message_area_y: u16, // Y offset of message area for click detection
+    pub hover_row: Option<u16>, // Current mouse hover row for debugging
 
     // ========== Input Area State ==========
     /// Stores the input area content rect for mouse click positioning
@@ -390,6 +402,7 @@ impl AppState {
             cache_generation: 0,
             render_metrics: RenderMetrics::new(),
             last_render_width: 0,
+            line_to_message_map: Vec::new(),
             pending_pastes: Vec::new(),
             mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
             loading_manager: LoadingStateManager::new(),
@@ -416,6 +429,15 @@ impl AppState {
             selection: SelectionState::default(),
             toast: None,
             input_content_area: None,
+
+            // Message action popup initialization
+            show_message_action_popup: false,
+            message_action_popup_selected: 0,
+            message_action_popup_position: None,
+            message_action_target_message_id: None,
+            message_action_target_text: None,
+            message_area_y: 0,
+            hover_row: None,
 
             // Profile switcher initialization
             show_profile_switcher: false,
