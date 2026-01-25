@@ -9,9 +9,7 @@
 mod provider;
 
 use crate::local::db;
-use crate::local::hooks::inline_scratchpad_context::{
-    InlineScratchpadContextHook, InlineScratchpadContextHookOptions,
-};
+use crate::local::hooks::task_board_context::{TaskBoardContextHook, TaskBoardContextHookOptions};
 use crate::models::AgentState;
 use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
 use libsql::Connection;
@@ -231,18 +229,16 @@ impl AgentClient {
         let mut hook_registry = config.hook_registry.unwrap_or_default();
         hook_registry.register(
             LifecycleEvent::BeforeInference,
-            Box::new(InlineScratchpadContextHook::new(
-                InlineScratchpadContextHookOptions {
-                    model_options: crate::local::ModelOptions {
-                        smart_model: model_options.smart_model.clone(),
-                        eco_model: model_options.eco_model.clone(),
-                        recovery_model: model_options.recovery_model.clone(),
-                    },
-                    history_action_message_size_limit: Some(100),
-                    history_action_message_keep_last_n: Some(1),
-                    history_action_result_keep_last_n: Some(50),
+            Box::new(TaskBoardContextHook::new(TaskBoardContextHookOptions {
+                model_options: crate::local::ModelOptions {
+                    smart_model: model_options.smart_model.clone(),
+                    eco_model: model_options.eco_model.clone(),
+                    recovery_model: model_options.recovery_model.clone(),
                 },
-            )),
+                history_action_message_size_limit: Some(100),
+                history_action_message_keep_last_n: Some(1),
+                history_action_result_keep_last_n: Some(50),
+            })),
         );
         let hook_registry = Arc::new(hook_registry);
 
