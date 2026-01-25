@@ -738,18 +738,48 @@ pub fn get_wrapped_message_lines(
     get_wrapped_message_lines_internal(messages, width, false)
 }
 
+/// Compute a cache key that uniquely identifies the current message state.
+/// This key changes when:
+/// - Width changes
+/// - Shell popup visibility changes  
+/// - Side panel visibility changes
+/// - Messages are added, removed, or resumed (via message count and last message ID)
+fn compute_cache_key(state: &AppState, width: usize) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    // Include width
+    width.hash(&mut hasher);
+
+    // Include visibility states
+    state.shell_popup_visible.hash(&mut hasher);
+    state.show_side_panel.hash(&mut hasher);
+
+    // Include message count (filters out collapsed messages)
+    let visible_messages: Vec<&Message> = state
+        .messages
+        .iter()
+        .filter(|m| m.is_collapsed.is_none())
+        .collect();
+    visible_messages.len().hash(&mut hasher);
+
+    // Include last message ID to detect content changes at the end (streaming)
+    if let Some(last_msg) = visible_messages.last() {
+        last_msg.id.hash(&mut hasher);
+    }
+
+    // Include first message ID to detect changes at the beginning (resume)
+    if let Some(first_msg) = visible_messages.first() {
+        first_msg.id.hash(&mut hasher);
+    }
+
+    hasher.finish()
+}
+
 /// Get the total number of cached lines without cloning.
 /// This is useful for scroll calculations where we only need the count.
 #[allow(dead_code)]
 pub fn get_cached_line_count(state: &AppState, width: usize) -> Option<usize> {
-    // Use consistent cache key calculation with get_wrapped_message_lines_cached
-    let mut cache_key = width;
-    if state.shell_popup_visible {
-        cache_key += 100000;
-    }
-    if state.show_side_panel {
-        cache_key += 200000;
-    }
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, ref cached_lines, _)) = state.assembled_lines_cache
         && cached_key == cache_key
@@ -849,11 +879,7 @@ pub fn get_visible_lines_owned(
 /// This is more efficient when you just need to ensure the cache exists.
 #[allow(dead_code)]
 fn ensure_cache_populated(state: &mut AppState, width: usize) {
-    let cache_key = if state.shell_popup_visible {
-        width + 100000
-    } else {
-        width
-    };
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, _, _)) = &state.assembled_lines_cache
         && *cached_key == cache_key
@@ -876,19 +902,10 @@ fn ensure_cache_populated(state: &mut AppState, width: usize) {
 /// NOTE: Prefer using `get_visible_lines_cached` when you only need a slice,
 /// as it avoids cloning the entire vector.
 pub fn get_wrapped_message_lines_cached(state: &mut AppState, width: usize) -> Vec<Line<'static>> {
-    // FAST PATH: If assembled cache exists and width matches, return it immediately.
-    // The cache is explicitly invalidated when messages change, so if it exists, it's valid.
-    // We encode visibility states in the cache key to ensure cache invalidation when they change:
-    // - shell_popup_visible: adds 100000
-    // - show_side_panel: adds 200000
-    // This ensures the cache is invalidated when these visibility states change.
-    let mut cache_key = width;
-    if state.shell_popup_visible {
-        cache_key += 100000;
-    }
-    if state.show_side_panel {
-        cache_key += 200000;
-    }
+    // FAST PATH: If assembled cache exists and key matches, return it immediately.
+    // The cache key is a hash that includes width, visibility states, message count,
+    // and first/last message IDs to detect changes from resume, streaming, etc.
+    let cache_key = compute_cache_key(state, width);
 
     if let Some((cached_key, cached_lines, _)) = &state.assembled_lines_cache
         && *cached_key == cache_key

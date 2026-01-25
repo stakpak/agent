@@ -69,8 +69,8 @@ pub struct AppState {
     /// Per-message rendered line cache for efficient incremental rendering
     pub per_message_cache: PerMessageCache,
     /// Assembled lines cache (the final combined output of all message lines)
-    /// Format: (cache_key, lines, generation_counter)
-    pub assembled_lines_cache: Option<(usize, Vec<Line<'static>>, u64)>,
+    /// Format: (cache_key_hash, lines, generation_counter)
+    pub assembled_lines_cache: Option<(u64, Vec<Line<'static>>, u64)>,
     /// Cache for visible lines on screen (avoids cloning on every frame)
     pub visible_lines_cache: Option<VisibleLinesCache>,
     /// Generation counter for assembled cache (increments on each rebuild)

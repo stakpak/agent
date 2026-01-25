@@ -10,7 +10,7 @@
 
 use crate::app::AppState;
 use crate::services::message_action_popup::find_user_message_at_line;
-use crate::services::text_selection::{SelectionState, copy_to_clipboard, extract_selected_text};
+use crate::services::text_selection::{copy_to_clipboard, extract_selected_text, SelectionState};
 use crate::services::toast::Toast;
 
 /// Check if coordinates are within the input area
@@ -45,7 +45,9 @@ pub fn handle_drag_start(state: &mut AppState, col: u16, row: u16, message_area_
 
     // Check if click is within message area
     // Message area starts at message_area_y and extends for message_area_height rows
-    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+    // Subtract 1 to account for visual offset (same fix as hover highlighting in view.rs)
+    let row_adjusted = (row as usize).saturating_sub(1);
+    let row_in_message_area = row_adjusted.saturating_sub(state.message_area_y as usize);
     if row < state.message_area_y || row_in_message_area >= message_area_height {
         // Click is outside message area, don't start selection
         state.selection = SelectionState::default();
@@ -98,7 +100,9 @@ pub fn handle_drag(state: &mut AppState, col: u16, row: u16, message_area_height
 
     // Clamp row to message area
     // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-    let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+    // Subtract 1 to account for visual offset (same fix as hover highlighting in view.rs)
+    let row_adjusted = (row as usize).saturating_sub(1);
+    let row_in_message_area = row_adjusted.saturating_sub(state.message_area_y as usize);
     let clamped_row = row_in_message_area.min(message_area_height.saturating_sub(1));
 
     // Convert screen row to absolute line index
@@ -164,8 +168,17 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16, message_area_he
     if is_just_click {
         // Just a click, not a selection - check if it's on a user message
         // Mouse row is absolute to terminal, so subtract message_area_y to get row relative to message area
-        let row_in_message_area = (row as usize).saturating_sub(state.message_area_y as usize);
+        // Subtract 1 to account for visual offset (same fix as hover highlighting in view.rs)
+        let row_adjusted = (row as usize).saturating_sub(1);
+        let row_in_message_area = row_adjusted.saturating_sub(state.message_area_y as usize);
         let absolute_line = state.scroll + row_in_message_area;
+
+        // Debug logging for click
+        eprintln!(
+            "[ClickDebug] row={}, adjusted={}, msg_area_y={}, row_in_area={}, scroll={}, absolute_line={}, map={:?}",
+            row, row_adjusted, state.message_area_y, row_in_message_area, state.scroll, absolute_line,
+            state.line_to_message_map.iter().map(|(s, e, _, _, _)| (*s, *e)).collect::<Vec<_>>()
+        );
 
         // Clear selection first
         state.selection = SelectionState::default();

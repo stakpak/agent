@@ -356,14 +356,24 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
         }
     }
 
-    // Apply hover highlighting for user messages (debug feature)
+    // Apply hover highlighting for user messages
+    // Use state.scroll (not local scroll) to match selection handler behavior
     let visible_lines = if let Some(hover_row) = state.hover_row {
-        // Subtract 2 to account for visual offset (investigating root cause)
-        let hover_row = (hover_row as usize).saturating_sub(2);
+        // Subtract 1 to account for visual offset (same as selection click handling)
+        let hover_row_adjusted = (hover_row as usize).saturating_sub(1);
+        let row_in_message_area = hover_row_adjusted.saturating_sub(state.message_area_y as usize);
+
         // Check if hover is within message area
-        if hover_row >= area.y as usize && hover_row < (area.y as usize + height) {
-            let screen_row = hover_row - area.y as usize;
-            let absolute_line = scroll + screen_row;
+        if row_in_message_area < height {
+            // Use state.scroll to match how selection calculates absolute_line
+            let absolute_line = state.scroll + row_in_message_area;
+
+            // Debug logging for hover
+            eprintln!(
+                "[HoverDebug] hover_row={}, adjusted={}, msg_area_y={}, row_in_area={}, state.scroll={}, render_scroll={}, absolute_line={}, map={:?}",
+                hover_row, hover_row_adjusted, state.message_area_y, row_in_message_area, state.scroll, scroll, absolute_line,
+                state.line_to_message_map.iter().map(|(s, e, _, _, _)| (*s, *e)).collect::<Vec<_>>()
+            );
 
             // Check if this line is a user message
             let is_user_message =
@@ -375,19 +385,19 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
                     });
 
             if is_user_message {
-                // Highlight this line with green background
+                // Highlight this line with subtle dark background
                 visible_lines
                     .into_iter()
                     .enumerate()
                     .map(|(i, line)| {
-                        if i == screen_row {
+                        if i == row_in_message_area {
                             Line::from(
                                 line.spans
                                     .into_iter()
                                     .map(|span| {
                                         ratatui::text::Span::styled(
                                             span.content,
-                                            span.style.bg(Color::Green),
+                                            span.style.bg(Color::Indexed(240)).fg(Color::White),
                                         )
                                     })
                                     .collect::<Vec<_>>(),
