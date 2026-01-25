@@ -916,7 +916,7 @@ impl MarkdownRenderer {
                 }
             } else if c == '*' && chars.peek() == Some(&'*') {
                 chars.next(); // consume second *
-                // Include content until next **
+                              // Include content until next **
                 while let Some(&next) = chars.peek() {
                     if next == '*' {
                         chars.next();
@@ -997,12 +997,45 @@ impl MarkdownRenderer {
         }
 
         // Parse table rows (even if there's no separator - for streaming compatibility)
+        // Handle wrapped/broken rows: if a line starts with | but doesn't end with |,
+        // concatenate subsequent lines until we find one ending with |
         while j < all_lines.len() && rows.len() < max_table_rows {
             let stripped_row_line = self.strip_line_number(all_lines[j]);
-            let row_line = stripped_row_line.trim();
+            let mut row_line = stripped_row_line.trim().to_string();
 
-            // Check if this is still a table row
-            if !row_line.starts_with('|') || !row_line.ends_with('|') {
+            // Check if this looks like a table row start
+            if !row_line.starts_with('|') {
+                break;
+            }
+
+            // If line starts with | but doesn't end with |, it might be a wrapped row
+            // Try to reassemble it by concatenating subsequent lines
+            let mut lookahead = j + 1;
+            while !row_line.ends_with('|') && lookahead < all_lines.len() {
+                let next_stripped = self.strip_line_number(all_lines[lookahead]);
+                let next_line = next_stripped.trim();
+
+                // If next line starts with |, this is a new row, not a continuation
+                if next_line.starts_with('|') {
+                    break;
+                }
+
+                // Append continuation line (preserving space)
+                row_line.push_str(next_line);
+                lookahead += 1;
+
+                // Safety limit to prevent infinite loops
+                if lookahead - j > 10 {
+                    break;
+                }
+            }
+
+            // Update j to skip any continuation lines we consumed
+            j = lookahead - 1;
+
+            // Now check if we have a valid complete row
+            if !row_line.ends_with('|') {
+                // Still not a valid row after reassembly, stop parsing
                 break;
             }
 
