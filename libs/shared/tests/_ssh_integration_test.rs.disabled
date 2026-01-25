@@ -1,0 +1,332 @@
+//! SSH Integration Tests for Persistent Remote Shell Sessions
+//!
+//! These tests require a Docker-based SSH server to be running.
+//! Run with: cargo test -p stakpak-shared --test ssh_integration_test -- --ignored
+//!
+//! To start the test SSH server:
+//!   docker run -d --name test-ssh -p 2222:22 \
+//!     -e SSH_ENABLE_ROOT=true \
+//!     -e ROOT_PASSWORD=testpass123 \
+//!     panubo/sshd:latest
+//!
+//! Or use the provided docker-compose in platform-testing/
+
+use stakpak_shared::remote_connection::RemoteConnectionInfo;
+use stakpak_shared::shell_session::{RemoteShellSession, ShellSession, ShellSessionManager};
+use std::time::Duration;
+
+const TEST_SSH_HOST: &str = "127.0.0.1";
+const TEST_SSH_PORT: u16 = 2222;
+const TEST_SSH_USER: &str = "root";
+const TEST_SSH_PASS: &str = "testpass123";
+
+fn connection_string() -> String {
+    format!("{}@{}:{}", TEST_SSH_USER, TEST_SSH_HOST, TEST_SSH_PORT)
+}
+
+fn connection_info() -> RemoteConnectionInfo {
+    RemoteConnectionInfo {
+        connection_string: connection_string(),
+        password: Some(TEST_SSH_PASS.to_string()),
+        private_key_path: None,
+    }
+}
+
+/// Helper to check if SSH server is available
+async fn ssh_server_available() -> bool {
+    use std::net::TcpStream;
+    TcpStream::connect(format!("{}:{}", TEST_SSH_HOST, TEST_SSH_PORT)).is_ok()
+}
+
+#[tokio::test]
+#[ignore] // Run with --ignored flag when SSH server is available
+async fn test_ssh_connection_establishment() {
+    if !ssh_server_available().await {
+        eprintln!(
+            "SSH server not available at {}:{}, skipping test",
+            TEST_SSH_HOST, TEST_SSH_PORT
+        );
+        return;
+    }
+
+    let result = RemoteShellSession::new(connection_info(), None, None).await;
+
+    assert!(
+        result.is_ok(),
+        "Should establish SSH connection: {:?}",
+        result.err()
+    );
+
+    let session = result.unwrap();
+    assert!(
+        session.is_alive().await,
+        "Session should be alive after connection"
+    );
+    assert!(
+        session.session_id().starts_with("remote-"),
+        "Session ID should have remote prefix"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_simple_command() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    let result = session.execute("echo hello_ssh", None).await;
+
+    assert!(result.is_ok(), "Command should succeed: {:?}", result.err());
+    let output = result.unwrap();
+    assert!(
+        output.output.contains("hello_ssh"),
+        "Output should contain 'hello_ssh', got: '{}'",
+        output.output
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_env_var_persistence() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Set environment variable
+    let set_result = session
+        .execute("export SSH_TEST_VAR=persistent_value_123", None)
+        .await;
+    assert!(set_result.is_ok(), "Setting env var should succeed");
+
+    // Read it back in subsequent command
+    let get_result = session.execute("echo $SSH_TEST_VAR", None).await;
+    assert!(get_result.is_ok(), "Reading env var should succeed");
+
+    let output = get_result.unwrap();
+    assert!(
+        output.output.contains("persistent_value_123"),
+        "Environment variable should persist across commands, got: '{}'",
+        output.output
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_cwd_persistence() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Change directory
+    let cd_result = session.execute("cd /tmp", None).await;
+    assert!(cd_result.is_ok(), "cd should succeed");
+
+    // Verify we're still in /tmp
+    let pwd_result = session.execute("pwd", None).await;
+    assert!(pwd_result.is_ok(), "pwd should succeed");
+
+    let output = pwd_result.unwrap();
+    assert!(
+        output.output.contains("/tmp"),
+        "Working directory should persist to /tmp, got: '{}'",
+        output.output
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_marker_transparency() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Run multiple commands and verify NO markers leak
+    let commands = vec![
+        "echo first_command",
+        "echo second_command",
+        "ls /tmp | head -3",
+        "echo third_command",
+    ];
+
+    for (i, cmd) in commands.iter().enumerate() {
+        let result = session.execute(cmd, None).await;
+        assert!(
+            result.is_ok(),
+            "Command {} '{}' should succeed: {:?}",
+            i,
+            cmd,
+            result.err()
+        );
+
+        let output = result.unwrap();
+
+        // CRITICAL: Verify no markers leak into output
+        assert!(
+            !output.output.contains("__STAKPAK_CMD_END_"),
+            "Marker should NOT appear in output for command '{}', got: '{}'",
+            cmd,
+            output.output
+        );
+        assert!(
+            !output.output.contains("__STAKPAK_CMD_"),
+            "Marker prefix should NOT appear in output for command '{}', got: '{}'",
+            cmd,
+            output.output
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_multiple_sequential_commands() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Run 10 commands in sequence
+    for i in 1..=10 {
+        let result = session
+            .execute(&format!("echo iteration_{}", i), None)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Command {} should succeed: {:?}",
+            i,
+            result.err()
+        );
+
+        let output = result.unwrap();
+        assert!(
+            output.output.contains(&format!("iteration_{}", i)),
+            "Output should contain 'iteration_{}', got: '{}'",
+            i,
+            output.output
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_session_close() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let mut session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Execute a command
+    let result = session.execute("echo before_close", None).await;
+    assert!(result.is_ok(), "Command before close should succeed");
+
+    // Close the session
+    let close_result = session.close().await;
+    assert!(close_result.is_ok(), "Close should succeed");
+
+    // Session should report as not alive
+    assert!(
+        !session.is_alive().await,
+        "Session should not be alive after close"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_via_manager() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let manager = ShellSessionManager::with_defaults();
+
+    // Create remote session via manager
+    let session_id = manager
+        .get_or_create_default_remote_session(
+            &connection_string(),
+            Some(TEST_SSH_PASS.to_string()),
+            None,
+        )
+        .await;
+
+    assert!(
+        session_id.is_ok(),
+        "Should create remote session via manager: {:?}",
+        session_id.err()
+    );
+    let session_id = session_id.unwrap();
+
+    // Execute command via manager
+    let result = manager
+        .execute_in_session(&session_id, "echo manager_test", None)
+        .await;
+    assert!(
+        result.is_ok(),
+        "Command via manager should succeed: {:?}",
+        result.err()
+    );
+
+    let output = result.unwrap();
+    assert!(
+        output.output.contains("manager_test"),
+        "Output should contain 'manager_test', got: '{}'",
+        output.output
+    );
+
+    // Verify session is listed
+    let sessions = manager.list_sessions().await;
+    assert!(!sessions.is_empty(), "Should have at least one session");
+    assert!(
+        sessions.iter().any(|s| s.is_remote),
+        "Should have a remote session"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_ssh_command_timeout() {
+    if !ssh_server_available().await {
+        eprintln!("SSH server not available, skipping test");
+        return;
+    }
+
+    let session = RemoteShellSession::new(connection_info(), None, None)
+        .await
+        .expect("Should connect");
+
+    // Run a command with a very short timeout
+    let result = session
+        .execute("sleep 10", Some(Duration::from_millis(500)))
+        .await;
+
+    // Should timeout
+    assert!(result.is_err(), "Long-running command should timeout");
+}

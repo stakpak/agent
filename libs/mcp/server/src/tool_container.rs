@@ -8,6 +8,7 @@ use stakpak_api::AgentProvider;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use stakpak_shared::remote_connection::RemoteConnectionManager;
 use stakpak_shared::secret_manager::SecretManager;
+use stakpak_shared::shell_session::ShellSessionManager;
 use stakpak_shared::task_manager::TaskManagerHandle;
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ pub struct ToolContainer {
     pub secret_manager: SecretManager,
     pub task_manager: Arc<TaskManagerHandle>,
     pub remote_connection_manager: Arc<RemoteConnectionManager>,
+    pub shell_session_manager: Arc<ShellSessionManager>,
     pub subagent_configs: Option<SubagentConfigs>,
     pub enabled_tools: EnabledToolsConfig,
     pub tool_router: ToolRouter<Self>,
@@ -38,6 +40,7 @@ impl ToolContainer {
             secret_manager: SecretManager::new(redact_secrets, privacy_mode),
             task_manager,
             remote_connection_manager: Arc::new(RemoteConnectionManager::new()),
+            shell_session_manager: Arc::new(ShellSessionManager::with_defaults()),
             subagent_configs,
             enabled_tools,
             tool_router,
@@ -58,6 +61,10 @@ impl ToolContainer {
 
     pub fn get_remote_connection_manager(&self) -> &Arc<RemoteConnectionManager> {
         &self.remote_connection_manager
+    }
+
+    pub fn get_shell_session_manager(&self) -> &Arc<ShellSessionManager> {
+        &self.shell_session_manager
     }
 
     pub fn get_subagent_configs(&self) -> &Option<SubagentConfigs> {
