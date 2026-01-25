@@ -642,6 +642,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 usage: None,
+                ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
@@ -661,6 +662,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 usage: None,
+                ..Default::default()
             },
         ]
     }
@@ -791,6 +793,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 usage: None,
+                ..Default::default()
             },
             ChatMessage {
                 role: Role::Assistant,
@@ -812,6 +815,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 usage: None,
+                ..Default::default()
             },
         ];
 

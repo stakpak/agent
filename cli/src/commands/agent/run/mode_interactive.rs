@@ -13,18 +13,13 @@ use crate::commands::agent::run::stream::process_responses_stream;
 use crate::commands::agent::run::tooling::{list_sessions, run_tool_call};
 use crate::commands::agent::run::tui::{send_input_event, send_tool_call};
 use crate::commands::warden;
-use crate::config::{AppConfig, ProviderType};
+use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::check_update::get_latest_cli_version;
 use crate::utils::local_context::LocalContext;
 use reqwest::header::HeaderMap;
 use stakpak_api::models::ApiStreamError;
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    models::ListRuleBook,
-    remote::{ClientConfig, RemoteClient},
-};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, models::ListRuleBook};
 
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::models::integrations::mcp::CallToolResultExt;
@@ -84,9 +79,9 @@ pub async fn run_interactive(
         };
 
         // Clone config values for this iteration
-        let api_key = ctx.api_key.clone();
+        let api_key = ctx.get_stakpak_api_key();
         let api_endpoint = ctx.api_endpoint.clone();
-        let provider_type = ctx.provider.clone();
+        let has_stakpak_key = api_key.is_some();
         let config_path = ctx.config_path.clone();
         let _mcp_server_host = ctx.mcp_server_host.clone();
         let local_context = config.local_context.clone();
@@ -163,31 +158,31 @@ pub async fn run_interactive(
         let client_handle: tokio::task::JoinHandle<ClientTaskResult> = tokio::spawn(async move {
             let mut current_session_id: Option<Uuid> = None;
 
-            let client: Arc<dyn AgentProvider> = match provider_type {
-                ProviderType::Remote => {
-                    let client = RemoteClient::new(&ClientConfig {
-                        api_key: api_key_for_client.clone(),
-                        api_endpoint: api_endpoint_for_client.clone(),
-                    })
-                    .map_err(|e| e.to_string())?;
-                    Arc::new(client)
-                }
-                ProviderType::Local => {
-                    // Use credential resolution with auth.toml fallback chain
-                    let client = LocalClient::new(LocalClientConfig {
-                        stakpak_base_url: Some(api_endpoint_for_client.clone()),
-                        store_path: None,
-                        providers: ctx_clone.get_llm_provider_config(),
-                        eco_model: ctx_clone.eco_model.clone(),
-                        recovery_model: ctx_clone.recovery_model.clone(),
-                        smart_model: ctx_clone.smart_model.clone(),
-                        hook_registry: None,
-                    })
+            // Build unified AgentClient config
+            let providers = ctx_clone.get_llm_provider_config();
+            let mut client_config = AgentClientConfig::new().with_providers(providers);
+
+            if let Some(ref key) = api_key_for_client {
+                client_config = client_config.with_stakpak(
+                    stakpak_api::StakpakConfig::new(key.clone())
+                        .with_endpoint(api_endpoint_for_client.clone()),
+                );
+            }
+            if let Some(smart_model) = &ctx_clone.smart_model {
+                client_config = client_config.with_smart_model(smart_model.clone());
+            }
+            if let Some(eco_model) = &ctx_clone.eco_model {
+                client_config = client_config.with_eco_model(eco_model.clone());
+            }
+            if let Some(recovery_model) = &ctx_clone.recovery_model {
+                client_config = client_config.with_recovery_model(recovery_model.clone());
+            }
+
+            let client: Arc<dyn AgentProvider> = Arc::new(
+                AgentClient::new(client_config)
                     .await
-                    .map_err(|e| format!("Failed to create local client: {}", e))?;
-                    Arc::new(client)
-                }
-            };
+                    .map_err(|e| format!("Failed to create client: {}", e))?,
+            );
 
             let mcp_init_config = mcp_init::McpInitConfig {
                 redact_secrets,
@@ -224,8 +219,8 @@ pub async fn run_interactive(
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
-            // Fetch billing info (only for remote provider)
-            if matches!(provider_type, ProviderType::Remote) {
+            // Fetch billing info (only when Stakpak API key is present)
+            if has_stakpak_key {
                 refresh_billing_info(client.as_ref(), &input_tx).await;
             }
             // Load available profiles and send to TUI
@@ -365,6 +360,7 @@ pub async fn run_interactive(
                                 tool_calls: None,
                                 tool_call_id: None,
                                 usage: None,
+                                ..Default::default()
                             }
                         };
 
@@ -372,7 +368,8 @@ pub async fn run_interactive(
                         tools_queue.clear();
                         messages.push(user_msg);
 
-                        if matches!(provider_type, ProviderType::Local)
+                        // Capture telemetry when not using Stakpak API (local mode)
+                        if !has_stakpak_key
                             && let Some(ref anonymous_id) = ctx_clone.anonymous_id
                             && ctx_clone.collect_telemetry.unwrap_or(true)
                         {
@@ -985,8 +982,8 @@ pub async fn run_interactive(
                         )
                         .await?;
 
-                        // Refresh billing info after each assistant message (only for remote provider)
-                        if matches!(provider_type, ProviderType::Remote) {
+                        // Refresh billing info after each assistant message (only when using Stakpak API)
+                        if has_stakpak_key {
                             refresh_billing_info(client.as_ref(), &input_tx).await;
                         }
 
@@ -1049,31 +1046,30 @@ pub async fn run_interactive(
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
             // Fetch and filter rulebooks for the new profile
-            let client: Box<dyn AgentProvider> = match new_config.provider {
-                ProviderType::Remote => {
-                    let client = RemoteClient::new(&ClientConfig {
-                        api_key: new_config.api_key.clone(),
-                        api_endpoint: new_config.api_endpoint.clone(),
-                    })
-                    .map_err(|e| e.to_string())?;
-                    Box::new(client)
-                }
-                ProviderType::Local => {
-                    // Use credential resolution with auth.toml fallback chain
-                    let client = LocalClient::new(LocalClientConfig {
-                        store_path: None,
-                        stakpak_base_url: Some(new_config.api_endpoint.clone()),
-                        providers: new_config.get_llm_provider_config(),
-                        eco_model: new_config.eco_model.clone(),
-                        recovery_model: new_config.recovery_model.clone(),
-                        smart_model: new_config.smart_model.clone(),
-                        hook_registry: None,
-                    })
+            let providers = new_config.get_llm_provider_config();
+            let mut new_client_config = AgentClientConfig::new().with_providers(providers);
+
+            if let Some(api_key) = new_config.get_stakpak_api_key() {
+                new_client_config = new_client_config.with_stakpak(
+                    stakpak_api::StakpakConfig::new(api_key)
+                        .with_endpoint(new_config.api_endpoint.clone()),
+                );
+            }
+            if let Some(smart_model) = &new_config.smart_model {
+                new_client_config = new_client_config.with_smart_model(smart_model.clone());
+            }
+            if let Some(eco_model) = &new_config.eco_model {
+                new_client_config = new_client_config.with_eco_model(eco_model.clone());
+            }
+            if let Some(recovery_model) = &new_config.recovery_model {
+                new_client_config = new_client_config.with_recovery_model(recovery_model.clone());
+            }
+
+            let client: Box<dyn AgentProvider> = Box::new(
+                AgentClient::new(new_client_config)
                     .await
-                    .map_err(|e| format!("Failed to create local client: {}", e))?;
-                    Box::new(client)
-                }
-            };
+                    .map_err(|e| format!("Failed to create client: {}", e))?,
+            );
 
             let new_rulebooks = client.list_rulebooks().await.ok().map(|rulebooks| {
                 if let Some(rulebook_config) = &new_config.rulebooks {
@@ -1118,35 +1114,29 @@ pub async fn run_interactive(
 
         // Normal exit - no profile switch requested
         // Display final stats and session info
-        let final_api_key = ctx.api_key.clone();
-        let final_api_endpoint = ctx.api_endpoint.clone();
-        let final_provider = ctx.provider.clone();
+        let providers = ctx.get_llm_provider_config();
+        let mut final_client_config = AgentClientConfig::new().with_providers(providers);
 
-        let client: Box<dyn AgentProvider> = match final_provider {
-            ProviderType::Remote => {
-                let client = RemoteClient::new(&ClientConfig {
-                    api_key: final_api_key.clone(),
-                    api_endpoint: final_api_endpoint.clone(),
-                })
-                .map_err(|e| e.to_string())?;
-                Box::new(client)
-            }
-            ProviderType::Local => {
-                // Use credential resolution with auth.toml fallback chain
-                let client = LocalClient::new(LocalClientConfig {
-                    store_path: None,
-                    stakpak_base_url: Some(final_api_endpoint.clone()),
-                    providers: ctx.get_llm_provider_config(),
-                    eco_model: ctx.eco_model.clone(),
-                    recovery_model: ctx.recovery_model.clone(),
-                    smart_model: ctx.smart_model.clone(),
-                    hook_registry: None,
-                })
+        if let Some(api_key) = ctx.get_stakpak_api_key() {
+            final_client_config = final_client_config.with_stakpak(
+                stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
+            );
+        }
+        if let Some(smart_model) = &ctx.smart_model {
+            final_client_config = final_client_config.with_smart_model(smart_model.clone());
+        }
+        if let Some(eco_model) = &ctx.eco_model {
+            final_client_config = final_client_config.with_eco_model(eco_model.clone());
+        }
+        if let Some(recovery_model) = &ctx.recovery_model {
+            final_client_config = final_client_config.with_recovery_model(recovery_model.clone());
+        }
+
+        let client: Box<dyn AgentProvider> = Box::new(
+            AgentClient::new(final_client_config)
                 .await
-                .map_err(|e| format!("Failed to create local client: {}", e))?;
-                Box::new(client)
-            }
-        };
+                .map_err(|e| format!("Failed to create client: {}", e))?,
+        );
 
         // Display session stats
         if let Some(session_id) = final_session_id {

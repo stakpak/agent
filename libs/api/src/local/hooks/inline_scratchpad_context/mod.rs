@@ -78,6 +78,7 @@ define_hook!(
             max_tokens: 16000,
             tools,
             provider_options: None,
+            headers: None,
         });
 
         Ok(HookAction::Continue)

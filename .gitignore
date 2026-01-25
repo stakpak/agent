@@ -4,3 +4,4 @@ debug.log
 
 # Stakpak local files
 .stakpak
+.DS_Store

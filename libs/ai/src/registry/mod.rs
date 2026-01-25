@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Registry for managing AI providers
+#[derive(Clone)]
 pub struct ProviderRegistry {
     providers: HashMap<String, Arc<dyn Provider>>,
 }

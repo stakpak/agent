@@ -8,15 +8,10 @@ use crate::commands::agent::run::helpers::{
 use crate::commands::agent::run::mcp_init::{McpInitConfig, initialize_mcp_server_and_tools};
 use crate::commands::agent::run::renderer::{OutputFormat, OutputRenderer};
 use crate::commands::agent::run::tooling::run_tool_call;
-use crate::config::{AppConfig, ProviderType};
+use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    models::ListRuleBook,
-    remote::{ClientConfig, RemoteClient},
-};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, models::ListRuleBook};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
@@ -83,31 +78,30 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         mcp_init_result.tools
     };
 
-    let client: Box<dyn AgentProvider> = match ctx.provider {
-        ProviderType::Remote => {
-            let client = RemoteClient::new(&ClientConfig {
-                api_key: ctx.api_key.clone(),
-                api_endpoint: ctx.api_endpoint.clone(),
-            })
-            .map_err(|e| e.to_string())?;
-            Box::new(client)
-        }
-        ProviderType::Local => {
-            // Use credential resolution with auth.toml fallback chain
-            let client = LocalClient::new(LocalClientConfig {
-                stakpak_base_url: Some(ctx.api_endpoint.clone()),
-                store_path: None,
-                providers: ctx.get_llm_provider_config(),
-                eco_model: ctx.eco_model.clone(),
-                recovery_model: ctx.recovery_model.clone(),
-                smart_model: ctx.smart_model.clone(),
-                hook_registry: None,
-            })
+    // Build unified AgentClient config
+    let providers = ctx.get_llm_provider_config();
+    let mut client_config = AgentClientConfig::new().with_providers(providers);
+
+    if let Some(api_key) = ctx.get_stakpak_api_key() {
+        client_config = client_config.with_stakpak(
+            stakpak_api::StakpakConfig::new(api_key).with_endpoint(ctx.api_endpoint.clone()),
+        );
+    }
+    if let Some(smart_model) = &ctx.smart_model {
+        client_config = client_config.with_smart_model(smart_model.clone());
+    }
+    if let Some(eco_model) = &ctx.eco_model {
+        client_config = client_config.with_eco_model(eco_model.clone());
+    }
+    if let Some(recovery_model) = &ctx.recovery_model {
+        client_config = client_config.with_recovery_model(recovery_model.clone());
+    }
+
+    let client: Box<dyn AgentProvider> = Box::new(
+        AgentClient::new(client_config)
             .await
-            .map_err(|e| format!("Failed to create local client: {}", e))?;
-            Box::new(client)
-        }
-    };
+            .map_err(|e| format!("Failed to create client: {}", e))?,
+    );
 
     // Load checkpoint messages if provided
     if let Some(checkpoint_id) = config.checkpoint_id {
