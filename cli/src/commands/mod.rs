@@ -157,8 +157,12 @@ pub enum Commands {
         command: Option<warden::WardenCommands>,
     },
     /// Task board for tracking complex work (cards, checklists, comments)
-    #[command(subcommand)]
-    Board(board::BoardCommands),
+    /// Run `stakpak board --help` for available commands.
+    Board {
+        /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Update Stakpak Agent to the latest version
     Update,
 }
@@ -440,8 +444,8 @@ impl Commands {
                     }
                 }
             }
-            Commands::Board(board_command) => {
-                board_command.run().await?;
+            Commands::Board { args } => {
+                board::run_board(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
