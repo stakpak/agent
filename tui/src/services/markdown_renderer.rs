@@ -1704,7 +1704,7 @@ fn xml_tags_to_markdown_headers(input: &str) -> String {
             if tag_name == "checkpoint_id" {
                 caps[0].to_string() // Return the original closing tag unchanged
             } else {
-                "SPACING_MARKER".to_string() // Remove other closing tags
+                String::new() // Just remove other closing tags
             }
         })
         .to_string();
