@@ -916,7 +916,7 @@ impl MarkdownRenderer {
                 }
             } else if c == '*' && chars.peek() == Some(&'*') {
                 chars.next(); // consume second *
-                              // Include content until next **
+                // Include content until next **
                 while let Some(&next) = chars.peek() {
                     if next == '*' {
                         chars.next();
