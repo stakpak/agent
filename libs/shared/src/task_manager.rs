@@ -351,7 +351,8 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the process by PID only if it still exists
+                // Kill the entire process group to ensure all child processes are terminated
+                // This is important for tools like vite/node that spawn child processes
                 #[cfg(unix)]
                 {
                     use std::process::Command;
@@ -366,17 +367,26 @@ impl TaskManager {
                         .map(|output| output.status.success())
                         .unwrap_or(false)
                     {
+                        // Kill the entire process group using negative PID
+                        // Since we spawn with .process_group(0), the shell becomes the process group leader
+                        // Using -{pid} kills all processes in that group (shell + children like node/vite/esbuild)
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(format!("-{}", process_id))
+                            .output();
+
+                        // Also try to kill the individual process in case it's not a group leader
                         let _ = Command::new("kill")
                             .arg("-9")
                             .arg(process_id.to_string())
-                            .output(); // Use output() to capture stderr and avoid printing
+                            .output();
                     }
                 }
 
                 #[cfg(windows)]
                 {
                     use std::process::Command;
-                    // On Windows, tasklist can check if process exists
+                    // On Windows, use taskkill with /T flag to kill the process tree
                     let check_result = Command::new("tasklist")
                         .arg("/FI")
                         .arg(format!("PID eq {}", process_id))
@@ -388,12 +398,13 @@ impl TaskManager {
                     if let Ok(output) = check_result {
                         let output_str = String::from_utf8_lossy(&output.stdout);
                         if output_str.lines().count() > 1 {
-                            // More than just header line
+                            // More than just header line - use /T to kill process tree
                             let _ = Command::new("taskkill")
                                 .arg("/F")
+                                .arg("/T") // Kill process tree
                                 .arg("/PID")
                                 .arg(process_id.to_string())
-                                .output(); // Use output() to capture stderr and avoid printing
+                                .output();
                         }
                     }
                 }
@@ -689,7 +700,8 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the process by PID only if it still exists
+                // Kill the entire process group to ensure all child processes are terminated
+                // This is important for tools like vite/node that spawn child processes
                 #[cfg(unix)]
                 {
                     use std::process::Command;
@@ -704,17 +716,26 @@ impl TaskManager {
                         .map(|output| output.status.success())
                         .unwrap_or(false)
                     {
+                        // Kill the entire process group using negative PID
+                        // Since we spawn with .process_group(0), the shell becomes the process group leader
+                        // Using -{pid} kills all processes in that group (shell + children like node/vite/esbuild)
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(format!("-{}", process_id))
+                            .output();
+
+                        // Also try to kill the individual process in case it's not a group leader
                         let _ = Command::new("kill")
                             .arg("-9")
                             .arg(process_id.to_string())
-                            .output(); // Use output() to capture stderr and avoid printing
+                            .output();
                     }
                 }
 
                 #[cfg(windows)]
                 {
                     use std::process::Command;
-                    // On Windows, tasklist can check if process exists
+                    // On Windows, use taskkill with /T flag to kill the process tree
                     let check_result = Command::new("tasklist")
                         .arg("/FI")
                         .arg(format!("PID eq {}", process_id))
@@ -726,12 +747,13 @@ impl TaskManager {
                     if let Ok(output) = check_result {
                         let output_str = String::from_utf8_lossy(&output.stdout);
                         if output_str.lines().count() > 1 {
-                            // More than just header line
+                            // More than just header line - use /T to kill process tree
                             let _ = Command::new("taskkill")
                                 .arg("/F")
+                                .arg("/T") // Kill process tree
                                 .arg("/PID")
                                 .arg(process_id.to_string())
-                                .output(); // Use output() to capture stderr and avoid printing
+                                .output();
                         }
                     }
                 }
