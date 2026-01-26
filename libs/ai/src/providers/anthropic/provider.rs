@@ -104,16 +104,6 @@ impl Provider for AnthropicProvider {
             conversion_result.has_cache_control,
         );
 
-        // Debug: Print HTTP request details
-        eprintln!("\n=== Anthropic HTTP Request (generate) ===");
-        eprintln!("URL: POST {}", url);
-        eprintln!("Headers: {:#?}", headers);
-        eprintln!(
-            "Body: {}",
-            serde_json::to_string_pretty(&conversion_result.request).unwrap_or_default()
-        );
-        eprintln!("==========================================\n");
-
         let response = self
             .client
             .post(&url)
@@ -143,16 +133,6 @@ impl Provider for AnthropicProvider {
             request.options.headers.as_ref(),
             conversion_result.has_cache_control,
         );
-
-        // Debug: Print HTTP request details
-        eprintln!("\n=== Anthropic HTTP Request (stream) ===");
-        eprintln!("URL: POST {}", url);
-        eprintln!("Headers: {:#?}", headers);
-        eprintln!(
-            "Body: {}",
-            serde_json::to_string_pretty(&conversion_result.request).unwrap_or_default()
-        );
-        eprintln!("========================================\n");
 
         let req_builder = self
             .client
