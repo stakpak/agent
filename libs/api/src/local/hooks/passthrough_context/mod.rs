@@ -4,8 +4,8 @@
 //! Anthropic's prompt caching. Each turn appends to the conversation rather than
 //! rewriting it, creating a stable prefix that can be cached.
 
-use crate::local::context_managers::passthrough_context_manager::PassthroughContextManager;
 use crate::local::context_managers::ContextManager;
+use crate::local::context_managers::passthrough_context_manager::PassthroughContextManager;
 use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
 use stakpak_shared::define_hook;
