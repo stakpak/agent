@@ -1,6 +1,6 @@
 //! Anthropic-specific types
 
-use crate::types::CacheControl;
+use crate::types::{CacheControl, CacheStrategy};
 use serde::{Deserialize, Serialize};
 
 /// Authentication type for Anthropic
@@ -56,6 +56,13 @@ pub struct AnthropicConfig {
     pub anthropic_version: String,
     /// Beta features to enable (e.g., ["prompt-caching-2024-07-31"])
     pub beta_features: Vec<String>,
+    /// Default caching strategy for requests (can be overridden per-request)
+    ///
+    /// Defaults to `CacheStrategy::Auto` which applies optimal caching:
+    /// - Last tool definition (caches all tools)
+    /// - Last system message
+    /// - Last 2 non-system messages
+    pub default_cache_strategy: CacheStrategy,
 }
 
 /// Beta header for OAuth authentication
@@ -81,6 +88,7 @@ impl AnthropicConfig {
             base_url: "https://api.anthropic.com/v1/".to_string(),
             anthropic_version: "2023-06-01".to_string(),
             beta_features: vec![],
+            default_cache_strategy: CacheStrategy::Auto,
         }
     }
 
@@ -91,6 +99,7 @@ impl AnthropicConfig {
             base_url: "https://api.anthropic.com/v1/".to_string(),
             anthropic_version: "2023-06-01".to_string(),
             beta_features: vec![OAUTH_BETA_HEADER.to_string()],
+            default_cache_strategy: CacheStrategy::Auto,
         }
     }
 
@@ -106,6 +115,7 @@ impl AnthropicConfig {
             base_url: "https://api.anthropic.com/v1/".to_string(),
             anthropic_version: "2023-06-01".to_string(),
             beta_features,
+            default_cache_strategy: CacheStrategy::Auto,
         }
     }
 
@@ -149,11 +159,42 @@ impl AnthropicConfig {
         self.beta_features.push(feature.into());
         self
     }
+
+    /// Set default caching strategy
+    ///
+    /// This strategy will be used for all requests unless overridden
+    /// via `GenerateOptions::with_cache_strategy()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stakai::{providers::anthropic::AnthropicConfig, CacheStrategy};
+    ///
+    /// // Disable caching by default for this provider
+    /// let config = AnthropicConfig::new("api-key")
+    ///     .with_cache_strategy(CacheStrategy::None);
+    ///
+    /// // Custom caching: only cache system prompts
+    /// let config = AnthropicConfig::new("api-key")
+    ///     .with_cache_strategy(CacheStrategy::anthropic(false, true, 0));
+    /// ```
+    pub fn with_cache_strategy(mut self, strategy: CacheStrategy) -> Self {
+        self.default_cache_strategy = strategy;
+        self
+    }
 }
 
 impl Default for AnthropicConfig {
     fn default() -> Self {
-        Self::new(std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| String::new()))
+        Self {
+            auth: AnthropicAuth::api_key(
+                std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| String::new()),
+            ),
+            base_url: "https://api.anthropic.com/v1/".to_string(),
+            anthropic_version: "2023-06-01".to_string(),
+            beta_features: vec![],
+            default_cache_strategy: CacheStrategy::Auto,
+        }
     }
 }
 
