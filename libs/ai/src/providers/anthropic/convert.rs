@@ -1,7 +1,7 @@
 //! Conversion between unified types and Anthropic types
 
 use super::types::{
-    AnthropicAuth, AnthropicCacheControl, AnthropicContent, AnthropicMessage,
+    AnthropicAuth, AnthropicCacheControl, AnthropicConfig, AnthropicContent, AnthropicMessage,
     AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSource,
     AnthropicSystemBlock, AnthropicSystemContent, AnthropicThinkingConfig as AnthropicThinking,
     CLAUDE_CODE_SYSTEM_PREFIX, infer_max_tokens,
@@ -24,33 +24,64 @@ pub struct AnthropicConversionResult {
     pub has_cache_control: bool,
 }
 
-/// Convert unified request to Anthropic request with cache control validation
+/// Convert unified request to Anthropic request with smart caching
+///
+/// This function applies the caching strategy from the request options,
+/// falling back to the provider's default strategy if not specified.
 pub fn to_anthropic_request(
     req: &GenerateRequest,
-    auth: &AnthropicAuth,
+    config: &AnthropicConfig,
     stream: bool,
 ) -> Result<AnthropicConversionResult> {
     let mut validator = CacheControlValidator::new();
 
-    // Extract and convert system messages with cache control and auth handling
-    let system = build_system_content(&req.messages, auth, &mut validator)?;
+    // Determine the effective caching strategy:
+    // 1. Request-level strategy takes precedence
+    // 2. Fall back to provider default
+    let cache_strategy = req
+        .options
+        .cache_strategy
+        .clone()
+        .unwrap_or_else(|| config.default_cache_strategy.clone());
 
-    // Convert non-system messages with cache control
-    let messages: Vec<AnthropicMessage> = req
-        .messages
-        .iter()
-        .filter(|m| m.role != Role::System)
-        .map(|m| to_anthropic_message(m, &mut validator))
-        .collect::<Result<Vec<_>>>()?;
+    let cache_config = cache_strategy.to_anthropic_config();
+
+    // Check if we have tools (for cache budget calculation)
+    let has_tools = req.options.tools.as_ref().map_or(false, |t| !t.is_empty());
+
+    // Build tools with smart caching (cache last tool)
+    let tools = build_tools_with_caching(
+        &req.options.tools,
+        &mut validator,
+        cache_config
+            .as_ref()
+            .map_or(false, |c| c.cache_tools && has_tools),
+    )?;
+
+    // Extract and convert system messages with smart caching
+    let system = build_system_content_with_caching(
+        &req.messages,
+        &config.auth,
+        &mut validator,
+        cache_config.as_ref().map_or(false, |c| c.cache_system),
+    )?;
+
+    // Calculate remaining budget for tail messages
+    let tail_budget = cache_config.as_ref().map_or(0, |c| {
+        let used = validator.breakpoint_count();
+        let max = 4usize; // Anthropic limit
+        let remaining = max.saturating_sub(used);
+        c.tail_message_count.min(remaining)
+    });
+
+    // Convert non-system messages with smart tail caching
+    let messages = build_messages_with_caching(&req.messages, &mut validator, tail_budget)?;
 
     // Determine max_tokens (required by Anthropic!)
     let max_tokens = req
         .options
         .max_tokens
         .unwrap_or_else(|| infer_max_tokens(&req.model));
-
-    // Convert tools to Anthropic format with cache control
-    let tools = build_tools(&req.options.tools, &mut validator)?;
 
     // Convert tool_choice to Anthropic format
     let tool_choice = req.options.tool_choice.as_ref().map(|choice| match choice {
@@ -98,11 +129,15 @@ pub fn to_anthropic_request(
     })
 }
 
-/// Build system content with cache control support and OAuth handling
-fn build_system_content(
+/// Build system content with smart caching and OAuth handling
+///
+/// When `auto_cache_last` is true, the last system block gets a cache breakpoint.
+/// This caches ALL system messages (Anthropic caches the full prefix up to the breakpoint).
+fn build_system_content_with_caching(
     messages: &[Message],
     auth: &AnthropicAuth,
     validator: &mut CacheControlValidator,
+    auto_cache_last: bool,
 ) -> Result<Option<AnthropicSystemContent>> {
     let system_messages: Vec<&Message> =
         messages.iter().filter(|m| m.role == Role::System).collect();
@@ -114,8 +149,11 @@ fn build_system_content(
         return Ok(None);
     }
 
-    // Check if any system message has cache control
-    let has_cache_control = system_messages.iter().any(|m| m.cache_control().is_some());
+    // Check if any system message has explicit cache control
+    let has_explicit_cache = system_messages.iter().any(|m| m.cache_control().is_some());
+
+    // Determine if we should use blocks format
+    let use_blocks = is_oauth || has_explicit_cache || auto_cache_last;
 
     // For OAuth, always use blocks format with Claude Code prefix
     if is_oauth {
@@ -134,11 +172,22 @@ fn build_system_content(
         );
 
         // Add user system messages
-        for msg in &system_messages {
+        let msg_count = system_messages.len();
+        for (i, msg) in system_messages.iter().enumerate() {
             if let Some(text) = msg.text() {
-                let cache_control = msg.cache_control();
+                let is_last = i == msg_count - 1;
+
+                // Use explicit cache or auto-cache last
+                let cache_control = msg.cache_control().cloned().or_else(|| {
+                    if is_last && auto_cache_last {
+                        Some(crate::types::CacheControl::ephemeral())
+                    } else {
+                        None
+                    }
+                });
+
                 let validated_cache =
-                    validator.validate(cache_control, CacheContext::system_message());
+                    validator.validate(cache_control.as_ref(), CacheContext::system_message());
 
                 blocks.push(AnthropicSystemBlock {
                     type_: "text".to_string(),
@@ -151,8 +200,8 @@ fn build_system_content(
         return Ok(Some(AnthropicSystemContent::Blocks(blocks)));
     }
 
-    // For API key auth without cache control, use simple string format
-    if !has_cache_control {
+    // For API key auth without any caching, use simple string format
+    if !use_blocks {
         let combined = system_messages
             .iter()
             .filter_map(|m| m.text())
@@ -161,13 +210,26 @@ fn build_system_content(
         return Ok(Some(AnthropicSystemContent::String(combined)));
     }
 
-    // Complex case: cache control present, use blocks format
+    // Complex case: caching needed, use blocks format
+    let msg_count = system_messages.len();
     let blocks: Vec<AnthropicSystemBlock> = system_messages
         .iter()
-        .filter_map(|msg| {
+        .enumerate()
+        .filter_map(|(i, msg)| {
             let text = msg.text()?;
-            let cache_control = msg.cache_control();
-            let validated_cache = validator.validate(cache_control, CacheContext::system_message());
+            let is_last = i == msg_count - 1;
+
+            // Use explicit cache or auto-cache last
+            let cache_control = msg.cache_control().cloned().or_else(|| {
+                if is_last && auto_cache_last {
+                    Some(crate::types::CacheControl::ephemeral())
+                } else {
+                    None
+                }
+            });
+
+            let validated_cache =
+                validator.validate(cache_control.as_ref(), CacheContext::system_message());
 
             Some(AnthropicSystemBlock {
                 type_: "text".to_string(),
@@ -184,22 +246,38 @@ fn build_system_content(
     }
 }
 
-/// Build tools with cache control support
-fn build_tools(
+/// Build tools with smart caching on the last tool
+///
+/// When `auto_cache_last` is true, the last tool gets a cache breakpoint.
+/// This caches ALL tools as a group (Anthropic caches the full prefix).
+fn build_tools_with_caching(
     tools: &Option<Vec<crate::types::Tool>>,
     validator: &mut CacheControlValidator,
+    auto_cache_last: bool,
 ) -> Result<Option<Vec<serde_json::Value>>> {
     let tools = match tools {
-        Some(t) => t,
-        None => return Ok(None),
+        Some(t) if !t.is_empty() => t,
+        _ => return Ok(None),
     };
 
+    let len = tools.len();
     let converted: Vec<serde_json::Value> = tools
         .iter()
-        .map(|tool| {
-            let cache_control = tool.cache_control();
+        .enumerate()
+        .map(|(i, tool)| {
+            let is_last = i == len - 1;
+
+            // Use explicit cache_control if set, otherwise auto-cache last tool
+            let cache_control = tool.cache_control().cloned().or_else(|| {
+                if is_last && auto_cache_last {
+                    Some(crate::types::CacheControl::ephemeral())
+                } else {
+                    None
+                }
+            });
+
             let validated_cache =
-                validator.validate(cache_control, CacheContext::tool_definition());
+                validator.validate(cache_control.as_ref(), CacheContext::tool_definition());
 
             let mut tool_json = json!({
                 "name": tool.function.name,
@@ -218,10 +296,35 @@ fn build_tools(
     Ok(Some(converted))
 }
 
-/// Convert unified message to Anthropic message with cache control validation
-fn to_anthropic_message(
+/// Build messages with smart tail caching
+///
+/// Caches the last N non-system messages to maximize cache hits
+/// on subsequent requests in a conversation.
+fn build_messages_with_caching(
+    messages: &[Message],
+    validator: &mut CacheControlValidator,
+    tail_count: usize,
+) -> Result<Vec<AnthropicMessage>> {
+    let non_system: Vec<&Message> = messages.iter().filter(|m| m.role != Role::System).collect();
+
+    let len = non_system.len();
+    let cache_start_index = len.saturating_sub(tail_count);
+
+    non_system
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| {
+            let should_auto_cache = tail_count > 0 && i >= cache_start_index;
+            to_anthropic_message_with_caching(msg, validator, should_auto_cache)
+        })
+        .collect()
+}
+
+/// Convert unified message to Anthropic message with optional auto-caching
+fn to_anthropic_message_with_caching(
     msg: &Message,
     validator: &mut CacheControlValidator,
+    auto_cache: bool,
 ) -> Result<AnthropicMessage> {
     // Determine the Anthropic role - Tool messages become "user" with tool_result content
     // (Anthropic doesn't support role="tool" like OpenAI)
@@ -236,8 +339,14 @@ fn to_anthropic_message(
         }
     };
 
-    // Get the message-level cache control
-    let msg_cache_control = msg.cache_control();
+    // Get the message-level cache control, or use auto-cache
+    let msg_cache_control = msg.cache_control().cloned().or_else(|| {
+        if auto_cache {
+            Some(crate::types::CacheControl::ephemeral())
+        } else {
+            None
+        }
+    });
 
     // Convert content parts
     let parts = msg.parts();
@@ -266,7 +375,11 @@ fn to_anthropic_message(
             .map(|(i, part)| {
                 let is_last = i == num_parts - 1;
                 // For the last part, include message-level cache control as fallback
-                let fallback_cache = if is_last { msg_cache_control } else { None };
+                let fallback_cache = if is_last {
+                    msg_cache_control.as_ref()
+                } else {
+                    None
+                };
                 to_anthropic_content_part(part, fallback_cache, validator, is_last)
             })
             .collect::<Result<Vec<_>>>()?;
