@@ -7,6 +7,7 @@ pub use types::*;
 
 use crate::services::approval_bar::ApprovalBar;
 use crate::services::auto_approve::AutoApproveManager;
+use crate::services::board_tasks::TaskProgress;
 use crate::services::changeset::{Changeset, SidePanelSection, TodoItem};
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::file_search::{FileSearch, file_search_worker, find_at_trigger};
@@ -218,7 +219,7 @@ pub struct AppState {
 
     pub todos: Vec<TodoItem>,
     /// Task progress (completed/total checklist items)
-    pub task_progress: Option<crate::services::board_tasks::TaskProgress>,
+    pub task_progress: Option<TaskProgress>,
     pub session_start_time: std::time::Instant,
 
     // Auto-show side panel tracking

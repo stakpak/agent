@@ -148,8 +148,13 @@ pub fn cards_to_todo_items(cards: &[BoardCard]) -> Vec<TodoItem> {
             .collect();
 
         // Find indices of done items and first non-done item
-        let done_count = checklist_items.iter().filter(|(_, s)| *s == TodoStatus::Done).count();
-        let first_pending_idx = checklist_items.iter().position(|(_, s)| *s != TodoStatus::Done);
+        let done_count = checklist_items
+            .iter()
+            .filter(|(_, s)| *s == TodoStatus::Done)
+            .count();
+        let first_pending_idx = checklist_items
+            .iter()
+            .position(|(_, s)| *s != TodoStatus::Done);
 
         // Determine which items to show vs collapse
         // Show: last done item (if any) + all pending items
@@ -381,25 +386,28 @@ mod tests {
                 status: "in_progress".to_string(),
                 assigned_to: None,
                 tags: vec![],
-                checklist: vec![
-                    ChecklistItem {
-                        id: "3".to_string(),
-                        text: "Item 3".to_string(),
-                        checked: false,
-                    },
-                ],
+                checklist: vec![ChecklistItem {
+                    id: "3".to_string(),
+                    text: "Item 3".to_string(),
+                    checked: false,
+                }],
                 created_at: "".to_string(),
                 updated_at: "".to_string(),
             },
         ];
 
         let items = cards_to_todo_items(&cards);
-        
+
         // Card 1: Card + collapsed(1) + Item 2 (last done)
         // Card 2: Card + Item 3 (pending)
         // Total: 5 items
-        assert_eq!(items.len(), 5, "Expected 5 items, got: {:?}", items.iter().map(|i| &i.text).collect::<Vec<_>>());
-        
+        assert_eq!(
+            items.len(),
+            5,
+            "Expected 5 items, got: {:?}",
+            items.iter().map(|i| &i.text).collect::<Vec<_>>()
+        );
+
         assert_eq!(items[0].text, "Card 1 - Done");
         assert_eq!(items[1].text, "(1 completed)"); // collapsed indicator
         assert_eq!(items[2].text, "Item 2"); // last done

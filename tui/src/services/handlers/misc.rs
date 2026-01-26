@@ -4,6 +4,9 @@
 
 use crate::app::{AppState, InputEvent};
 use crate::services::bash_block::render_bash_block_rejected;
+use crate::services::board_tasks::{
+    FetchTasksResult, extract_board_agent_id_from_messages, fetch_tasks_as_todo_items,
+};
 use crate::services::commands::list_auto_approved_tools;
 use crate::services::file_search::{handle_file_selection, handle_tab_trigger};
 use crate::services::helper_block::{handle_errors, push_error_message, push_styled_message};
@@ -340,9 +343,10 @@ pub fn handle_refresh_board_tasks(
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
 ) {
     // Try to get agent_id from state, or extract from message history
-    let agent_id = state.board_agent_id.clone().or_else(|| {
-        crate::services::board_tasks::extract_board_agent_id_from_messages(&state.messages)
-    });
+    let agent_id = state
+        .board_agent_id
+        .clone()
+        .or_else(|| extract_board_agent_id_from_messages(&state.messages));
 
     let Some(agent_id) = agent_id else {
         return;
@@ -355,7 +359,7 @@ pub fn handle_refresh_board_tasks(
 
     let tx = input_tx.clone();
     tokio::spawn(async move {
-        match crate::services::board_tasks::fetch_tasks_as_todo_items(&agent_id) {
+        match fetch_tasks_as_todo_items(&agent_id) {
             Ok(result) => {
                 let _ = tx.send(InputEvent::BoardTasksLoaded(result)).await;
             }
@@ -367,10 +371,7 @@ pub fn handle_refresh_board_tasks(
 }
 
 /// Handle board tasks loaded event
-pub fn handle_board_tasks_loaded(
-    state: &mut AppState,
-    result: crate::services::board_tasks::FetchTasksResult,
-) {
+pub fn handle_board_tasks_loaded(state: &mut AppState, result: FetchTasksResult) {
     state.todos = result.items;
     state.task_progress = Some(result.progress);
 }

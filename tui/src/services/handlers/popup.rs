@@ -468,7 +468,10 @@ pub fn handle_toggle_collapsed_messages(
 // ========== Side Panel Handlers ==========
 
 /// Handle toggle side panel event
-pub fn handle_toggle_side_panel(state: &mut AppState, input_tx: &tokio::sync::mpsc::Sender<InputEvent>) {
+pub fn handle_toggle_side_panel(
+    state: &mut AppState,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
     state.show_side_panel = !state.show_side_panel;
     // Refresh board tasks when showing the side panel
     if state.show_side_panel && state.board_agent_id.is_some() {

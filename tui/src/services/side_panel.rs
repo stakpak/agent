@@ -353,7 +353,8 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
         let card_prefix_width = LEFT_PADDING.len() + 6; // "  [x] " = 6 chars
         let checklist_prefix_width = LEFT_PADDING.len() + 9; // "     └ [x] " = 9 chars
         let card_content_width = (area.width as usize).saturating_sub(card_prefix_width + 2);
-        let checklist_content_width = (area.width as usize).saturating_sub(checklist_prefix_width + 2);
+        let checklist_content_width =
+            (area.width as usize).saturating_sub(checklist_prefix_width + 2);
 
         for todo in &state.todos {
             let (symbol, symbol_color, text_color) = match todo.status {
@@ -381,10 +382,7 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
                             ]));
                         } else {
                             lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("{}    ", LEFT_PADDING),
-                                    Style::default(),
-                                ),
+                                Span::styled(format!("{}    ", LEFT_PADDING), Style::default()),
                                 Span::styled(
                                     line_text.clone(),
                                     Style::default().fg(text_color).add_modifier(Modifier::BOLD),
