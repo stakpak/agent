@@ -7,7 +7,9 @@
 
 use super::types::{AnthropicContent, AnthropicStreamEvent};
 use crate::error::{Error, Result};
-use crate::types::{FinishReason, FinishReasonKind, GenerateStream, StreamEvent, Usage};
+use crate::types::{
+    FinishReason, FinishReasonKind, GenerateStream, InputTokenDetails, StreamEvent, Usage,
+};
 use futures::stream::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 
@@ -92,9 +94,29 @@ fn process_anthropic_event(
 ) -> Vec<StreamEvent> {
     match event.type_.as_str() {
         "message_start" => {
-            // Message started - extract usage info
+            // Message started - extract usage info including cache details
             if let Some(message) = event.message {
-                accumulated_usage.prompt_tokens = message.usage.input_tokens;
+                let usage = &message.usage;
+                let cache_creation = usage.cache_creation_input_tokens.unwrap_or(0);
+                let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
+                let input_tokens = usage.input_tokens;
+                let total_input = input_tokens + cache_creation + cache_read;
+
+                accumulated_usage.prompt_tokens = total_input;
+                accumulated_usage.input_token_details = Some(InputTokenDetails {
+                    total: Some(total_input),
+                    no_cache: Some(input_tokens),
+                    cache_read: if cache_read > 0 {
+                        Some(cache_read)
+                    } else {
+                        None
+                    },
+                    cache_write: if cache_creation > 0 {
+                        Some(cache_creation)
+                    } else {
+                        None
+                    },
+                });
             }
             Vec::new()
         }
