@@ -318,14 +318,16 @@ fn render_tasks_section(f: &mut Frame, state: &AppState, area: Rect, collapsed: 
     let header_style = section_header_style(focused);
 
     let collapse_indicator = if collapsed { "▸" } else { "▾" };
-    let count = if state.todos.is_empty() {
+    let progress = if let Some(ref p) = state.task_progress {
+        format!(" ({}/{})", p.completed, p.total)
+    } else if state.todos.is_empty() {
         String::new()
     } else {
         format!(" ({})", state.todos.len())
     };
 
     let header = Line::from(Span::styled(
-        format!("{}{} Tasks{}", LEFT_PADDING, collapse_indicator, count),
+        format!("{}{} Tasks{}", LEFT_PADDING, collapse_indicator, progress),
         header_style,
     ));
 

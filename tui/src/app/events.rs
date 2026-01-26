@@ -144,7 +144,7 @@ pub enum InputEvent {
 
     // Board tasks events
     RefreshBoardTasks,
-    BoardTasksLoaded(Vec<crate::services::changeset::TodoItem>),
+    BoardTasksLoaded(crate::services::board_tasks::FetchTasksResult),
     BoardTasksError(String),
 }
 

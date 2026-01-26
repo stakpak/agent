@@ -75,6 +75,47 @@ pub fn fetch_agent_tasks(agent_id: &str) -> Result<Vec<BoardCard>, String> {
     serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse JSON: {}", e))
 }
 
+/// Task progress statistics
+#[derive(Debug, Clone, Default)]
+pub struct TaskProgress {
+    pub completed: usize,
+    pub total: usize,
+}
+
+impl TaskProgress {
+    /// Format as "X/Y" for display
+    pub fn display(&self) -> String {
+        format!("{}/{}", self.completed, self.total)
+    }
+}
+
+/// Calculate progress from cards: checked items / total checklist items
+/// Cards without checklists count as 1 item (done if card is done)
+pub fn calculate_progress(cards: &[BoardCard]) -> TaskProgress {
+    let mut completed = 0;
+    let mut total = 0;
+
+    for card in cards {
+        if card.checklist.is_empty() {
+            // Card with no checklist counts as 1 item
+            total += 1;
+            if card.status == "done" {
+                completed += 1;
+            }
+        } else {
+            // Count checklist items
+            for item in &card.checklist {
+                total += 1;
+                if item.checked {
+                    completed += 1;
+                }
+            }
+        }
+    }
+
+    TaskProgress { completed, total }
+}
+
 /// Convert board cards to TodoItems for display with smart collapsing
 /// Strategy: Show last completed + all in-progress/pending, collapse older completed items
 pub fn cards_to_todo_items(cards: &[BoardCard]) -> Vec<TodoItem> {
@@ -154,10 +195,20 @@ pub fn cards_to_todo_items(cards: &[BoardCard]) -> Vec<TodoItem> {
     items
 }
 
-/// Fetch and convert tasks in one call
-pub fn fetch_tasks_as_todo_items(agent_id: &str) -> Result<Vec<TodoItem>, String> {
+/// Result of fetching tasks including items and progress
+#[derive(Debug, Clone)]
+pub struct FetchTasksResult {
+    pub items: Vec<TodoItem>,
+    pub progress: TaskProgress,
+}
+
+/// Fetch and convert tasks in one call, including progress stats
+pub fn fetch_tasks_as_todo_items(agent_id: &str) -> Result<FetchTasksResult, String> {
     let cards = fetch_agent_tasks(agent_id)?;
-    Ok(cards_to_todo_items(&cards))
+    Ok(FetchTasksResult {
+        items: cards_to_todo_items(&cards),
+        progress: calculate_progress(&cards),
+    })
 }
 
 /// Extract board agent ID from message history by scanning backwards for the pattern

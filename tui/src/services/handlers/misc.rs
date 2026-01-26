@@ -356,8 +356,8 @@ pub fn handle_refresh_board_tasks(
     let tx = input_tx.clone();
     tokio::spawn(async move {
         match crate::services::board_tasks::fetch_tasks_as_todo_items(&agent_id) {
-            Ok(tasks) => {
-                let _ = tx.send(InputEvent::BoardTasksLoaded(tasks)).await;
+            Ok(result) => {
+                let _ = tx.send(InputEvent::BoardTasksLoaded(result)).await;
             }
             Err(err) => {
                 let _ = tx.send(InputEvent::BoardTasksError(err)).await;
@@ -369,9 +369,10 @@ pub fn handle_refresh_board_tasks(
 /// Handle board tasks loaded event
 pub fn handle_board_tasks_loaded(
     state: &mut AppState,
-    tasks: Vec<crate::services::changeset::TodoItem>,
+    result: crate::services::board_tasks::FetchTasksResult,
 ) {
-    state.todos = tasks;
+    state.todos = result.items;
+    state.task_progress = Some(result.progress);
 }
 
 /// Handle board tasks error event

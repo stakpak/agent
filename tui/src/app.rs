@@ -217,6 +217,8 @@ pub struct AppState {
     pub changeset: Changeset,
 
     pub todos: Vec<TodoItem>,
+    /// Task progress (completed/total checklist items)
+    pub task_progress: Option<crate::services::board_tasks::TaskProgress>,
     pub session_start_time: std::time::Instant,
 
     // Auto-show side panel tracking
@@ -471,6 +473,7 @@ impl AppState {
             side_panel_areas: HashMap::new(),
             changeset: Changeset::new(),
             todos: Vec::new(),
+            task_progress: None,
             session_start_time: std::time::Instant::now(),
             side_panel_auto_shown: false,
             session_id: String::new(), // Will be set when session starts
