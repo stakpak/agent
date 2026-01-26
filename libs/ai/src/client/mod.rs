@@ -72,11 +72,11 @@ impl Inference {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use stakai::{Inference, GenerateRequest, Message, Role};
+    /// # use stakai::{Inference, GenerateRequest, Message, Model, Role};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = Inference::new();
     /// let request = GenerateRequest::new(
-    ///     "openai/gpt-4",
+    ///     Model::custom("gpt-4", "openai"),
     ///     vec![Message::new(Role::User, "Hello!")]
     /// );
     /// let response = client.generate(&request).await?;
@@ -204,12 +204,12 @@ impl Inference {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use stakai::{Inference, GenerateRequest, Message, Role, StreamEvent};
+    /// # use stakai::{Inference, GenerateRequest, Message, Model, Role, StreamEvent};
     /// # use futures::StreamExt;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = Inference::new();
     /// let request = GenerateRequest::new(
-    ///     "openai/gpt-4",
+    ///     Model::custom("gpt-4", "openai"),
     ///     vec![Message::new(Role::User, "Count to 5")]
     /// );
     /// let mut stream = client.stream(&request).await?;

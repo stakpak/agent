@@ -15,14 +15,14 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use stakai::{Inference, GenerateRequest, Message, Role};
+//! use stakai::{Inference, GenerateRequest, Message, Model, Role};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Inference::new();
 //!
 //!     let request = GenerateRequest::new(
-//!         "gpt-4",
+//!         Model::custom("gpt-4", "openai"),
 //!         vec![Message::new(Role::User, "What is Rust?")]
 //!     );
 //!

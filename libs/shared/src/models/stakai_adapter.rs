@@ -830,9 +830,6 @@ impl StakAIClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::integrations::anthropic::AnthropicModel;
-    use crate::models::integrations::gemini::GeminiModel;
-    use crate::models::integrations::openai::OpenAIModel;
 
     // ==================== Role Conversion Tests ====================
 
@@ -1304,37 +1301,30 @@ mod tests {
 
     #[test]
     fn test_model_string_anthropic() {
-        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let model = Model::custom("claude-sonnet-4-5-20250929", "anthropic");
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("anthropic/"));
-        assert!(model_str.contains("claude"));
+        assert_eq!(model_str, "claude-sonnet-4-5-20250929");
     }
 
     #[test]
     fn test_model_string_openai() {
-        let model = LLMModel::OpenAI(OpenAIModel::GPT5);
+        let model = Model::custom("gpt-5", "openai");
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("openai/"));
-        assert!(model_str.contains("gpt"));
+        assert_eq!(model_str, "gpt-5");
     }
 
     #[test]
     fn test_model_string_gemini() {
-        let model = LLMModel::Gemini(GeminiModel::Gemini25Flash);
+        let model = Model::custom("gemini-2.5-flash", "google");
         let model_str = get_stakai_model_string(&model);
-        assert!(model_str.starts_with("google/"));
-        assert!(model_str.contains("gemini"));
+        assert_eq!(model_str, "gemini-2.5-flash");
     }
 
     #[test]
     fn test_model_string_custom() {
-        let model = LLMModel::Custom {
-            provider: "litellm".to_string(),
-            model: "claude-opus-4-5".to_string(),
-            name: None,
-        };
+        let model = Model::custom("claude-opus-4-5", "litellm");
         let model_str = get_stakai_model_string(&model);
-        assert_eq!(model_str, "litellm/claude-opus-4-5");
+        assert_eq!(model_str, "claude-opus-4-5");
     }
 
     // ==================== Response Conversion Tests ====================
@@ -1434,7 +1424,7 @@ mod tests {
             google: None,
         };
 
-        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let model = Model::custom("claude-sonnet-4-5-20250929", "anthropic");
         let result = to_stakai_provider_options(&opts, &model);
 
         assert!(result.is_some());
@@ -1458,7 +1448,7 @@ mod tests {
             google: None,
         };
 
-        let model = LLMModel::OpenAI(OpenAIModel::GPT5);
+        let model = Model::custom("gpt-5", "openai");
         let result = to_stakai_provider_options(&opts, &model);
 
         assert!(result.is_some());
@@ -1481,7 +1471,7 @@ mod tests {
             }),
         };
 
-        let model = LLMModel::Gemini(GeminiModel::Gemini25Flash);
+        let model = Model::custom("gemini-2.5-flash", "google");
         let result = to_stakai_provider_options(&opts, &model);
 
         assert!(result.is_some());
@@ -1498,7 +1488,7 @@ mod tests {
 
         let opts = LLMProviderOptions::default();
 
-        let model = LLMModel::Anthropic(AnthropicModel::Claude45Sonnet);
+        let model = Model::custom("claude-sonnet-4-5-20250929", "anthropic");
         let result = to_stakai_provider_options(&opts, &model);
 
         assert!(result.is_none());

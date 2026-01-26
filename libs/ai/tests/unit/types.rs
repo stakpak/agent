@@ -1,6 +1,7 @@
 //! Unit tests for core types
 
 use stakai::types::*;
+use stakai::Model;
 
 #[test]
 fn test_message_creation() {
@@ -85,7 +86,7 @@ fn test_content_part_image_with_detail() {
 #[test]
 fn test_generate_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai/gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
@@ -104,7 +105,7 @@ fn test_generate_request_creation() {
 #[test]
 fn test_generate_request_simple() {
     let request = GenerateRequest::new(
-        "openai/gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![Message {
             role: Role::User,
             content: "Hello".into(),

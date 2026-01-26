@@ -32,17 +32,18 @@ pub struct GenerateRequest {
     /// # Example
     ///
     /// ```rust
-    /// use stakai::GenerateRequest;
+    /// use stakai::{GenerateRequest, Message, Model, Role};
     /// use std::collections::HashMap;
     ///
     /// let mut metadata = HashMap::new();
     /// metadata.insert("user.id".to_string(), "user-123".to_string());
     /// metadata.insert("session.id".to_string(), "session-456".to_string());
     ///
-    /// let request = GenerateRequest {
-    ///     telemetry_metadata: Some(metadata),
-    ///     ..Default::default()
-    /// };
+    /// let mut request = GenerateRequest::new(
+    ///     Model::custom("gpt-4", "openai"),
+    ///     vec![Message::new(Role::User, "Hello")]
+    /// );
+    /// request.telemetry_metadata = Some(metadata);
     /// ```
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_metadata: Option<HashMap<String, String>>,

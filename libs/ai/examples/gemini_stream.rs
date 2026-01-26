@@ -1,7 +1,7 @@
 //! Example: Streaming with Gemini
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, Message, Role, StreamEvent};
+use stakai::{GenerateRequest, Inference, Message, Model, Role, StreamEvent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gemini-1.5-flash",
+        Model::custom("gemini-1.5-flash", "google"),
         vec![Message::new(
             Role::User,
             "Tell me an interesting fact about space exploration.",
