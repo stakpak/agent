@@ -223,17 +223,15 @@ fn to_anthropic_message(
     msg: &Message,
     validator: &mut CacheControlValidator,
 ) -> Result<AnthropicMessage> {
+    // Determine the Anthropic role - Tool messages become "user" with tool_result content
+    // (Anthropic doesn't support role="tool" like OpenAI)
     let role = match msg.role {
         Role::User => "user",
         Role::Assistant => "assistant",
+        Role::Tool => "user", // Anthropic expects tool results as user messages
         Role::System => {
             return Err(Error::invalid_response(
                 "System messages should be filtered out",
-            ));
-        }
-        Role::Tool => {
-            return Err(Error::invalid_response(
-                "Tool messages not yet supported for Anthropic",
             ));
         }
     };
@@ -248,7 +246,10 @@ fn to_anthropic_message(
     let has_cache_control =
         msg_cache_control.is_some() || parts.iter().any(|p| p.cache_control().is_some());
 
-    let content = if parts.len() == 1 && !has_cache_control {
+    // Tool messages always use blocks format (tool_result content blocks)
+    let force_blocks = msg.role == Role::Tool;
+
+    let content = if parts.len() == 1 && !has_cache_control && !force_blocks {
         // Single content without cache control - try to use simple string format if text
         match &parts[0] {
             ContentPart::Text { text, .. } => AnthropicMessageContent::String(text.clone()),
@@ -257,7 +258,7 @@ fn to_anthropic_message(
             )?]),
         }
     } else {
-        // Multiple content parts or has cache control - use array format
+        // Multiple content parts, has cache control, or tool message - use array format
         let num_parts = parts.len();
         let content_parts = parts
             .iter()
@@ -488,6 +489,7 @@ fn parse_stop_reason(reason: &Option<String>) -> FinishReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::MessageContent;
 
     #[test]
     fn test_infer_max_tokens() {
@@ -506,5 +508,148 @@ mod tests {
         assert_eq!(result.type_, "base64");
         assert_eq!(result.media_type, "image/png");
         assert_eq!(result.data, "iVBORw0KGgoAAAANS");
+    }
+
+    #[test]
+    fn test_tool_role_message_converted_to_user_with_tool_result() {
+        // Test that Role::Tool messages are converted to Anthropic's expected format:
+        // role="user" with tool_result content blocks
+        // This is critical for Anthropic compatibility - they don't support role="tool"
+        let mut validator = CacheControlValidator::new();
+
+        let tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![ContentPart::ToolResult {
+                tool_call_id: "toolu_01Abc123".to_string(),
+                content: serde_json::json!("Tool execution result"),
+                provider_options: None,
+            }]),
+            name: None,
+            provider_options: None,
+        };
+
+        let result = to_anthropic_message(&tool_msg, &mut validator).unwrap();
+
+        // Role should be converted to "user" for Anthropic
+        assert_eq!(
+            result.role, "user",
+            "Tool role should be converted to user for Anthropic"
+        );
+
+        // Content should contain tool_result block
+        match result.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1, "Should have exactly one content block");
+                match &blocks[0] {
+                    AnthropicContent::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        assert_eq!(tool_use_id, "toolu_01Abc123");
+                        // Content should be the stringified JSON
+                        match content {
+                            Some(AnthropicMessageContent::String(s)) => {
+                                assert_eq!(s, "\"Tool execution result\"");
+                            }
+                            _ => panic!("Expected string content in tool result"),
+                        }
+                    }
+                    _ => panic!("Expected ToolResult content block, got {:?}", blocks[0]),
+                }
+            }
+            _ => panic!("Expected Blocks content, got {:?}", result.content),
+        }
+    }
+
+    #[test]
+    fn test_tool_role_message_with_text_content() {
+        // Test tool result with plain text content (common case)
+        let mut validator = CacheControlValidator::new();
+
+        let tool_msg = Message {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![ContentPart::ToolResult {
+                tool_call_id: "toolu_02Xyz789".to_string(),
+                content: serde_json::json!({"temperature": 22, "unit": "celsius"}),
+                provider_options: None,
+            }]),
+            name: None,
+            provider_options: None,
+        };
+
+        let result = to_anthropic_message(&tool_msg, &mut validator).unwrap();
+
+        assert_eq!(result.role, "user");
+        match result.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    AnthropicContent::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        assert_eq!(tool_use_id, "toolu_02Xyz789");
+                        match content {
+                            Some(AnthropicMessageContent::String(s)) => {
+                                // JSON object should be stringified
+                                assert!(s.contains("temperature"));
+                                assert!(s.contains("22"));
+                            }
+                            _ => panic!("Expected string content"),
+                        }
+                    }
+                    _ => panic!("Expected ToolResult"),
+                }
+            }
+            _ => panic!("Expected Blocks"),
+        }
+    }
+
+    #[test]
+    fn test_assistant_message_not_affected_by_tool_conversion() {
+        // Ensure assistant messages are not affected by the tool role handling
+        let mut validator = CacheControlValidator::new();
+
+        let assistant_msg = Message {
+            role: Role::Assistant,
+            content: MessageContent::Text("I'll help you with that.".to_string()),
+            name: None,
+            provider_options: None,
+        };
+
+        let result = to_anthropic_message(&assistant_msg, &mut validator).unwrap();
+
+        assert_eq!(result.role, "assistant");
+        match result.content {
+            AnthropicMessageContent::String(s) => {
+                assert_eq!(s, "I'll help you with that.");
+            }
+            _ => panic!("Expected string content for simple assistant message"),
+        }
+    }
+
+    #[test]
+    fn test_user_message_not_affected_by_tool_conversion() {
+        // Ensure user messages are not affected by the tool role handling
+        let mut validator = CacheControlValidator::new();
+
+        let user_msg = Message {
+            role: Role::User,
+            content: MessageContent::Text("Hello!".to_string()),
+            name: None,
+            provider_options: None,
+        };
+
+        let result = to_anthropic_message(&user_msg, &mut validator).unwrap();
+
+        assert_eq!(result.role, "user");
+        match result.content {
+            AnthropicMessageContent::String(s) => {
+                assert_eq!(s, "Hello!");
+            }
+            _ => panic!("Expected string content for simple user message"),
+        }
     }
 }
