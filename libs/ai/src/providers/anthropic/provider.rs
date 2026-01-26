@@ -97,12 +97,22 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, false)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, false)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
             conversion_result.has_cache_control,
         );
+
+        // Debug: Print HTTP request details
+        eprintln!("\n=== Anthropic HTTP Request (generate) ===");
+        eprintln!("URL: POST {}", url);
+        eprintln!("Headers: {:#?}", headers);
+        eprintln!(
+            "Body: {}",
+            serde_json::to_string_pretty(&conversion_result.request).unwrap_or_default()
+        );
+        eprintln!("==========================================\n");
 
         let response = self
             .client
@@ -127,12 +137,22 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, true)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, true)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
             conversion_result.has_cache_control,
         );
+
+        // Debug: Print HTTP request details
+        eprintln!("\n=== Anthropic HTTP Request (stream) ===");
+        eprintln!("URL: POST {}", url);
+        eprintln!("Headers: {:#?}", headers);
+        eprintln!(
+            "Body: {}",
+            serde_json::to_string_pretty(&conversion_result.request).unwrap_or_default()
+        );
+        eprintln!("========================================\n");
 
         let req_builder = self
             .client

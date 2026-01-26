@@ -140,6 +140,30 @@ pub enum ProviderConfig {
         /// Use the base URL as required by your provider (e.g., "http://localhost:11434/v1")
         api_endpoint: String,
     },
+    /// Stakpak provider configuration
+    ///
+    /// Routes inference through Stakpak's unified API, which provides:
+    /// - Access to multiple LLM providers via a single endpoint
+    /// - Usage tracking and billing
+    /// - Session management and checkpoints
+    ///
+    /// # Example TOML
+    /// ```toml
+    /// [profiles.myprofile.providers.stakpak]
+    /// type = "stakpak"
+    /// api_key = "your-stakpak-api-key"
+    /// api_endpoint = "https://apiv2.stakpak.dev"  # optional, this is the default
+    ///
+    /// # Then use models as:
+    /// smart_model = "stakpak/anthropic/claude-sonnet-4-5-20250929"
+    /// ```
+    Stakpak {
+        /// Stakpak API key (required)
+        api_key: String,
+        /// API endpoint URL (default: https://apiv2.stakpak.dev)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_endpoint: Option<String>,
+    },
 }
 
 impl ProviderConfig {
@@ -150,6 +174,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { .. } => "anthropic",
             ProviderConfig::Gemini { .. } => "gemini",
             ProviderConfig::Custom { .. } => "custom",
+            ProviderConfig::Stakpak { .. } => "stakpak",
         }
     }
 
@@ -160,6 +185,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Gemini { api_key, .. } => api_key.as_deref(),
             ProviderConfig::Custom { api_key, .. } => api_key.as_deref(),
+            ProviderConfig::Stakpak { api_key, .. } => Some(api_key.as_str()),
         }
     }
 
@@ -170,6 +196,7 @@ impl ProviderConfig {
             ProviderConfig::Anthropic { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Gemini { api_endpoint, .. } => api_endpoint.as_deref(),
             ProviderConfig::Custom { api_endpoint, .. } => Some(api_endpoint.as_str()),
+            ProviderConfig::Stakpak { api_endpoint, .. } => api_endpoint.as_deref(),
         }
     }
 
@@ -213,6 +240,14 @@ impl ProviderConfig {
             api_endpoint,
         }
     }
+
+    /// Create a Stakpak provider config
+    pub fn stakpak(api_key: String, api_endpoint: Option<String>) -> Self {
+        ProviderConfig::Stakpak {
+            api_key,
+            api_endpoint,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -234,6 +269,8 @@ pub enum LLMModel {
         provider: String,
         /// Model name/path to pass to the provider API (can include nested prefixes)
         model: String,
+        /// Optional display name for the model (shown in UI instead of provider/model)
+        name: Option<String>,
     },
 }
 
@@ -252,7 +289,13 @@ impl ContextAware for LLMModel {
             LLMModel::Anthropic(model) => model.model_name(),
             LLMModel::Gemini(model) => model.model_name(),
             LLMModel::OpenAI(model) => model.model_name(),
-            LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => name
+                .clone()
+                .unwrap_or_else(|| format!("{}/{}", provider, model)),
         }
     }
 }
@@ -314,9 +357,12 @@ impl From<String> for LLMModel {
                 "google" | "gemini" => return Self::from_model_name(model),
                 // Unknown provider = custom provider (model can contain additional slashes)
                 _ => {
+                    // Extract display name from the last segment (e.g., "anthropic/claude-opus" -> "claude-opus")
+                    let display_name = model.rsplit('/').next().unwrap_or(model).to_string();
                     return LLMModel::Custom {
                         provider: provider.to_string(),
                         model: model.to_string(), // Preserves nested paths like "anthropic/claude-opus"
+                        name: Some(display_name),
                     };
                 }
             }
@@ -355,6 +401,7 @@ impl LLMModel {
             LLMModel::Custom {
                 provider: "custom".to_string(),
                 model: model.to_string(),
+                name: Some(model.to_string()), // Use model name as display name
             }
         }
     }
@@ -378,6 +425,28 @@ impl LLMModel {
             LLMModel::Custom { model, .. } => model.clone(),
         }
     }
+
+    /// Set a display name for a custom model
+    pub fn with_name(self, name: impl Into<String>) -> Self {
+        match self {
+            LLMModel::Custom {
+                provider, model, ..
+            } => LLMModel::Custom {
+                provider,
+                model,
+                name: Some(name.into()),
+            },
+            other => other, // Built-in models don't support custom names
+        }
+    }
+
+    /// Get the display name if set (for custom models only)
+    pub fn display_name(&self) -> Option<&str> {
+        match self {
+            LLMModel::Custom { name, .. } => name.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 impl Display for LLMModel {
@@ -386,7 +455,17 @@ impl Display for LLMModel {
             LLMModel::Anthropic(model) => write!(f, "{}", model),
             LLMModel::Gemini(model) => write!(f, "{}", model),
             LLMModel::OpenAI(model) => write!(f, "{}", model),
-            LLMModel::Custom { provider, model } => write!(f, "{}/{}", provider, model),
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
+                if let Some(name) = name {
+                    write!(f, "{}", name)
+                } else {
+                    write!(f, "{}/{}", provider, model)
+                }
+            }
         }
     }
 }
@@ -454,6 +533,9 @@ pub struct LLMInput {
     pub tools: Option<Vec<LLMTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_options: Option<LLMProviderOptions>,
+    /// Custom headers to pass to the inference provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug)]
@@ -464,6 +546,8 @@ pub struct LLMStreamInput {
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,
     pub tools: Option<Vec<LLMTool>>,
     pub provider_options: Option<LLMProviderOptions>,
+    /// Custom headers to pass to the inference provider
+    pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 impl From<&LLMStreamInput> for LLMInput {
@@ -474,6 +558,7 @@ impl From<&LLMStreamInput> for LLMInput {
             max_tokens: value.max_tokens,
             tools: value.tools.clone(),
             provider_options: value.provider_options.clone(),
+            headers: value.headers.clone(),
         }
     }
 }
@@ -764,9 +849,15 @@ mod tests {
     fn test_llm_model_from_custom_provider_with_slash() {
         let model = LLMModel::from("litellm/claude-opus-4-5".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "litellm");
                 assert_eq!(model, "claude-opus-4-5");
+                // Display name is automatically extracted from last segment
+                assert_eq!(name, Some("claude-opus-4-5".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -776,9 +867,34 @@ mod tests {
     fn test_llm_model_from_ollama_provider() {
         let model = LLMModel::from("ollama/llama3".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "ollama");
                 assert_eq!(model, "llama3");
+                // Display name is automatically extracted from last segment
+                assert_eq!(name, Some("llama3".to_string()));
+            }
+            _ => panic!("Expected Custom model"),
+        }
+    }
+
+    #[test]
+    fn test_llm_model_from_nested_provider() {
+        // Test nested path like stakpak/anthropic/claude-sonnet-4-5
+        let model = LLMModel::from("stakpak/anthropic/claude-sonnet-4-5".to_string());
+        match model {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
+                assert_eq!(provider, "stakpak");
+                assert_eq!(model, "anthropic/claude-sonnet-4-5");
+                // Display name is the last segment only
+                assert_eq!(name, Some("claude-sonnet-4-5".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -823,9 +939,15 @@ mod tests {
     fn test_llm_model_unknown_model_becomes_custom() {
         let model = LLMModel::from("some-random-model".to_string());
         match model {
-            LLMModel::Custom { provider, model } => {
+            LLMModel::Custom {
+                provider,
+                model,
+                name,
+            } => {
                 assert_eq!(provider, "custom");
                 assert_eq!(model, "some-random-model");
+                // Display name is the model name itself
+                assert_eq!(name, Some("some-random-model".to_string()));
             }
             _ => panic!("Expected Custom model"),
         }
@@ -843,8 +965,28 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus".to_string(),
+            name: None,
         };
         assert_eq!(model.to_string(), "litellm/claude-opus");
+    }
+
+    #[test]
+    fn test_llm_model_display_custom_with_name() {
+        let model = LLMModel::Custom {
+            provider: "litellm".to_string(),
+            model: "claude-opus".to_string(),
+            name: Some("My Custom Model".to_string()),
+        };
+        assert_eq!(model.to_string(), "My Custom Model");
+    }
+
+    #[test]
+    fn test_llm_model_with_name() {
+        let model = LLMModel::from("ollama/llama3".to_string()).with_name("Local Llama");
+        assert_eq!(model.to_string(), "Local Llama");
+        assert_eq!(model.display_name(), Some("Local Llama"));
+        // model_id should still return the original model
+        assert_eq!(model.model_id(), "llama3");
     }
 
     #[test]
@@ -864,7 +1006,8 @@ mod tests {
         assert_eq!(
             LLMModel::Custom {
                 provider: "litellm".to_string(),
-                model: "test".to_string()
+                model: "test".to_string(),
+                name: None,
             }
             .provider_name(),
             "litellm"
@@ -876,6 +1019,7 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus-4-5".to_string(),
+            name: None,
         };
         assert_eq!(model.model_id(), "claude-opus-4-5");
     }

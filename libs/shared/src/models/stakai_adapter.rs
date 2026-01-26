@@ -12,7 +12,7 @@ use crate::models::llm::{
 use futures::StreamExt;
 use stakai::{
     AnthropicOptions, ContentPart, FinishReason, GenerateOptions, GenerateRequest,
-    GenerateResponse, GoogleOptions, Inference, InferenceConfig, Message, MessageContent,
+    GenerateResponse, GoogleOptions, Headers, Inference, InferenceConfig, Message, MessageContent,
     OpenAIOptions, ProviderOptions, ReasoningEffort, Role, StreamEvent, ThinkingOptions, Tool,
     ToolFunction, Usage, providers::anthropic::AnthropicConfig as StakaiAnthropicConfig,
     registry::ProviderRegistry,
@@ -424,6 +424,16 @@ pub fn build_inference_config(config: &LLMProviderConfig) -> Result<InferenceCon
                         inference_config.gemini(api_key.clone(), api_endpoint.clone());
                 }
             }
+            ProviderConfig::Stakpak {
+                api_key,
+                api_endpoint,
+            } => {
+                // Skip if api_key is empty - stakpak is optional
+                if !api_key.is_empty() {
+                    inference_config =
+                        inference_config.stakpak(api_key.clone(), api_endpoint.clone());
+                }
+            }
             ProviderConfig::Custom { .. } => {
                 // Custom providers are handled by build_provider_registry_direct
                 // InferenceConfig doesn't support custom providers directly
@@ -442,6 +452,7 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
     };
     use stakai::providers::gemini::{GeminiConfig as StakaiGeminiConfig, GeminiProvider};
     use stakai::providers::openai::{OpenAIConfig as StakaiOpenAIConfig, OpenAIProvider};
+    use stakai::providers::stakpak::{StakpakProvider, StakpakProviderConfig};
 
     let mut registry = ProviderRegistry::new();
 
@@ -502,6 +513,22 @@ fn build_provider_registry_direct(config: &LLMProviderConfig) -> Result<Provider
                     registry = registry.register("google", provider);
                 }
             }
+            ProviderConfig::Stakpak {
+                api_key,
+                api_endpoint,
+            } => {
+                // Skip if api_key is empty - stakpak is optional
+                if api_key.is_empty() {
+                    continue;
+                }
+                let mut stakpak_config = StakpakProviderConfig::new(api_key.clone());
+                if let Some(endpoint) = api_endpoint {
+                    stakpak_config = stakpak_config.with_base_url(endpoint.clone());
+                }
+                let provider = StakpakProvider::new(stakpak_config)
+                    .map_err(|e| format!("Failed to create Stakpak provider: {}", e))?;
+                registry = registry.register("stakpak", provider);
+            }
             ProviderConfig::Custom {
                 api_key,
                 api_endpoint,
@@ -533,11 +560,14 @@ pub fn get_stakai_model_string(model: &LLMModel) -> String {
         LLMModel::Anthropic(m) => format!("anthropic/{}", m),
         LLMModel::Gemini(m) => format!("google/{}", m),
         LLMModel::OpenAI(m) => format!("openai/{}", m),
-        LLMModel::Custom { provider, model } => format!("{}/{}", provider, model),
+        LLMModel::Custom {
+            provider, model, ..
+        } => format!("{}/{}", provider, model),
     }
 }
 
 /// Wrapper around StakAI Inference for CLI usage
+#[derive(Clone)]
 pub struct StakAIClient {
     inference: Inference,
 }
@@ -584,6 +614,15 @@ impl StakAIClient {
             }
         }
 
+        // Add custom headers if present
+        if let Some(headers) = &input.headers {
+            let mut stakai_headers = Headers::new();
+            for (key, value) in headers {
+                stakai_headers.insert(key, value);
+            }
+            options = options.headers(stakai_headers);
+        }
+
         // Convert provider options if present
         let provider_options = input
             .provider_options
@@ -619,6 +658,15 @@ impl StakAIClient {
             for tool in tools {
                 options = options.add_tool(to_stakai_tool(tool));
             }
+        }
+
+        // Add custom headers if present
+        if let Some(headers) = &input.headers {
+            let mut stakai_headers = Headers::new();
+            for (key, value) in headers {
+                stakai_headers.insert(key, value);
+            }
+            options = options.headers(stakai_headers);
         }
 
         // Convert provider options if present
@@ -1286,6 +1334,7 @@ mod tests {
         let model = LLMModel::Custom {
             provider: "litellm".to_string(),
             model: "claude-opus-4-5".to_string(),
+            name: None,
         };
         let model_str = get_stakai_model_string(&model);
         assert_eq!(model_str, "litellm/claude-opus-4-5");

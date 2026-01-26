@@ -43,6 +43,7 @@ pub fn user_message(user_input: String) -> ChatMessage {
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     }
 }
 
@@ -54,6 +55,7 @@ pub fn system_message(system_prompt: String) -> ChatMessage {
         tool_calls: None,
         tool_call_id: None,
         usage: None,
+        ..Default::default()
     }
 }
 
@@ -65,6 +67,7 @@ pub fn tool_result(tool_call_id: String, result: String) -> ChatMessage {
         tool_calls: None,
         tool_call_id: Some(tool_call_id),
         usage: None,
+        ..Default::default()
     }
 }
 
