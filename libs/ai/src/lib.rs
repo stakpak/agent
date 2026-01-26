@@ -47,6 +47,8 @@ pub mod tracing;
 pub use client::{Inference, InferenceConfig};
 pub use error::{Error, Result};
 pub use types::{
+    // Cache control types
+    AnthropicCacheConfig,
     // Message types
     AnthropicContentPartOptions,
     AnthropicMessageOptions,
@@ -54,8 +56,6 @@ pub use types::{
     AnthropicOptions,
     // Options types
     AnthropicToolOptions,
-    // Cache control types
-    AnthropicCacheConfig,
     CacheContext,
     CacheControl,
     CacheControlValidator,

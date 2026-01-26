@@ -1,8 +1,8 @@
 //! Generation options and tool definitions
 
+use super::Headers;
 use super::cache::CacheControl;
 use super::cache_strategy::CacheStrategy;
-use super::Headers;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
