@@ -1,6 +1,6 @@
 //! Basic generation example
 
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build a request
     let mut request = GenerateRequest::new(
-        "gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![
             Message::new(Role::System, "You are a helpful assistant"),
             Message::new(Role::User, "What is Rust programming language?"),

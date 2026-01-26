@@ -81,7 +81,7 @@ pub fn to_anthropic_request(
     let max_tokens = req
         .options
         .max_tokens
-        .unwrap_or_else(|| infer_max_tokens(&req.model));
+        .unwrap_or_else(|| infer_max_tokens(&req.model.id));
 
     // Convert tool_choice to Anthropic format
     let tool_choice = req.options.tool_choice.as_ref().map(|choice| match choice {
@@ -110,7 +110,7 @@ pub fn to_anthropic_request(
 
     Ok(AnthropicConversionResult {
         request: AnthropicRequest {
-            model: req.model.clone(),
+            model: req.model.id.clone(),
             messages,
             max_tokens,
             system,

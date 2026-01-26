@@ -1,6 +1,6 @@
 //! Test example for InferenceConfig
 
-use stakai::{GenerateRequest, Inference, InferenceConfig, Message, Role};
+use stakai::{GenerateRequest, Inference, InferenceConfig, Message, Model, Role};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,10 +48,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Try to make a request (will fail without real API key, but tests the API)
     println!("\n=== Test 4: Request API Test ===");
-    let request = GenerateRequest::new("gpt-4", vec![Message::new(Role::User, "Hello!")]);
+    let request = GenerateRequest::new(
+        Model::custom("gpt-4", "openai"),
+        vec![Message::new(Role::User, "Hello!")],
+    );
 
     println!("✓ Request created successfully");
-    println!("  Model: {}", request.model);
+    println!("  Model: {}", request.model.id);
     println!("  Messages: {}", request.messages.len());
 
     println!("\n=== All Tests Passed ===");

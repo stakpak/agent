@@ -1,7 +1,7 @@
 //! Streaming generation example
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, Message, Role, StreamEvent};
+use stakai::{GenerateRequest, Inference, Message, Model, Role, StreamEvent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build a request
     let mut request = GenerateRequest::new(
-        "gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![Message::new(
             Role::User,
             "Write a haiku about Rust programming",

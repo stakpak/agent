@@ -60,7 +60,7 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
             }
         })
         .unwrap_or_else(|| {
-            if is_reasoning_model(&req.model) {
+            if is_reasoning_model(&req.model.id) {
                 SystemMessageMode::Developer
             } else {
                 SystemMessageMode::System
@@ -74,13 +74,13 @@ pub fn to_openai_request(req: &GenerateRequest, stream: bool) -> ChatCompletionR
         .filter_map(|msg| to_openai_message_with_mode(msg, system_message_mode))
         .collect();
 
-    let temp = match is_reasoning_model(&req.model) {
+    let temp = match is_reasoning_model(&req.model.id) {
         false => Some(0.0),
         true => None,
     };
 
     ChatCompletionRequest {
-        model: req.model.clone(),
+        model: req.model.id.clone(),
         messages,
         temperature: temp,
         max_completion_tokens: req.options.max_tokens,

@@ -11,10 +11,10 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, models::ListRuleBook};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, Model, models::ListRuleBook};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
-use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
+use stakpak_shared::models::integrations::openai::ChatMessage;
 use stakpak_shared::models::llm::LLMTokenUsage;
 use stakpak_shared::models::subagent::SubagentConfigs;
 use std::time::Instant;
@@ -35,7 +35,7 @@ pub struct RunAsyncConfig {
     pub enable_mtls: bool,
     pub system_prompt: Option<String>,
     pub enabled_tools: EnabledToolsConfig,
-    pub model: AgentModel,
+    pub model: Model,
     pub agents_md: Option<AgentsMdInfo>,
 }
 

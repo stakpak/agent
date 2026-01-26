@@ -4,7 +4,7 @@ use models::*;
 use reqwest::header::HeaderMap;
 use rmcp::model::Content;
 use stakpak_shared::models::integrations::openai::{
-    AgentModel, ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
+    ChatCompletionResponse, ChatCompletionStreamResponse, ChatMessage, Tool,
 };
 use uuid::Uuid;
 
@@ -20,6 +20,63 @@ pub(crate) mod local;
 pub use client::{
     AgentClient, AgentClientConfig, DEFAULT_STAKPAK_ENDPOINT, ModelOptions, StakpakConfig,
 };
+
+// Re-export Model types from stakai
+pub use stakai::{Model, ModelCost, ModelLimit};
+
+/// Find a model by ID string
+///
+/// Parses the model string and searches the catalog:
+/// - If format is "provider/model_id", searches within that provider
+/// - If no provider prefix, searches all providers by model ID
+///
+/// When `use_stakpak` is true, the returned model will have provider set to "stakpak"
+/// for routing through the Stakpak API.
+///
+/// Returns None if the model is not found in any catalog.
+pub fn find_model(model_str: &str, use_stakpak: bool) -> Option<Model> {
+    use stakai::providers::{anthropic, gemini, openai};
+
+    // Split on first '/' to check for provider prefix
+    let (provider_prefix, model_id) = if let Some(idx) = model_str.find('/') {
+        let (prefix, rest) = model_str.split_at(idx);
+        (Some(prefix), &rest[1..]) // Skip the '/'
+    } else {
+        (None, model_str)
+    };
+
+    // Search for the model
+    let found_model = match provider_prefix {
+        Some("anthropic") => anthropic::models::get_model(model_id),
+        Some("openai") => openai::models::get_model(model_id),
+        Some("google") | Some("gemini") => gemini::models::get_model(model_id),
+        Some(_) => None, // Unknown provider prefix, will search all below
+        None => None,
+    };
+
+    // If not found with prefix, or no prefix given, search all providers
+    let found_model = found_model.or_else(|| {
+        anthropic::models::get_model(model_id)
+            .or_else(|| openai::models::get_model(model_id))
+            .or_else(|| gemini::models::get_model(model_id))
+    });
+
+    // Adjust the model for Stakpak routing if needed
+    found_model.map(|mut m| {
+        if use_stakpak {
+            // Prefix the ID with the original provider for Stakpak routing
+            let provider_for_id = match m.provider.as_str() {
+                "anthropic" => "anthropic",
+                "openai" => "openai",
+                "google" => "google",
+                _ => &m.provider,
+            };
+            m.id = format!("{}/{}", provider_for_id, m.id);
+            m.provider = "stakpak".into();
+        }
+        m
+    })
+}
 
 #[async_trait]
 pub trait AgentProvider: Send + Sync {
@@ -56,13 +113,13 @@ pub trait AgentProvider: Send + Sync {
     // Chat
     async fn chat_completion(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
     ) -> Result<ChatCompletionResponse, String>;
     async fn chat_completion_stream(
         &self,
-        model: AgentModel,
+        model: Model,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         headers: Option<HeaderMap>,
@@ -97,4 +154,7 @@ pub trait AgentProvider: Send + Sync {
         &self,
         input: &SlackSendMessageRequest,
     ) -> Result<Vec<Content>, String>;
+
+    // Models
+    async fn list_models(&self) -> Vec<Model>;
 }

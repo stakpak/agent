@@ -2,7 +2,7 @@
 
 use stakai::providers::openai::{OpenAIConfig, OpenAIProvider};
 use stakai::registry::ProviderRegistry;
-use stakai::{GenerateRequest, Inference, Message, Role};
+use stakai::{GenerateRequest, Inference, Message, Model, Role};
 
 #[test]
 fn test_client_creation() {
@@ -55,7 +55,7 @@ fn test_registry_list_providers() {
 #[test]
 fn test_request_creation() {
     let mut request = GenerateRequest::new(
-        "openai/gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![
             Message {
                 role: Role::System,
@@ -82,7 +82,7 @@ fn test_request_creation() {
 #[test]
 fn test_request_with_model() {
     let request = GenerateRequest::new(
-        "gpt-4",
+        Model::custom("gpt-4", "openai"),
         vec![Message {
             role: Role::User,
             content: "Hello".into(),
@@ -91,7 +91,7 @@ fn test_request_with_model() {
         }],
     );
 
-    assert_eq!(request.model, "gpt-4");
+    assert_eq!(request.model.id, "gpt-4");
     assert_eq!(request.messages.len(), 1);
 }
 
@@ -112,7 +112,7 @@ fn test_request_multiple_messages() {
         },
     ];
 
-    let request = GenerateRequest::new("openai/gpt-4", messages);
+    let request = GenerateRequest::new(Model::custom("gpt-4", "openai"), messages);
 
     assert_eq!(request.messages.len(), 2);
 }

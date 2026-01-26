@@ -1,11 +1,12 @@
 //! Anthropic provider implementation
 
 use super::convert::{from_anthropic_response_with_warnings, to_anthropic_request};
+use super::models;
 use super::stream::create_stream;
 use super::types::{AnthropicConfig, AnthropicResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
-use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
+use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers, Model};
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_eventsource::EventSource;
@@ -57,42 +58,14 @@ impl Provider for AnthropicProvider {
         self.build_headers_with_cache(custom_headers, false)
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
-        let url = format!("{}models", self.config.base_url);
-        let headers = self.build_headers(None);
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Return static model definitions with full metadata
+        Ok(models::models())
+    }
 
-        let response = self
-            .client
-            .get(&url)
-            .headers(headers.to_reqwest_headers())
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::provider_error(format!(
-                "Anthropic API error {}: {}",
-                status, error_text
-            )));
-        }
-
-        let resp: serde_json::Value = response.json().await?;
-
-        // Extract model IDs from the response
-        // Response format: { "data": [{ "id": "model-id", ... }, ...] }
-        let models = resp
-            .get("data")
-            .and_then(|d| d.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
-                    .map(|s| s.to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        Ok(models)
+    async fn get_model(&self, id: &str) -> Result<Option<Model>> {
+        // Use static lookup for efficiency
+        Ok(models::get_model(id))
     }
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {

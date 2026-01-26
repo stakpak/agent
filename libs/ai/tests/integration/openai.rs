@@ -3,7 +3,7 @@
 //! Run with: cargo test --test integration -- --ignored
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, Message, Role, StreamEvent};
+use stakai::{GenerateRequest, Inference, Message, Model, Role, StreamEvent};
 
 #[tokio::test]
 #[ignore] // Requires OPENAI_API_KEY
@@ -11,7 +11,7 @@ async fn test_openai_generate() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-5-mini-2025-08-07",
+        Model::custom("gpt-5-mini-2025-08-07", "openai"),
         vec![Message {
             role: Role::User,
             content: "Say 'Hello, World!' and nothing else".into(),
@@ -37,7 +37,7 @@ async fn test_openai_streaming() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-5-mini-2025-08-07",
+        Model::custom("gpt-5-mini-2025-08-07", "openai"),
         vec![Message {
             role: Role::User,
             content: "Count from 1 to 3".into(),
@@ -79,7 +79,7 @@ async fn test_openai_with_system_message() {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "gpt-5-mini-2025-08-07",
+        Model::custom("gpt-5-mini-2025-08-07", "openai"),
         vec![
             Message {
                 role: Role::System,
@@ -112,7 +112,7 @@ async fn test_openai_explicit_provider() {
     let client = Inference::new();
 
     let request = GenerateRequest::new(
-        "openai/gpt-3.5-turbo",
+        Model::custom("gpt-3.5-turbo", "openai"),
         vec![Message {
             role: Role::User,
             content: "Say hello".into(),
@@ -134,7 +134,7 @@ async fn test_openai_temperature_variation() {
 
     // Test with temperature 0 (deterministic)
     let mut request = GenerateRequest::new(
-        "gpt-3.5-turbo",
+        Model::custom("gpt-3.5-turbo", "openai"),
         vec![Message {
             role: Role::User,
             content: "Say exactly: 'Test'".into(),

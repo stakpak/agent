@@ -8,6 +8,7 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
+stakai = { workspace = true }
 stakpak-shared = { workspace = true }
 stakpak-api = { workspace = true }
 regex = { workspace = true }

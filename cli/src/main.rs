@@ -3,7 +3,7 @@ use names::{self, Name};
 use rustls::crypto::CryptoProvider;
 use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider};
 use stakpak_mcp_server::EnabledToolsConfig;
-use stakpak_shared::models::{integrations::openai::AgentModel, subagent::SubagentConfigs};
+use stakpak_shared::models::subagent::SubagentConfigs;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -121,10 +121,6 @@ struct Cli {
     /// Configuration profile to use (can also be set with STAKPAK_PROFILE env var)
     #[arg(long = "profile")]
     profile: Option<String>,
-
-    /// Choose agent model on startup (smart or eco)
-    #[arg(long = "model")]
-    model: Option<AgentModel>,
 
     /// Custom path to config file (overrides default ~/.stakpak/config.toml)
     #[arg(long = "config")]
@@ -430,6 +426,7 @@ async fn main() {
 
                     let allowed_tools = cli.allowed_tools.or_else(|| config.allowed_tools.clone());
                     let auto_approve = config.auto_approve.clone();
+                    let default_model = config.get_default_model();
 
                     match use_async_mode {
                         // Async mode: run continuously until no more tool calls (or max_steps=1 for single-step)
@@ -452,7 +449,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
-                                model: cli.model.unwrap_or(AgentModel::Smart),
+                                model: default_model.clone(),
                                 agents_md: agents_md.clone(),
                             },
                         )
@@ -484,7 +481,7 @@ async fn main() {
                                 enabled_tools: EnabledToolsConfig {
                                     slack: cli.enable_slack_tools,
                                 },
-                                model: cli.model.unwrap_or(AgentModel::Smart),
+                                model: default_model,
                                 agents_md,
                             },
                         )

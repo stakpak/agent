@@ -55,6 +55,7 @@ use crate::models::{
     model_pricing::{ContextAware, ModelContextInfo},
 };
 use serde::{Deserialize, Serialize};
+use stakai::Model;
 use std::collections::HashMap;
 use std::fmt::Display;
 
@@ -527,7 +528,7 @@ pub struct LLMGoogleOptions {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LLMInput {
-    pub model: LLMModel,
+    pub model: Model,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub tools: Option<Vec<LLMTool>>,
@@ -540,7 +541,7 @@ pub struct LLMInput {
 
 #[derive(Debug)]
 pub struct LLMStreamInput {
-    pub model: LLMModel,
+    pub model: Model,
     pub messages: Vec<LLMMessage>,
     pub max_tokens: u32,
     pub stream_channel_tx: tokio::sync::mpsc::Sender<GenerationDelta>,

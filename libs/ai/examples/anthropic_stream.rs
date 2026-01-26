@@ -1,7 +1,7 @@
 //! Example: Streaming with Anthropic
 
 use futures::StreamExt;
-use stakai::{GenerateRequest, Inference, Message, Role, StreamEvent};
+use stakai::{GenerateRequest, Inference, Message, Model, Role, StreamEvent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Inference::new();
 
     let mut request = GenerateRequest::new(
-        "claude-3-5-sonnet-20241022",
+        Model::custom("claude-3-5-sonnet-20241022", "anthropic"),
         vec![Message::new(
             Role::User,
             "Write a short poem about Rust programming.",

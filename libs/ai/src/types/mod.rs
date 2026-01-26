@@ -5,6 +5,7 @@ mod cache_strategy;
 mod cache_validator;
 mod headers;
 mod message;
+mod model;
 mod options;
 mod request;
 mod response;
@@ -43,3 +44,6 @@ pub use response::{
 
 // Stream types
 pub use stream::{GenerateStream, StreamEvent};
+
+// Model types
+pub use model::{Model, ModelCost, ModelLimit};

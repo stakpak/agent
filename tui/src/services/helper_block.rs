@@ -3,7 +3,6 @@ use crate::constants::{EXCEEDED_API_LIMIT_ERROR, EXCEEDED_API_LIMIT_ERROR_MESSAG
 use crate::services::message::{Message, MessageContent, invalidate_message_lines_cache};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use stakpak_shared::models::integrations::openai::AgentModel;
 use uuid::Uuid;
 
 pub fn get_stakpak_version() -> String {
@@ -225,36 +224,6 @@ pub fn push_memorize_message(state: &mut AppState) {
     state.messages.push(Message {
         id: uuid::Uuid::new_v4(),
         content: MessageContent::StyledBlock(lines),
-        is_collapsed: None,
-    });
-    invalidate_message_lines_cache(state);
-}
-
-pub fn push_model_message(state: &mut AppState) {
-    let mut line = Vec::new();
-    line.push(Span::styled(
-        "Switched to ",
-        Style::default().fg(Color::DarkGray),
-    ));
-    match state.agent_model {
-        AgentModel::Smart => {
-            line.push(Span::styled("smart", Style::default().fg(Color::Cyan)));
-        }
-        AgentModel::Eco => {
-            line.push(Span::styled("eco", Style::default().fg(Color::LightGreen)));
-        }
-        AgentModel::Recovery => {
-            line.push(Span::styled(
-                "recovery",
-                Style::default().fg(Color::LightBlue),
-            ));
-        }
-    }
-    line.push(Span::styled(" model", Style::default().fg(Color::DarkGray)));
-
-    state.messages.push(Message {
-        id: uuid::Uuid::new_v4(),
-        content: MessageContent::Styled(Line::from(line)),
         is_collapsed: None,
     });
     invalidate_message_lines_cache(state);
