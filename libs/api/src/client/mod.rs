@@ -236,7 +236,7 @@ impl AgentClient {
                     recovery_model: model_options.recovery_model.clone(),
                 },
                 history_action_message_size_limit: Some(100),
-                history_action_message_keep_last_n: Some(1),
+                history_action_message_keep_last_n: Some(50),
                 history_action_result_keep_last_n: Some(50),
             })),
         );
