@@ -110,19 +110,19 @@ pub fn messages_to_history(
     history_items
 }
 
-/// Format history items as XML text
-pub fn history_to_text(history: &[HistoryItem]) -> String {
-    format!(
-        "<history>\n{}\n</history>",
-        history
-            .iter()
-            .map(|item| item.to_string())
-            .collect::<Vec<String>>()
-            .join("\n"),
-    )
-    .trim()
-    .to_string()
-}
+// /// Format history items as XML text
+// pub fn history_to_text(history: &[HistoryItem]) -> String {
+//     format!(
+//         "<history>\n{}\n</history>",
+//         history
+//             .iter()
+//             .map(|item| item.to_string())
+//             .collect::<Vec<String>>()
+//             .join("\n"),
+//     )
+//     .trim()
+//     .to_string()
+// }
 
 pub fn remove_xml_tag(tag_name: &str, content: &str) -> String {
     #[allow(clippy::unwrap_used)]
