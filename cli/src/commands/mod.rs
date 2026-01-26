@@ -11,6 +11,7 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod board;
 pub mod mcp;
 pub mod warden;
 
@@ -154,6 +155,13 @@ pub enum Commands {
         volume: Vec<String>,
         #[command(subcommand)]
         command: Option<warden::WardenCommands>,
+    },
+    /// Task board for tracking complex work (cards, checklists, comments)
+    /// Run `stakpak board --help` for available commands.
+    Board {
+        /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Update Stakpak Agent to the latest version
     Update,
@@ -435,6 +443,9 @@ impl Commands {
                         warden::run_default_warden(config, volume, env).await?;
                     }
                 }
+            }
+            Commands::Board { args } => {
+                board::run_board(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;

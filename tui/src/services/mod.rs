@@ -1,6 +1,7 @@
 pub mod approval_bar;
 pub mod auto_approve;
 pub mod bash_block;
+pub mod board_tasks;
 pub mod changeset;
 pub mod clipboard_paste;
 pub mod commands;

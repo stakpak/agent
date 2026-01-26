@@ -82,6 +82,9 @@ pub async fn run_tui(
     // Create internal channel for event handling (needed for error reporting during initialization)
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<InputEvent>(100);
 
+    // Get board_agent_id from environment variable
+    let board_agent_id = std::env::var("AGENT_BOARD_AGENT_ID").ok();
+
     let mut state = AppState::new(AppStateOptions {
         latest_version,
         redact_secrets,
@@ -93,6 +96,7 @@ pub async fn run_tui(
         agent_model,
         editor_command,
         auth_display_info,
+        board_agent_id,
     });
 
     // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
@@ -113,6 +117,12 @@ pub async fn run_tui(
     let welcome_msg =
         crate::services::helper_block::welcome_messages(state.latest_version.clone(), &state);
     state.messages.extend(welcome_msg);
+
+    // Trigger initial board tasks refresh if agent ID is configured
+    if state.board_agent_id.is_some() {
+        let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
+    }
+
     let internal_tx_thread = internal_tx.clone();
     // Create atomic pause flag for input thread
     let input_paused = Arc::new(AtomicBool::new(false));
@@ -298,6 +308,10 @@ pub async fn run_tui(
                        // Invalidate cache and scroll to bottom to show the result
                        crate::services::message::invalidate_message_lines_cache(&mut state);
                        state.stay_at_bottom = true;
+
+                       // Refresh board tasks after tool execution (agent may have updated tasks)
+                       // Always trigger refresh - the handler will extract agent_id from messages if needed
+                       let _ = internal_tx.try_send(InputEvent::RefreshBoardTasks);
                    }
                    if let InputEvent::ToggleMouseCapture = event {
                        #[cfg(unix)]
