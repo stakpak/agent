@@ -55,9 +55,11 @@ pub use types::{
     // Options types
     AnthropicToolOptions,
     // Cache control types
+    AnthropicCacheConfig,
     CacheContext,
     CacheControl,
     CacheControlValidator,
+    CacheStrategy,
     CacheWarning,
     CacheWarningType,
     ContentPart,
