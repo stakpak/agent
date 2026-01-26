@@ -632,7 +632,7 @@ pub fn update(
 
         // Side panel handlers
         InputEvent::ToggleSidePanel => {
-            popup::handle_toggle_side_panel(state);
+            popup::handle_toggle_side_panel(state, input_tx);
         }
         InputEvent::SidePanelNextSection => {
             popup::handle_side_panel_next_section(state);
@@ -742,6 +742,17 @@ pub fn update(
             } else {
                 popup::handle_side_panel_mouse_click(state, col, row);
             }
+        }
+
+        // Board tasks events
+        InputEvent::RefreshBoardTasks => {
+            misc::handle_refresh_board_tasks(state, input_tx);
+        }
+        InputEvent::BoardTasksLoaded(tasks) => {
+            misc::handle_board_tasks_loaded(state, tasks);
+        }
+        InputEvent::BoardTasksError(err) => {
+            misc::handle_board_tasks_error(state, err);
         }
     }
 

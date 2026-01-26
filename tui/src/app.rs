@@ -222,6 +222,9 @@ pub struct AppState {
     // Auto-show side panel tracking
     pub side_panel_auto_shown: bool,
 
+    /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID or created)
+    pub board_agent_id: Option<String>,
+
     /// External editor command (vim, nvim, or nano)
     pub editor_command: String,
 
@@ -244,6 +247,8 @@ pub struct AppStateOptions<'a> {
     pub editor_command: Option<String>,
     /// Auth display info: (config_provider, auth_provider, subscription_name) for local providers
     pub auth_display_info: (Option<String>, Option<String>, Option<String>),
+    /// Agent board ID for task tracking (from AGENT_BOARD_AGENT_ID env var)
+    pub board_agent_id: Option<String>,
 }
 
 impl AppState {
@@ -285,6 +290,7 @@ impl AppState {
             agent_model,
             editor_command,
             auth_display_info,
+            board_agent_id,
         } = options;
 
         let helpers = Self::get_helper_commands();
@@ -458,7 +464,7 @@ impl AppState {
                 let mut collapsed = std::collections::HashMap::new();
                 collapsed.insert(SidePanelSection::Context, false); // Always expanded
                 collapsed.insert(SidePanelSection::Billing, false); // Expanded by default
-                collapsed.insert(SidePanelSection::Todos, false); // Expanded by default
+                collapsed.insert(SidePanelSection::Tasks, false); // Expanded by default
                 collapsed.insert(SidePanelSection::Changeset, false); // Expanded by default
                 collapsed
             },
@@ -468,6 +474,7 @@ impl AppState {
             session_start_time: std::time::Instant::now(),
             side_panel_auto_shown: false,
             session_id: String::new(), // Will be set when session starts
+            board_agent_id,
             editor_command: crate::services::editor::detect_editor(editor_command)
                 .unwrap_or_else(|| "nano".to_string()),
             pending_editor_open: None,

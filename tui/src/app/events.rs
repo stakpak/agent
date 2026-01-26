@@ -141,6 +141,11 @@ pub enum InputEvent {
     SidePanelNextSection,
     SidePanelToggleSection,
     MouseClick(u16, u16),
+
+    // Board tasks events
+    RefreshBoardTasks,
+    BoardTasksLoaded(Vec<crate::services::changeset::TodoItem>),
+    BoardTasksError(String),
 }
 
 #[derive(Debug)]

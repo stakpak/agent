@@ -5651,6 +5651,7 @@ dependencies = [
  "chrono",
  "console",
  "crossterm 0.29.0",
+ "dirs",
  "ignore",
  "image",
  "log",

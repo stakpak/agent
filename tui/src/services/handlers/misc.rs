@@ -333,3 +333,49 @@ pub fn handle_billing_info_loaded(
 ) {
     state.billing_info = Some(billing_info);
 }
+
+/// Handle refresh board tasks event - spawns async task to fetch from agent-board
+pub fn handle_refresh_board_tasks(
+    state: &mut AppState,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
+    // Try to get agent_id from state, or extract from message history
+    let agent_id = state.board_agent_id.clone().or_else(|| {
+        crate::services::board_tasks::extract_board_agent_id_from_messages(&state.messages)
+    });
+
+    let Some(agent_id) = agent_id else {
+        return;
+    };
+
+    // Update state if we found it from messages
+    if state.board_agent_id.is_none() {
+        state.board_agent_id = Some(agent_id.clone());
+    }
+
+    let tx = input_tx.clone();
+    tokio::spawn(async move {
+        match crate::services::board_tasks::fetch_tasks_as_todo_items(&agent_id) {
+            Ok(tasks) => {
+                let _ = tx.send(InputEvent::BoardTasksLoaded(tasks)).await;
+            }
+            Err(err) => {
+                let _ = tx.send(InputEvent::BoardTasksError(err)).await;
+            }
+        }
+    });
+}
+
+/// Handle board tasks loaded event
+pub fn handle_board_tasks_loaded(
+    state: &mut AppState,
+    tasks: Vec<crate::services::changeset::TodoItem>,
+) {
+    state.todos = tasks;
+}
+
+/// Handle board tasks error event
+pub fn handle_board_tasks_error(_state: &mut AppState, _err: String) {
+    // Log error but don't show to user - tasks will just be empty
+    // Could add logging here if tracing is added as a dependency
+}
