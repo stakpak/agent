@@ -47,7 +47,7 @@ pub fn to_anthropic_request(
     let cache_config = cache_strategy.to_anthropic_config();
 
     // Check if we have tools (for cache budget calculation)
-    let has_tools = req.options.tools.as_ref().map_or(false, |t| !t.is_empty());
+    let has_tools = req.options.tools.as_ref().is_some_and(|t| !t.is_empty());
 
     // Build tools with smart caching (cache last tool)
     let tools = build_tools_with_caching(
@@ -55,7 +55,7 @@ pub fn to_anthropic_request(
         &mut validator,
         cache_config
             .as_ref()
-            .map_or(false, |c| c.cache_tools && has_tools),
+            .is_some_and(|c| c.cache_tools && has_tools),
     )?;
 
     // Extract and convert system messages with smart caching
@@ -63,7 +63,7 @@ pub fn to_anthropic_request(
         &req.messages,
         &config.auth,
         &mut validator,
-        cache_config.as_ref().map_or(false, |c| c.cache_system),
+        cache_config.as_ref().is_some_and(|c| c.cache_system),
     )?;
 
     // Calculate remaining budget for tail messages
