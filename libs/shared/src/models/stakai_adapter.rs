@@ -202,11 +202,23 @@ pub fn from_stakai_stream_event(event: &StreamEvent) -> Option<GenerationDelta> 
 
 /// Convert StakAI Usage to CLI LLMTokenUsage
 pub fn from_stakai_usage(usage: &Usage) -> LLMTokenUsage {
+    use crate::models::llm::PromptTokensDetails;
+
+    // Convert StakAI input_token_details to CLI PromptTokensDetails
+    let prompt_tokens_details = usage.input_token_details.as_ref().map(|details| {
+        PromptTokensDetails {
+            input_tokens: details.no_cache,
+            output_tokens: None, // Output tokens are tracked separately
+            cache_read_input_tokens: details.cache_read,
+            cache_write_input_tokens: details.cache_write,
+        }
+    });
+
     LLMTokenUsage {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
         total_tokens: usage.total_tokens,
-        prompt_tokens_details: None,
+        prompt_tokens_details,
     }
 }
 
