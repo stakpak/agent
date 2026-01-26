@@ -101,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )],
     ));
 
-    let mut request_with_result = GenerateRequest::new(Model::custom("gpt-4o-mini", "openai"), messages);
+    let mut request_with_result =
+        GenerateRequest::new(Model::custom("gpt-4o-mini", "openai"), messages);
     request_with_result.options = request_with_result.options.add_tool(
         Tool::function("get_weather", "Get the current weather for a location").parameters(json!({
             "type": "object",

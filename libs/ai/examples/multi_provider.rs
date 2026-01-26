@@ -8,7 +8,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let question = "What is the meaning of life?";
 
-    let mut request = GenerateRequest::new(Model::custom("gpt-4", "openai"), vec![Message::new(Role::User, question)]);
+    let mut request = GenerateRequest::new(
+        Model::custom("gpt-4", "openai"),
+        vec![Message::new(Role::User, question)],
+    );
     request.options.temperature = Some(0.7);
     request.options.max_tokens = Some(200);
 

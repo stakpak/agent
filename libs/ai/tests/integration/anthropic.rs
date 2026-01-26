@@ -4,7 +4,8 @@
 
 use futures::StreamExt;
 use stakai::{
-    GenerateRequest, Inference, InferenceConfig, Message, Model, Role, StreamEvent, Tool, ToolChoice,
+    GenerateRequest, Inference, InferenceConfig, Message, Model, Role, StreamEvent, Tool,
+    ToolChoice,
 };
 
 // =============================================================================

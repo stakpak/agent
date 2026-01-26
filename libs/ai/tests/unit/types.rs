@@ -1,7 +1,7 @@
 //! Unit tests for core types
 
-use stakai::types::*;
 use stakai::Model;
+use stakai::types::*;
 
 #[test]
 fn test_message_creation() {
