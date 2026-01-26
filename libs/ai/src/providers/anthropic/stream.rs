@@ -97,25 +97,17 @@ fn process_anthropic_event(
             // Message started - extract usage info including cache details
             if let Some(message) = event.message {
                 let usage = &message.usage;
-                let cache_creation = usage.cache_creation_input_tokens.unwrap_or(0);
+                let cache_write = usage.cache_creation_input_tokens.unwrap_or(0);
                 let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
                 let input_tokens = usage.input_tokens;
-                let total_input = input_tokens + cache_creation + cache_read;
+                let total_input = input_tokens + cache_write + cache_read;
 
                 accumulated_usage.prompt_tokens = total_input;
                 accumulated_usage.input_token_details = Some(InputTokenDetails {
                     total: Some(total_input),
                     no_cache: Some(input_tokens),
-                    cache_read: if cache_read > 0 {
-                        Some(cache_read)
-                    } else {
-                        None
-                    },
-                    cache_write: if cache_creation > 0 {
-                        Some(cache_creation)
-                    } else {
-                        None
-                    },
+                    cache_read: (cache_read > 0).then_some(cache_read),
+                    cache_write: (cache_write > 0).then_some(cache_write),
                 });
             }
             Vec::new()
