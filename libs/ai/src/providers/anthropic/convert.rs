@@ -393,6 +393,15 @@ fn to_anthropic_message_with_caching(
     })
 }
 
+/// Convert a single message to Anthropic format (test helper, no auto-caching)
+#[cfg(test)]
+fn to_anthropic_message(
+    msg: &Message,
+    validator: &mut CacheControlValidator,
+) -> Result<AnthropicMessage> {
+    to_anthropic_message_with_caching(msg, validator, false)
+}
+
 /// Convert a content part to Anthropic format with cache control
 fn to_anthropic_content_part(
     part: &ContentPart,
