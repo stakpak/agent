@@ -14,7 +14,7 @@ use crate::models::llm::{
 };
 use crate::models::model_pricing::{ContextAware, ContextPricingTier, ModelContextInfo};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 // =============================================================================
@@ -862,47 +862,73 @@ impl From<ChatMessage> for LLMMessage {
     fn from(chat_message: ChatMessage) -> Self {
         let mut content_parts = Vec::new();
 
-        match chat_message.content {
-            Some(MessageContent::String(s)) => {
-                if !s.is_empty() {
-                    content_parts.push(LLMMessageTypedContent::Text { text: s });
-                }
+        // Handle tool result messages (Role::Tool with tool_call_id)
+        // For tool results, the content is embedded in the ToolResult, so we skip
+        // the regular content handling below
+        let is_tool_result = chat_message.role == Role::Tool && chat_message.tool_call_id.is_some();
+        if is_tool_result {
+            if let Some(tool_call_id) = &chat_message.tool_call_id {
+                let content_str = match &chat_message.content {
+                    Some(MessageContent::String(s)) => s.clone(),
+                    Some(MessageContent::Array(parts)) => parts
+                        .iter()
+                        .filter_map(|p| p.text.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    None => String::new(),
+                };
+                content_parts.push(LLMMessageTypedContent::ToolResult {
+                    tool_use_id: tool_call_id.clone(),
+                    content: content_str,
+                });
             }
-            Some(MessageContent::Array(parts)) => {
-                for part in parts {
-                    if let Some(text) = part.text {
-                        content_parts.push(LLMMessageTypedContent::Text { text });
-                    } else if let Some(image_url) = part.image_url {
-                        let (media_type, data) = if image_url.url.starts_with("data:") {
-                            let parts: Vec<&str> = image_url.url.splitn(2, ',').collect();
-                            if parts.len() == 2 {
-                                let meta = parts[0];
-                                let data = parts[1];
-                                let media_type = meta
-                                    .trim_start_matches("data:")
-                                    .trim_end_matches(";base64")
-                                    .to_string();
-                                (media_type, data.to_string())
-                            } else {
-                                ("image/jpeg".to_string(), image_url.url)
-                            }
-                        } else {
-                            ("image/jpeg".to_string(), image_url.url)
-                        };
-
-                        content_parts.push(LLMMessageTypedContent::Image {
-                            source: LLMMessageImageSource {
-                                r#type: "base64".to_string(),
-                                media_type,
-                                data,
-                            },
-                        });
-                    }
-                }
-            }
-            None => {}
         }
 
+        // Handle regular content (text, images) - skip for tool results
+        if !is_tool_result {
+            match chat_message.content {
+                Some(MessageContent::String(s)) => {
+                    if !s.is_empty() {
+                        content_parts.push(LLMMessageTypedContent::Text { text: s });
+                    }
+                }
+                Some(MessageContent::Array(parts)) => {
+                    for part in parts {
+                        if let Some(text) = part.text {
+                            content_parts.push(LLMMessageTypedContent::Text { text });
+                        } else if let Some(image_url) = part.image_url {
+                            let (media_type, data) = if image_url.url.starts_with("data:") {
+                                let parts: Vec<&str> = image_url.url.splitn(2, ',').collect();
+                                if parts.len() == 2 {
+                                    let meta = parts[0];
+                                    let data = parts[1];
+                                    let media_type = meta
+                                        .trim_start_matches("data:")
+                                        .trim_end_matches(";base64")
+                                        .to_string();
+                                    (media_type, data.to_string())
+                                } else {
+                                    ("image/jpeg".to_string(), image_url.url)
+                                }
+                            } else {
+                                ("image/jpeg".to_string(), image_url.url)
+                            };
+
+                            content_parts.push(LLMMessageTypedContent::Image {
+                                source: LLMMessageImageSource {
+                                    r#type: "base64".to_string(),
+                                    media_type,
+                                    data,
+                                },
+                            });
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+
+        // Handle tool calls (assistant messages with tool_calls)
         if let Some(tool_calls) = chat_message.tool_calls {
             for tool_call in tool_calls {
                 let args = serde_json::from_str(&tool_call.function.arguments).unwrap_or(json!({}));

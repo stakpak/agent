@@ -5,5 +5,8 @@ pub trait ContextManager: Send + Sync {
 }
 
 pub mod file_scratchpad_context_manager;
+pub mod passthrough_context_manager;
 pub mod scratchpad_context_manager;
 pub mod simple_context_manager;
+
+pub use passthrough_context_manager::PassthroughContextManager;
