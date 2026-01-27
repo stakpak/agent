@@ -335,6 +335,19 @@ pub fn config_to_toml_preview(profile: &ProfileConfig) -> String {
                     ));
                 }
             }
+            ProviderConfig::Stakpak {
+                api_key,
+                api_endpoint,
+            } => {
+                toml.push_str("type = \"stakpak\"\n");
+                toml.push_str(&format!(
+                    "api_key = \"{}\"\n",
+                    if api_key.is_empty() { "" } else { "***" }
+                ));
+                if let Some(endpoint) = api_endpoint {
+                    toml.push_str(&format!("api_endpoint = \"{}\"\n", endpoint));
+                }
+            }
         }
     }
 

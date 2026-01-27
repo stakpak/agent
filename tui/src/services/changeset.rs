@@ -397,11 +397,23 @@ impl TodoStatus {
     }
 }
 
-/// A todo item for the Todos section
+/// Type of task item for visual hierarchy
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TodoItemType {
+    /// Top-level card/task
+    Card,
+    /// Checklist item under a card
+    ChecklistItem,
+    /// Collapsed indicator showing count of hidden items
+    CollapsedIndicator,
+}
+
+/// A task item for the Tasks section (from agent-board cards)
 #[derive(Debug, Clone)]
 pub struct TodoItem {
     pub text: String,
     pub status: TodoStatus,
+    pub item_type: TodoItemType,
 }
 
 impl TodoItem {
@@ -409,11 +421,25 @@ impl TodoItem {
         Self {
             text,
             status: TodoStatus::Pending,
+            item_type: TodoItemType::Card,
+        }
+    }
+
+    pub fn checklist_item(text: String) -> Self {
+        Self {
+            text,
+            status: TodoStatus::Pending,
+            item_type: TodoItemType::ChecklistItem,
         }
     }
 
     pub fn with_status(mut self, status: TodoStatus) -> Self {
         self.status = status;
+        self
+    }
+
+    pub fn into_collapsed_indicator(mut self) -> Self {
+        self.item_type = TodoItemType::CollapsedIndicator;
         self
     }
 }
@@ -423,7 +449,7 @@ impl TodoItem {
 pub enum SidePanelSection {
     Context,
     Billing,
-    Todos,
+    Tasks,
     Changeset,
 }
 
@@ -432,7 +458,7 @@ impl SidePanelSection {
         match self {
             SidePanelSection::Context => "Context",
             SidePanelSection::Billing => "Billing",
-            SidePanelSection::Todos => "Todos",
+            SidePanelSection::Tasks => "Tasks",
             SidePanelSection::Changeset => "Changeset",
         }
     }
@@ -440,8 +466,8 @@ impl SidePanelSection {
     pub fn next(&self) -> Self {
         match self {
             SidePanelSection::Context => SidePanelSection::Billing,
-            SidePanelSection::Billing => SidePanelSection::Todos,
-            SidePanelSection::Todos => SidePanelSection::Changeset,
+            SidePanelSection::Billing => SidePanelSection::Tasks,
+            SidePanelSection::Tasks => SidePanelSection::Changeset,
             SidePanelSection::Changeset => SidePanelSection::Context,
         }
     }
@@ -450,8 +476,8 @@ impl SidePanelSection {
         match self {
             SidePanelSection::Context => SidePanelSection::Changeset,
             SidePanelSection::Billing => SidePanelSection::Context,
-            SidePanelSection::Todos => SidePanelSection::Billing,
-            SidePanelSection::Changeset => SidePanelSection::Todos,
+            SidePanelSection::Tasks => SidePanelSection::Billing,
+            SidePanelSection::Changeset => SidePanelSection::Tasks,
         }
     }
 }

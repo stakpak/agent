@@ -97,7 +97,7 @@ impl Provider for AnthropicProvider {
 
     async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, false)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, false)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),
@@ -127,7 +127,7 @@ impl Provider for AnthropicProvider {
 
     async fn stream(&self, request: GenerateRequest) -> Result<GenerateStream> {
         let url = format!("{}messages", self.config.base_url);
-        let conversion_result = to_anthropic_request(&request, &self.config.auth, true)?;
+        let conversion_result = to_anthropic_request(&request, &self.config, true)?;
 
         let headers = self.build_headers_with_cache(
             request.options.headers.as_ref(),

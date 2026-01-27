@@ -2,7 +2,7 @@
 //!
 //! Handles all popup-related events including profile switcher, rulebook switcher, command palette, shortcuts, collapsed messages, and context popup.
 
-use crate::app::{AppState, OutputEvent};
+use crate::app::{AppState, InputEvent, OutputEvent};
 use crate::services::changeset::Changeset;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
@@ -473,9 +473,15 @@ pub fn handle_toggle_collapsed_messages(
 // ========== Side Panel Handlers ==========
 
 /// Handle toggle side panel event
-pub fn handle_toggle_side_panel(state: &mut AppState) {
+pub fn handle_toggle_side_panel(
+    state: &mut AppState,
+    input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
+) {
     state.show_side_panel = !state.show_side_panel;
-    // Note: Mouse capture toggle logic removed - mouse clicks still work when enabled elsewhere
+    // Refresh board tasks when showing the side panel
+    if state.show_side_panel && state.board_agent_id.is_some() {
+        let _ = input_tx.try_send(InputEvent::RefreshBoardTasks);
+    }
 }
 
 /// Handle side panel section navigation

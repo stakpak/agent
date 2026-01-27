@@ -2,3 +2,4 @@
 
 pub mod file_scratchpad_context;
 pub mod inline_scratchpad_context;
+pub mod task_board_context;

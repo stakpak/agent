@@ -4,30 +4,31 @@ use stakpak_shared::models::integrations::openai::Role;
 use stakpak_shared::models::llm::{LLMInput, LLMMessage, LLMMessageContent};
 
 use crate::local::context_managers::ContextManager;
-use crate::local::context_managers::scratchpad_context_manager::{
-    ScratchpadContextManager, ScratchpadContextManagerOptions,
+use crate::local::context_managers::task_board_context_manager::{
+    TaskBoardContextManager, TaskBoardContextManagerOptions,
 };
 use crate::local::{ModelOptions, ModelSet};
 use crate::models::AgentState;
 
 const SYSTEM_PROMPT: &str = include_str!("./system_prompt.txt");
 
-pub struct InlineScratchpadContextHook {
+pub struct TaskBoardContextHook {
     pub model_set: ModelSet,
-    pub context_manager: ScratchpadContextManager,
+    pub context_manager: TaskBoardContextManager,
 }
-pub struct InlineScratchpadContextHookOptions {
+
+pub struct TaskBoardContextHookOptions {
     pub model_options: ModelOptions,
     pub history_action_message_size_limit: Option<usize>,
     pub history_action_message_keep_last_n: Option<usize>,
     pub history_action_result_keep_last_n: Option<usize>,
 }
 
-impl InlineScratchpadContextHook {
-    pub fn new(options: InlineScratchpadContextHookOptions) -> Self {
+impl TaskBoardContextHook {
+    pub fn new(options: TaskBoardContextHookOptions) -> Self {
         let model_set: ModelSet = options.model_options.into();
 
-        let context_manager = ScratchpadContextManager::new(ScratchpadContextManagerOptions {
+        let context_manager = TaskBoardContextManager::new(TaskBoardContextManagerOptions {
             history_action_message_size_limit: options
                 .history_action_message_size_limit
                 .unwrap_or(100),
@@ -47,8 +48,8 @@ impl InlineScratchpadContextHook {
 }
 
 define_hook!(
-    InlineScratchpadContextHook,
-    "inline_scratchpad_context",
+    TaskBoardContextHook,
+    "task_board_context",
     async |&self, ctx: &mut HookContext<AgentState>, event: &LifecycleEvent| {
         if *event != LifecycleEvent::BeforeInference {
             return Ok(HookAction::Continue);

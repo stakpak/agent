@@ -1,9 +1,5 @@
-use crate::config::{AppConfig, ProviderType};
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    remote::RemoteClient,
-};
+use crate::config::AppConfig;
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use tokio::time::Duration;
 
 const MAX_RETRIES: u32 = 2;
@@ -22,42 +18,35 @@ pub async fn validate_profile_switch(
         .map_err(|e| format!("Failed to load profile '{}': {}", new_profile, e))?;
 
     // 2. Handle API key - inherit from default if not present
-    if new_config.api_key.is_none() {
-        if let Some(default_key) = default_api_key {
-            new_config.api_key = Some(default_key);
-        } else {
-            // Only error if provider is remote
-            if matches!(new_config.provider, ProviderType::Remote) {
-                return Err(format!(
-                    "Profile '{}' has no API key and no default key available",
-                    new_profile
-                ));
-            }
-        }
+    // Note: With AgentClient, no API key is fine - it will use local providers
+    if new_config.api_key.is_none()
+        && let Some(default_key) = default_api_key
+    {
+        new_config.api_key = Some(default_key);
     }
 
-    // 3. Test API key with retry logic
-    let client: Box<dyn AgentProvider> = match new_config.provider {
-        ProviderType::Remote => {
-            let client = RemoteClient::new(&new_config.clone().into())
-                .map_err(|e| format!("Failed to create API client: {}", e))?;
-            Box::new(client)
-        }
-        ProviderType::Local => {
-            // Use credential resolution with auth.toml fallback chain
-            let client = LocalClient::new(LocalClientConfig {
-                stakpak_base_url: Some(new_config.api_endpoint.clone()),
-                store_path: None,
-                providers: new_config.get_llm_provider_config(),
-                eco_model: new_config.eco_model.clone(),
-                recovery_model: new_config.recovery_model.clone(),
-                smart_model: new_config.smart_model.clone(),
-                hook_registry: None,
-            })
-            .await
-            .map_err(|e| format!("Failed to create local client: {}", e))?;
-            Box::new(client)
-        }
+    // 3. Create AgentClient and test API connection with retry logic
+    let client: Box<dyn AgentProvider> = {
+        // Use credential resolution with auth.toml fallback chain
+        let stakpak = new_config
+            .get_stakpak_api_key()
+            .map(|api_key| StakpakConfig {
+                api_key,
+                api_endpoint: new_config.api_endpoint.clone(),
+            });
+
+        let client = AgentClient::new(AgentClientConfig {
+            stakpak,
+            providers: new_config.get_llm_provider_config(),
+            eco_model: new_config.eco_model.clone(),
+            recovery_model: new_config.recovery_model.clone(),
+            smart_model: new_config.smart_model.clone(),
+            store_path: None,
+            hook_registry: None,
+        })
+        .await
+        .map_err(|e| format!("Failed to create agent client: {}", e))?;
+        Box::new(client)
     };
 
     let mut last_error = String::new();
@@ -68,11 +57,8 @@ pub async fn validate_profile_switch(
                 return Ok(new_config);
             }
             Err(e) => {
-                // If local provider returns "Not Implemented", we consider it a success for now as it doesn't support account check
-                if matches!(new_config.provider, ProviderType::Local) {
-                    return Ok(new_config);
-                }
-
+                // If no Stakpak key, the local stub account is returned, so this should succeed
+                // If it fails, it's a real error
                 last_error = e;
                 if attempt < MAX_RETRIES {
                     // Wait before retry (exponential backoff)

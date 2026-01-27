@@ -1,6 +1,9 @@
 //! Client configuration
 
-use crate::providers::{anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig};
+use crate::providers::{
+    anthropic::AnthropicConfig, gemini::GeminiConfig, openai::OpenAIConfig,
+    stakpak::StakpakProviderConfig,
+};
 
 /// Configuration for the AI client
 #[derive(Debug, Clone, Default)]
@@ -52,6 +55,7 @@ impl ClientConfig {
 ///         .openai("sk-...", None)
 ///         .anthropic("sk-ant-...", None)
 ///         .gemini("your-key", None)
+///         .stakpak("your-stakpak-key", None)
 /// );
 /// ```
 #[derive(Debug, Default)]
@@ -59,6 +63,7 @@ pub struct InferenceConfig {
     pub(crate) openai_config: Option<OpenAIConfig>,
     pub(crate) anthropic_config: Option<AnthropicConfig>,
     pub(crate) gemini_config: Option<GeminiConfig>,
+    pub(crate) stakpak_config: Option<StakpakProviderConfig>,
     pub(crate) client_config: ClientConfig,
 }
 
@@ -202,6 +207,48 @@ impl InferenceConfig {
     /// Set request timeout in seconds
     pub fn timeout(mut self, seconds: u64) -> Self {
         self.client_config.timeout_seconds = Some(seconds);
+        self
+    }
+
+    /// Configure Stakpak provider with API key and optional base URL
+    ///
+    /// Stakpak provides unified access to multiple LLM providers through
+    /// a single API endpoint with usage tracking and billing.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::InferenceConfig;
+    /// let config = InferenceConfig::new()
+    ///     .stakpak("your-api-key", None);
+    ///
+    /// // With custom base URL
+    /// let config = InferenceConfig::new()
+    ///     .stakpak("your-api-key", Some("https://custom.stakpak.dev".to_string()));
+    /// ```
+    pub fn stakpak(mut self, api_key: impl Into<String>, base_url: Option<String>) -> Self {
+        let mut config = StakpakProviderConfig::new(api_key);
+        if let Some(url) = base_url {
+            config = config.with_base_url(url);
+        }
+        self.stakpak_config = Some(config);
+        self
+    }
+
+    /// Configure Stakpak provider with full StakpakProviderConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use stakai::{InferenceConfig, providers::stakpak::StakpakProviderConfig};
+    /// let stakpak_config = StakpakProviderConfig::new("your-api-key")
+    ///     .with_base_url("https://custom.stakpak.dev");
+    ///
+    /// let config = InferenceConfig::new()
+    ///     .stakpak_config(stakpak_config);
+    /// ```
+    pub fn stakpak_config(mut self, config: StakpakProviderConfig) -> Self {
+        self.stakpak_config = Some(config);
         self
     }
 }
