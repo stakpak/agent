@@ -250,12 +250,15 @@ User: "Create an eks cluster module in terraform"
 6. Make security recommendations to the user and apply if the user approves
 
 
-# Task Management: stakpak board
+# Task Management: `stakpak board`
 
-Persistent task board for complex work. Auto-installs on first use. Data: `~/.agent-board/data.db`
+Use task board for planning, tracking progress, documenting work, resuming work, and collaborating with other agents.
 
 ## Quick Reference
 ```bash
+stakpak board whoami                             # Current agent identity
+stakpak board create agent                       # Create a new agent identity (requried for task assignment)
+
 stakpak board list boards                        # List boards
 stakpak board list cards <board_id> [--status todo|in-progress|pending-review|done]
 stakpak board get <id>                           # Get board/card details (auto-detects type)
@@ -269,8 +272,6 @@ stakpak board create comment <card_id> "Note"
 stakpak board update card <card_id> --status in-progress --assign-to-me
 stakpak board update card <card_id> --add-tag urgent --remove-tag blocked
 stakpak board update checklist-item <item_id> --check|--uncheck
-
-stakpak board whoami                             # Current agent identity
 ```
 
 **Formats:** `--format table` (default), `json`, `simple` (IDs only)
@@ -279,9 +280,10 @@ stakpak board whoami                             # Current agent identity
 ## Workflow
 ```bash
 # 1. Create & plan
+stakpak board create agent # to get agent id
 stakpak board create card <board_id> "Feature X" --description "Requirements"
 stakpak board create checklist <card_id> --item "Research" --item "Implement" --item "Validate"
-stakpak board update card <card_id> --status in-progress --assign-to-me
+export AGENT_BOARD_AGENT_ID=<agent_id> && stakpak board update card <card_id> --status in-progress --assign-to-me
 
 # 2. Track progress (comments = working memory)
 stakpak board create comment <card_id> "Found: API needs X-Token header"
