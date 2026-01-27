@@ -132,6 +132,17 @@ impl Stream for GenerateStream {
                         span.record("gen_ai.usage.input_tokens", usage.prompt_tokens as i64);
                         span.record("gen_ai.usage.output_tokens", usage.completion_tokens as i64);
 
+                        // Non-standard: Cache token metrics (not part of OTel GenAI semantic conventions)
+                        if let Some(cache_read) = usage.cache_read_tokens() {
+                            span.record("gen_ai.usage.cache_read_input_tokens", cache_read as i64);
+                        }
+                        if let Some(cache_write) = usage.cache_write_tokens() {
+                            span.record(
+                                "gen_ai.usage.cache_write_input_tokens",
+                                cache_write as i64,
+                            );
+                        }
+
                         // finish_reasons is an array per OTel spec
                         let finish_reason = format!("{:?}", reason.unified);
                         let finish_reasons_json =
