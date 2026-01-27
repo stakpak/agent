@@ -146,9 +146,9 @@ commit_and_push() {
     git add Cargo.toml Cargo.lock
 
     # Add any other uncommitted changes if they exist
-    # if [[ -n $(git status --porcelain) ]]; then
-    #     git add .
-    # fi
+    if [[ -n $(git status --porcelain) ]]; then
+        git add .
+    fi
 
     print_info "Committing version bump..."
     git commit -m "chore: bump version to $version"
