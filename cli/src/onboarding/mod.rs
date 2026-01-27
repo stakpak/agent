@@ -173,6 +173,9 @@ pub async fn run_onboarding(config: &mut AppConfig, mode: OnboardingMode) {
             }
         }
     }
+
+    // Update config with the new profile name so callers can use it
+    config.profile_name = profile_name;
 }
 
 async fn handle_own_keys_flow(config: &mut AppConfig, profile_name: &str) -> bool {

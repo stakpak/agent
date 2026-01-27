@@ -2,22 +2,16 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use crate::{
-    // code_index::{get_or_build_local_code_index, start_code_index_watcher},
-    config::{AppConfig, ProviderType},
-};
+use crate::config::AppConfig;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
-use stakpak_api::{
-    AgentProvider,
-    local::{LocalClient, LocalClientConfig},
-    remote::RemoteClient,
-};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 
 pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod auto_update;
+pub mod board;
 pub mod mcp;
 pub mod warden;
 
@@ -162,35 +156,39 @@ pub enum Commands {
         #[command(subcommand)]
         command: Option<warden::WardenCommands>,
     },
+    /// Task board for tracking complex work (cards, checklists, comments)
+    /// Run `stakpak board --help` for available commands.
+    Board {
+        /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Update Stakpak Agent to the latest version
     Update,
 }
 
 async fn get_client(config: &AppConfig) -> Result<Arc<dyn AgentProvider>, String> {
-    match config.provider {
-        ProviderType::Remote => {
-            let client = RemoteClient::new(&config.clone().into())?;
-            Ok(Arc::new(client))
-        }
-        ProviderType::Local => {
-            // Use credential resolution with auth.toml fallback chain
-            // Refresh OAuth tokens in parallel to minimize startup delay
-            let providers = config.get_llm_provider_config_async().await;
+    // Use credential resolution with auth.toml fallback chain
+    // Refresh OAuth tokens in parallel to minimize startup delay
+    let providers = config.get_llm_provider_config_async().await;
 
-            let client = LocalClient::new(LocalClientConfig {
-                stakpak_base_url: Some(config.api_endpoint.clone()),
-                store_path: None,
-                providers,
-                eco_model: config.eco_model.clone(),
-                recovery_model: config.recovery_model.clone(),
-                smart_model: config.smart_model.clone(),
-                hook_registry: None,
-            })
-            .await
-            .map_err(|e| format!("Failed to create local client: {}", e))?;
-            Ok(Arc::new(client))
-        }
-    }
+    let stakpak = config.get_stakpak_api_key().map(|api_key| StakpakConfig {
+        api_key,
+        api_endpoint: config.api_endpoint.clone(),
+    });
+
+    let client = AgentClient::new(AgentClientConfig {
+        stakpak,
+        providers,
+        eco_model: config.eco_model.clone(),
+        recovery_model: config.recovery_model.clone(),
+        smart_model: config.smart_model.clone(),
+        store_path: None,
+        hook_registry: None,
+    })
+    .await
+    .map_err(|e| format!("Failed to create agent client: {}", e))?;
+    Ok(Arc::new(client))
 }
 
 /// Helper function to convert AppConfig's config_path to Option<&Path>
@@ -445,6 +443,9 @@ impl Commands {
                         warden::run_default_warden(config, volume, env).await?;
                     }
                 }
+            }
+            Commands::Board { args } => {
+                board::run_board(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;

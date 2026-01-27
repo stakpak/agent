@@ -1,7 +1,6 @@
 //! Main application configuration.
 
 use config::ConfigError;
-use stakpak_api::remote::ClientConfig;
 use stakpak_shared::auth_manager::AuthManager;
 use stakpak_shared::models::auth::ProviderAuth;
 use stakpak_shared::models::integrations::anthropic::AnthropicConfig;
@@ -714,12 +713,17 @@ impl AppConfig {
     }
 
     /// Get Stakpak API key with resolved credentials from auth.toml fallback chain.
+    /// Returns None if the API key is empty or not set.
     pub fn get_stakpak_api_key(&self) -> Option<String> {
-        if self.api_key.is_some() {
-            return self.api_key.clone();
+        if let Some(ref key) = self.api_key
+            && !key.is_empty()
+        {
+            return Some(key.clone());
         }
 
-        if let Some(ProviderAuth::Api { key }) = self.resolve_provider_auth("stakpak") {
+        if let Some(ProviderAuth::Api { key }) = self.resolve_provider_auth("stakpak")
+            && !key.is_empty()
+        {
             return Some(key);
         }
 
@@ -775,15 +779,6 @@ impl AppConfig {
 }
 
 // Conversions
-
-impl From<AppConfig> for ClientConfig {
-    fn from(config: AppConfig) -> Self {
-        ClientConfig {
-            api_key: config.api_key.clone(),
-            api_endpoint: config.api_endpoint.clone(),
-        }
-    }
-}
 
 impl From<AppConfig> for Settings {
     fn from(config: AppConfig) -> Self {

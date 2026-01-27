@@ -7,6 +7,7 @@ use stakpak_shared::models::{
 use uuid::Uuid;
 
 use crate::app::{LoadingOperation, SessionInfo};
+use crate::services::board_tasks::FetchTasksResult;
 
 #[derive(Debug)]
 pub enum InputEvent {
@@ -147,6 +148,11 @@ pub enum InputEvent {
     MouseDrag(u16, u16),
     MouseDragEnd(u16, u16),
     MouseMove(u16, u16),
+
+    // Board tasks events
+    RefreshBoardTasks,
+    BoardTasksLoaded(FetchTasksResult),
+    BoardTasksError(String),
 }
 
 #[derive(Debug)]

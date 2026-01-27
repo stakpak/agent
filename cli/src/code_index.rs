@@ -1,5 +1,5 @@
 use stakpak_api::models::{BuildCodeIndexInput, BuildCodeIndexOutput, CodeIndex, SimpleDocument};
-use stakpak_api::{AgentProvider, ClientConfig, LocalClient, RemoteClient};
+use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, StakpakConfig};
 use stakpak_shared::file_watcher::{FileWatchEvent, create_and_start_watcher};
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::indexing::IndexingStatus;
@@ -14,7 +14,7 @@ use stakpak_shared::utils::{
     self, is_supported_file, read_gitignore_patterns, should_include_entry,
 };
 
-use crate::config::{AppConfig, ProviderType};
+use crate::config::AppConfig;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -313,23 +313,32 @@ async fn build_local_code_index(
             .unwrap_or_else(|_| ".".to_string())
     });
 
-    let client: Box<dyn AgentProvider> = match app_config.provider {
-        ProviderType::Remote => {
-            let client = RemoteClient::new(&ClientConfig {
-                api_key: app_config.api_key.clone(),
-                api_endpoint: app_config.api_endpoint.clone(),
-            })
-            .map_err(|e| e.to_string())?;
-            Box::new(client)
-        }
-        ProviderType::Local => Box::new(LocalClient),
-    };
+    let stakpak = app_config
+        .get_stakpak_api_key()
+        .map(|api_key| StakpakConfig {
+            api_key,
+            api_endpoint: app_config.api_endpoint.clone(),
+        });
+
+    let client = AgentClient::new(AgentClientConfig {
+        stakpak,
+        providers: app_config.get_llm_provider_config(),
+        eco_model: app_config.eco_model.clone(),
+        recovery_model: app_config.recovery_model.clone(),
+        smart_model: app_config.smart_model.clone(),
+        store_path: None,
+        hook_registry: None,
+    })
+    .await
+    .map_err(|e| format!("Failed to create agent client: {}", e))?;
 
     let documents = process_directory(&directory)?;
 
-    let index = client
-        .build_code_index(&BuildCodeIndexInput { documents })
-        .await?;
+    // TODO: build_code_index is not yet implemented in AgentProvider trait
+    // This feature is currently disabled (code_index module is commented out in main.rs)
+    let _ = client; // Suppress unused warning
+    let _ = documents; // Suppress unused warning
+    return Err("Code indexing is not yet supported with AgentClient".to_string());
 
     // Create CodeIndex with timestamp
     let code_index = CodeIndex {
@@ -678,21 +687,30 @@ async fn execute_code_index_update(
             }
 
             // Call the indexing API
-            let client: Box<dyn AgentProvider> = match app_config.provider {
-                ProviderType::Remote => {
-                    let client = RemoteClient::new(&ClientConfig {
-                        api_key: app_config.api_key.clone(),
-                        api_endpoint: app_config.api_endpoint.clone(),
-                    })
-                    .map_err(|e| e.to_string())?;
-                    Box::new(client)
-                }
-                ProviderType::Local => Box::new(LocalClient),
-            };
+            let stakpak = app_config
+                .get_stakpak_api_key()
+                .map(|api_key| StakpakConfig {
+                    api_key,
+                    api_endpoint: app_config.api_endpoint.clone(),
+                });
 
-            let new_index = client
-                .build_code_index(&BuildCodeIndexInput { documents })
-                .await?;
+            let client = AgentClient::new(AgentClientConfig {
+                stakpak,
+                providers: app_config.get_llm_provider_config(),
+                eco_model: app_config.eco_model.clone(),
+                recovery_model: app_config.recovery_model.clone(),
+                smart_model: app_config.smart_model.clone(),
+                store_path: None,
+                hook_registry: None,
+            })
+            .await
+            .map_err(|e| format!("Failed to create agent client: {}", e))?;
+
+            // TODO: build_code_index is not yet implemented in AgentProvider trait
+            // This feature is currently disabled (code_index module is commented out in main.rs)
+            let _ = client; // Suppress unused warning
+            let _ = documents; // Suppress unused warning
+            return Err("Code indexing is not yet supported with AgentClient".to_string());
 
             // Merge the results
             merge_index_results(&mut existing_index.index, new_index, &documents_to_reindex);
