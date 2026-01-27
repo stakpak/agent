@@ -9,7 +9,8 @@ use super::{
     StakpakApiConfig, UpdateSessionRequest, UpdateSessionResponse, models::*,
 };
 use crate::models::{
-    CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook, RuleBook,
+    CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
+    ListRulebooksResponse, RuleBook,
 };
 use reqwest::{Client as ReqwestClient, Response, header};
 use rmcp::model::Content;
@@ -248,7 +249,14 @@ impl StakpakApiClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        self.handle_response(response).await
+
+        let response = self.handle_response_error(response).await?;
+        let value: Value = response.json().await.map_err(|e| e.to_string())?;
+
+        match serde_json::from_value::<ListRulebooksResponse>(value) {
+            Ok(response) => Ok(response.results),
+            Err(e) => Err(format!("Failed to deserialize rulebooks response: {}", e)),
+        }
     }
 
     /// Get a rulebook by URI
