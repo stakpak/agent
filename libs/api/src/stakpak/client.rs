@@ -298,7 +298,7 @@ impl StakpakApiClient {
     /// Search documentation
     pub async fn search_docs(&self, req: &SearchDocsRequest) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "paks-search-docs".to_string(),
+            name: "search_docs".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -307,7 +307,7 @@ impl StakpakApiClient {
     /// Search memory
     pub async fn search_memory(&self, req: &SearchMemoryRequest) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "memory-search".to_string(),
+            name: "search_memory".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -334,7 +334,7 @@ impl StakpakApiClient {
         req: &SlackReadMessagesRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-read-messages".to_string(),
+            name: "slack_read_messages".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -346,7 +346,7 @@ impl StakpakApiClient {
         req: &SlackReadRepliesRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-read-replies".to_string(),
+            name: "slack_read_replies".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
@@ -358,7 +358,7 @@ impl StakpakApiClient {
         req: &SlackSendMessageRequest,
     ) -> Result<Vec<Content>, String> {
         self.call_mcp_tool(&ToolsCallParams {
-            name: "slack-send-message".to_string(),
+            name: "slack_send_message".to_string(),
             arguments: serde_json::to_value(req).map_err(|e| e.to_string())?,
         })
         .await
