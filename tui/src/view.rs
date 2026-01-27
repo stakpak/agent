@@ -11,11 +11,11 @@ use crate::services::message_pattern::spans_to_string;
 use crate::services::shell_popup;
 use crate::services::side_panel;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 pub fn view(f: &mut Frame, state: &mut AppState) {
@@ -371,8 +371,18 @@ fn render_messages(f: &mut Frame, state: &mut AppState, area: Rect, width: usize
             // Debug logging for hover
             eprintln!(
                 "[HoverDebug] hover_row={}, adjusted={}, msg_area_y={}, row_in_area={}, state.scroll={}, render_scroll={}, absolute_line={}, map={:?}",
-                hover_row, hover_row_adjusted, state.message_area_y, row_in_message_area, state.scroll, scroll, absolute_line,
-                state.line_to_message_map.iter().map(|(s, e, _, _, _)| (*s, *e)).collect::<Vec<_>>()
+                hover_row,
+                hover_row_adjusted,
+                state.message_area_y,
+                row_in_message_area,
+                state.scroll,
+                scroll,
+                absolute_line,
+                state
+                    .line_to_message_map
+                    .iter()
+                    .map(|(s, e, _, _, _)| (*s, *e))
+                    .collect::<Vec<_>>()
             );
 
             // Check if this line is a user message

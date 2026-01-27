@@ -1,3 +1,4 @@
+use crate::AppState;
 use crate::app::RenderedMessageCache;
 use crate::services::bash_block::{
     format_text_content, render_bash_block, render_collapsed_command_message, render_file_diff,
@@ -6,7 +7,6 @@ use crate::services::bash_block::{
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::markdown_renderer::render_markdown_to_lines_with_width;
 use crate::services::shell_mode::SHELL_PROMPT_PREFIX;
-use crate::AppState;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -309,7 +309,7 @@ fn strip_context_blocks(text: &str) -> String {
 /// Render user message with cyan bar prefix and proper word wrapping
 fn render_user_message_lines(text: &str, width: usize) -> Vec<(Line<'static>, Style)> {
     use ratatui::text::{Line, Span};
-    use textwrap::{wrap, Options};
+    use textwrap::{Options, wrap};
 
     let mut lines = Vec::new();
     let accent_color = Color::DarkGray;

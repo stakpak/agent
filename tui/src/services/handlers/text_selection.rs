@@ -10,7 +10,7 @@
 
 use crate::app::AppState;
 use crate::services::message_action_popup::find_user_message_at_line;
-use crate::services::text_selection::{copy_to_clipboard, extract_selected_text, SelectionState};
+use crate::services::text_selection::{SelectionState, copy_to_clipboard, extract_selected_text};
 use crate::services::toast::Toast;
 
 /// Check if coordinates are within the input area
@@ -176,8 +176,17 @@ pub fn handle_drag_end(state: &mut AppState, col: u16, row: u16, message_area_he
         // Debug logging for click
         eprintln!(
             "[ClickDebug] row={}, adjusted={}, msg_area_y={}, row_in_area={}, scroll={}, absolute_line={}, map={:?}",
-            row, row_adjusted, state.message_area_y, row_in_message_area, state.scroll, absolute_line,
-            state.line_to_message_map.iter().map(|(s, e, _, _, _)| (*s, *e)).collect::<Vec<_>>()
+            row,
+            row_adjusted,
+            state.message_area_y,
+            row_in_message_area,
+            state.scroll,
+            absolute_line,
+            state
+                .line_to_message_map
+                .iter()
+                .map(|(s, e, _, _, _)| (*s, *e))
+                .collect::<Vec<_>>()
         );
 
         // Clear selection first
