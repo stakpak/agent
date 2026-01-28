@@ -369,11 +369,35 @@ async fn update_binary_atomic(os: &str, arch: &str, version: Option<String>) -> 
             // Clean up downloaded binary
             fs::remove_file(&extracted_binary_path).ok();
 
-            println!(
-                "🎉 Update complete! Please restart the CLI to use version {}.",
-                version
-            );
-            std::process::exit(0);
+            println!("🎉 Update complete! Restarting with version {}...", version);
+
+            // Re-exec the new binary with the same arguments
+            // This replaces the current process with the updated binary
+            let args: Vec<String> = std::env::args().collect();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                // exec() replaces the current process - never returns on success
+                let err = Command::new(&current_exe)
+                    .args(&args[1..]) // Skip the program name, pass remaining args
+                    .exec();
+                // If we get here, exec failed
+                eprintln!("Failed to exec new binary: {}", err);
+                std::process::exit(1);
+            }
+
+            #[cfg(windows)]
+            {
+                // Windows doesn't have exec(), so spawn and exit
+                match Command::new(&current_exe).args(&args[1..]).spawn() {
+                    Ok(_) => std::process::exit(0),
+                    Err(e) => {
+                        eprintln!("Failed to spawn new binary: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
         }
         Err(e) => {
             // Atomic rename failed, try to restore backup
