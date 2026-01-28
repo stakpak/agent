@@ -1538,7 +1538,11 @@ impl acp::Agent for StakpakAcpAgent {
             Vec::new()
         };
 
+        // Get version from Cargo.toml at compile time
+        let version = env!("CARGO_PKG_VERSION");
+
         Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1)
+            .agent_info(acp::Implementation::new("stakpak", version).title("Stakpak Agent"))
             .agent_capabilities(
                 acp::AgentCapabilities::new()
                     .mcp_capabilities(acp::McpCapabilities::new().http(true).sse(true))
