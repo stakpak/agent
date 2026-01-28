@@ -1,6 +1,6 @@
 use crossterm::style::{Color, Stylize};
 use serde_json::Value;
-use stakpak_api::models::{AgentSessionStats, ToolUsageStats};
+use stakpak_api::storage::{SessionStats, ToolUsageStats};
 use stakpak_shared::models::{integrations::openai::ChatMessage, llm::LLMTokenUsage};
 use std::fmt;
 
@@ -421,7 +421,7 @@ impl OutputRenderer {
         wrapped_lines
     }
 
-    pub fn render_session_stats(&self, stats: &AgentSessionStats) -> String {
+    pub fn render_session_stats(&self, stats: &SessionStats) -> String {
         match &self.format {
             OutputFormat::Json => {
                 serde_json::to_string_pretty(stats).unwrap_or_else(|_| "{}".to_string())

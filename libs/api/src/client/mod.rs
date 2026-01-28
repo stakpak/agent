@@ -8,15 +8,16 @@
 
 mod provider;
 
-use crate::local::db;
 use crate::local::hooks::task_board_context::{TaskBoardContextHook, TaskBoardContextHookOptions};
+use crate::local::storage::LocalStorage;
 use crate::models::AgentState;
+use crate::stakpak::storage::StakpakStorage;
 use crate::stakpak::{StakpakApiClient, StakpakApiConfig};
-use libsql::Connection;
+use crate::storage::SessionStorage;
+
 use stakpak_shared::hooks::{HookRegistry, LifecycleEvent};
 use stakpak_shared::models::llm::{LLMModel, LLMProviderConfig, ProviderConfig};
 use stakpak_shared::models::stakai_adapter::{StakAIClient, get_stakai_model_string};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 // =============================================================================
@@ -140,7 +141,7 @@ const DEFAULT_STORE_PATH: &str = ".stakpak/data/local.db";
 ///
 /// Provides a single interface for:
 /// - LLM inference via stakai (with Stakpak or direct providers)
-/// - Session/checkpoint management (Stakpak API or local SQLite)
+/// - Session/checkpoint management via SessionStorage trait (Stakpak API or local SQLite)
 /// - MCP tools, billing, rulebooks (Stakpak API only)
 #[derive(Clone)]
 pub struct AgentClient {
@@ -148,8 +149,8 @@ pub struct AgentClient {
     pub(crate) stakai: StakAIClient,
     /// Stakpak API client for non-inference operations (optional)
     pub(crate) stakpak_api: Option<StakpakApiClient>,
-    /// Local SQLite database for fallback storage
-    pub(crate) local_db: Connection,
+    /// Session storage implementation (abstracts Stakpak API vs local SQLite)
+    pub(crate) session_storage: Arc<dyn SessionStorage>,
     /// Hook registry for lifecycle events
     pub(crate) hook_registry: Arc<HookRegistry<AgentState>>,
     /// Model configuration
@@ -196,27 +197,26 @@ impl AgentClient {
             None
         };
 
-        // 4. Initialize local SQLite database
-        let store_path = config.store_path.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::var("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_default()
-                .join(DEFAULT_STORE_PATH)
-        });
-
-        if let Some(parent) = store_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create database directory: {}", e))?;
-        }
-
-        let db = libsql::Builder::new_local(store_path.display().to_string())
-            .build()
-            .await
-            .map_err(|e| format!("Failed to open database: {}", e))?;
-        let local_db = db
-            .connect()
-            .map_err(|e| format!("Failed to connect to database: {}", e))?;
-        db::init_schema(&local_db).await?;
+        // 4. Create session storage (Stakpak API or local SQLite)
+        let session_storage: Arc<dyn SessionStorage> = if let Some(stakpak) = &config.stakpak
+            && !stakpak.api_key.is_empty()
+        {
+            Arc::new(
+                StakpakStorage::new(&stakpak.api_key, &stakpak.api_endpoint)
+                    .map_err(|e| format!("Failed to create Stakpak storage: {}", e))?,
+            )
+        } else {
+            let store_path = config.store_path.clone().unwrap_or_else(|| {
+                std::env::var("HOME")
+                    .map(|h| format!("{}/{}", h, DEFAULT_STORE_PATH))
+                    .unwrap_or_else(|_| DEFAULT_STORE_PATH.to_string())
+            });
+            Arc::new(
+                LocalStorage::new(&store_path)
+                    .await
+                    .map_err(|e| format!("Failed to create local storage: {}", e))?,
+            )
+        };
 
         // 5. Parse model options
         let model_options = ModelOptions {
@@ -245,7 +245,7 @@ impl AgentClient {
         Ok(Self {
             stakai,
             stakpak_api,
-            local_db,
+            session_storage,
             hook_registry,
             model_options,
             stakpak: config.stakpak,
@@ -275,11 +275,6 @@ impl AgentClient {
         self.stakpak_api.as_ref()
     }
 
-    /// Get reference to the local database
-    pub fn local_db(&self) -> &Connection {
-        &self.local_db
-    }
-
     /// Get reference to the hook registry
     pub fn hook_registry(&self) -> &Arc<HookRegistry<AgentState>> {
         &self.hook_registry
@@ -288,6 +283,13 @@ impl AgentClient {
     /// Get the model options
     pub fn model_options(&self) -> &ModelOptions {
         &self.model_options
+    }
+
+    /// Get reference to the session storage
+    ///
+    /// Use this for all session and checkpoint operations.
+    pub fn session_storage(&self) -> &Arc<dyn SessionStorage> {
+        &self.session_storage
     }
 
     /// Get the model string for the given agent model type

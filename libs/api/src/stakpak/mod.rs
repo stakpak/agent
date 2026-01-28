@@ -8,6 +8,7 @@
 
 mod client;
 mod models;
+pub mod storage;
 
 pub use client::StakpakApiClient;
 pub use models::*;
