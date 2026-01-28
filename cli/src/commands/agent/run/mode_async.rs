@@ -104,7 +104,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     // Load checkpoint messages if provided
     if let Some(checkpoint_id_str) = config.checkpoint_id {
         let checkpoint_start = Instant::now();
-        
+
         // Parse checkpoint UUID
         let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str)
             .map_err(|_| format!("Invalid checkpoint ID: {}", checkpoint_id_str))?;
@@ -127,7 +127,8 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 Ok(checkpoint_data) => {
                     current_session_id = Some(checkpoint_data.session.id);
                     current_checkpoint_id = Some(checkpoint_uuid);
-                    let stakpak_api::models::AgentOutput::PabloV1 { messages, .. } = checkpoint_data.output;
+                    let stakpak_api::models::AgentOutput::PabloV1 { messages, .. } =
+                        checkpoint_data.output;
                     chat_messages.extend(messages);
                 }
                 Err(e) => {
@@ -135,7 +136,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 }
             }
         }
-        
+
         llm_response_time += checkpoint_start.elapsed();
         print!(
             "{}",
@@ -238,14 +239,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         // response.id is the checkpoint_id created by chat_completion
         if let Ok(checkpoint_uuid) = Uuid::parse_str(&response.id) {
             current_checkpoint_id = Some(checkpoint_uuid);
-            
+
             // Get session_id from checkpoint if we don't have it yet
             if current_session_id.is_none() {
                 if let Some(stakpak_api) = client.stakpak_api() {
-                    if let Ok(checkpoint_response) = stakpak_api.get_checkpoint(checkpoint_uuid).await {
+                    if let Ok(checkpoint_response) =
+                        stakpak_api.get_checkpoint(checkpoint_uuid).await
+                    {
                         current_session_id = Some(checkpoint_response.checkpoint.session_id);
                     }
-                } else if let Ok(checkpoint_data) = client.get_agent_checkpoint(checkpoint_uuid).await {
+                } else if let Ok(checkpoint_data) =
+                    client.get_agent_checkpoint(checkpoint_uuid).await
+                {
                     current_session_id = Some(checkpoint_data.session.id);
                 }
             }
@@ -442,10 +447,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         }
 
         // Print resume command
-        println!(
-            "\nTo resume, run:\nstakpak -c {}\n",
-            checkpoint_id
-        );
+        println!("\nTo resume, run:\nstakpak -c {}\n", checkpoint_id);
     } else {
         print!(
             "{}",
