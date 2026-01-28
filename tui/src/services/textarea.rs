@@ -19,6 +19,9 @@ struct TextElement {
     range: Range<usize>,
 }
 
+// Re-export WidgetSelection as TextAreaSelection for backwards compatibility
+pub use crate::services::widget_selection::WidgetSelection as TextAreaSelection;
+
 #[derive(Debug)]
 pub struct TextArea {
     text: String,
@@ -28,6 +31,8 @@ pub struct TextArea {
     elements: Vec<TextElement>,
     shell_mode: bool,
     session_empty: bool,
+    /// Text selection state
+    pub selection: TextAreaSelection,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +63,7 @@ impl TextArea {
             elements: Vec::new(),
             shell_mode: false,
             session_empty: true,
+            selection: TextAreaSelection::default(),
         }
     }
 
@@ -162,6 +168,184 @@ impl TextArea {
         Some((area.x + col, area.y + screen_row))
     }
 
+    /// Convert screen coordinates to text position.
+    /// Returns the text position (byte offset) for the given screen coordinates.
+    /// The coordinates are relative to the terminal, not the text area.
+    pub fn screen_pos_to_text_pos(
+        &self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> Option<usize> {
+        // Check if the click is within the text area
+        if screen_x < area.x || screen_x >= area.x + area.width {
+            return None;
+        }
+        if screen_y < area.y || screen_y >= area.y + area.height {
+            return None;
+        }
+
+        // Handle empty text case
+        if self.text.is_empty() {
+            return Some(0);
+        }
+
+        // Use content width (area width minus prefix) - must match rendering
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
+        if lines.is_empty() {
+            return Some(0);
+        }
+
+        let effective_scroll = self.effective_scroll(area.height, &lines, state.scroll);
+
+        // Calculate which wrapped line was clicked
+        let relative_y = screen_y.saturating_sub(area.y);
+        let line_idx = (effective_scroll as usize) + (relative_y as usize);
+
+        if line_idx >= lines.len() {
+            // Clicked below all lines - position at end
+            return Some(self.text.len());
+        }
+
+        let line_range = &lines[line_idx];
+
+        // Validate line_range is within text bounds
+        if line_range.start > self.text.len() || line_range.end > self.text.len() + 1 {
+            return Some(self.text.len());
+        }
+
+        // Calculate column within the line, accounting for prefix
+        let relative_x = screen_x.saturating_sub(area.x);
+
+        // If clicking in prefix area, position at start of line
+        if relative_x < prefix_width {
+            return Some(line_range.start.min(self.text.len()));
+        }
+
+        let click_col = (relative_x - prefix_width) as usize;
+
+        // Safe end for slicing (exclusive end, but clamped to text length)
+        let safe_end = line_range.end.saturating_sub(1).min(self.text.len());
+        let safe_start = line_range.start.min(self.text.len());
+
+        if safe_start >= safe_end {
+            return Some(safe_start);
+        }
+
+        // Find the character position within the line based on display width
+        let line_text = &self.text[safe_start..safe_end];
+        let mut current_width = 0usize;
+        let mut byte_pos = safe_start;
+
+        for (idx, grapheme) in line_text.grapheme_indices(true) {
+            let grapheme_width = grapheme.width();
+
+            if current_width + grapheme_width > click_col {
+                // Click is on this character - decide if we should position before or after
+                if click_col >= current_width + grapheme_width / 2 {
+                    byte_pos = safe_start + idx + grapheme.len();
+                } else {
+                    byte_pos = safe_start + idx;
+                }
+                break;
+            }
+            current_width += grapheme_width;
+            byte_pos = safe_start + idx + grapheme.len();
+        }
+
+        Some(byte_pos.min(self.text.len()))
+    }
+
+    /// Set cursor position from screen coordinates
+    pub fn set_cursor_from_screen_pos(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> bool {
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.set_cursor(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Start a text selection at the given screen position
+    pub fn start_selection(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) -> bool {
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.selection.start(pos);
+            self.set_cursor(pos);
+            true
+        } else {
+            self.selection.clear();
+            false
+        }
+    }
+
+    /// Update the selection end position during drag
+    pub fn update_selection(
+        &mut self,
+        screen_x: u16,
+        screen_y: u16,
+        area: Rect,
+        state: &TextAreaState,
+    ) {
+        if !self.selection.is_active() {
+            return;
+        }
+        if let Some(pos) = self.screen_pos_to_text_pos(screen_x, screen_y, area, state) {
+            self.selection.update(pos);
+            self.set_cursor(pos);
+        }
+    }
+
+    /// End the selection and return the selected text, clearing the selection
+    pub fn end_selection(&mut self) -> Option<String> {
+        if !self.selection.is_active() {
+            return None;
+        }
+
+        // Use the new API that clears after getting text
+        self.selection
+            .end_and_get_text(&self.text)
+            .map(|s| s.to_string())
+    }
+
+    /// Clear the selection
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+    }
+
+    /// Check if there's an active selection
+    pub fn has_selection(&self) -> bool {
+        self.selection.has_selection()
+    }
+
+    /// Get the selected text (without clearing)
+    pub fn get_selected_text(&self) -> Option<&str> {
+        self.selection.get_text(&self.text)
+    }
+
+    /// Delete the selected text and return it
+    pub fn delete_selection(&mut self) -> Option<String> {
+        let (start, end) = self.selection.normalized()?;
+        let deleted = self.text[start..end].to_string();
+        self.replace_range(start..end, "");
+        self.selection.clear();
+        Some(deleted)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
@@ -204,7 +388,10 @@ impl TextArea {
         state: &mut TextAreaState,
         waiting_for_shell_input: bool,
     ) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         let scroll = self.effective_scroll(area.height, &lines, state.scroll);
         state.scroll = scroll;
 
@@ -951,7 +1138,10 @@ impl TextArea {
 
 impl WidgetRef for &TextArea {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         self.render_lines(area, buf, &lines, 0..lines.len(), false);
     }
 }
@@ -960,7 +1150,10 @@ impl StatefulWidgetRef for &TextArea {
     type State = TextAreaState;
 
     fn render_ref(&self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let lines = self.wrapped_lines(area.width);
+        // Wrap at content width (area width minus prefix)
+        let prefix_width = self.get_prefix_width() as u16;
+        let content_width = area.width.saturating_sub(prefix_width);
+        let lines = self.wrapped_lines(content_width);
         let scroll = self.effective_scroll(area.height, &lines, state.scroll);
         state.scroll = scroll;
 
@@ -1061,6 +1254,24 @@ impl TextArea {
                     let x_off = self.text[line_range.start..overlap_start].width() as u16;
                     let style = Style::default().fg(Color::Cyan);
                     buf.set_string(content_x + x_off, y, styled, style);
+                }
+            }
+
+            // Overlay selection highlighting
+            if let Some((sel_start, sel_end)) = self.selection.normalized() {
+                // Check if selection intersects this line
+                let overlap_start = sel_start.max(line_range.start);
+                let overlap_end = sel_end.min(line_range.end);
+                if overlap_start < overlap_end {
+                    let selected_text = if waiting_for_shell_input && self.shell_mode {
+                        "*".repeat(overlap_end - overlap_start)
+                    } else {
+                        self.text[overlap_start..overlap_end].to_string()
+                    };
+                    let x_off = self.text[line_range.start..overlap_start].width() as u16;
+                    // Selection style: inverted colors (white text on blue background)
+                    let selection_style = Style::default().fg(Color::White).bg(Color::Blue);
+                    buf.set_string(content_x + x_off, y, &selected_text, selection_style);
                 }
             }
         }

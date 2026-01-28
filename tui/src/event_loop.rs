@@ -3,7 +3,6 @@
 //! Contains the main TUI event loop and related helper functions.
 
 use crate::app::{AppState, AppStateOptions, InputEvent, OutputEvent};
-use crate::services::detect_term::is_unsupported_terminal;
 use crate::services::handlers::tool::{
     clear_streaming_tool_results, handle_tool_result, update_session_tool_calls_queue,
 };
@@ -56,24 +55,18 @@ pub async fn run_tui(
 
     crossterm::terminal::enable_raw_mode()?;
 
-    // Detect terminal support for mouse capture
+    // Detect terminal for adaptive colors (but always enable mouse capture)
     #[cfg(unix)]
     let terminal_info = crate::services::detect_term::detect_terminal();
-    #[cfg(unix)]
-    let enable_mouse_capture = is_unsupported_terminal(&terminal_info.emulator);
+    #[allow(unused_variables)]
+    let _ = terminal_info; // Used for adaptive colors, kept for future use
 
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        EnableMouseCapture
     )?;
-
-    #[cfg(unix)]
-    if enable_mouse_capture {
-        execute!(std::io::stdout(), EnableMouseCapture)?;
-    } else {
-        execute!(std::io::stdout(), DisableMouseCapture)?;
-    }
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
 
@@ -99,15 +92,20 @@ pub async fn run_tui(
         board_agent_id,
     });
 
-    // Set mouse_capture_enabled based on terminal detection (matches the execute logic above)
-    #[cfg(unix)]
-    {
-        state.mouse_capture_enabled = enable_mouse_capture;
-    }
-    #[cfg(not(unix))]
-    {
-        state.mouse_capture_enabled = false;
-    }
+    // Mouse capture is always enabled
+    state.mouse_capture_enabled = true;
+
+    // Set initial terminal size
+    state.terminal_size = ratatui::layout::Size {
+        width: term_size.width,
+        height: term_size.height,
+    };
+
+    // Pre-initialize the gitleaks config for secret redaction
+    // This compiles all regex patterns upfront so first paste is fast
+    tokio::spawn(async move {
+        stakpak_shared::secrets::initialize_gitleaks_config(privacy_mode);
+    });
 
     // Set the current profile name and rulebook config
     state.current_profile_name = current_profile_name;

@@ -10,6 +10,7 @@ mod misc;
 mod navigation;
 mod popup;
 pub mod shell;
+mod text_selection;
 pub mod tool;
 
 // Re-export find_image_file_by_name for use in clipboard_paste
@@ -62,6 +63,40 @@ pub fn update(
 
     state.scroll = state.scroll.max(0);
 
+    // Intercept keys for Message Action Popup
+    if state.show_message_action_popup {
+        match event {
+            InputEvent::HandleEsc => {
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            InputEvent::Up | InputEvent::ScrollUp => {
+                popup::handle_message_action_popup_navigate(state, -1);
+                return;
+            }
+            InputEvent::Down | InputEvent::ScrollDown => {
+                popup::handle_message_action_popup_navigate(state, 1);
+                return;
+            }
+            InputEvent::InputSubmitted => {
+                popup::handle_message_action_popup_execute(state);
+                return;
+            }
+            InputEvent::MouseClick(_, _)
+            | InputEvent::MouseDragStart(_, _)
+            | InputEvent::MouseDrag(_, _)
+            | InputEvent::MouseDragEnd(_, _) => {
+                // Close popup on any mouse click/interaction
+                popup::handle_message_action_popup_close(state);
+                return;
+            }
+            _ => {
+                // Consume other events to prevent side effects
+                return;
+            }
+        }
+    }
+
     // Intercept keys for File Changes Popup
     if state.show_file_changes_popup {
         match event {
@@ -100,8 +135,12 @@ pub fn update(
                 popup::handle_file_changes_popup_backspace(state);
                 return;
             }
-            InputEvent::MouseClick(col, row) => {
+            InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
+                return;
+            }
+            InputEvent::MouseDrag(_, _) | InputEvent::MouseDragEnd(_, _) => {
+                // Ignore drag events when file changes popup is open
                 return;
             }
             _ => {
@@ -415,9 +454,17 @@ pub fn update(
         }
         InputEvent::ScrollUp => {
             navigation::handle_up_navigation(state);
+            // Extend selection when scrolling during active selection
+            if state.selection.active {
+                text_selection::handle_scroll_during_selection(state, -1, message_area_height);
+            }
         }
         InputEvent::ScrollDown => {
             navigation::handle_down_navigation(state, message_area_height, message_area_width);
+            // Extend selection when scrolling during active selection
+            if state.selection.active {
+                text_selection::handle_scroll_during_selection(state, 1, message_area_height);
+            }
         }
         InputEvent::PageUp => {
             navigation::handle_page_up(state, message_area_height, message_area_width);
@@ -735,15 +782,26 @@ pub fn update(
             // so we don't need to call it again to avoid double-counting file changes.
         }
         InputEvent::ApprovalPopupSubmit => {}
-        InputEvent::MouseClick(col, row) => {
+        InputEvent::MouseClick(col, row) | InputEvent::MouseDragStart(col, row) => {
             // Check if click is on file changes popup first
             if state.show_file_changes_popup {
                 popup::handle_file_changes_popup_mouse_click(state, col, row);
             } else {
+                // Try side panel click first, then start text selection if in message area
                 popup::handle_side_panel_mouse_click(state, col, row);
+                text_selection::handle_drag_start(state, col, row, message_area_height);
             }
         }
-
+        InputEvent::MouseDrag(col, row) => {
+            text_selection::handle_drag(state, col, row, message_area_height);
+        }
+        InputEvent::MouseDragEnd(col, row) => {
+            text_selection::handle_drag_end(state, col, row, message_area_height);
+        }
+        InputEvent::MouseMove(_col, row) => {
+            // Track hover row for visual debugging
+            state.hover_row = Some(row);
+        }
         // Board tasks events
         InputEvent::RefreshBoardTasks => {
             misc::handle_refresh_board_tasks(state, input_tx);
