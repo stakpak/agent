@@ -4,6 +4,7 @@ pub mod anthropic;
 pub mod gemini;
 pub mod openai;
 pub mod stakpak;
+pub(crate) mod tls;
 
 // Re-export providers
 pub use anthropic::AnthropicProvider;

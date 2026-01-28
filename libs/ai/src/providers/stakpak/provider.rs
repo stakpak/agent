@@ -5,6 +5,7 @@ use super::types::{StakpakProviderConfig, StakpakResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
 use crate::providers::openai::convert::to_openai_request;
+use crate::providers::tls::create_platform_tls_client;
 use crate::types::{
     FinishReason, FinishReasonKind, GenerateRequest, GenerateResponse, GenerateStream, Headers,
     InputTokenDetails, OutputTokenDetails, ResponseContent, ToolCall, Usage,
@@ -29,7 +30,7 @@ impl StakpakProvider {
             return Err(Error::MissingApiKey("stakpak".to_string()));
         }
 
-        let client = Client::new();
+        let client = create_platform_tls_client()?;
         Ok(Self { config, client })
     }
 

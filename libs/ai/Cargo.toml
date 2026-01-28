@@ -32,6 +32,10 @@ async-stream = "0.3"
 reqwest = { workspace = true }
 reqwest-eventsource = "0.6"
 
+# TLS
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
