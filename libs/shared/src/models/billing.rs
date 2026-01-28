@@ -45,21 +45,27 @@ pub struct Product {
     pub id: String,
     pub is_add_on: bool,
     pub is_default: bool,
-    pub items: Vec<ProductItem>,
+    #[serde(default)]
+    pub items: Option<Vec<ProductItem>>,
     pub name: String,
+    #[serde(default)]
     pub quantity: u32,
     pub started_at: u64,
     pub status: String,
+    #[serde(default)]
     pub version: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BillingResponse {
     pub created_at: u64,
+    #[serde(default)]
     pub env: String,
     pub features: HashMap<String, Feature>,
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub products: Vec<Product>,
+    #[serde(default)]
     pub stripe_id: Option<String>,
 }
