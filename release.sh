@@ -65,12 +65,12 @@ validate_version() {
 bump_version() {
     local current_version=$1
     local bump_type=$2
-    
+
     IFS='.' read -ra VERSION_PARTS <<< "$current_version"
     local major=${VERSION_PARTS[0]}
     local minor=${VERSION_PARTS[1]}
     local patch=${VERSION_PARTS[2]}
-    
+
     case $bump_type in
         "patch")
             patch=$((patch + 1))
@@ -89,7 +89,7 @@ bump_version() {
             return 1
             ;;
     esac
-    
+
     echo "$major.$minor.$patch"
 }
 
@@ -97,20 +97,21 @@ bump_version() {
 update_cargo_version() {
     local new_version=$1
     local temp_file=$(mktemp)
-    
+
     # 1. Update [workspace.package] version
     # This updates the first occurrence of version = "..." which is workspace.package
-    sed "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
+    # Pattern handles both regular versions (X.Y.Z) and beta versions (X.Y.Z-beta.N)
+    sed -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?\"/version = \"$new_version\"/" Cargo.toml > "$temp_file"
     mv "$temp_file" Cargo.toml
-    
+
     # 2. Update internal dependencies versions in [workspace.dependencies]
     # We look for lines starting with 'stakai' or 'stakpak-' and update their version field
     local temp_file2=$(mktemp)
     sed -E "/^(stakai|stakpak-)/s/version = \"[^\"]+\"/version = \"$new_version\"/" Cargo.toml > "$temp_file2"
     mv "$temp_file2" Cargo.toml
-    
+
     print_success "Updated workspace version and internal dependency versions to $new_version"
-    
+
     # Update Cargo.lock to reflect the new version
     print_info "Updating Cargo.lock..."
     if cargo update --workspace; then
@@ -140,21 +141,21 @@ check_git_status() {
 # Function to commit and push changes
 commit_and_push() {
     local version=$1
-    
+
     print_info "Adding changes to git..."
     git add Cargo.toml Cargo.lock
-    
+
     # Add any other uncommitted changes if they exist
     if [[ -n $(git status --porcelain) ]]; then
         git add .
     fi
-    
+
     print_info "Committing version bump..."
     git commit -m "chore: bump version to $version"
-    
+
     print_info "Pushing changes to remote..."
     git push origin $(git branch --show-current)
-    
+
     print_success "Changes committed and pushed"
 }
 
@@ -162,13 +163,13 @@ commit_and_push() {
 create_and_push_tag() {
     local version=$1
     local tag="v$version"
-    
+
     print_info "Creating git tag: $tag"
     git tag "$tag"
-    
+
     print_info "Pushing tag to remote..."
     git push --tags
-    
+
     print_success "Tag $tag created and pushed"
 }
 
@@ -176,7 +177,7 @@ create_and_push_tag() {
 get_next_beta_number() {
     local base_version=$1
     local latest_beta=$(git tag -l "v${base_version}-beta.*" | sort -V | tail -1)
-    
+
     if [[ -z "$latest_beta" ]]; then
         echo "1"
     else
@@ -188,11 +189,11 @@ get_next_beta_number() {
 # Main script logic
 main() {
     print_info "Starting release process..."
-    
+
     # Parse arguments for --beta flag
     local is_beta=false
     local version_input=""
-    
+
     for arg in "$@"; do
         if [[ "$arg" == "--beta" ]]; then
             is_beta=true
@@ -200,36 +201,36 @@ main() {
             version_input="$arg"
         fi
     done
-    
+
     # Check if we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         print_error "Not in a git repository"
         exit 1
     fi
-    
+
     # Check if Cargo.toml exists
     if [[ ! -f "Cargo.toml" ]]; then
         print_error "Cargo.toml not found in current directory"
         exit 1
     fi
-    
+
     # Get current version (strip any existing beta suffix for base version)
     current_version=$(get_current_version)
     base_version=$(echo "$current_version" | sed -E 's/-beta\.[0-9]+$//')
-    
+
     if [[ -z "$current_version" ]]; then
         print_error "Could not find version in Cargo.toml"
         exit 1
     fi
-    
+
     print_info "Current version: $current_version"
     if [[ "$is_beta" == true ]]; then
         print_info "Beta release mode enabled"
     fi
-    
+
     # Determine new version
     local new_version
-    
+
     if [[ -z "$version_input" ]]; then
         # Interactive mode
         echo ""
@@ -241,12 +242,12 @@ main() {
         echo ""
         read -p "Enter choice (1-4): " -n 1 -r choice
         echo ""
-        
+
         case $choice in
             1) new_version=$(bump_version "$base_version" "patch") ;;
             2) new_version=$(bump_version "$base_version" "minor") ;;
             3) new_version=$(bump_version "$base_version" "major") ;;
-            4) 
+            4)
                 read -p "Enter custom version (X.Y.Z format): " custom_version
                 if validate_version "$custom_version"; then
                     new_version="$custom_version"
@@ -269,16 +270,16 @@ main() {
         show_usage
         exit 1
     fi
-    
+
     # Add beta suffix if --beta flag is set
     if [[ "$is_beta" == true ]]; then
         beta_num=$(get_next_beta_number "$new_version")
         new_version="${new_version}-beta.${beta_num}"
         print_info "Beta version: $new_version"
     fi
-    
+
     print_info "New version will be: $new_version"
-    
+
     # Confirm the release
     echo ""
     if [[ "$is_beta" == true ]]; then
@@ -291,19 +292,19 @@ main() {
         print_info "Release cancelled."
         exit 0
     fi
-    
+
     # Check git status
     check_git_status
-    
+
     # Update version in Cargo.toml
     update_cargo_version "$new_version"
-    
+
     # Commit and push changes
     commit_and_push "$new_version"
-    
+
     # Create and push tag
     create_and_push_tag "$new_version"
-    
+
     if [[ "$is_beta" == true ]]; then
         print_success "Beta release $new_version completed successfully! 🧪"
         print_info "Install beta from GitHub release:"

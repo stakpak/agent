@@ -114,6 +114,9 @@ impl Inference {
                 "gen_ai.tool.definitions" = tracing::field::Empty,
                 "gen_ai.usage.input_tokens" = tracing::field::Empty,
                 "gen_ai.usage.output_tokens" = tracing::field::Empty,
+                // Non-standard: Cache token metrics (not part of OTel GenAI semantic conventions)
+                "gen_ai.usage.cache_read_input_tokens" = tracing::field::Empty,
+                "gen_ai.usage.cache_write_input_tokens" = tracing::field::Empty,
                 "gen_ai.response.finish_reasons" = tracing::field::Empty,
             );
 
@@ -163,6 +166,16 @@ impl Inference {
                     "gen_ai.usage.output_tokens",
                     response.usage.completion_tokens as i64,
                 );
+
+                // Non-standard: Cache token metrics (not part of OTel GenAI semantic conventions)
+                if let Some(cache_read) = response.usage.cache_read_tokens() {
+                    tracing::Span::current()
+                        .record("gen_ai.usage.cache_read_input_tokens", cache_read as i64);
+                }
+                if let Some(cache_write) = response.usage.cache_write_tokens() {
+                    tracing::Span::current()
+                        .record("gen_ai.usage.cache_write_input_tokens", cache_write as i64);
+                }
 
                 // finish_reasons is an array per OTel spec
                 let finish_reason = format!("{:?}", response.finish_reason.unified);
@@ -259,6 +272,9 @@ impl Inference {
                 "gen_ai.tool.definitions" = tracing::field::Empty,
                 "gen_ai.usage.input_tokens" = tracing::field::Empty,
                 "gen_ai.usage.output_tokens" = tracing::field::Empty,
+                // Non-standard: Cache token metrics (not part of OTel GenAI semantic conventions)
+                "gen_ai.usage.cache_read_input_tokens" = tracing::field::Empty,
+                "gen_ai.usage.cache_write_input_tokens" = tracing::field::Empty,
                 "gen_ai.response.finish_reasons" = tracing::field::Empty,
             );
 

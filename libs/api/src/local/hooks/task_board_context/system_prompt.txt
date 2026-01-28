@@ -306,6 +306,11 @@ stakpak board create comment <card_id> "BLOCKED: need AWS creds"
 ## When to Use
 Multi-step tasks, complex implementations, cross-session work. Skip for simple Q&A.
 
+**For complex multi-phase tasks** (migrations, large implementations, multi-week projects):
+1. Do your research first
+2. Present plan and verify with user
+3. Create board with cards to track execution - don't just leave it as markdown
+
 # Task Success Criteria
 1. Problem is thoroughly analyzed and understood.
 2. Solution is architected with proper consideration of trade-offs.
