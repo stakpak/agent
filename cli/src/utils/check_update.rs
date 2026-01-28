@@ -1,9 +1,25 @@
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use semver::Version;
 use serde::Deserialize;
 use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use std::error::Error;
 
 use crate::commands::auto_update::run_auto_update;
+
+/// Parse version string (with or without 'v' prefix) into semver Version
+fn parse_version(version_str: &str) -> Option<Version> {
+    let cleaned = version_str.strip_prefix('v').unwrap_or(version_str);
+    Version::parse(cleaned).ok()
+}
+
+/// Check if remote version is newer than current version using semver
+fn is_newer_version(current: &str, remote: &str) -> bool {
+    match (parse_version(current), parse_version(remote)) {
+        (Some(current_ver), Some(remote_ver)) => remote_ver > current_ver,
+        // If parsing fails, fall back to string comparison (shouldn't happen with valid versions)
+        _ => current != remote,
+    }
+}
 
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
@@ -100,7 +116,7 @@ fn format_changelog(body: &str) -> String {
 
 pub async fn check_update(current_version: &str) -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
-    if current_version != release.tag_name {
+    if is_newer_version(current_version, &release.tag_name) {
         let sep = "\x1b[1;34m═\x1b[0m".repeat(40);
         println!("\n\x1b[1;34m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
         println!(
@@ -161,7 +177,7 @@ pub async fn get_latest_cli_version() -> Result<String, Box<dyn Error>> {
 pub async fn auto_update() -> Result<(), Box<dyn Error>> {
     let release = get_latest_release().await?;
     let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
-    if current_version != release.tag_name {
+    if is_newer_version(&current_version, &release.tag_name) {
         println!(
             "\n🚀 Update available!  \x1b[1;37m\x1b[1;33m{}\x1b[0m → \x1b[1;32m{}\x1b[0m ✨\n",
             current_version, release.tag_name
@@ -197,4 +213,23 @@ pub async fn auto_update() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+/// Force auto-update without prompting (for ACP mode).
+/// Returns true if an update was performed and the process should restart.
+pub async fn force_auto_update() -> Result<bool, Box<dyn Error>> {
+    let release = get_latest_release().await?;
+    let current_version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    if is_newer_version(&current_version, &release.tag_name) {
+        eprintln!(
+            "🔄 Updating Stakpak: {} → {} ...",
+            current_version, release.tag_name
+        );
+        run_auto_update().await?;
+        // run_auto_update calls std::process::exit(0) on success,
+        // so we only reach here if something went wrong
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
