@@ -226,19 +226,31 @@ fn build_tool_container(
     task_manager_handle: Arc<TaskManagerHandle>,
 ) -> Result<ToolContainer> {
     let tool_container = match config.tool_mode {
-        ToolMode::LocalOnly => ToolContainer::new(
-            None,
-            config.redact_secrets,
-            config.privacy_mode,
-            config.enabled_tools.clone(),
-            task_manager_handle.clone(),
-            config.subagent_configs.clone(),
-            ToolContainer::tool_router_local(),
-        ),
+        ToolMode::LocalOnly => {
+            let mut tool_router = ToolContainer::tool_router_local();
+
+            if config.subagent_configs.is_some() {
+                tool_router += ToolContainer::tool_router_subagent();
+            }
+
+            ToolContainer::new(
+                None,
+                config.redact_secrets,
+                config.privacy_mode,
+                config.enabled_tools.clone(),
+                task_manager_handle.clone(),
+                config.subagent_configs.clone(),
+                tool_router,
+            )
+        }
         ToolMode::RemoteOnly => {
             let mut tool_router = ToolContainer::tool_router_remote();
             if config.enabled_tools.slack {
                 tool_router += ToolContainer::tool_router_slack();
+            }
+
+            if config.subagent_configs.is_some() {
+                tool_router += ToolContainer::tool_router_subagent();
             }
 
             ToolContainer::new(

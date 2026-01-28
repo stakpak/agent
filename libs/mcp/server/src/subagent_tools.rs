@@ -132,6 +132,11 @@ The subagent runs asynchronously in the background. This tool returns immediatel
             prompt_file_path, subagent_config.max_steps
         );
 
+        // Add model flag if specified
+        if let Some(model) = &subagent_config.model {
+            command.push_str(&format!(" --model {}", model));
+        }
+
         for tool in &subagent_config.allowed_tools {
             command.push_str(&format!(" -t {}", tool));
         }

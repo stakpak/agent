@@ -60,6 +60,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         privacy_mode: config.privacy_mode,
         enabled_tools: config.enabled_tools.clone(),
         enable_mtls: config.enable_mtls,
+        subagent_configs: config.subagent_configs.clone(),
     };
     let mcp_init_result = initialize_mcp_server_and_tools(&ctx, mcp_init_config, None).await?;
     let mcp_client = mcp_init_result.client;

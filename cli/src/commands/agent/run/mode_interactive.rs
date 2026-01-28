@@ -189,6 +189,7 @@ pub async fn run_interactive(
                 privacy_mode,
                 enabled_tools: enabled_tools.clone(),
                 enable_mtls,
+                subagent_configs: subagent_configs.clone(),
             };
             let (mcp_client, mcp_tools, _tools, _server_shutdown_tx, _proxy_shutdown_tx) =
                 match mcp_init::initialize_mcp_server_and_tools(
