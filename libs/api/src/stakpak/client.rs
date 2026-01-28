@@ -261,7 +261,8 @@ impl StakpakApiClient {
 
     /// Get a rulebook by URI
     pub async fn get_rulebook_by_uri(&self, uri: &str) -> Result<RuleBook, String> {
-        let url = format!("{}/v1/rules/{}", self.base_url, uri);
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
         let response = self
             .client
             .get(&url)
@@ -289,7 +290,8 @@ impl StakpakApiClient {
 
     /// Delete a rulebook
     pub async fn delete_rulebook(&self, uri: &str) -> Result<(), String> {
-        let url = format!("{}/v1/rules/{}", self.base_url, uri);
+        let encoded_uri = urlencoding::encode(uri);
+        let url = format!("{}/v1/rules/{}", self.base_url, encoded_uri);
         let response = self
             .client
             .delete(&url)
