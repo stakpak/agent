@@ -3,6 +3,7 @@
 //! Handles all popup-related events including profile switcher, rulebook switcher, command palette, shortcuts, collapsed messages, and context popup.
 
 use crate::app::{AppState, InputEvent, OutputEvent};
+use crate::services::changeset::Changeset;
 use crate::services::detect_term::AdaptiveColors;
 use crate::services::helper_block::{push_error_message, push_styled_message, welcome_messages};
 use crate::services::message::{
@@ -166,6 +167,10 @@ pub fn handle_profile_switch_complete(state: &mut AppState, profile: String) {
     state.retry_attempts = 0;
     state.last_user_message_for_retry = None;
     state.is_retrying = false;
+
+    // Clear changeset and todos from previous session
+    state.changeset = Changeset::default();
+    state.todos.clear();
 
     // CRITICAL: Close profile switcher to prevent stray selects
     state.show_profile_switcher = false;

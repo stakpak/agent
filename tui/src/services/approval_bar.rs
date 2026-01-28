@@ -245,15 +245,14 @@ impl ApprovalBar {
     }
 
     /// Calculate the height needed for rendering
-    /// Returns: top border (1) + content lines (with spacing) + empty line (1) + footer (1) + bottom border (1)
+    /// Returns: top border (1) + content lines (with spacing) + footer (1) + bottom border (1)
     pub fn calculate_height(&self) -> u16 {
         if !self.is_visible() {
             return 0;
         }
-        // For now, estimate max height needed
-        // Top border (1) + up to 3 button rows with spacing (5) + empty line (1) + footer (1) + bottom border (1) = 9
+        // Top border (1) + up to 3 button rows with spacing (5) + footer (1) + bottom border (1) = 8
         // But cap at reasonable height
-        8
+        7
     }
 
     /// Render the approval bar with wrapping support
@@ -379,8 +378,8 @@ impl ApprovalBar {
         // Render content lines (tabs/buttons) with spacing between rows
         let mut current_y = area.y + 1;
         for (line_idx, tab_spans) in lines.iter().enumerate() {
-            if current_y >= area.y + area.height.saturating_sub(3) {
-                break; // Leave room for empty line, footer and bottom border
+            if current_y >= area.y + area.height.saturating_sub(2) {
+                break; // Leave room for footer and bottom border
             }
 
             // Add empty line before each button row (except the first)
@@ -396,7 +395,7 @@ impl ApprovalBar {
                 );
                 current_y += 1;
 
-                if current_y >= area.y + area.height.saturating_sub(3) {
+                if current_y >= area.y + area.height.saturating_sub(2) {
                     break;
                 }
             }
@@ -421,22 +420,8 @@ impl ApprovalBar {
             current_y += 1;
         }
 
-        // Empty line between buttons and footer
-        let empty_line_y = current_y;
-        if empty_line_y < area.y + area.height.saturating_sub(2) {
-            let empty_line = Line::from(vec![
-                Span::styled("│", Style::default().fg(border_color)),
-                Span::raw(" ".repeat(inner_width)),
-                Span::styled("│", Style::default().fg(border_color)),
-            ]);
-            f.render_widget(
-                Paragraph::new(empty_line),
-                Rect::new(area.x, empty_line_y, area.width, 1),
-            );
-        }
-
-        // Footer line with controls
-        let footer_y = empty_line_y + 1;
+        // Footer line with controls (directly after buttons, no empty line)
+        let footer_y = current_y;
         if footer_y < area.y + area.height.saturating_sub(1) {
             // Build footer controls with same style as approval popup
             let footer_controls = vec![

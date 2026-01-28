@@ -105,6 +105,11 @@ pub fn handle_input_submitted_event(
                     state.scroll = 0;
                     state.scroll_to_bottom = true;
                     state.stay_at_bottom = true;
+
+                    // Clear changeset and todos from previous session
+                    state.changeset = crate::services::changeset::Changeset::default();
+                    state.todos.clear();
+
                     crate::services::message::invalidate_message_lines_cache(state);
 
                     // Reset usage
