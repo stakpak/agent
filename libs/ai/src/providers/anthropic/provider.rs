@@ -5,6 +5,7 @@ use super::stream::create_stream;
 use super::types::{AnthropicConfig, AnthropicResponse};
 use crate::error::{Error, Result};
 use crate::provider::Provider;
+use crate::providers::tls::create_platform_tls_client;
 use crate::types::{GenerateRequest, GenerateResponse, GenerateStream, Headers};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -29,7 +30,7 @@ impl AnthropicProvider {
             return Err(Error::MissingApiKey("anthropic".to_string()));
         }
 
-        let client = Client::new();
+        let client = create_platform_tls_client()?;
         Ok(Self { config, client })
     }
 
