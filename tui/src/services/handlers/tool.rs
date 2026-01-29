@@ -620,6 +620,29 @@ pub fn extract_file_path_from_tool_call(tool_call: &ToolCall) -> Option<String> 
     None
 }
 
+/// Extract view tool parameters (path, grep, glob) from a tool call
+pub fn extract_view_params_from_tool_call(
+    tool_call: &ToolCall,
+) -> (Option<String>, Option<String>, Option<String>) {
+    // Try to parse arguments as JSON
+    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
+        let path = args
+            .get("path")
+            .or(args.get("filePath"))
+            .or(args.get("file_path"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let grep = args.get("grep").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        let glob = args.get("glob").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        return (path, grep, glob);
+    }
+
+    (None, None, None)
+}
+
 // ========== Approval Bar Handlers ==========
 
 /// Handle approve all in approval bar

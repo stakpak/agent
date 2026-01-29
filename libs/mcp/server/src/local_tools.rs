@@ -8,7 +8,12 @@ use stakpak_shared::remote_connection::{
     PathLocation, RemoteConnection, RemoteConnectionInfo, RemoteFileSystemProvider,
 };
 
+use globset::Glob;
+use grep_regex::RegexMatcher;
+use grep_searcher::Searcher;
+use grep_searcher::sinks::UTF8;
 use html2md;
+use ignore::WalkBuilder;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::json;
 use similar::TextDiff;
@@ -89,6 +94,14 @@ pub struct ViewRequest {
         description = "Optional line range to view [start_line, end_line]. Line numbers are 1-indexed. Use -1 for end_line to read to end of file."
     )]
     pub view_range: Option<[i32; 2]>,
+    #[schemars(
+        description = "Regex pattern to search for in file contents. Returns matching lines with line numbers. For directories, searches all files recursively (respects .gitignore)."
+    )]
+    pub grep: Option<String>,
+    #[schemars(
+        description = "Glob pattern to filter files when viewing directories (e.g., '*.rs', '**/*.ts', 'src/**/*.go'). Only applies to directory views."
+    )]
+    pub glob: Option<String>,
     #[schemars(description = "Optional password for remote connection (if path is remote)")]
     pub password: Option<String>,
     #[schemars(
@@ -608,6 +621,23 @@ For directories:
 - Default behavior: Lists immediate directory contents
 - With tree=true: Displays nested directory structure as a tree (limited to 3 levels deep)
 
+GREP (Content Search):
+- Use 'grep' parameter with a regex pattern to search file contents
+- For files: Returns matching lines with line numbers (format: line_num:content)
+- For directories: Recursively searches all files, respects .gitignore (format: file:line_num:content)
+- Examples:
+  * grep='TODO|FIXME' - Find all TODO/FIXME comments
+  * grep='fn\\s+\\w+' - Find Rust function definitions
+  * grep='error' - Simple text search
+
+GLOB (File Filtering):
+- Use 'glob' parameter to filter files in directories by pattern
+- Supports standard glob syntax: *, ?, [abc], **
+- Examples:
+  * glob='*.rs' - All Rust files
+  * glob='*.ts' - All TypeScript files  
+  * glob='test_*' - Files starting with test_
+
 SECRET HANDLING:
 - File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
 - These placeholders represent actual secret values that are safely stored for later use
@@ -620,6 +650,8 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
         Parameters(ViewRequest {
             path,
             view_range,
+            grep,
+            glob,
             password,
             private_key_path,
             tree,
@@ -635,15 +667,31 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
                 .await
             {
                 Ok((conn, remote_path)) => {
-                    self.view_remote_path(&conn, &remote_path, &path, view_range, MAX_LINES, tree)
-                        .await
+                    self.view_remote_path(
+                        &conn,
+                        &remote_path,
+                        &path,
+                        view_range,
+                        MAX_LINES,
+                        tree,
+                        grep.as_deref(),
+                        glob.as_deref(),
+                    )
+                    .await
                 }
                 Err(error_result) => Ok(error_result),
             }
         } else {
             // Handle local file/directory viewing
-            self.view_local_path(&path, view_range, MAX_LINES, tree)
-                .await
+            self.view_local_path(
+                &path,
+                view_range,
+                MAX_LINES,
+                tree,
+                grep.as_deref(),
+                glob.as_deref(),
+            )
+            .await
         }
     }
 
@@ -1269,6 +1317,8 @@ SAFETY NOTES:
         view_range: Option<[i32; 2]>,
         max_lines: usize,
         tree: Option<bool>,
+        grep: Option<&str>,
+        glob: Option<&str>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(path);
 
@@ -1280,6 +1330,28 @@ SAFETY NOTES:
         }
 
         if path_obj.is_dir() {
+            // Handle combined glob + grep: filter files by glob, then search content
+            if let (Some(glob_pattern), Some(grep_pattern)) = (glob, grep) {
+                return self
+                    .grep_local_directory_with_glob(path, grep_pattern, glob_pattern, max_lines)
+                    .await;
+            }
+
+            // Handle glob pattern filtering for directories (list files only)
+            if let Some(glob_pattern) = glob {
+                return self
+                    .view_local_dir_with_glob(path, glob_pattern, max_lines)
+                    .await;
+            }
+
+            // Handle grep search in directory (all files)
+            if let Some(grep_pattern) = grep {
+                return self
+                    .grep_local_directory(path, grep_pattern, max_lines)
+                    .await;
+            }
+
+            // Default directory tree view
             let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = LocalFileSystemProvider;
             let path_str = path_obj.to_string_lossy();
@@ -1303,6 +1375,11 @@ SAFETY NOTES:
                 ])),
             }
         } else {
+            // Handle grep search in single file
+            if let Some(grep_pattern) = grep {
+                return self.grep_local_file(path, grep_pattern, max_lines);
+            }
+
             // Read file contents
             match fs::read_to_string(path) {
                 Ok(content) => {
@@ -1328,6 +1405,332 @@ SAFETY NOTES:
         }
     }
 
+    /// View directory contents filtered by glob pattern
+    async fn view_local_dir_with_glob(
+        &self,
+        path: &str,
+        glob_pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        // Build the glob matcher
+        let glob = match Glob::new(glob_pattern) {
+            Ok(g) => g.compile_matcher(),
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_GLOB"),
+                    Content::text(format!("Invalid glob pattern '{}': {}", glob_pattern, e)),
+                ]));
+            }
+        };
+
+        // Use ignore crate's WalkBuilder for gitignore-aware traversal
+        let walker = WalkBuilder::new(path)
+            .hidden(false) // Show hidden files
+            .git_ignore(true) // Respect .gitignore
+            .build();
+
+        let mut matches: Vec<String> = Vec::new();
+        let base_path = Path::new(path);
+
+        for entry in walker.flatten() {
+            let entry_path = entry.path();
+
+            // Get relative path for glob matching
+            let relative = match entry_path.strip_prefix(base_path) {
+                Ok(r) => r.to_string_lossy().to_string(),
+                Err(_) => continue,
+            };
+
+            // Skip the root directory itself
+            if relative.is_empty() {
+                continue;
+            }
+
+            // Check if the path matches the glob pattern
+            if glob.is_match(&relative) || glob.is_match(entry_path.file_name().unwrap_or_default())
+            {
+                let prefix = if entry_path.is_dir() {
+                    "📁 "
+                } else {
+                    "📄 "
+                };
+                matches.push(format!("{}{}", prefix, relative));
+            }
+        }
+
+        if matches.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No files matching '{}' found in {}",
+                glob_pattern, path
+            ))]));
+        }
+
+        // Sort and truncate
+        matches.sort();
+        let total = matches.len();
+        let truncated = matches.len() > max_lines;
+        if truncated {
+            matches.truncate(max_lines);
+        }
+
+        let mut result = format!(
+            "Files matching '{}' in \"{}\" ({} matches):\n\n{}",
+            glob_pattern,
+            path,
+            total,
+            matches.join("\n")
+        );
+
+        if truncated {
+            result.push_str(&format!("\n\n... and {} more files", total - max_lines));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    /// Grep search in a single local file
+    fn grep_local_file(
+        &self,
+        path: &str,
+        pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        let matcher = match RegexMatcher::new(pattern) {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_REGEX"),
+                    Content::text(format!("Invalid regex pattern '{}': {}", pattern, e)),
+                ]));
+            }
+        };
+
+        let mut matches: Vec<String> = Vec::new();
+        let mut searcher = Searcher::new();
+
+        let sink_result = searcher.search_path(
+            &matcher,
+            path,
+            UTF8(|line_num, line| {
+                if matches.len() < max_lines {
+                    matches.push(format!("{}:{}", line_num, line.trim_end()));
+                }
+                Ok(true)
+            }),
+        );
+
+        if let Err(e) = sink_result {
+            return Ok(CallToolResult::error(vec![
+                Content::text("GREP_ERROR"),
+                Content::text(format!("Error searching file: {}", e)),
+            ]));
+        }
+
+        if matches.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No matches for '{}' in {}",
+                pattern, path
+            ))]));
+        }
+
+        let total = matches.len();
+        let result = format!(
+            "Grep results for '{}' in \"{}\" ({} matches):\n\n{}",
+            pattern,
+            path,
+            total,
+            matches.join("\n")
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    /// Grep search across a directory (recursive, respects .gitignore)
+    async fn grep_local_directory(
+        &self,
+        path: &str,
+        pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        let matcher = match RegexMatcher::new(pattern) {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_REGEX"),
+                    Content::text(format!("Invalid regex pattern '{}': {}", pattern, e)),
+                ]));
+            }
+        };
+
+        // Use ignore crate for gitignore-aware traversal
+        let walker = WalkBuilder::new(path)
+            .hidden(false)
+            .git_ignore(true)
+            .build();
+
+        let mut all_matches: Vec<String> = Vec::new();
+        let mut files_with_matches = 0;
+        let base_path = Path::new(path);
+
+        for entry in walker.flatten() {
+            if all_matches.len() >= max_lines {
+                break;
+            }
+
+            let entry_path = entry.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+
+            let relative = entry_path
+                .strip_prefix(base_path)
+                .map(|r| r.to_string_lossy().to_string())
+                .unwrap_or_else(|_| entry_path.to_string_lossy().to_string());
+
+            let mut file_matches: Vec<String> = Vec::new();
+            let mut searcher = Searcher::new();
+
+            let _ = searcher.search_path(
+                &matcher,
+                entry_path,
+                UTF8(|line_num, line| {
+                    if all_matches.len() + file_matches.len() < max_lines {
+                        file_matches.push(format!("{}:{}:{}", relative, line_num, line.trim_end()));
+                    }
+                    Ok(true)
+                }),
+            );
+
+            if !file_matches.is_empty() {
+                files_with_matches += 1;
+                all_matches.extend(file_matches);
+            }
+        }
+
+        if all_matches.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No matches for '{}' in {}",
+                pattern, path
+            ))]));
+        }
+
+        let truncated = all_matches.len() >= max_lines;
+        let result = format!(
+            "Grep results for '{}' in \"{}\" ({} matches in {} files):\n\n{}{}",
+            pattern,
+            path,
+            all_matches.len(),
+            files_with_matches,
+            all_matches.join("\n"),
+            if truncated { "\n\n... (truncated)" } else { "" }
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    /// Grep search across a directory filtered by glob pattern
+    async fn grep_local_directory_with_glob(
+        &self,
+        path: &str,
+        pattern: &str,
+        glob_pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        let matcher = match RegexMatcher::new(pattern) {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_REGEX"),
+                    Content::text(format!("Invalid regex pattern '{}': {}", pattern, e)),
+                ]));
+            }
+        };
+
+        let glob = match Glob::new(glob_pattern) {
+            Ok(g) => g.compile_matcher(),
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![
+                    Content::text("INVALID_GLOB"),
+                    Content::text(format!("Invalid glob pattern '{}': {}", glob_pattern, e)),
+                ]));
+            }
+        };
+
+        // Use ignore crate for gitignore-aware traversal
+        let walker = WalkBuilder::new(path)
+            .hidden(false)
+            .git_ignore(true)
+            .build();
+
+        let mut all_matches: Vec<String> = Vec::new();
+        let mut files_with_matches = 0;
+        let base_path = Path::new(path);
+
+        for entry in walker.flatten() {
+            if all_matches.len() >= max_lines {
+                break;
+            }
+
+            let entry_path = entry.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+
+            // Check if file matches glob pattern
+            let relative = entry_path
+                .strip_prefix(base_path)
+                .map(|r| r.to_string_lossy().to_string())
+                .unwrap_or_else(|_| entry_path.to_string_lossy().to_string());
+
+            let matches_glob = glob.is_match(&relative)
+                || glob.is_match(entry_path.file_name().unwrap_or_default());
+
+            if !matches_glob {
+                continue;
+            }
+
+            let mut file_matches: Vec<String> = Vec::new();
+            let mut searcher = Searcher::new();
+
+            let _ = searcher.search_path(
+                &matcher,
+                entry_path,
+                UTF8(|line_num, line| {
+                    if all_matches.len() + file_matches.len() < max_lines {
+                        file_matches.push(format!("{}:{}:{}", relative, line_num, line.trim_end()));
+                    }
+                    Ok(true)
+                }),
+            );
+
+            if !file_matches.is_empty() {
+                files_with_matches += 1;
+                all_matches.extend(file_matches);
+            }
+        }
+
+        if all_matches.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No matches for '{}' in {} (filtered by glob '{}')",
+                pattern, path, glob_pattern
+            ))]));
+        }
+
+        let truncated = all_matches.len() >= max_lines;
+        let result = format!(
+            "Grep results for '{}' in \"{}\" (glob: '{}') ({} matches in {} files):\n\n{}{}",
+            pattern,
+            path,
+            glob_pattern,
+            all_matches.len(),
+            files_with_matches,
+            all_matches.join("\n"),
+            if truncated { "\n\n... (truncated)" } else { "" }
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     /// View the contents of a remote file or directory
     async fn view_remote_path(
         &self,
@@ -1337,6 +1740,8 @@ SAFETY NOTES:
         view_range: Option<[i32; 2]>,
         max_lines: usize,
         tree: Option<bool>,
+        grep: Option<&str>,
+        glob: Option<&str>,
     ) -> Result<CallToolResult, McpError> {
         if !conn.exists(remote_path).await {
             return Ok(CallToolResult::error(vec![
@@ -1349,6 +1754,47 @@ SAFETY NOTES:
         }
 
         if conn.is_directory(remote_path).await {
+            // Handle combined glob + grep for remote directories
+            if let (Some(glob_pattern), Some(grep_pattern)) = (glob, grep) {
+                return self
+                    .grep_remote_directory_with_glob(
+                        conn,
+                        remote_path,
+                        original_path,
+                        grep_pattern,
+                        glob_pattern,
+                        max_lines,
+                    )
+                    .await;
+            }
+
+            // Handle glob pattern filtering for remote directories
+            if let Some(glob_pattern) = glob {
+                return self
+                    .view_remote_dir_with_glob(
+                        conn,
+                        remote_path,
+                        original_path,
+                        glob_pattern,
+                        max_lines,
+                    )
+                    .await;
+            }
+
+            // Handle grep search in remote directory
+            if let Some(grep_pattern) = grep {
+                return self
+                    .grep_remote_directory(
+                        conn,
+                        remote_path,
+                        original_path,
+                        grep_pattern,
+                        max_lines,
+                    )
+                    .await;
+            }
+
+            // Default directory tree view
             let depth = if tree.unwrap_or(false) { 3 } else { 1 };
             let provider = RemoteFileSystemProvider::new(conn.clone());
 
@@ -1368,6 +1814,13 @@ SAFETY NOTES:
                 ])),
             }
         } else {
+            // Handle grep search in single remote file
+            if let Some(grep_pattern) = grep {
+                return self
+                    .grep_remote_file(conn, remote_path, original_path, grep_pattern, max_lines)
+                    .await;
+            }
+
             // Read remote file contents
             match conn.read_file_to_string(remote_path).await {
                 Ok(content) => {
@@ -1397,6 +1850,274 @@ SAFETY NOTES:
                     Content::text(format!("Cannot read remote file: {}", e)),
                 ])),
             }
+        }
+    }
+
+    /// View remote directory contents filtered by glob pattern using find command
+    async fn view_remote_dir_with_glob(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        glob_pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        // Escape for double quotes (the command will be wrapped in bash -c '...' which uses double quotes internally)
+        let escaped_pattern = glob_pattern
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`");
+
+        // Use double quotes for pattern since single quotes conflict with bash -c wrapper
+        let command = format!(
+            "find {} -name \"{}\" 2>/dev/null | head -n {}",
+            remote_path,
+            escaped_pattern,
+            max_lines + 1 // +1 to detect truncation
+        );
+
+        match conn.execute_command(&command, None, None).await {
+            Ok((output, exit_code)) => {
+                if exit_code != 0 && output.trim().is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "No files matching '{}' found in {}",
+                        glob_pattern, original_path
+                    ))]));
+                }
+
+                let lines: Vec<&str> = output.lines().collect();
+                let truncated = lines.len() > max_lines;
+                let display_lines: Vec<&str> = lines.into_iter().take(max_lines).collect();
+
+                if display_lines.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "No files matching '{}' found in {}",
+                        glob_pattern, original_path
+                    ))]));
+                }
+
+                let mut result = format!(
+                    "Remote files matching '{}' in \"{}\":\n\n{}",
+                    glob_pattern,
+                    original_path,
+                    display_lines.join("\n")
+                );
+
+                if truncated {
+                    result.push_str("\n\n... (truncated)");
+                }
+
+                Ok(CallToolResult::success(vec![Content::text(result)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("REMOTE_GLOB_ERROR"),
+                Content::text(format!("Failed to search remote directory: {}", e)),
+            ])),
+        }
+    }
+
+    /// Grep search in a single remote file
+    async fn grep_remote_file(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        // Escape for double quotes (the command will be wrapped in bash -c '...' which uses double quotes internally)
+        // Need to escape: \ " $ ` 
+        let escaped_pattern = pattern
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`");
+
+        // Use grep -E for extended regex (supports |, +, ?, etc.)
+        // Use double quotes for pattern since single quotes conflict with bash -c wrapper
+        let command = format!(
+            "grep -En \"{}\" {} 2>/dev/null | head -n {}",
+            escaped_pattern,
+            remote_path,
+            max_lines + 1
+        );
+
+        match conn.execute_command(&command, None, None).await {
+            Ok((output, _exit_code)) => {
+                // grep returns exit code 1 for no matches, which is fine
+                let lines: Vec<&str> = output.lines().collect();
+
+                if lines.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "No matches for '{}' in {}",
+                        pattern, original_path
+                    ))]));
+                }
+
+                let truncated = lines.len() > max_lines;
+                let display_lines: Vec<&str> = lines.into_iter().take(max_lines).collect();
+
+                let mut result = format!(
+                    "Grep results for '{}' in \"{}\" ({} matches):\n\n{}",
+                    pattern,
+                    original_path,
+                    display_lines.len(),
+                    display_lines.join("\n")
+                );
+
+                if truncated {
+                    result.push_str("\n\n... (truncated)");
+                }
+
+                Ok(CallToolResult::success(vec![Content::text(result)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("REMOTE_GREP_ERROR"),
+                Content::text(format!("Failed to grep remote file: {}", e)),
+            ])),
+        }
+    }
+
+    /// Grep search across a remote directory using grep -rE
+    async fn grep_remote_directory(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        // Escape for double quotes (the command will be wrapped in bash -c '...' which uses double quotes internally)
+        let escaped_pattern = pattern
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`");
+
+        // Use grep -rEn for recursive search with extended regex and line numbers
+        // Use double quotes for pattern since single quotes conflict with bash -c wrapper
+        let command = format!(
+            "grep -rEn --include=\"*\" \"{}\" {} 2>/dev/null | head -n {}",
+            escaped_pattern,
+            remote_path,
+            max_lines + 1
+        );
+
+        match conn.execute_command(&command, None, None).await {
+            Ok((output, _exit_code)) => {
+                let lines: Vec<&str> = output.lines().collect();
+
+                if lines.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "No matches for '{}' in {}",
+                        pattern, original_path
+                    ))]));
+                }
+
+                let truncated = lines.len() > max_lines;
+                let display_lines: Vec<&str> = lines.into_iter().take(max_lines).collect();
+
+                // Count unique files
+                let files_with_matches: std::collections::HashSet<&str> = display_lines
+                    .iter()
+                    .filter_map(|line| line.split(':').next())
+                    .collect();
+
+                let mut result = format!(
+                    "Grep results for '{}' in \"{}\" ({} matches in {} files):\n\n{}",
+                    pattern,
+                    original_path,
+                    display_lines.len(),
+                    files_with_matches.len(),
+                    display_lines.join("\n")
+                );
+
+                if truncated {
+                    result.push_str("\n\n... (truncated)");
+                }
+
+                Ok(CallToolResult::success(vec![Content::text(result)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("REMOTE_GREP_ERROR"),
+                Content::text(format!("Failed to grep remote directory: {}", e)),
+            ])),
+        }
+    }
+
+    /// Grep search across a remote directory filtered by glob pattern
+    async fn grep_remote_directory_with_glob(
+        &self,
+        conn: &Arc<RemoteConnection>,
+        remote_path: &str,
+        original_path: &str,
+        pattern: &str,
+        glob_pattern: &str,
+        max_lines: usize,
+    ) -> Result<CallToolResult, McpError> {
+        // Escape for double quotes (the command will be wrapped in bash -c '...' which uses double quotes internally)
+        let escaped_pattern = pattern
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`");
+        let escaped_glob = glob_pattern
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`");
+
+        // Use find with -name to filter files, then grep -E for extended regex
+        // Use double quotes for patterns since single quotes conflict with bash -c wrapper
+        let command = format!(
+            "find {} -name \"{}\" -type f -exec grep -EHn \"{}\" {{}} \\; 2>/dev/null | head -n {}",
+            remote_path,
+            escaped_glob,
+            escaped_pattern,
+            max_lines + 1
+        );
+
+        match conn.execute_command(&command, None, None).await {
+            Ok((output, _exit_code)) => {
+                let lines: Vec<&str> = output.lines().collect();
+
+                if lines.is_empty() {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "No matches for '{}' in {} (filtered by glob '{}')",
+                        pattern, original_path, glob_pattern
+                    ))]));
+                }
+
+                let truncated = lines.len() > max_lines;
+                let display_lines: Vec<&str> = lines.into_iter().take(max_lines).collect();
+
+                // Count unique files
+                let files_with_matches: std::collections::HashSet<&str> = display_lines
+                    .iter()
+                    .filter_map(|line| line.split(':').next())
+                    .collect();
+
+                let mut result = format!(
+                    "Grep results for '{}' in \"{}\" (glob: '{}') ({} matches in {} files):\n\n{}",
+                    pattern,
+                    original_path,
+                    glob_pattern,
+                    display_lines.len(),
+                    files_with_matches.len(),
+                    display_lines.join("\n")
+                );
+
+                if truncated {
+                    result.push_str("\n\n... (truncated)");
+                }
+
+                Ok(CallToolResult::success(vec![Content::text(result)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![
+                Content::text("REMOTE_GREP_ERROR"),
+                Content::text(format!("Failed to grep remote directory: {}", e)),
+            ])),
         }
     }
 

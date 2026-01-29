@@ -284,13 +284,13 @@ pub async fn run_tui(
                                 }
                                 "read" | "view" | "read_file" => {
                                     // View file tool - show compact view with file icon and line count
-                                    // Extract file path from tool call arguments
-                                    let file_path = crate::services::handlers::tool::extract_file_path_from_tool_call(&tool_call_result.call)
-                                        .unwrap_or_else(|| "file".to_string());
+                                    // Extract file path and optional grep/glob from tool call arguments
+                                    let (file_path, grep, glob) = crate::services::handlers::tool::extract_view_params_from_tool_call(&tool_call_result.call);
+                                    let file_path = file_path.unwrap_or_else(|| "file".to_string());
                                     let total_lines = tool_call_result.result.lines().count();
-                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines));
+                                    state.messages.push(Message::render_view_file_block(file_path.clone(), total_lines, grep.clone(), glob.clone()));
                                     // Full screen popup: same compact view without borders
-                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines));
+                                    state.messages.push(Message::render_view_file_block_popup(file_path, total_lines, grep, glob));
                                 }
                                _ => {
                                    // TUI: collapsed command message - last 3 lines (is_collapsed: None)

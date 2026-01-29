@@ -440,9 +440,17 @@ impl RemoteConnection {
         let wrapped_command = if options.simple {
             command.to_string()
         } else {
+            // Escape characters that have special meaning inside double quotes in bash:
+            // \ " $ ` ! need escaping, and | needs escaping to prevent pipe interpretation
+            let escaped_command = command
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('$', "\\$")
+                .replace('`', "\\`")
+                .replace('!', "\\!");
             format!(
                 "bash -c 'echo \"PID:$$\"; exec bash -c \"{}\"'",
-                command.replace('\\', "\\\\").replace('"', "\\\"")
+                escaped_command
             )
         };
 

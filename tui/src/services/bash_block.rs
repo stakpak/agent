@@ -1700,11 +1700,13 @@ pub fn render_collapsed_command_message(
 }
 
 /// Renders a compact view file result block with borders
-/// Format: View path/to/file.rs - 123 lines
+/// Format: View path/to/file.rs - 123 lines [grep: pattern] [glob: pattern]
 pub fn render_view_file_block(
     file_path: &str,
     total_lines: usize,
     terminal_width: usize,
+    grep: Option<&str>,
+    glob: Option<&str>,
 ) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 4 {
         terminal_width - 4
@@ -1715,23 +1717,43 @@ pub fn render_view_file_block(
 
     let border_color = Color::DarkGray;
     let icon = "";
-    let title = "View";
+    
+    // Determine title based on operation type
+    let title = if grep.is_some() && glob.is_some() {
+        "Grep+Glob"
+    } else if grep.is_some() {
+        "Grep"
+    } else if glob.is_some() {
+        "Glob"
+    } else {
+        "View"
+    };
+    
     let lines_text = format!("- {} lines", total_lines);
+    
+    // Build optional grep/glob suffix
+    let suffix = match (grep, glob) {
+        (Some(g), Some(gl)) => format!(" [grep: {} | glob: {}]", g, gl),
+        (Some(g), None) => format!(" [grep: {}]", g),
+        (None, Some(g)) => format!(" [glob: {}]", g),
+        _ => String::new(),
+    };
 
     // Calculate display widths
     let icon_width = calculate_display_width(icon);
     let title_width = calculate_display_width(title);
     let path_width = calculate_display_width(file_path);
     let lines_text_width = calculate_display_width(&lines_text);
+    let suffix_width = calculate_display_width(&suffix);
 
-    // Total content: icon + " " + title + " " + path + " " + lines_text
-    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+    // Total content: icon + " " + title + " " + path + " " + lines_text + suffix
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
 
     // Check if we need to truncate the path
     let (display_path, display_path_width) = if total_content_width > inner_width {
         // Need to truncate path
         let available_for_path =
-            inner_width.saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+            inner_width.saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3); // 3 for "..."
         let truncated = truncate_path_to_width(file_path, available_for_path);
         let w = calculate_display_width(&truncated);
         (truncated, w)
@@ -1740,10 +1762,10 @@ pub fn render_view_file_block(
     };
 
     let actual_content_width =
-        icon_width + 1 + title_width + 1 + display_path_width + 1 + lines_text_width;
+        icon_width + 1 + title_width + 1 + display_path_width + 1 + lines_text_width + suffix_width;
     let padding = inner_width.saturating_sub(actual_content_width);
 
-    let content_line = Line::from(vec![
+    let mut spans = vec![
         Span::styled("│", Style::default().fg(border_color)),
         Span::from(" "),
         Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
@@ -1758,9 +1780,16 @@ pub fn render_view_file_block(
         Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
         Span::from(" "),
         Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
-        Span::from(" ".repeat(padding)),
-        Span::styled(" │", Style::default().fg(border_color)),
-    ]);
+    ];
+    
+    if !suffix.is_empty() {
+        spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
+    }
+    
+    spans.push(Span::from(" ".repeat(padding)));
+    spans.push(Span::styled(" │", Style::default().fg(border_color)));
+
+    let content_line = Line::from(spans);
 
     let horizontal_line = "─".repeat(inner_width + 2);
     let top_border = Line::from(vec![Span::styled(
@@ -1776,11 +1805,13 @@ pub fn render_view_file_block(
 }
 
 /// Renders a compact view file block without borders (for full screen popup)
-/// Format: Stack View path/to/file.rs - 123 lines
+/// Format: Stack View path/to/file.rs - 123 lines [grep: pattern] [glob: pattern]
 pub fn render_view_file_block_no_border(
     file_path: &str,
     total_lines: usize,
     terminal_width: usize,
+    grep: Option<&str>,
+    glob: Option<&str>,
 ) -> Vec<Line<'static>> {
     let content_width = if terminal_width > 2 {
         terminal_width - 2
@@ -1789,23 +1820,43 @@ pub fn render_view_file_block_no_border(
     };
 
     let icon = "";
-    let title = "View";
+    
+    // Determine title based on operation type
+    let title = if grep.is_some() && glob.is_some() {
+        "Grep+Glob"
+    } else if grep.is_some() {
+        "Grep"
+    } else if glob.is_some() {
+        "Glob"
+    } else {
+        "View"
+    };
+    
     let lines_text = format!("- {} lines", total_lines);
+    
+    // Build optional grep/glob suffix
+    let suffix = match (grep, glob) {
+        (Some(g), Some(gl)) => format!(" [grep: {} | glob: {}]", g, gl),
+        (Some(g), None) => format!(" [grep: {}]", g),
+        (None, Some(g)) => format!(" [glob: {}]", g),
+        _ => String::new(),
+    };
 
     // Calculate display widths
     let icon_width = calculate_display_width(icon);
     let title_width = calculate_display_width(title);
     let path_width = calculate_display_width(file_path);
     let lines_text_width = calculate_display_width(&lines_text);
+    let suffix_width = calculate_display_width(&suffix);
 
-    // Total content: icon + " " + title + " " + path + " " + lines_text
-    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width;
+    // Total content: icon + " " + title + " " + path + " " + lines_text + suffix
+    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
 
     // Check if we need to truncate the path
     let (display_path, _display_path_width) = if total_content_width > content_width {
         // Need to truncate path
         let available_for_path = content_width
-            .saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + 3); // 3 for "..."
+            .saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3); // 3 for "..."
         let truncated = truncate_path_to_width(file_path, available_for_path);
         let w = calculate_display_width(&truncated);
         (truncated, w)
@@ -1813,7 +1864,7 @@ pub fn render_view_file_block_no_border(
         (file_path.to_string(), path_width)
     };
 
-    let content_line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(icon.to_string(), Style::default().fg(Color::DarkGray)),
         Span::from(" "),
         Span::styled(
@@ -1826,7 +1877,13 @@ pub fn render_view_file_block_no_border(
         Span::styled(display_path, Style::default().fg(AdaptiveColors::text())),
         Span::from(" "),
         Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
-    ]);
+    ];
+    
+    if !suffix.is_empty() {
+        spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
+    }
+
+    let content_line = Line::from(spans);
 
     vec![content_line]
 }
