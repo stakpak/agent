@@ -251,10 +251,8 @@ pub async fn run_interactive(
                 })?;
 
                 // Try to get the checkpoint with session info
-                if let Ok(checkpoint_with_session) =
-                    client.get_agent_checkpoint(checkpoint_uuid).await
-                {
-                    current_session_id = Some(checkpoint_with_session.session.id);
+                if let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await {
+                    current_session_id = Some(checkpoint.session_id);
                 }
 
                 let checkpoint_messages =
@@ -831,6 +829,7 @@ pub async fn run_interactive(
                             messages.clone(),
                             Some(tools.clone()),
                             headers.clone(),
+                            current_session_id,
                         )
                         .await;
 
@@ -991,10 +990,9 @@ pub async fn run_interactive(
                             && let Some(checkpoint_id) =
                                 extract_checkpoint_id_from_messages(&messages)
                             && let Ok(checkpoint_uuid) = Uuid::parse_str(&checkpoint_id)
-                            && let Ok(checkpoint_with_session) =
-                                client.get_agent_checkpoint(checkpoint_uuid).await
+                            && let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await
                         {
-                            current_session_id = Some(checkpoint_with_session.session.id);
+                            current_session_id = Some(checkpoint.session_id);
                         }
 
                         // Send tool calls to TUI if present
@@ -1140,7 +1138,7 @@ pub async fn run_interactive(
 
         // Display session stats
         if let Some(session_id) = final_session_id {
-            match client.get_agent_session_stats(session_id).await {
+            match client.get_session_stats(session_id).await {
                 Ok(stats) => {
                     let renderer = OutputRenderer::new(OutputFormat::Text, false);
                     print!("{}", renderer.render_session_stats(&stats));
