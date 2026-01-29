@@ -12,17 +12,18 @@ use crate::models::{
     CreateRuleBookInput, CreateRuleBookResponse, GetMyAccountResponse, ListRuleBook,
     ListRulebooksResponse, RuleBook,
 };
-use reqwest::{Client as ReqwestClient, Response, header};
+use reqwest::{Response, header};
 use rmcp::model::Content;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use stakpak_shared::models::billing::BillingResponse;
+use stakpak_shared::tls_client::{TlsClientConfig, create_tls_client};
 use uuid::Uuid;
 
 /// Client for Stakpak's non-inference APIs
 #[derive(Clone, Debug)]
 pub struct StakpakApiClient {
-    client: ReqwestClient,
+    client: reqwest::Client,
     base_url: String,
 }
 
@@ -57,11 +58,11 @@ impl StakpakApiClient {
                 .map_err(|e| e.to_string())?,
         );
 
-        let client = ReqwestClient::builder()
-            .default_headers(headers)
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = create_tls_client(
+            TlsClientConfig::default()
+                .with_headers(headers)
+                .with_timeout(std::time::Duration::from_secs(300)),
+        )?;
 
         Ok(Self {
             client,
