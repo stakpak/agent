@@ -691,15 +691,14 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
             }
         } else {
             // Handle local file/directory viewing
-            self.view_local_path(
-                &path,
+            let opts = ViewOptions {
                 view_range,
-                MAX_LINES,
+                max_lines: MAX_LINES,
                 tree,
-                grep.as_deref(),
-                glob.as_deref(),
-            )
-            .await
+                grep: grep.as_deref(),
+                glob: glob.as_deref(),
+            };
+            self.view_local_path(&path, &opts).await
         }
     }
 
@@ -1322,11 +1321,7 @@ SAFETY NOTES:
     async fn view_local_path(
         &self,
         path: &str,
-        view_range: Option<[i32; 2]>,
-        max_lines: usize,
-        tree: Option<bool>,
-        grep: Option<&str>,
-        glob: Option<&str>,
+        opts: &ViewOptions<'_>,
     ) -> Result<CallToolResult, McpError> {
         let path_obj = Path::new(path);
 
@@ -1339,28 +1334,33 @@ SAFETY NOTES:
 
         if path_obj.is_dir() {
             // Handle combined glob + grep: filter files by glob, then search content
-            if let (Some(glob_pattern), Some(grep_pattern)) = (glob, grep) {
+            if let (Some(glob_pattern), Some(grep_pattern)) = (opts.glob, opts.grep) {
                 return self
-                    .grep_local_directory_with_glob(path, grep_pattern, glob_pattern, max_lines)
+                    .grep_local_directory_with_glob(
+                        path,
+                        grep_pattern,
+                        glob_pattern,
+                        opts.max_lines,
+                    )
                     .await;
             }
 
             // Handle glob pattern filtering for directories (list files only)
-            if let Some(glob_pattern) = glob {
+            if let Some(glob_pattern) = opts.glob {
                 return self
-                    .view_local_dir_with_glob(path, glob_pattern, max_lines)
+                    .view_local_dir_with_glob(path, glob_pattern, opts.max_lines)
                     .await;
             }
 
             // Handle grep search in directory (all files)
-            if let Some(grep_pattern) = grep {
+            if let Some(grep_pattern) = opts.grep {
                 return self
-                    .grep_local_directory(path, grep_pattern, max_lines)
+                    .grep_local_directory(path, grep_pattern, opts.max_lines)
                     .await;
             }
 
             // Default directory tree view
-            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            let depth = if opts.tree.unwrap_or(false) { 3 } else { 1 };
             let provider = LocalFileSystemProvider;
             let path_str = path_obj.to_string_lossy();
 
@@ -1384,16 +1384,20 @@ SAFETY NOTES:
             }
         } else {
             // Handle grep search in single file
-            if let Some(grep_pattern) = grep {
-                return self.grep_local_file(path, grep_pattern, max_lines);
+            if let Some(grep_pattern) = opts.grep {
+                return self.grep_local_file(path, grep_pattern, opts.max_lines);
             }
 
             // Read file contents
             match fs::read_to_string(path) {
                 Ok(content) => {
-                    let result = match self
-                        .format_file_content(&content, path, view_range, max_lines, "File")
-                    {
+                    let result = match self.format_file_content(
+                        &content,
+                        path,
+                        opts.view_range,
+                        opts.max_lines,
+                        "File",
+                    ) {
                         Ok(result) => result,
                         Err(e) => {
                             return Ok(CallToolResult::error(vec![
