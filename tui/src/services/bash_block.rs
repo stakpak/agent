@@ -1717,7 +1717,7 @@ pub fn render_view_file_block(
 
     let border_color = Color::DarkGray;
     let icon = "";
-    
+
     // Determine title based on operation type
     let title = if grep.is_some() && glob.is_some() {
         "Grep+Glob"
@@ -1728,9 +1728,9 @@ pub fn render_view_file_block(
     } else {
         "View"
     };
-    
+
     let lines_text = format!("- {} lines", total_lines);
-    
+
     // Build optional grep/glob suffix
     let suffix = match (grep, glob) {
         (Some(g), Some(gl)) => format!(" [grep: {} | glob: {}]", g, gl),
@@ -1747,13 +1747,15 @@ pub fn render_view_file_block(
     let suffix_width = calculate_display_width(&suffix);
 
     // Total content: icon + " " + title + " " + path + " " + lines_text + suffix
-    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
+    let total_content_width =
+        icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
 
     // Check if we need to truncate the path
     let (display_path, display_path_width) = if total_content_width > inner_width {
         // Need to truncate path
-        let available_for_path =
-            inner_width.saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3); // 3 for "..."
+        let available_for_path = inner_width.saturating_sub(
+            icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3,
+        ); // 3 for "..."
         let truncated = truncate_path_to_width(file_path, available_for_path);
         let w = calculate_display_width(&truncated);
         (truncated, w)
@@ -1781,11 +1783,11 @@ pub fn render_view_file_block(
         Span::from(" "),
         Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
     ];
-    
+
     if !suffix.is_empty() {
         spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
     }
-    
+
     spans.push(Span::from(" ".repeat(padding)));
     spans.push(Span::styled(" │", Style::default().fg(border_color)));
 
@@ -1820,7 +1822,7 @@ pub fn render_view_file_block_no_border(
     };
 
     let icon = "";
-    
+
     // Determine title based on operation type
     let title = if grep.is_some() && glob.is_some() {
         "Grep+Glob"
@@ -1831,9 +1833,9 @@ pub fn render_view_file_block_no_border(
     } else {
         "View"
     };
-    
+
     let lines_text = format!("- {} lines", total_lines);
-    
+
     // Build optional grep/glob suffix
     let suffix = match (grep, glob) {
         (Some(g), Some(gl)) => format!(" [grep: {} | glob: {}]", g, gl),
@@ -1850,13 +1852,15 @@ pub fn render_view_file_block_no_border(
     let suffix_width = calculate_display_width(&suffix);
 
     // Total content: icon + " " + title + " " + path + " " + lines_text + suffix
-    let total_content_width = icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
+    let total_content_width =
+        icon_width + 1 + title_width + 1 + path_width + 1 + lines_text_width + suffix_width;
 
     // Check if we need to truncate the path
     let (display_path, _display_path_width) = if total_content_width > content_width {
         // Need to truncate path
-        let available_for_path = content_width
-            .saturating_sub(icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3); // 3 for "..."
+        let available_for_path = content_width.saturating_sub(
+            icon_width + 1 + title_width + 1 + 1 + lines_text_width + suffix_width + 3,
+        ); // 3 for "..."
         let truncated = truncate_path_to_width(file_path, available_for_path);
         let w = calculate_display_width(&truncated);
         (truncated, w)
@@ -1878,7 +1882,7 @@ pub fn render_view_file_block_no_border(
         Span::from(" "),
         Span::styled(lines_text, Style::default().fg(Color::DarkGray)),
     ];
-    
+
     if !suffix.is_empty() {
         spans.push(Span::styled(suffix, Style::default().fg(Color::Cyan)));
     }

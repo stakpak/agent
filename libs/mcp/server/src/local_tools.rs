@@ -112,6 +112,16 @@ pub struct ViewRequest {
     pub tree: Option<bool>,
 }
 
+/// Options for viewing files/directories (used internally to reduce function arguments)
+#[derive(Debug, Clone)]
+pub struct ViewOptions<'a> {
+    pub view_range: Option<[i32; 2]>,
+    pub max_lines: usize,
+    pub tree: Option<bool>,
+    pub grep: Option<&'a str>,
+    pub glob: Option<&'a str>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct StrReplaceRequest {
     #[schemars(
@@ -667,17 +677,15 @@ A maximum of 300 lines will be shown at a time, the rest will be truncated."
                 .await
             {
                 Ok((conn, remote_path)) => {
-                    self.view_remote_path(
-                        &conn,
-                        &remote_path,
-                        &path,
+                    let opts = ViewOptions {
                         view_range,
-                        MAX_LINES,
+                        max_lines: MAX_LINES,
                         tree,
-                        grep.as_deref(),
-                        glob.as_deref(),
-                    )
-                    .await
+                        grep: grep.as_deref(),
+                        glob: glob.as_deref(),
+                    };
+                    self.view_remote_path(&conn, &remote_path, &path, &opts)
+                        .await
                 }
                 Err(error_result) => Ok(error_result),
             }
@@ -1737,11 +1745,7 @@ SAFETY NOTES:
         conn: &Arc<RemoteConnection>,
         remote_path: &str,
         original_path: &str,
-        view_range: Option<[i32; 2]>,
-        max_lines: usize,
-        tree: Option<bool>,
-        grep: Option<&str>,
-        glob: Option<&str>,
+        opts: &ViewOptions<'_>,
     ) -> Result<CallToolResult, McpError> {
         if !conn.exists(remote_path).await {
             return Ok(CallToolResult::error(vec![
@@ -1755,7 +1759,7 @@ SAFETY NOTES:
 
         if conn.is_directory(remote_path).await {
             // Handle combined glob + grep for remote directories
-            if let (Some(glob_pattern), Some(grep_pattern)) = (glob, grep) {
+            if let (Some(glob_pattern), Some(grep_pattern)) = (opts.glob, opts.grep) {
                 return self
                     .grep_remote_directory_with_glob(
                         conn,
@@ -1763,39 +1767,39 @@ SAFETY NOTES:
                         original_path,
                         grep_pattern,
                         glob_pattern,
-                        max_lines,
+                        opts.max_lines,
                     )
                     .await;
             }
 
             // Handle glob pattern filtering for remote directories
-            if let Some(glob_pattern) = glob {
+            if let Some(glob_pattern) = opts.glob {
                 return self
                     .view_remote_dir_with_glob(
                         conn,
                         remote_path,
                         original_path,
                         glob_pattern,
-                        max_lines,
+                        opts.max_lines,
                     )
                     .await;
             }
 
             // Handle grep search in remote directory
-            if let Some(grep_pattern) = grep {
+            if let Some(grep_pattern) = opts.grep {
                 return self
                     .grep_remote_directory(
                         conn,
                         remote_path,
                         original_path,
                         grep_pattern,
-                        max_lines,
+                        opts.max_lines,
                     )
                     .await;
             }
 
             // Default directory tree view
-            let depth = if tree.unwrap_or(false) { 3 } else { 1 };
+            let depth = if opts.tree.unwrap_or(false) { 3 } else { 1 };
             let provider = RemoteFileSystemProvider::new(conn.clone());
 
             match generate_directory_tree(&provider, remote_path, "", depth, 0).await {
@@ -1815,9 +1819,15 @@ SAFETY NOTES:
             }
         } else {
             // Handle grep search in single remote file
-            if let Some(grep_pattern) = grep {
+            if let Some(grep_pattern) = opts.grep {
                 return self
-                    .grep_remote_file(conn, remote_path, original_path, grep_pattern, max_lines)
+                    .grep_remote_file(
+                        conn,
+                        remote_path,
+                        original_path,
+                        grep_pattern,
+                        opts.max_lines,
+                    )
                     .await;
             }
 
@@ -1827,8 +1837,8 @@ SAFETY NOTES:
                     let result = match self.format_file_content(
                         &content,
                         original_path,
-                        view_range,
-                        max_lines,
+                        opts.view_range,
+                        opts.max_lines,
                         "Remote file",
                     ) {
                         Ok(result) => result,
@@ -1927,7 +1937,7 @@ SAFETY NOTES:
         max_lines: usize,
     ) -> Result<CallToolResult, McpError> {
         // Escape for double quotes (the command will be wrapped in bash -c '...' which uses double quotes internally)
-        // Need to escape: \ " $ ` 
+        // Need to escape: \ " $ `
         let escaped_pattern = pattern
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
