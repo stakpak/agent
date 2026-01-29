@@ -42,7 +42,18 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Calculate section heights
     let collapsed_height = 1; // Height when collapsed (just header)
-    let footer_height = 4; // For version+profile, empty line, shortcuts (2 lines)
+    // Calculate footer height - check if version+profile needs to wrap
+    let version = env!("CARGO_PKG_VERSION");
+    let profile = &state.current_profile_name;
+    let available_width = padded_area.width as usize;
+    let left_part = format!("{}v{}", LEFT_PADDING, version);
+    let right_part = format!("profile {} ", profile);
+    let total_content = left_part.len() + right_part.len() + 1;
+    let footer_height = if total_content > available_width {
+        5
+    } else {
+        4
+    };
 
     // All sections are expanded by default (no collapsing)
     let context_collapsed = state
@@ -72,8 +83,11 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         5 // Header + Tokens + Model + Provider
     };
 
-    // Billing section is hidden when billing_info is None (local mode)
-    let billing_height = if state.billing_info.is_none() {
+    // Billing section is hidden when billing_info is None OR when using local provider
+    // Check if auth_display_info indicates local provider (first element is Some("Local"))
+    let is_local_provider =
+        matches!(&state.auth_display_info, (Some(provider), _, _) if provider == "Local");
+    let billing_height = if state.billing_info.is_none() || is_local_provider {
         0
     } else if billing_collapsed {
         collapsed_height
@@ -640,21 +654,37 @@ fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
     let profile = &state.current_profile_name;
     let available_width = area.width as usize;
 
-    // Line 1: Version (left) and Profile (right)
+    // Line 1: Version (left) and Profile (right) - wrap if too long
     let left_part = format!("{}v{}", LEFT_PADDING, version);
     let right_part = format!("profile {} ", profile);
-    let total_content = left_part.len() + right_part.len();
-    let spacing = available_width.saturating_sub(total_content).max(1);
+    let total_content = left_part.len() + right_part.len() + 1; // +1 for min spacing
 
-    lines.push(Line::from(vec![
-        Span::styled(
+    if total_content <= available_width {
+        // Fits on one line
+        let spacing = available_width.saturating_sub(total_content).max(1);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}v{}", LEFT_PADDING, version),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(" ".repeat(spacing)),
+            Span::styled("profile ", Style::default().fg(Color::DarkGray)),
+            Span::styled(profile, Style::default().fg(Color::Reset)),
+        ]));
+    } else {
+        // Wrap: version on first line, profile on second line
+        lines.push(Line::from(vec![Span::styled(
             format!("{}v{}", LEFT_PADDING, version),
             Style::default().fg(Color::DarkGray),
-        ),
-        Span::raw(" ".repeat(spacing)),
-        Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-        Span::styled(profile, Style::default().fg(Color::Reset)),
-    ]));
+        )]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}profile ", LEFT_PADDING),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(profile, Style::default().fg(Color::Reset)),
+        ]));
+    }
 
     // Empty line between version/profile and shortcuts
     lines.push(Line::from(""));

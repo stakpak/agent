@@ -730,17 +730,49 @@ impl AppConfig {
         None
     }
 
-    /// Get auth display info for the TUI.
-    pub fn get_auth_display_info(&self) -> (Option<String>, Option<String>, Option<String>) {
-        if matches!(self.provider, ProviderType::Remote) {
-            return (None, None, None);
+    /// Check if using a local LLM provider (via auth.toml or config).
+    /// Returns true if any local provider (anthropic, openai, gemini) has auth configured,
+    /// even if the profile's provider setting is Remote.
+    pub fn is_using_local_provider(&self) -> bool {
+        // If explicitly set to Local, it's local
+        if matches!(self.provider, ProviderType::Local) {
+            return true;
         }
 
-        let config_provider = Some("Local".to_string());
+        // Check if any local provider has auth configured in auth.toml
+        let builtin_providers = ["anthropic", "openai", "gemini"];
+        for provider_name in builtin_providers {
+            if self.resolve_provider_auth(provider_name).is_some() {
+                return true;
+            }
+        }
+
+        // Check custom providers in config
+        for name in self.providers.keys() {
+            if !builtin_providers.contains(&name.as_str())
+                && name != "stakpak"
+                && self
+                    .providers
+                    .get(name)
+                    .is_some_and(|p| p.api_key().is_some())
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Get auth display info for the TUI.
+    /// Returns (config_provider, auth_provider, subscription_name).
+    /// Now checks for local provider auth even when provider=Remote.
+    pub fn get_auth_display_info(&self) -> (Option<String>, Option<String>, Option<String>) {
         let builtin_providers = ["anthropic", "openai", "gemini"];
 
+        // Check if any local provider has auth - if so, treat as "Local" for display
         for provider_name in builtin_providers {
             if let Some(auth) = self.resolve_provider_auth(provider_name) {
+                let config_provider = Some("Local".to_string());
                 let base_name = match provider_name {
                     "anthropic" => "Anthropic",
                     "openai" => "OpenAI",
@@ -769,12 +801,19 @@ impl AppConfig {
 
         // Check custom providers
         for name in self.providers.keys() {
-            if !builtin_providers.contains(&name.as_str()) {
-                return (config_provider, Some(name.clone()), None);
+            if !builtin_providers.contains(&name.as_str())
+                && name != "stakpak"
+                && self
+                    .providers
+                    .get(name)
+                    .is_some_and(|p| p.api_key().is_some())
+            {
+                return (Some("Local".to_string()), Some(name.clone()), None);
             }
         }
 
-        (config_provider, None, None)
+        // No local provider auth found - return None for all (Remote mode)
+        (None, None, None)
     }
 }
 

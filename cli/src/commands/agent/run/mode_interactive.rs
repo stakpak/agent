@@ -219,8 +219,9 @@ pub async fn run_interactive(
             let data = client.get_my_account().await?;
             send_input_event(&input_tx, InputEvent::GetStatus(data.to_text())).await?;
 
-            // Fetch billing info (only when Stakpak API key is present)
-            if has_stakpak_key {
+            // Fetch billing info (only when Stakpak API key is present AND not using local provider)
+            // When using local provider auth (e.g., Claude API key in auth.toml), skip billing
+            if has_stakpak_key && !ctx_clone.is_using_local_provider() {
                 refresh_billing_info(client.as_ref(), &input_tx).await;
             }
             // Load available profiles and send to TUI
