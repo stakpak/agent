@@ -645,8 +645,8 @@ GLOB (File Filtering):
 - Supports standard glob syntax: *, ?, [abc], **
 - Examples:
   * glob='*.rs' - All Rust files
-  * glob='*.ts' - All TypeScript files  
-  * glob='test_*' - Files starting with test_
+  * glob='**/*.ts' - All TypeScript files (recursive)
+  * glob='test_*.py' - Python test files
 
 SECRET HANDLING:
 - File contents containing secrets will be redacted and shown as placeholders like [REDACTED_SECRET:rule-id:hash]
@@ -1547,7 +1547,7 @@ SAFETY NOTES:
 
         let total = matches.len();
         let result = format!(
-            "Grep results for '{}' in \"{}\" ({} matches):\n\n{}",
+            "Grep results for '{}' in \"{}\" ({} matches in 1 file):\n\n{}",
             pattern,
             path,
             total,
@@ -1973,7 +1973,7 @@ SAFETY NOTES:
                 let display_lines: Vec<&str> = lines.into_iter().take(max_lines).collect();
 
                 let mut result = format!(
-                    "Grep results for '{}' in \"{}\" ({} matches):\n\n{}",
+                    "Grep results for '{}' in \"{}\" ({} matches in 1 file):\n\n{}",
                     pattern,
                     original_path,
                     display_lines.len(),
