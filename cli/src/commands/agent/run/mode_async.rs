@@ -353,6 +353,18 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     }
 
     let elapsed = start_time.elapsed();
+
+    // Gracefully shutdown MCP server and proxy immediately after loop to stop background tasks
+    print!(
+        "{}",
+        renderer.render_info("Shutting down MCP server and proxy...")
+    );
+    let _ = server_shutdown_tx.send(());
+    let _ = proxy_shutdown_tx.send(());
+    // Give the servers a moment to cleanup
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    print!("{}", renderer.render_success("Shutdown complete"));
+
     let tool_execution_time = elapsed.saturating_sub(llm_response_time);
 
     // Use generic renderer functions to build the completion output
@@ -475,17 +487,6 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
     if let Some(session_id) = current_session_id {
         println!("Session ID: {}", session_id);
     }
-
-    // Gracefully shutdown MCP server and proxy
-    print!(
-        "{}",
-        renderer.render_info("Shutting down MCP server and proxy...")
-    );
-    let _ = server_shutdown_tx.send(());
-    let _ = proxy_shutdown_tx.send(());
-    // Give the servers a moment to cleanup
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    print!("{}", renderer.render_success("Shutdown complete"));
 
     Ok(())
 }
