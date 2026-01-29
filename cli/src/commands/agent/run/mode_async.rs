@@ -186,15 +186,25 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
 
         // Make chat completion request
         let llm_start = Instant::now();
-        let response = client
+        let response_result = client
             .chat_completion(
                 config.model.clone(),
                 chat_messages.clone(),
                 Some(tools.clone()),
                 current_session_id,
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await;
+
+        let response = match response_result {
+            Ok(response) => response,
+            Err(e) => {
+                print!(
+                    "{}",
+                    renderer.render_error(&format!("Error during execution: {}", e))
+                );
+                break;
+            }
+        };
         llm_response_time += llm_start.elapsed();
 
         // Accumulate token usage
@@ -432,6 +442,33 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             "{}",
             renderer.render_info("No checkpoint available to save")
         );
+    }
+
+    // Attempt to print billing info (cost)
+    if let Ok(account_data) = client.get_my_account().await {
+        let billing_username = account_data
+            .scope
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or(&account_data.username);
+
+        if let Ok(billing_info) = client.get_billing_info(billing_username).await {
+            let mut info_str = String::new();
+            for (name, feature) in billing_info.features {
+                if let Some(balance) = feature.balance {
+                    info_str.push_str(&format!("  - {}: {:.2}\n", name, balance));
+                }
+                // Check for included usage as well which might represent "credits" in some contexts
+                if let Some(usage) = feature.usage {
+                    info_str.push_str(&format!("  - {} Usage: {:.2}\n", name, usage));
+                }
+            }
+
+            if !info_str.is_empty() {
+                print!("{}", renderer.render_info("Billing Status:"));
+                print!("{}", renderer.render_info(&info_str));
+            }
+        }
     }
 
     // Print session ID if available
