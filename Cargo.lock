@@ -5493,6 +5493,7 @@ dependencies = [
  "rmcp",
  "rpassword",
  "rustls 0.23.35",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",

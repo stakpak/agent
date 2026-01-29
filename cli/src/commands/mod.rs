@@ -454,6 +454,13 @@ impl Commands {
                 auth_command.run(config).await?;
             }
             Commands::Acp { system_prompt_file } => {
+                // Force auto-update before starting ACP session (no prompt)
+                use crate::utils::check_update::force_auto_update;
+                if let Err(e) = force_auto_update().await {
+                    // Log error but continue - don't block ACP if update check fails
+                    eprintln!("Update check failed: {}", e);
+                }
+
                 let system_prompt = if let Some(system_prompt_file_path) = &system_prompt_file {
                     match std::fs::read_to_string(system_prompt_file_path) {
                         Ok(content) => {
