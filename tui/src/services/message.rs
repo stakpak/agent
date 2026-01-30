@@ -67,9 +67,9 @@ pub enum MessageContent {
         Option<String>,
         crate::services::bash_block::RunCommandState,
     ),
-    /// View file block - compact display showing file path and line count
-    /// (file_path: String, total_lines: usize)
-    RenderViewFileBlock(String, usize),
+    /// View file block - compact display showing file path, line count, and optional grep/glob
+    /// (file_path: String, total_lines: usize, grep: Option<String>, glob: Option<String>)
+    RenderViewFileBlock(String, usize, Option<String>, Option<String>),
 }
 
 /// Compute a hash of the MessageContent for cache invalidation.
@@ -194,10 +194,12 @@ pub fn hash_message_content(content: &MessageContent) -> u64 {
                 msg.hash(&mut hasher);
             }
         }
-        MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+        MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob) => {
             17u8.hash(&mut hasher);
             file_path.hash(&mut hasher);
             total_lines.hash(&mut hasher);
+            grep.hash(&mut hasher);
+            glob.hash(&mut hasher);
         }
         MessageContent::UserMessage(text) => {
             18u8.hash(&mut hasher);
@@ -504,21 +506,31 @@ impl Message {
     }
 
     /// Create a view file block message
-    /// Shows a compact display with file icon, "View", file path, and line count
-    pub fn render_view_file_block(file_path: String, total_lines: usize) -> Self {
+    /// Shows a compact display with file icon, \"View\", file path, line count, and optional grep/glob
+    pub fn render_view_file_block(
+        file_path: String,
+        total_lines: usize,
+        grep: Option<String>,
+        glob: Option<String>,
+    ) -> Self {
         Message {
             id: Uuid::new_v4(),
-            content: MessageContent::RenderViewFileBlock(file_path, total_lines),
+            content: MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob),
             is_collapsed: None,
         }
     }
 
     /// Create a view file block message for the full screen popup (no borders)
-    /// Shows a compact display with file icon, "View", file path, and line count
-    pub fn render_view_file_block_popup(file_path: String, total_lines: usize) -> Self {
+    /// Shows a compact display with file icon, \"View\", file path, line count, and optional grep/glob
+    pub fn render_view_file_block_popup(
+        file_path: String,
+        total_lines: usize,
+        grep: Option<String>,
+        glob: Option<String>,
+    ) -> Self {
         Message {
             id: Uuid::new_v4(),
-            content: MessageContent::RenderViewFileBlock(file_path, total_lines),
+            content: MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob),
             // is_collapsed: Some(true) means it shows in full screen popup only
             is_collapsed: Some(true),
         }
@@ -1319,16 +1331,24 @@ fn render_single_message_internal(msg: &Message, width: usize) -> Vec<(Line<'sta
                 Style::default(),
             ));
         }
-        MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+        MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob) => {
             // Use no-border version for popup (is_collapsed: Some(true))
             let rendered = if msg.is_collapsed == Some(true) {
                 crate::services::bash_block::render_view_file_block_no_border(
                     file_path,
                     *total_lines,
                     width,
+                    grep.as_deref(),
+                    glob.as_deref(),
                 )
             } else {
-                crate::services::bash_block::render_view_file_block(file_path, *total_lines, width)
+                crate::services::bash_block::render_view_file_block(
+                    file_path,
+                    *total_lines,
+                    width,
+                    grep.as_deref(),
+                    glob.as_deref(),
+                )
             };
             let borrowed = get_wrapped_styled_block_lines(&rendered, width);
             lines.extend(convert_to_owned_lines(borrowed));
@@ -1922,19 +1942,23 @@ fn get_wrapped_message_lines_internal(
                 let owned_lines = convert_to_owned_lines(borrowed_lines);
                 all_lines.extend(owned_lines);
             }
-            MessageContent::RenderViewFileBlock(file_path, total_lines) => {
+            MessageContent::RenderViewFileBlock(file_path, total_lines, grep, glob) => {
                 // Use no-border version for popup (is_collapsed: Some(true))
                 let rendered_lines = if msg.is_collapsed == Some(true) {
                     crate::services::bash_block::render_view_file_block_no_border(
                         file_path,
                         *total_lines,
                         width,
+                        grep.as_deref(),
+                        glob.as_deref(),
                     )
                 } else {
                     crate::services::bash_block::render_view_file_block(
                         file_path,
                         *total_lines,
                         width,
+                        grep.as_deref(),
+                        glob.as_deref(),
                     )
                 };
                 let borrowed_lines = get_wrapped_styled_block_lines(&rendered_lines, width);
