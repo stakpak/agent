@@ -63,6 +63,7 @@ pub fn handle_stream_message(
         state
             .messages
             .push(Message::assistant(Some(id), s.clone(), None));
+        state.assistant_message_count += 1;
         state.text_area.set_text("");
 
         if !was_at_bottom {

@@ -65,6 +65,8 @@ pub struct AppState {
     pub collapsed_messages_scroll: usize,
     pub collapsed_messages_selected: usize,
     pub has_user_messages: bool,
+    /// Count of assistant message rounds/steps in the current session
+    pub assistant_message_count: usize,
     /// Per-message rendered line cache for efficient incremental rendering
     pub per_message_cache: PerMessageCache,
     /// Assembled lines cache (the final combined output of all message lines)
@@ -393,6 +395,7 @@ impl AppState {
             mouse_capture_enabled: false, // Will be set based on terminal detection in event_loop
             loading_manager: LoadingStateManager::new(),
             has_user_messages: false,
+            assistant_message_count: 0,
             message_tool_calls: None,
             approval_bar: ApprovalBar::new(),
             message_approved_tools: Vec::new(),

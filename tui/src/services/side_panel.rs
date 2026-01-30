@@ -69,7 +69,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let context_height = if context_collapsed {
         collapsed_height
     } else {
-        5 // Header + Tokens + Model + Provider
+        6 // Header + Tokens + Model + Provider + Steps
     };
 
     // Billing section is hidden when billing_info is None (local mode)
@@ -191,6 +191,14 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         .map(|m| m.context_info())
         .unwrap_or_default();
     let max_tokens = context_info.max_tokens as u32;
+
+    // Steps - show assistant message count (rounds/steps)
+    let steps_value = if state.assistant_message_count == 0 {
+        "N/A".to_string()
+    } else {
+        state.assistant_message_count.to_string()
+    };
+    lines.push(make_row("Steps", steps_value, Color::White));
 
     // Show N/A when no content yet (tokens == 0)
     if tokens == 0 {
