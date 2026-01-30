@@ -29,6 +29,10 @@ pub fn handle_error(state: &mut AppState, err: String) {
         return;
     }
     if err == "STREAM_CANCELLED" {
+        // Clear cancellation flag since we're now handling it
+        state.cancel_requested = false;
+        state.is_streaming = false;
+
         let rendered_lines =
             render_bash_block_rejected("Interrupted by user", "System", None, None);
         state.messages.push(Message {
@@ -36,6 +40,10 @@ pub fn handle_error(state: &mut AppState, err: String) {
             content: crate::services::message::MessageContent::StyledBlock(rendered_lines),
             is_collapsed: None,
         });
+
+        // Invalidate cache and scroll to bottom so the cancelled message is visible
+        crate::services::message::invalidate_message_lines_cache(state);
+        state.stay_at_bottom = true;
         return;
     }
     let mut error_message = handle_errors(err);
@@ -306,6 +314,8 @@ pub fn handle_end_loading_operation(state: &mut AppState, operation: crate::app:
 
 /// Handle assistant message event
 pub fn handle_assistant_message(state: &mut AppState, msg: String) {
+    // Clear any pending cancellation since a new assistant message arrived
+    state.cancel_requested = false;
     state.messages.push(Message::assistant(None, msg, None));
 
     // Invalidate cache since messages changed

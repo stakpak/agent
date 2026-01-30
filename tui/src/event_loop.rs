@@ -231,6 +231,9 @@ pub async fn run_tui(
                    if let InputEvent::ToolResult(ref tool_call_result) = event {
                        clear_streaming_tool_results(&mut state);
 
+                       // Clear cancel_requested now that the final result has arrived
+                       state.cancel_requested = false;
+
                        // For run_command, also remove any message that matches the tool call ID
                        // (handles case where streaming message uses tool_call_id directly)
                        // The tool call ID is a String, but message IDs are Uuid

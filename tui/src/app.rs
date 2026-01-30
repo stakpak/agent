@@ -125,6 +125,9 @@ pub struct AppState {
     pub streaming_tool_result_id: Option<Uuid>,
     pub completed_tool_calls: std::collections::HashSet<Uuid>,
     pub is_streaming: bool,
+    /// When true, cancellation has been requested (ESC pressed) but the final ToolResult
+    /// hasn't arrived yet. Late StreamToolResult/StreamAssistantMessage events should be ignored.
+    pub cancel_requested: bool,
     pub latest_tool_call: Option<ToolCall>,
     pub retry_attempts: usize,
     pub max_retry_attempts: usize,
@@ -376,6 +379,7 @@ impl AppState {
             file_search_tx: Some(file_search_tx),
             file_search_rx: Some(result_rx),
             is_streaming: false,
+            cancel_requested: false,
             interactive_commands: crate::constants::INTERACTIVE_COMMANDS
                 .iter()
                 .map(|s| s.to_string())
