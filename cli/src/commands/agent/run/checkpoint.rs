@@ -1,7 +1,6 @@
 use crate::commands::agent::run::tui::send_input_event;
 use rmcp::model::CallToolResult;
 use stakpak_api::AgentProvider;
-use stakpak_api::models::AgentOutput;
 use stakpak_shared::models::integrations::{
     mcp::CallToolResultExt,
     openai::{ChatMessage, MessageContent, Role, ToolCall, ToolCallResult},
@@ -11,7 +10,7 @@ use uuid::Uuid;
 
 pub async fn get_checkpoint_messages(
     client: &dyn AgentProvider,
-    checkpoint_id: &String,
+    checkpoint_id: &str,
 ) -> Result<Vec<ChatMessage>, String> {
     let checkpoint_uuid = Uuid::parse_str(checkpoint_id).map_err(|_| {
         format!(
@@ -21,26 +20,19 @@ pub async fn get_checkpoint_messages(
     })?;
 
     let checkpoint = client
-        .get_agent_checkpoint(checkpoint_uuid)
+        .get_checkpoint(checkpoint_uuid)
         .await
         .map_err(|e| e.to_string())?;
-    let checkpoint_output: AgentOutput = checkpoint.output;
 
-    Ok(get_messages_from_checkpoint_output(&checkpoint_output))
-}
-
-pub fn get_messages_from_checkpoint_output(output: &AgentOutput) -> Vec<ChatMessage> {
-    let AgentOutput::PabloV1 { messages, .. } = output;
-
-    messages.clone()
+    Ok(checkpoint.state.messages)
 }
 
 pub async fn extract_checkpoint_messages_and_tool_calls(
-    checkpoint_id: &String,
+    checkpoint_id: &str,
     input_tx: &tokio::sync::mpsc::Sender<InputEvent>,
     messages: Vec<ChatMessage>,
 ) -> Result<(Vec<ChatMessage>, Vec<ToolCall>), String> {
-    let mut checkpoint_messages = messages.clone();
+    let mut checkpoint_messages = messages;
     // Append checkpoint_id to the last assistant message if present
     if let Some(last_message) = checkpoint_messages
         .iter_mut()
@@ -58,7 +50,7 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         )));
     }
 
-    for message in &*checkpoint_messages {
+    for message in &checkpoint_messages {
         match message.role {
             Role::Assistant => {
                 if let Some(content) = &message.content {
@@ -123,7 +115,6 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
     }
 
     // Find the last assistant message that has tool_calls
-    // This handles the case where the checkpoint might have messages after the assistant's tool call
     let tool_calls = checkpoint_messages
         .iter()
         .rev()
@@ -146,7 +137,7 @@ pub async fn extract_checkpoint_messages_and_tool_calls(
         })
         .unwrap_or_default();
 
-    Ok((checkpoint_messages.clone(), pending_tool_calls))
+    Ok((checkpoint_messages, pending_tool_calls))
 }
 
 pub fn extract_checkpoint_id_from_messages(messages: &[ChatMessage]) -> Option<String> {
@@ -190,19 +181,16 @@ pub async fn resume_session_from_checkpoint(
 ) -> Result<(Vec<ChatMessage>, Vec<ToolCall>, Uuid), String> {
     let session_uuid = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
 
-    match client
-        .get_agent_session_latest_checkpoint(session_uuid)
-        .await
-    {
+    match client.get_active_checkpoint(session_uuid).await {
         Ok(checkpoint) => {
             let (chat_messages, tool_calls) = extract_checkpoint_messages_and_tool_calls(
-                &checkpoint.checkpoint.id.to_string(),
+                &checkpoint.id.to_string(),
                 input_tx,
-                get_messages_from_checkpoint_output(&checkpoint.output),
+                checkpoint.state.messages,
             )
             .await?;
 
-            Ok((chat_messages, tool_calls, checkpoint.session.id))
+            Ok((chat_messages, tool_calls, checkpoint.session_id))
         }
         Err(e) => {
             send_input_event(
@@ -210,7 +198,7 @@ pub async fn resume_session_from_checkpoint(
                 InputEvent::EndLoadingOperation(LoadingOperation::CheckpointResume),
             )
             .await?;
-            send_input_event(input_tx, InputEvent::Error(e)).await?;
+            send_input_event(input_tx, InputEvent::Error(e.to_string())).await?;
             Err("Failed to get session checkpoint".to_string())
         }
     }
