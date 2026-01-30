@@ -580,44 +580,33 @@ fn extract_diff_preview(message: &str) -> Option<String> {
     }
 }
 
-/// Extract file path from a view/read tool call
-pub fn extract_file_path_from_tool_call(tool_call: &ToolCall) -> Option<String> {
+/// Extract view tool parameters (path, grep, glob) from a tool call
+pub fn extract_view_params_from_tool_call(
+    tool_call: &ToolCall,
+) -> (Option<String>, Option<String>, Option<String>) {
     // Try to parse arguments as JSON
     if let Ok(args) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
-        // Common field names for file path in read/view tools
-        if let Some(path) = args
-            .get("filePath")
+        let path = args
+            .get("path")
+            .or(args.get("filePath"))
             .or(args.get("file_path"))
-            .or(args.get("path"))
-            .or(args.get("file"))
-            .or(args.get("target"))
             .and_then(|v| v.as_str())
-        {
-            return Some(path.to_string());
-        }
+            .map(|s| s.to_string());
+
+        let grep = args
+            .get("grep")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let glob = args
+            .get("glob")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        return (path, grep, glob);
     }
 
-    // Fallback: try to extract from raw arguments string
-    let args_str = &tool_call.function.arguments;
-
-    // Try simple patterns like filePath:"..." or path:"..."
-    for pattern in &["filePath", "file_path", "path", "file"] {
-        if let Some(start) = args_str.find(&format!("\"{}\"", pattern)) {
-            let after_key = &args_str[start + pattern.len() + 2..];
-            // Skip to the value (after colon and possible whitespace/quotes)
-            if let Some(colon_pos) = after_key.find(':') {
-                let after_colon = after_key[colon_pos + 1..].trim_start();
-                if after_colon.starts_with('"') {
-                    let value_start = 1;
-                    if let Some(end_quote) = after_colon[value_start..].find('"') {
-                        return Some(after_colon[value_start..value_start + end_quote].to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    (None, None, None)
 }
 
 // ========== Approval Bar Handlers ==========

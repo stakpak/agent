@@ -82,6 +82,12 @@ crossterm = "0.29"
 tempfile = "3.0"
 similar = { version = "2.7.0", features = ["inline"] }
 schemars = { version = "1.1.0", features = ["chrono"] }
+# Ripgrep ecosystem for grep/glob in view tool
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+globset = "0.4"
 async-trait = "0.1"
 open = "5.3.2"
 log = "0.4"
