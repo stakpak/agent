@@ -5,3 +5,5 @@ debug.log
 # Stakpak local files
 .stakpak
 .DS_Store
+debug_acp.sh
+PR_Description.md

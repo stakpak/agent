@@ -19,19 +19,19 @@ use uuid::Uuid;
 ///
 /// This distinction is important because some providers (like Anthropic via StakAI adapter)
 /// send multiple tool calls with the same index but different IDs.
-struct ToolCallAccumulator {
+pub struct ToolCallAccumulator {
     tool_calls: Vec<ToolCall>,
 }
 
 impl ToolCallAccumulator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tool_calls: Vec::new(),
         }
     }
 
     /// Process a tool call delta and accumulate it into the appropriate tool call.
-    fn process_delta(&mut self, delta: &ToolCallDelta) {
+    pub fn process_delta(&mut self, delta: &ToolCallDelta) {
         let delta_id = delta.id.as_deref().filter(|id| !id.is_empty());
         let delta_func = delta.function.as_ref();
 
@@ -93,7 +93,7 @@ impl ToolCallAccumulator {
     }
 
     /// Get the accumulated tool calls, filtering out empty placeholders.
-    fn into_tool_calls(self) -> Vec<ToolCall> {
+    pub fn into_tool_calls(self) -> Vec<ToolCall> {
         self.tool_calls
             .into_iter()
             .filter(|tc| !tc.id.is_empty())

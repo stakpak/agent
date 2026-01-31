@@ -87,7 +87,8 @@ pub async fn execute_acp_fs_tool(
         .map_err(|e| format!("Failed to parse tool arguments: {}", e))?;
 
     use super::tool_names;
-    match tool_call.function.name.as_str() {
+    let stripped_name = super::utils::strip_tool_name(&tool_call.function.name);
+    match stripped_name {
         tool_names::VIEW => {
             let path = args
                 .get("path")
