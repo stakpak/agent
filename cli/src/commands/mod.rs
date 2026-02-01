@@ -13,6 +13,7 @@ pub mod auth;
 pub mod auto_update;
 pub mod board;
 pub mod mcp;
+pub mod tab;
 pub mod warden;
 
 pub use auth::AuthCommands;
@@ -160,6 +161,13 @@ pub enum Commands {
     /// Run `stakpak board --help` for available commands.
     Board {
         /// Arguments to pass to the board plugin
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Browser automation CLI - control a real browser from the command line
+    /// Run `stakpak tab --help` for available commands.
+    Tab {
+        /// Arguments to pass to the tab plugin
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -446,6 +454,9 @@ impl Commands {
             }
             Commands::Board { args } => {
                 board::run_board(args).await?;
+            }
+            Commands::Tab { args } => {
+                tab::run_tab(args).await?;
             }
             Commands::Update => {
                 auto_update::run_auto_update().await?;
