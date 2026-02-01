@@ -145,10 +145,10 @@ async fn get_latest_github_release_version() -> Result<String, String> {
         .map_err(|e| format!("Failed to parse GitHub response: {}", e))?;
 
     for release in releases {
-        if let Some(tag_name) = release["tag_name"].as_str() {
-            if let Some(version) = tag_name.strip_prefix('v') {
-                return Ok(version.to_string());
-            }
+        if let Some(tag_name) = release["tag_name"].as_str()
+            && let Some(version) = tag_name.strip_prefix('v')
+        {
+            return Ok(version.to_string());
         }
     }
 
@@ -248,14 +248,14 @@ fn extract_tar_gz(
             .path()
             .map_err(|e| format!("Failed to get entry path: {}", e))?;
 
-        if let Some(file_name) = path.file_name() {
-            if file_name == binary_name {
-                let dest_path = dest_dir.join(file_name);
-                entry
-                    .unpack(&dest_path)
-                    .map_err(|e| format!("Failed to extract binary: {}", e))?;
-                return Ok(());
-            }
+        if let Some(file_name) = path.file_name()
+            && file_name == binary_name
+        {
+            let dest_path = dest_dir.join(file_name);
+            entry
+                .unpack(&dest_path)
+                .map_err(|e| format!("Failed to extract binary: {}", e))?;
+            return Ok(());
         }
     }
 
