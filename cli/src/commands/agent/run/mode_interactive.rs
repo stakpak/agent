@@ -363,7 +363,16 @@ pub async fn run_interactive(
                         };
 
                         send_input_event(&input_tx, InputEvent::HasUserMessage).await?;
-                        tools_queue.clear();
+                        // Add tool_result for any remaining queued tool calls before clearing.
+                        // Without this, assistant messages containing tool_use blocks for these
+                        // calls would be orphaned (no matching tool_result), causing Anthropic
+                        // API 400 errors on the next request.
+                        for abandoned_tool in tools_queue.drain(..) {
+                            messages.push(tool_result(
+                                abandoned_tool.id,
+                                "TOOL_CALL_CANCELLED".to_string(),
+                            ));
+                        }
                         messages.push(user_msg);
 
                         // Capture telemetry when not using Stakpak API (local mode)
