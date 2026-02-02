@@ -374,7 +374,9 @@ impl ProxyServer {
                     .pool_max_idle_per_host(10)
                     .tcp_keepalive(std::time::Duration::from_secs(60));
 
-                // Configure mTLS if certificate chain is provided
+                // Configure TLS: use mTLS cert chain if provided, otherwise use
+                // platform-verified TLS so the OS CA store is trusted (needed for
+                // warden container where a custom CA is installed).
                 if let Some(cert_chain) = certificate_chain.as_ref() {
                     match cert_chain.create_client_config() {
                         Ok(tls_config) => {
@@ -384,6 +386,22 @@ impl ProxyServer {
                             tracing::error!("Failed to create TLS config for {}: {:?}", name, e);
                             return;
                         }
+                    }
+                } else {
+                    // No mTLS cert chain — use platform verifier to trust system CA store
+                    let arc_crypto_provider =
+                        std::sync::Arc::new(rustls::crypto::ring::default_provider());
+                    if let Ok(tls_config) = rustls::ClientConfig::builder_with_provider(
+                        arc_crypto_provider,
+                    )
+                    .with_safe_default_protocol_versions()
+                    .map(|builder| {
+                        rustls_platform_verifier::BuilderVerifierExt::with_platform_verifier(
+                            builder,
+                        )
+                        .with_no_client_auth()
+                    }) {
+                        client_builder = client_builder.use_preconfigured_tls(tls_config);
                     }
                 }
 
