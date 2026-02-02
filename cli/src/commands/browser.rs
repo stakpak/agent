@@ -11,8 +11,6 @@ const DAEMON_BINARY: &str = if cfg!(windows) {
     "agent-tab-daemon"
 };
 
-/// Pass-through to agent-tab plugin. All args after 'tab' are forwarded directly.
-/// Run `stakpak tab --help` for available commands.
 pub async fn run_tab(args: Vec<String>) -> Result<(), String> {
     let tab_path = get_tab_plugin_path().await;
     let mut cmd = Command::new(&tab_path);
