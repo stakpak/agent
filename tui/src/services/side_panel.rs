@@ -69,7 +69,7 @@ pub fn render_side_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let context_height = if context_collapsed {
         collapsed_height
     } else {
-        5 // Header + Tokens + Model + Provider
+        6 // Header + Tokens + Model + Provider + Profile
     };
 
     // Billing section is hidden when billing_info is None (local mode)
@@ -236,6 +236,13 @@ fn render_context_section(f: &mut Frame, state: &AppState, area: Rect, collapsed
         _ => "Remote".to_string(),
     };
     lines.push(make_row("Provider", provider_value, Color::DarkGray));
+
+    // Profile
+    lines.push(make_row(
+        "Profile",
+        state.current_profile_name.clone(),
+        Color::DarkGray,
+    ));
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);
@@ -632,29 +639,17 @@ fn render_changeset_section(f: &mut Frame, state: &AppState, area: Rect, collaps
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer section with version and profile
-fn render_footer_section(f: &mut Frame, state: &AppState, area: Rect) {
+/// Render the footer section with version and shortcuts
+fn render_footer_section(f: &mut Frame, _state: &AppState, area: Rect) {
     let mut lines = Vec::new();
 
     let version = env!("CARGO_PKG_VERSION");
-    let profile = &state.current_profile_name;
-    let available_width = area.width as usize;
 
-    // Line 1: Version (left) and Profile (right)
-    let left_part = format!("{}v{}", LEFT_PADDING, version);
-    let right_part = format!("profile {} ", profile);
-    let total_content = left_part.len() + right_part.len();
-    let spacing = available_width.saturating_sub(total_content).max(1);
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("{}v{}", LEFT_PADDING, version),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::raw(" ".repeat(spacing)),
-        Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-        Span::styled(profile, Style::default().fg(Color::Reset)),
-    ]));
+    // Line 1: Version (left)
+    lines.push(Line::from(vec![Span::styled(
+        format!("{}v{}", LEFT_PADDING, version),
+        Style::default().fg(Color::DarkGray),
+    )]));
 
     // Empty line between version/profile and shortcuts
     lines.push(Line::from(""));

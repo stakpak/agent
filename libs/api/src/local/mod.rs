@@ -10,8 +10,9 @@ use stakpak_shared::models::llm::LLMModel;
 
 // Sub-modules
 pub(crate) mod context_managers;
-pub mod db;
 pub mod hooks;
+pub mod migrations;
+pub mod storage;
 
 #[cfg(test)]
 mod tests;

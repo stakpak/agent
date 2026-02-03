@@ -49,7 +49,12 @@ pub fn capture_event(
     };
 
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
+        let client = match crate::tls_client::create_tls_client(
+            crate::tls_client::TlsClientConfig::default(),
+        ) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
         let _ = client.post(TELEMETRY_ENDPOINT).json(&payload).send().await;
     });
 }

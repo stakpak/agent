@@ -45,6 +45,84 @@ fn service_error_to_error_data(e: ServiceError, context: &str) -> ErrorData {
     }
 }
 
+/// Single-pass restoration of `[REDACTED_SECRET:...]` placeholders in a string.
+///
+/// Unlike the iterative `restore_secrets()` helper (which calls `String::replace`
+/// for every map entry), this scans forward through the string once, resolving
+/// each placeholder from the map as it is encountered.  Because we advance past
+/// the *replacement text* without re-scanning it, a secret whose value happens
+/// to contain another `[REDACTED_SECRET:...]` token will **not** trigger a
+/// chain replacement.
+fn restore_secrets_single_pass(s: &str, redaction_map: &HashMap<String, String>) -> String {
+    const PREFIX: &str = "[REDACTED_SECRET:";
+
+    if redaction_map.is_empty() {
+        return s.to_string();
+    }
+
+    let mut result = String::with_capacity(s.len());
+    let mut remaining = s;
+
+    while let Some(start) = remaining.find(PREFIX) {
+        // Push everything before the placeholder.
+        result.push_str(&remaining[..start]);
+
+        // Look for the closing `]`.
+        if let Some(rel_end) = remaining[start..].find(']') {
+            let key = &remaining[start..start + rel_end + 1];
+            if let Some(original) = redaction_map.get(key) {
+                result.push_str(original);
+            } else {
+                // Unknown placeholder — keep it verbatim.
+                result.push_str(key);
+            }
+            remaining = &remaining[start + rel_end + 1..];
+        } else {
+            // No closing bracket — push from the prefix onward as-is and stop.
+            result.push_str(&remaining[start..]);
+            return result;
+        }
+    }
+
+    result.push_str(remaining);
+    result
+}
+
+/// Recursively restore redacted secrets in a JSON value tree.
+///
+/// Walks through all string values in the JSON structure and restores
+/// any `[REDACTED_SECRET:...]` placeholders to their original values.
+/// This avoids the pitfall of serializing to a JSON string, doing raw
+/// text replacement (which can break JSON when secret values contain
+/// `"`, `\`, or newlines), and parsing back.
+///
+/// Uses [`restore_secrets_single_pass`] for each string to prevent chain
+/// replacement when a secret's value itself contains a redaction placeholder.
+fn restore_secrets_in_json_value(
+    value: &mut serde_json::Value,
+    redaction_map: &HashMap<String, String>,
+) {
+    match value {
+        serde_json::Value::String(s) => {
+            let restored = restore_secrets_single_pass(s, redaction_map);
+            if restored != *s {
+                *s = restored;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_k, v) in map.iter_mut() {
+                restore_secrets_in_json_value(v, redaction_map);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                restore_secrets_in_json_value(v, redaction_map);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub struct ProxyServer {
     pool: Arc<ClientPool>,
     // Map downstream request IDs to upstream client names
@@ -180,14 +258,13 @@ impl ProxyServer {
         let mut tool_params = params.clone();
         tool_params.name = tool_name.to_string().into();
 
-        if let Some(arguments) = &tool_params.arguments
-            && let Ok(arguments_str) = serde_json::to_string(arguments)
+        // Load the redaction map once, then walk the entire JSON value tree.
+        let redaction_map = self.secret_manager.load_session_redaction_map();
+        if !redaction_map.is_empty()
+            && let Some(arguments) = &mut tool_params.arguments
         {
-            let restored = self
-                .secret_manager
-                .restore_secrets_in_string(&arguments_str);
-            if let Ok(restored_arguments) = serde_json::from_str(&restored) {
-                tool_params.arguments = Some(restored_arguments);
+            for (_key, value) in arguments.iter_mut() {
+                restore_secrets_in_json_value(value, &redaction_map);
             }
         }
 
@@ -297,7 +374,9 @@ impl ProxyServer {
                     .pool_max_idle_per_host(10)
                     .tcp_keepalive(std::time::Duration::from_secs(60));
 
-                // Configure mTLS if certificate chain is provided
+                // Configure TLS: use mTLS cert chain if provided, otherwise use
+                // platform-verified TLS so the OS CA store is trusted (needed for
+                // warden container where a custom CA is installed).
                 if let Some(cert_chain) = certificate_chain.as_ref() {
                     match cert_chain.create_client_config() {
                         Ok(tls_config) => {
@@ -307,6 +386,22 @@ impl ProxyServer {
                             tracing::error!("Failed to create TLS config for {}: {:?}", name, e);
                             return;
                         }
+                    }
+                } else {
+                    // No mTLS cert chain — use platform verifier to trust system CA store
+                    let arc_crypto_provider =
+                        std::sync::Arc::new(rustls::crypto::ring::default_provider());
+                    if let Ok(tls_config) = rustls::ClientConfig::builder_with_provider(
+                        arc_crypto_provider,
+                    )
+                    .with_safe_default_protocol_versions()
+                    .map(|builder| {
+                        rustls_platform_verifier::BuilderVerifierExt::with_platform_verifier(
+                            builder,
+                        )
+                        .with_no_client_auth()
+                    }) {
+                        client_builder = client_builder.use_preconfigured_tls(tls_config);
                     }
                 }
 
@@ -672,4 +767,492 @@ pub async fn start_proxy_server(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Helper: build a redaction map from pairs
+    fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — basic string restoration
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_simple_string() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:abc]", "s3cret")]);
+        let mut value = json!("password is [REDACTED_SECRET:pw:abc]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("password is s3cret"));
+    }
+
+    #[test]
+    fn test_restore_no_placeholder() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:abc]", "s3cret")]);
+        let mut value = json!("nothing to replace here");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("nothing to replace here"));
+    }
+
+    #[test]
+    fn test_restore_empty_map() {
+        let redaction_map = HashMap::new();
+        let mut value = json!("[REDACTED_SECRET:pw:abc] stays");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("[REDACTED_SECRET:pw:abc] stays"));
+    }
+
+    #[test]
+    fn test_restore_multiple_placeholders_same_string() {
+        let redaction_map = map(&[
+            ("[REDACTED_SECRET:a:1]", "alpha"),
+            ("[REDACTED_SECRET:b:2]", "beta"),
+        ]);
+        let mut value = json!("[REDACTED_SECRET:a:1] and [REDACTED_SECRET:b:2]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("alpha and beta"));
+    }
+
+    #[test]
+    fn test_restore_repeated_placeholder() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:x]", "pass")]);
+        let mut value = json!("[REDACTED_SECRET:pw:x]words and [REDACTED_SECRET:pw:x]words");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("passwords and passwords"));
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — nested objects
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_flat_object() {
+        let redaction_map = map(&[("[REDACTED_SECRET:key:1]", "actual_key")]);
+        let mut value = json!({
+            "path": "README.md",
+            "old_str": "key=[REDACTED_SECRET:key:1]",
+            "new_str": "key=new_value"
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value["old_str"], json!("key=actual_key"));
+        // Untouched fields stay the same
+        assert_eq!(value["path"], json!("README.md"));
+        assert_eq!(value["new_str"], json!("key=new_value"));
+    }
+
+    #[test]
+    fn test_restore_nested_object() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:z]", "secret123")]);
+        let mut value = json!({
+            "level1": {
+                "level2": {
+                    "password": "[REDACTED_SECRET:pw:z]"
+                }
+            }
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value["level1"]["level2"]["password"], json!("secret123"));
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — arrays
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_array_of_strings() {
+        let redaction_map = map(&[("[REDACTED_SECRET:t:1]", "token_abc")]);
+        let mut value = json!(["no secret", "[REDACTED_SECRET:t:1]", "also clean"]);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!(["no secret", "token_abc", "also clean"]));
+    }
+
+    #[test]
+    fn test_restore_array_of_objects() {
+        let redaction_map = map(&[
+            ("[REDACTED_SECRET:a:1]", "val_a"),
+            ("[REDACTED_SECRET:b:2]", "val_b"),
+        ]);
+        let mut value = json!([
+            {"key": "[REDACTED_SECRET:a:1]"},
+            {"key": "[REDACTED_SECRET:b:2]"}
+        ]);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value[0]["key"], json!("val_a"));
+        assert_eq!(value[1]["key"], json!("val_b"));
+    }
+
+    #[test]
+    fn test_restore_nested_arrays() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "found")]);
+        let mut value = json!([["a", "[REDACTED_SECRET:x:1]"], ["b"]]);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!([["a", "found"], ["b"]]));
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — non-string types unchanged
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_number_unchanged() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!(42);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!(42));
+    }
+
+    #[test]
+    fn test_restore_bool_unchanged() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!(true);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!(true));
+    }
+
+    #[test]
+    fn test_restore_null_unchanged() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!(null);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!(null));
+    }
+
+    #[test]
+    fn test_restore_mixed_types_in_object() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:1]", "secret")]);
+        let mut value = json!({
+            "string_field": "has [REDACTED_SECRET:pw:1]",
+            "number_field": 123,
+            "bool_field": false,
+            "null_field": null,
+            "array_field": [1, "[REDACTED_SECRET:pw:1]", true]
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value["string_field"], json!("has secret"));
+        assert_eq!(value["number_field"], json!(123));
+        assert_eq!(value["bool_field"], json!(false));
+        assert_eq!(value["null_field"], json!(null));
+        assert_eq!(value["array_field"], json!([1, "secret", true]));
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — secret values with JSON-special chars
+    // This is the key bug the new approach fixes: secrets containing
+    // `"`, `\`, or newlines would break the old serialize→replace→parse path.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_secret_with_double_quote() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:q]", "pass\"word")]);
+        let mut value = json!("auth=[REDACTED_SECRET:pw:q]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("auth=pass\"word"));
+    }
+
+    #[test]
+    fn test_restore_secret_with_backslash() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:b]", "C:\\Users\\admin")]);
+        let mut value = json!("path=[REDACTED_SECRET:pw:b]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("path=C:\\Users\\admin"));
+    }
+
+    #[test]
+    fn test_restore_secret_with_newline() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:n]", "line1\nline2")]);
+        let mut value = json!("content=[REDACTED_SECRET:pw:n]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("content=line1\nline2"));
+    }
+
+    #[test]
+    fn test_restore_secret_with_tab() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:t]", "col1\tcol2")]);
+        let mut value = json!("[REDACTED_SECRET:pw:t]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("col1\tcol2"));
+    }
+
+    #[test]
+    fn test_restore_secret_with_all_special_chars() {
+        let secret = "p@ss\"\n\\word\t{end}";
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:all]", secret)]);
+        let mut value = json!({
+            "old_str": "before [REDACTED_SECRET:pw:all] after",
+            "new_str": "replacement"
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value["old_str"], json!(format!("before {} after", secret)));
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — realistic str_replace scenario
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_str_replace_tool_call() {
+        let redaction_map = map(&[
+            ("[REDACTED_SECRET:url-embedded-passwords:2f6lt3]", "pass"),
+            (
+                "[REDACTED_SECRET:generic-api-key:abc123]",
+                "sk-ant-secret-key-value",
+            ),
+        ]);
+
+        let mut value = json!({
+            "path": "README.md",
+            "old_str": "Generate cryptographically secure [REDACTED_SECRET:url-embedded-passwords:2f6lt3]words with configurable complexity",
+            "new_str": "Generate strong passwords"
+        });
+
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+
+        assert_eq!(
+            value["old_str"],
+            json!("Generate cryptographically secure passwords with configurable complexity")
+        );
+        assert_eq!(value["new_str"], json!("Generate strong passwords"));
+        assert_eq!(value["path"], json!("README.md"));
+    }
+
+    #[test]
+    fn test_restore_run_command_tool_call() {
+        let redaction_map = map(&[("[REDACTED_SECRET:generic-api-key:k1]", "sk-live-abc123")]);
+
+        let mut value = json!({
+            "command": "curl -H 'Authorization: Bearer [REDACTED_SECRET:generic-api-key:k1]' https://api.example.com",
+            "description": "Test API call"
+        });
+
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+
+        assert_eq!(
+            value["command"],
+            json!("curl -H 'Authorization: Bearer sk-live-abc123' https://api.example.com")
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_in_json_value — edge cases
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_restore_empty_string() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!("");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!(""));
+    }
+
+    #[test]
+    fn test_restore_placeholder_is_entire_string() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:full]", "the_whole_secret")]);
+        let mut value = json!("[REDACTED_SECRET:pw:full]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!("the_whole_secret"));
+    }
+
+    #[test]
+    fn test_restore_deeply_nested() {
+        let redaction_map = map(&[("[REDACTED_SECRET:d:1]", "deep_val")]);
+        let mut value = json!({
+            "a": {
+                "b": {
+                    "c": {
+                        "d": {
+                            "e": "[REDACTED_SECRET:d:1]"
+                        }
+                    }
+                }
+            }
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value["a"]["b"]["c"]["d"]["e"], json!("deep_val"));
+    }
+
+    #[test]
+    fn test_restore_large_redaction_map() {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for i in 0..100 {
+            pairs.push((
+                format!("[REDACTED_SECRET:rule:{}]", i),
+                format!("secret_value_{}", i),
+            ));
+        }
+        let redaction_map: HashMap<String, String> = pairs.iter().cloned().collect();
+
+        let mut value = json!({
+            "field0": "has [REDACTED_SECRET:rule:0]",
+            "field50": "has [REDACTED_SECRET:rule:50]",
+            "field99": "has [REDACTED_SECRET:rule:99]",
+            "clean": "no secrets here"
+        });
+
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+
+        assert_eq!(value["field0"], json!("has secret_value_0"));
+        assert_eq!(value["field50"], json!("has secret_value_50"));
+        assert_eq!(value["field99"], json!("has secret_value_99"));
+        assert_eq!(value["clean"], json!("no secrets here"));
+    }
+
+    #[test]
+    fn test_restore_secret_value_looks_like_placeholder() {
+        // Edge case: a secret value itself looks like a redaction placeholder
+        let redaction_map = map(&[("[REDACTED_SECRET:outer:1]", "[REDACTED_SECRET:inner:2]")]);
+        let mut value = json!("contains [REDACTED_SECRET:outer:1]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        // Should restore to the literal string (no recursive resolution)
+        assert_eq!(value, json!("contains [REDACTED_SECRET:inner:2]"));
+    }
+
+    #[test]
+    fn test_restore_no_chain_replacement_both_keys_present() {
+        // Both outer and inner are valid keys in the map.
+        // Outer's value contains inner's key — single-pass must NOT chain.
+        let redaction_map = map(&[
+            ("[REDACTED_SECRET:outer:1]", "[REDACTED_SECRET:inner:2]"),
+            ("[REDACTED_SECRET:inner:2]", "final_secret"),
+        ]);
+        let mut value = json!("[REDACTED_SECRET:outer:1]");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        // Must stop at the first restoration, not chain into "final_secret"
+        assert_eq!(value, json!("[REDACTED_SECRET:inner:2]"));
+    }
+
+    #[test]
+    fn test_restore_no_chain_replacement_in_object() {
+        let redaction_map = map(&[
+            ("[REDACTED_SECRET:a:1]", "text [REDACTED_SECRET:b:2] text"),
+            ("[REDACTED_SECRET:b:2]", "chained"),
+        ]);
+        let mut value = json!({
+            "field": "before [REDACTED_SECRET:a:1] after"
+        });
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(
+            value["field"],
+            json!("before text [REDACTED_SECRET:b:2] text after")
+        );
+    }
+
+    #[test]
+    fn test_restore_partial_placeholder_not_matched() {
+        let redaction_map = map(&[("[REDACTED_SECRET:pw:abc]", "secret")]);
+        let mut value = json!("partial [REDACTED_SECRET:pw:ab is not replaced");
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(
+            value,
+            json!("partial [REDACTED_SECRET:pw:ab is not replaced")
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // restore_secrets_single_pass — unit tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_single_pass_basic() {
+        let map = map(&[("[REDACTED_SECRET:pw:1]", "secret")]);
+        assert_eq!(
+            restore_secrets_single_pass("auth=[REDACTED_SECRET:pw:1]", &map),
+            "auth=secret"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_no_placeholder() {
+        let map = map(&[("[REDACTED_SECRET:pw:1]", "secret")]);
+        assert_eq!(
+            restore_secrets_single_pass("no placeholders here", &map),
+            "no placeholders here"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_empty_map() {
+        let map = HashMap::new();
+        assert_eq!(
+            restore_secrets_single_pass("[REDACTED_SECRET:pw:1] stays", &map),
+            "[REDACTED_SECRET:pw:1] stays"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_unknown_key_preserved() {
+        let map = map(&[("[REDACTED_SECRET:pw:1]", "secret")]);
+        assert_eq!(
+            restore_secrets_single_pass("[REDACTED_SECRET:unknown:99]", &map),
+            "[REDACTED_SECRET:unknown:99]"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_multiple_placeholders() {
+        let map = map(&[
+            ("[REDACTED_SECRET:a:1]", "alpha"),
+            ("[REDACTED_SECRET:b:2]", "beta"),
+        ]);
+        assert_eq!(
+            restore_secrets_single_pass("[REDACTED_SECRET:a:1] and [REDACTED_SECRET:b:2]", &map),
+            "alpha and beta"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_no_closing_bracket() {
+        let map = map(&[("[REDACTED_SECRET:pw:1]", "secret")]);
+        assert_eq!(
+            restore_secrets_single_pass("broken [REDACTED_SECRET:pw:1 missing bracket", &map),
+            "broken [REDACTED_SECRET:pw:1 missing bracket"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_no_chain() {
+        let map = map(&[
+            ("[REDACTED_SECRET:a:1]", "value has [REDACTED_SECRET:b:2]"),
+            ("[REDACTED_SECRET:b:2]", "should not appear"),
+        ]);
+        assert_eq!(
+            restore_secrets_single_pass("[REDACTED_SECRET:a:1]", &map),
+            "value has [REDACTED_SECRET:b:2]"
+        );
+    }
+
+    #[test]
+    fn test_single_pass_adjacent_placeholders() {
+        let map = map(&[
+            ("[REDACTED_SECRET:a:1]", "X"),
+            ("[REDACTED_SECRET:b:2]", "Y"),
+        ]);
+        assert_eq!(
+            restore_secrets_single_pass("[REDACTED_SECRET:a:1][REDACTED_SECRET:b:2]", &map),
+            "XY"
+        );
+    }
+
+    #[test]
+    fn test_restore_empty_object() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!({});
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn test_restore_empty_array() {
+        let redaction_map = map(&[("[REDACTED_SECRET:x:1]", "val")]);
+        let mut value = json!([]);
+        restore_secrets_in_json_value(&mut value, &redaction_map);
+        assert_eq!(value, json!([]));
+    }
 }

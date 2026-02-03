@@ -2351,25 +2351,50 @@ SAFETY NOTES:
             }
         };
 
-        if !original_content.contains(&actual_old_str) {
+        // Try exact match first, then fall back to Unicode-normalized matching.
+        // LLMs commonly normalize curly quotes to straight quotes, en-dashes to
+        // hyphens, etc. The fallback finds the original substring in the file by
+        // normalizing both sides to ASCII and using char-position mapping.
+        let (new_content, replaced_count) = if original_content.contains(&actual_old_str) {
+            // Exact match — fast path.  Use `replacen` for single or
+            // `replace` for all, and derive the count from the result to
+            // avoid scanning the string twice.
+            if replace_all.unwrap_or(false) {
+                let result = original_content.replace(&actual_old_str, &actual_new_str);
+                // Derive count from the length difference.
+                let old_len = actual_old_str.len();
+                let new_len = actual_new_str.len();
+                let count = if old_len == new_len {
+                    // Length-neutral replacement — count via matches (unavoidable).
+                    original_content.matches(&actual_old_str).count()
+                } else {
+                    let orig = original_content.len();
+                    let after = result.len();
+                    // diff = count * (new_len - old_len), signed arithmetic
+                    let diff = after as isize - orig as isize;
+                    let step = new_len as isize - old_len as isize;
+                    (diff / step) as usize
+                };
+                (result, count)
+            } else {
+                (
+                    original_content.replacen(&actual_old_str, &actual_new_str, 1),
+                    1,
+                )
+            }
+        } else if let Some(result) = unicode_normalized_replace(
+            &original_content,
+            &actual_old_str,
+            &actual_new_str,
+            replace_all.unwrap_or(false),
+        ) {
+            // Unicode-normalized fallback matched
+            result
+        } else {
             return Ok(CallToolResult::error(vec![
                 Content::text("STRING_NOT_FOUND"),
                 Content::text("The string old_str was not found in the file"),
             ]));
-        }
-
-        let new_content = if replace_all.unwrap_or(false) {
-            original_content.replace(&actual_old_str, &actual_new_str)
-        } else {
-            original_content.replacen(&actual_old_str, &actual_new_str, 1)
-        };
-
-        let replaced_count = if replace_all.unwrap_or(false) {
-            original_content.matches(&actual_old_str).count()
-        } else if original_content.contains(&actual_old_str) {
-            1
-        } else {
-            0
         };
 
         let unified_diff = self.create_unified_diff(&original_content, &new_content, path, path);
@@ -2765,5 +2790,745 @@ SAFETY NOTES:
         table.push_str("═══════════════════════════════════════\n\n");
 
         table
+    }
+}
+
+/// Normalize a single character: map common Unicode "fancy" characters to their
+/// ASCII equivalents.  Most mappings are 1-to-1, but some are 1-to-many (e.g.
+/// `…` → `...`).  Returns `None` when the character requires no normalisation.
+fn normalize_unicode_char(c: char) -> Option<&'static str> {
+    match c {
+        // Quotation marks
+        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{2039}' | '\u{203A}' => Some("'"), // ' ' ‚ ‹ ›  → '
+        '\u{FF07}' => Some("'"), // fullwidth apostrophe → '
+        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{00AB}' | '\u{00BB}' => Some("\""), // " " „ « »  → "
+
+        // Dashes
+        '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}' => Some("-"), // ‐ ‑ ‒ – — ―  → -
+
+        // Spaces
+        '\u{00A0}' | '\u{2002}' | '\u{2003}' | '\u{2009}' | '\u{200A}' | '\u{202F}' => Some(" "), // NBSP, en/em/thin/hair/nnbsp → space
+
+        // Dots / ellipsis  (1-to-many: one char → three chars)
+        '\u{2026}' => Some("..."), // … → ...
+
+        // Other common normalizations
+        '\u{2022}' => Some("*"), // bullet → *
+        '\u{00B7}' => Some("."), // middle dot → .
+
+        _ => None,
+    }
+}
+
+/// Normalize a string by mapping each character through [`normalize_unicode_char`].
+///
+/// Because some mappings are 1-to-many (e.g. `…` → `...`), the returned string
+/// may have a **different** character count than the input.  Use
+/// [`normalize_with_byte_mapping`] when you need to map positions back.
+fn normalize_unicode_to_ascii(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match normalize_unicode_char(c) {
+            Some(replacement) => out.push_str(replacement),
+            None => out.push(c),
+        }
+    }
+    out
+}
+
+/// Result of normalizing a string with byte-position tracking.
+struct NormalizedWithMapping {
+    /// The normalized string.
+    text: String,
+    /// For each char-boundary byte offset in `text`, the corresponding byte
+    /// offset in the **original** string.
+    ///
+    /// Indexed by the char-boundary byte offset in `text`. There is one entry
+    /// per character plus a sentinel at the end equal to the original string's
+    /// byte length. This lets us translate match byte ranges from
+    /// [`str::find`] directly to original byte ranges without an intermediate
+    /// char-index conversion.
+    norm_byte_to_orig_byte: Vec<usize>,
+    /// All char-boundary byte offsets in `text` (sorted).
+    /// Used to locate the *end* of a match: given the match start byte +
+    /// pattern byte length, we round to the next char boundary via binary
+    /// search.  Only needed when the normalized text contains multi-byte
+    /// characters (e.g. non-mapped Unicode like `é`).
+    char_boundaries: Vec<usize>,
+}
+
+/// Normalize `s` while building a byte-level mapping from positions in the
+/// normalized output back to positions in `s`.
+fn normalize_with_byte_mapping(s: &str) -> NormalizedWithMapping {
+    let mut text = String::with_capacity(s.len());
+    let mut norm_byte_to_orig_byte: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    let mut char_boundaries: Vec<usize> = Vec::with_capacity(s.len() + 1);
+
+    for (byte_idx, c) in s.char_indices() {
+        match normalize_unicode_char(c) {
+            Some(replacement) => {
+                for rc in replacement.chars() {
+                    char_boundaries.push(text.len());
+                    norm_byte_to_orig_byte.push(byte_idx);
+                    text.push(rc);
+                }
+            }
+            None => {
+                char_boundaries.push(text.len());
+                norm_byte_to_orig_byte.push(byte_idx);
+                text.push(c);
+            }
+        }
+    }
+
+    // Sentinel: one past the last character.
+    char_boundaries.push(text.len());
+    norm_byte_to_orig_byte.push(s.len());
+
+    NormalizedWithMapping {
+        text,
+        norm_byte_to_orig_byte,
+        char_boundaries,
+    }
+}
+
+impl NormalizedWithMapping {
+    /// Convert a byte offset in the normalized `text` to the corresponding
+    /// byte offset in the original string.  Returns `None` if `norm_byte` does
+    /// not fall on a character boundary (should never happen for offsets
+    /// returned by [`str::find`]).
+    fn orig_byte_at(&self, norm_byte: usize) -> Option<usize> {
+        let idx = self.char_boundaries.binary_search(&norm_byte).ok()?;
+        Some(self.norm_byte_to_orig_byte[idx])
+    }
+}
+
+/// Attempt to find `old_str` in `content` using Unicode-normalized matching,
+/// then perform the replacement on the *original* content preserving its
+/// encoding.
+///
+/// Returns `Some((new_content, replaced_count))` on success, `None` if the
+/// normalized old_str is still not found.
+///
+/// Supports 1-to-many normalizations (e.g. `…` → `...`) by building a byte-
+/// position mapping from the normalized characters back to original byte
+/// ranges.
+///
+/// Uses Rust's built-in [`str::find`] (Two-Way algorithm) for O(n + m)
+/// substring search instead of a naive O(n × m) character-by-character scan.
+fn unicode_normalized_replace(
+    content: &str,
+    old_str: &str,
+    new_str: &str,
+    replace_all: bool,
+) -> Option<(String, usize)> {
+    let norm_old = normalize_unicode_to_ascii(old_str);
+
+    if norm_old.is_empty() {
+        return None;
+    }
+
+    // Cheap pre-check: normalize content without building the mapping.
+    // If the pattern doesn't appear in the normalized content at all,
+    // skip the heavier mapping allocation.
+    let norm_content_quick = normalize_unicode_to_ascii(content);
+    if !norm_content_quick.contains(&norm_old) {
+        return None;
+    }
+    drop(norm_content_quick);
+
+    // Pattern is present — build the full mapping.
+    let norm_content = normalize_with_byte_mapping(content);
+
+    // Use Rust's optimized string search (Two-Way algorithm, O(n + m)).
+    // Matches are collected as (orig_byte_start, orig_byte_end) pairs.
+    let norm_old_byte_len = norm_old.len();
+    let mut match_orig_ranges: Vec<(usize, usize)> = Vec::new();
+
+    if replace_all {
+        let mut search_byte = 0usize;
+        while search_byte + norm_old_byte_len <= norm_content.text.len() {
+            if let Some(rel) = norm_content.text[search_byte..].find(&norm_old) {
+                let match_start = search_byte + rel;
+                let match_end = match_start + norm_old_byte_len;
+
+                if let (Some(orig_start), Some(orig_end)) = (
+                    norm_content.orig_byte_at(match_start),
+                    norm_content.orig_byte_at(match_end),
+                ) {
+                    match_orig_ranges.push((orig_start, orig_end));
+                }
+                search_byte = match_end;
+            } else {
+                break;
+            }
+        }
+    } else if let Some(match_start) = norm_content.text.find(&norm_old) {
+        let match_end = match_start + norm_old_byte_len;
+
+        if let (Some(orig_start), Some(orig_end)) = (
+            norm_content.orig_byte_at(match_start),
+            norm_content.orig_byte_at(match_end),
+        ) {
+            match_orig_ranges.push((orig_start, orig_end));
+        }
+    }
+
+    if match_orig_ranges.is_empty() {
+        return None;
+    }
+
+    let replaced_count = match_orig_ranges.len();
+
+    // Build the result by splicing in new_str at each matched byte range.
+    let mut result = String::with_capacity(content.len());
+    let mut prev_byte_end = 0usize;
+
+    for &(orig_start, orig_end) in &match_orig_ranges {
+        result.push_str(&content[prev_byte_end..orig_start]);
+        result.push_str(new_str);
+        prev_byte_end = orig_end;
+    }
+    result.push_str(&content[prev_byte_end..]);
+
+    Some((result, replaced_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------------------------------------------------------------
+    // normalize_unicode_char / normalize_unicode_to_ascii
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalize_straight_quotes_unchanged() {
+        assert_eq!(normalize_unicode_to_ascii("it's fine"), "it's fine");
+    }
+
+    #[test]
+    fn test_normalize_curly_single_quotes() {
+        // U+2018 LEFT SINGLE QUOTATION MARK
+        assert_eq!(normalize_unicode_to_ascii("it\u{2018}s"), "it's");
+        // U+2019 RIGHT SINGLE QUOTATION MARK
+        assert_eq!(normalize_unicode_to_ascii("shouldn\u{2019}t"), "shouldn't");
+    }
+
+    #[test]
+    fn test_normalize_curly_double_quotes() {
+        // U+201C / U+201D
+        assert_eq!(
+            normalize_unicode_to_ascii("\u{201C}hello\u{201D}"),
+            "\"hello\""
+        );
+    }
+
+    #[test]
+    fn test_normalize_en_dash() {
+        assert_eq!(normalize_unicode_to_ascii("a\u{2013}b"), "a-b");
+    }
+
+    #[test]
+    fn test_normalize_em_dash() {
+        assert_eq!(normalize_unicode_to_ascii("a\u{2014}b"), "a-b");
+    }
+
+    #[test]
+    fn test_normalize_figure_dash() {
+        assert_eq!(normalize_unicode_to_ascii("a\u{2012}b"), "a-b");
+    }
+
+    #[test]
+    fn test_normalize_hyphen_unicode() {
+        // U+2010 HYPHEN
+        assert_eq!(normalize_unicode_to_ascii("a\u{2010}b"), "a-b");
+    }
+
+    #[test]
+    fn test_normalize_nbsp() {
+        assert_eq!(
+            normalize_unicode_to_ascii("hello\u{00A0}world"),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn test_normalize_preserves_char_count_for_1to1() {
+        // Only 1-to-1 mappings in this input — char count preserved
+        let input = "\u{201C}shouldn\u{2019}t\u{201D} \u{2013} done";
+        let normalized = normalize_unicode_to_ascii(input);
+        assert_eq!(input.chars().count(), normalized.chars().count());
+    }
+
+    #[test]
+    fn test_normalize_ellipsis_expands() {
+        // Ellipsis is 1-to-3 mapping
+        assert_eq!(normalize_unicode_to_ascii("wait\u{2026}"), "wait...");
+        // Char count grows: 5 input chars → 7 output chars
+        assert_eq!("wait\u{2026}".chars().count(), 5);
+        assert_eq!(
+            normalize_unicode_to_ascii("wait\u{2026}").chars().count(),
+            7
+        );
+    }
+
+    #[test]
+    fn test_normalize_pure_ascii_passthrough() {
+        let ascii = "The quick brown fox jumps over the lazy dog. 0123456789 !@#$%^&*()";
+        assert_eq!(normalize_unicode_to_ascii(ascii), ascii);
+    }
+
+    #[test]
+    fn test_normalize_bullet() {
+        assert_eq!(normalize_unicode_to_ascii("\u{2022} item"), "* item");
+    }
+
+    #[test]
+    fn test_normalize_non_breaking_hyphen() {
+        assert_eq!(
+            normalize_unicode_to_ascii("non\u{2011}breaking"),
+            "non-breaking"
+        );
+    }
+
+    #[test]
+    fn test_normalize_guillemets() {
+        assert_eq!(
+            normalize_unicode_to_ascii("\u{00AB}quoted\u{00BB}"),
+            "\"quoted\""
+        );
+    }
+
+    #[test]
+    fn test_normalize_fullwidth_apostrophe() {
+        assert_eq!(normalize_unicode_to_ascii("it\u{FF07}s"), "it's");
+    }
+
+    #[test]
+    fn test_normalize_mixed_unicode_and_ascii() {
+        let input = "It\u{2019}s a \u{201C}test\u{201D} \u{2013} really";
+        let expected = "It's a \"test\" - really";
+        assert_eq!(normalize_unicode_to_ascii(input), expected);
+    }
+
+    // ---------------------------------------------------------------
+    // normalize_with_byte_mapping
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_byte_mapping_ascii() {
+        let m = normalize_with_byte_mapping("abc");
+        assert_eq!(m.text, "abc");
+        assert_eq!(m.char_boundaries, vec![0, 1, 2, 3]); // includes sentinel
+        assert_eq!(m.norm_byte_to_orig_byte, vec![0, 1, 2, 3]); // includes sentinel
+    }
+
+    #[test]
+    fn test_byte_mapping_ellipsis() {
+        // … is 3 bytes in UTF-8, maps to 3 normalized chars "..."
+        let m = normalize_with_byte_mapping("x\u{2026}y");
+        assert_eq!(m.text, "x...y");
+        // char boundaries: x=0, .=1, .=2, .=3, y=4, sentinel=5
+        assert_eq!(m.char_boundaries, vec![0, 1, 2, 3, 4, 5]);
+        // 'x' at orig 0, all three '.' at orig 1 (start of …), 'y' at orig 4, sentinel=5
+        assert_eq!(m.norm_byte_to_orig_byte, vec![0, 1, 1, 1, 4, 5]);
+    }
+
+    #[test]
+    fn test_byte_mapping_curly_quote() {
+        // U+2019 is 3 bytes in UTF-8
+        let m = normalize_with_byte_mapping("a\u{2019}b");
+        assert_eq!(m.text, "a'b");
+        assert_eq!(m.char_boundaries, vec![0, 1, 2, 3]);
+        assert_eq!(m.norm_byte_to_orig_byte, vec![0, 1, 4, 5]);
+    }
+
+    #[test]
+    fn test_byte_mapping_multibyte_passthrough() {
+        // 'é' (2 bytes) is NOT in the normalization map — preserved as-is
+        let m = normalize_with_byte_mapping("café");
+        assert_eq!(m.text, "café");
+        // c=0, a=1, f=2, é=3 (norm byte), sentinel=5 (norm byte, since é is 2 bytes)
+        assert_eq!(m.char_boundaries, vec![0, 1, 2, 3, 5]);
+        // c→0, a→1, f→2, é→3, sentinel→5 (orig len)
+        assert_eq!(m.norm_byte_to_orig_byte, vec![0, 1, 2, 3, 5]);
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — exact match still works
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_exact_ascii() {
+        let content = "hello world";
+        let result = unicode_normalized_replace(content, "world", "rust", false);
+        assert_eq!(result, Some(("hello rust".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_no_match() {
+        let content = "hello world";
+        assert_eq!(
+            unicode_normalized_replace(content, "xyz", "abc", false),
+            None
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — curly quote fallback
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_curly_apostrophe() {
+        // File has curly quote, LLM sends straight quote
+        let content = "Infrastructure shouldn\u{2019}t be this hard.";
+        let old_str = "Infrastructure shouldn't be this hard.";
+        let new_str = "Infra is easy.";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("Infra is easy.".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_preserves_surrounding_content() {
+        let content = "before shouldn\u{2019}t after";
+        let old_str = "shouldn't";
+        let new_str = "REPLACED";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("before REPLACED after".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_curly_double_quotes() {
+        let content = "She said \u{201C}hello\u{201D} loudly";
+        let old_str = "\"hello\"";
+        let new_str = "\"hi\"";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("She said \"hi\" loudly".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_en_dash() {
+        let content = "pages 10\u{2013}20 of the book";
+        let old_str = "10-20";
+        let new_str = "10-30";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("pages 10-30 of the book".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_em_dash() {
+        let content = "word\u{2014}another word";
+        let old_str = "word-another";
+        let new_str = "one-two";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("one-two word".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_nbsp_to_space() {
+        let content = "hello\u{00A0}world";
+        let old_str = "hello world";
+        let new_str = "hi there";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("hi there".to_string(), 1)));
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — ellipsis (1-to-many mapping)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_ellipsis_in_content() {
+        // File has … (1 char), LLM sends ... (3 chars)
+        let content = "wait\u{2026} what?";
+        let old_str = "wait... what?";
+        let new_str = "oh!";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("oh!".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_ellipsis_in_old_str() {
+        // File has ... (3 chars), LLM sends … (1 char, normalizes to ...)
+        let content = "wait... what?";
+        let old_str = "wait\u{2026} what?";
+        let new_str = "oh!";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("oh!".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_ellipsis_preserves_surroundings() {
+        let content = "before\u{2026}after";
+        let old_str = "...";
+        let new_str = "---";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("before---after".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_ellipsis_replace_all() {
+        let content = "one\u{2026}two\u{2026}three";
+        let old_str = "...";
+        let new_str = " ";
+        let result = unicode_normalized_replace(content, old_str, new_str, true);
+        assert_eq!(result, Some(("one two three".to_string(), 2)));
+    }
+
+    #[test]
+    fn test_normalized_replace_ellipsis_with_other_unicode() {
+        // Mix of ellipsis and curly quotes
+        let content = "She said \u{201C}wait\u{2026}\u{201D}";
+        let old_str = "\"wait...\"";
+        let new_str = "\"go!\"";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("She said \"go!\"".to_string(), 1)));
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — additional Unicode chars
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_figure_dash() {
+        let content = "pages 10\u{2012}20";
+        let old_str = "10-20";
+        let new_str = "10-30";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("pages 10-30".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_unicode_hyphen() {
+        let content = "non\u{2010}breaking";
+        let old_str = "non-breaking";
+        let new_str = "unbreakable";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("unbreakable".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_fullwidth_apostrophe() {
+        let content = "it\u{FF07}s fine";
+        let old_str = "it's fine";
+        let new_str = "all good";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("all good".to_string(), 1)));
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — replace_all
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_all_multiple() {
+        let content = "shouldn\u{2019}t and shouldn\u{2019}t again";
+        let old_str = "shouldn't";
+        let new_str = "should not";
+        let result = unicode_normalized_replace(content, old_str, new_str, true);
+        assert_eq!(
+            result,
+            Some(("should not and should not again".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn test_normalized_replace_all_false_stops_at_first() {
+        let content = "shouldn\u{2019}t and shouldn\u{2019}t again";
+        let old_str = "shouldn't";
+        let new_str = "should not";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(
+            result,
+            Some(("should not and shouldn\u{2019}t again".to_string(), 1))
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — multiple different Unicode chars
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_mixed_unicode() {
+        // File has: curly quotes + en-dash
+        let content = "\u{201C}10\u{2013}20\u{201D}";
+        let old_str = "\"10-20\"";
+        let new_str = "range";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("range".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_readme_scenario() {
+        // The exact scenario from the bug: file has U+2019 in "shouldn't"
+        // and U+2013 en-dashes elsewhere. LLM normalizes to ASCII.
+        let content = concat!(
+            "Infrastructure shouldn\u{2019}t be this hard.\n",
+            "- `--disable-secret-redaction` \u{2013} **not recommended**\n",
+            "- `--privacy-mode` \u{2013} redacts additional data\n",
+        );
+
+        // LLM sends old_str with the first line only (ASCII apostrophe)
+        let old_str = "Infrastructure shouldn't be this hard.";
+        let new_str = "Infrastructure is easy.";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert!(result.is_some());
+        let (new_content, count) = result.unwrap();
+        assert_eq!(count, 1);
+        assert!(new_content.starts_with("Infrastructure is easy.\n"));
+        // Rest of the file (with en-dashes) should be untouched
+        assert!(new_content.contains("\u{2013}"));
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — edge cases
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_empty_old_str() {
+        assert_eq!(unicode_normalized_replace("content", "", "x", false), None);
+    }
+
+    #[test]
+    fn test_normalized_replace_empty_content() {
+        assert_eq!(unicode_normalized_replace("", "hello", "x", false), None);
+    }
+
+    #[test]
+    fn test_normalized_replace_entire_content() {
+        let content = "shouldn\u{2019}t";
+        let old_str = "shouldn't";
+        let new_str = "should not";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("should not".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_at_start() {
+        let content = "\u{201C}hello\u{201D} world";
+        let old_str = "\"hello\"";
+        let new_str = "\"hi\"";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("\"hi\" world".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_at_end() {
+        let content = "world \u{201C}hello\u{201D}";
+        let old_str = "\"hello\"";
+        let new_str = "\"hi\"";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("world \"hi\"".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_no_false_positive_on_ascii() {
+        // When both content and old_str are pure ASCII and don't match,
+        // the normalized path should also return None.
+        assert_eq!(
+            unicode_normalized_replace("hello world", "goodbye", "x", false),
+            None
+        );
+    }
+
+    #[test]
+    fn test_normalized_replace_preserves_other_unicode() {
+        // Unicode that is NOT in the normalization map should be preserved
+        let content = "café shouldn\u{2019}t break";
+        let old_str = "shouldn't";
+        let new_str = "should not";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("café should not break".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_adjacent_unicode_chars() {
+        // Multiple unicode chars right next to each other
+        let content = "\u{201C}\u{2019}\u{2013}\u{201D}";
+        let old_str = "\"'-\"";
+        let new_str = "X";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("X".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_only_unicode_differs() {
+        // Content and old_str are identical except for one Unicode char
+        let content = "a\u{00A0}b"; // non-breaking space
+        let old_str = "a b"; // regular space
+        let new_str = "a_b";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert_eq!(result, Some(("a_b".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_normalized_replace_large_multiline() {
+        // Simulates a realistic str_replace with a large multi-line old_str
+        let content = concat!(
+            "# Title\n\n",
+            "Some text before.\n\n",
+            "Infrastructure shouldn\u{2019}t be this hard. Stakpak lets developers secure, deploy, and run infra.\n\n",
+            "## Features\n\n",
+            "- Feature 1 \u{2013} description\n",
+            "- Feature 2 \u{2013} description\n",
+            "\nMore text after.\n",
+        );
+
+        let old_str = concat!(
+            "Infrastructure shouldn't be this hard. Stakpak lets developers secure, deploy, and run infra.\n\n",
+            "## Features\n\n",
+            "- Feature 1 - description\n",
+            "- Feature 2 - description\n",
+        );
+
+        let new_str = "## Simplified\n\nJust works.\n";
+
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert!(result.is_some());
+        let (new_content, count) = result.unwrap();
+        assert_eq!(count, 1);
+        assert!(new_content.contains("# Title"));
+        assert!(new_content.contains("Some text before."));
+        assert!(new_content.contains("## Simplified\n\nJust works.\n"));
+        assert!(new_content.contains("More text after."));
+        // Original unicode chars that were NOT in old_str are preserved
+        assert!(!new_content.contains("\u{2019}"));
+        assert!(!new_content.contains("\u{2013}"));
+    }
+
+    #[test]
+    fn test_normalized_replace_all_non_overlapping() {
+        let content = "a\u{2013}b c\u{2013}d";
+        let old_str = "-";
+        // This should match the normalized dashes
+        let new_str = "=";
+        let result = unicode_normalized_replace(content, old_str, new_str, true);
+        assert_eq!(result, Some(("a=b c=d".to_string(), 2)));
+    }
+
+    // ---------------------------------------------------------------
+    // unicode_normalized_replace — ellipsis in multi-line realistic scenario
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_replace_ellipsis_multiline() {
+        let content = concat!("Loading\u{2026}\n", "Please wait\u{2026}\n", "Done!\n",);
+        let old_str = concat!("Loading...\n", "Please wait...\n",);
+        let new_str = "Loaded!\n";
+        let result = unicode_normalized_replace(content, old_str, new_str, false);
+        assert!(result.is_some());
+        let (new_content, count) = result.unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(new_content, "Loaded!\nDone!\n");
+    }
+
+    #[test]
+    fn test_normalized_replace_multiple_ellipsis_replace_all() {
+        let content = "a\u{2026}b\u{2026}c";
+        let old_str = "...";
+        let new_str = "***";
+        let result = unicode_normalized_replace(content, old_str, new_str, true);
+        assert_eq!(result, Some(("a***b***c".to_string(), 2)));
     }
 }

@@ -8,7 +8,9 @@ use crate::commands::agent::run::tooling::run_tool_call;
 use crate::config::AppConfig;
 use crate::utils::agents_md::AgentsMdInfo;
 use crate::utils::local_context::LocalContext;
-use stakpak_api::{AgentClient, AgentClientConfig, AgentProvider, models::ListRuleBook};
+use stakpak_api::{
+    AgentClient, AgentClientConfig, AgentProvider, SessionStorage, models::ListRuleBook,
+};
 use stakpak_mcp_server::EnabledToolsConfig;
 use stakpak_shared::local_store::LocalStore;
 use stakpak_shared::models::integrations::openai::{AgentModel, ChatMessage};
@@ -103,31 +105,15 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
         let checkpoint_uuid = Uuid::parse_str(&checkpoint_id_str)
             .map_err(|_| format!("Invalid checkpoint ID: {}", checkpoint_id_str))?;
 
-        // Get checkpoint with session info using stakpak API or local db
-        if let Some(stakpak_api) = client.stakpak_api() {
-            match stakpak_api.get_checkpoint(checkpoint_uuid).await {
-                Ok(response) => {
-                    current_session_id = Some(response.checkpoint.session_id);
-                    current_checkpoint_id = Some(checkpoint_uuid);
-                    chat_messages.extend(response.checkpoint.state.messages);
-                }
-                Err(e) => {
-                    return Err(format!("Failed to get checkpoint: {}", e));
-                }
+        // Get checkpoint with session info
+        match client.get_checkpoint(checkpoint_uuid).await {
+            Ok(checkpoint) => {
+                current_session_id = Some(checkpoint.session_id);
+                current_checkpoint_id = Some(checkpoint_uuid);
+                chat_messages.extend(checkpoint.state.messages);
             }
-        } else {
-            // Fallback to local database via AgentProvider trait
-            match client.get_agent_checkpoint(checkpoint_uuid).await {
-                Ok(checkpoint_data) => {
-                    current_session_id = Some(checkpoint_data.session.id);
-                    current_checkpoint_id = Some(checkpoint_uuid);
-                    let stakpak_api::models::AgentOutput::PabloV1 { messages, .. } =
-                        checkpoint_data.output;
-                    chat_messages.extend(messages);
-                }
-                Err(e) => {
-                    return Err(format!("Failed to get checkpoint from local db: {}", e));
-                }
+            Err(e) => {
+                return Err(format!("Failed to get checkpoint: {}", e));
             }
         }
 
@@ -199,6 +185,7 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
                 config.model.clone(),
                 chat_messages.clone(),
                 Some(tools.clone()),
+                current_session_id,
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -235,18 +222,10 @@ pub async fn run_async(ctx: AppConfig, config: RunAsyncConfig) -> Result<(), Str
             current_checkpoint_id = Some(checkpoint_uuid);
 
             // Get session_id from checkpoint if we don't have it yet
-            if current_session_id.is_none() {
-                if let Some(stakpak_api) = client.stakpak_api() {
-                    if let Ok(checkpoint_response) =
-                        stakpak_api.get_checkpoint(checkpoint_uuid).await
-                    {
-                        current_session_id = Some(checkpoint_response.checkpoint.session_id);
-                    }
-                } else if let Ok(checkpoint_data) =
-                    client.get_agent_checkpoint(checkpoint_uuid).await
-                {
-                    current_session_id = Some(checkpoint_data.session.id);
-                }
+            if current_session_id.is_none()
+                && let Ok(checkpoint) = client.get_checkpoint(checkpoint_uuid).await
+            {
+                current_session_id = Some(checkpoint.session_id);
             }
         }
 

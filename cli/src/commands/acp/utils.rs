@@ -1,5 +1,27 @@
 use regex::Regex;
 
+/// Strip the MCP server prefix and any trailing "()" from a tool name.
+/// Example: "stakpak__run_command" -> "run_command"
+/// Example: "run_command" -> "run_command"
+/// Example: "str_replace()" -> "str_replace"
+pub fn strip_tool_name(name: &str) -> &str {
+    let mut result = name;
+
+    // Strip the MCP server prefix (e.g., "stakpak__")
+    if let Some(pos) = result.find("__")
+        && pos + 2 < result.len()
+    {
+        result = &result[pos + 2..];
+    }
+
+    // Strip trailing "()" if present
+    if result.ends_with("()") {
+        result = &result[..result.len() - 2];
+    }
+
+    result
+}
+
 /// Convert XML tags to markdown headers using pattern matching
 /// Handles the 4 specific tags: scratchpad, todo, local_context, rulebooks
 pub fn convert_xml_tags_to_markdown(text: &str) -> String {
@@ -60,6 +82,18 @@ pub fn process_all_xml_patterns(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_strip_tool_name() {
+        assert_eq!(strip_tool_name("stakpak__run_command"), "run_command");
+        assert_eq!(strip_tool_name("run_command"), "run_command");
+        assert_eq!(strip_tool_name("other__server__tool"), "server__tool");
+        assert_eq!(strip_tool_name("prefix__"), "prefix__");
+        assert_eq!(strip_tool_name("__tool"), "tool");
+        assert_eq!(strip_tool_name("str_replace()"), "str_replace");
+        assert_eq!(strip_tool_name("create()"), "create");
+        assert_eq!(strip_tool_name("stakpak__str_replace()"), "str_replace");
+    }
 
     #[test]
     fn test_convert_xml_tags_to_markdown() {

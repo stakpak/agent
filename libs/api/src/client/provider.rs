@@ -6,11 +6,10 @@
 //! - Hook registry integration for lifecycle events
 
 use crate::AgentProvider;
-use crate::local::db;
 use crate::models::*;
-use crate::stakpak::{
-    CheckpointState, CreateCheckpointRequest, CreateSessionRequest, ListCheckpointsQuery,
-    ListSessionsQuery,
+use crate::storage::{
+    CreateCheckpointRequest as StorageCreateCheckpointRequest,
+    CreateSessionRequest as StorageCreateSessionRequest,
 };
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -29,6 +28,14 @@ use stakpak_shared::models::stakai_adapter::get_stakai_model_string;
 use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+/// Lightweight session info returned by initialize_session / save_checkpoint
+#[derive(Debug, Clone)]
+pub(crate) struct SessionInfo {
+    session_id: Uuid,
+    checkpoint_id: Uuid,
+    checkpoint_created_at: chrono::DateTime<chrono::Utc>,
+}
 
 use super::AgentClient;
 
@@ -165,173 +172,6 @@ impl AgentProvider for AgentClient {
     }
 
     // =========================================================================
-    // Agent Sessions
-    // =========================================================================
-
-    async fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, String> {
-        if let Some(api) = &self.stakpak_api {
-            // Use Stakpak API
-            let response = api.list_sessions(&ListSessionsQuery::default()).await?;
-            Ok(response
-                .sessions
-                .into_iter()
-                .map(|s| AgentSession {
-                    id: s.id,
-                    title: s.title,
-                    agent_id: AgentID::PabloV1,
-                    visibility: match s.visibility {
-                        crate::stakpak::SessionVisibility::Public => AgentSessionVisibility::Public,
-                        crate::stakpak::SessionVisibility::Private => {
-                            AgentSessionVisibility::Private
-                        }
-                    },
-                    checkpoints: vec![], // Summary doesn't include full checkpoints
-                    created_at: s.created_at,
-                    updated_at: s.updated_at,
-                })
-                .collect())
-        } else {
-            // Fallback to local DB
-            db::list_sessions(&self.local_db).await
-        }
-    }
-
-    async fn get_agent_session(&self, session_id: Uuid) -> Result<AgentSession, String> {
-        if let Some(api) = &self.stakpak_api {
-            let response = api.get_session(session_id).await?;
-            let s = response.session;
-
-            // Get checkpoints for this session
-            let checkpoints_response = api
-                .list_checkpoints(session_id, &ListCheckpointsQuery::default())
-                .await?;
-
-            Ok(AgentSession {
-                id: s.id,
-                title: s.title,
-                agent_id: AgentID::PabloV1,
-                visibility: match s.visibility {
-                    crate::stakpak::SessionVisibility::Public => AgentSessionVisibility::Public,
-                    crate::stakpak::SessionVisibility::Private => AgentSessionVisibility::Private,
-                },
-                checkpoints: checkpoints_response
-                    .checkpoints
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, c)| AgentCheckpointListItem {
-                        id: c.id,
-                        status: AgentStatus::Complete,
-                        execution_depth: i,
-                        parent: c.parent_id.map(|id| AgentParentCheckpoint { id }),
-                        created_at: c.created_at,
-                        updated_at: c.updated_at,
-                    })
-                    .collect(),
-                created_at: s.created_at,
-                updated_at: s.updated_at,
-            })
-        } else {
-            db::get_session(&self.local_db, session_id).await
-        }
-    }
-
-    async fn get_agent_session_stats(
-        &self,
-        _session_id: Uuid,
-    ) -> Result<AgentSessionStats, String> {
-        // TODO: Implement session stats via Stakpak API when available
-        Ok(AgentSessionStats::default())
-    }
-
-    async fn get_agent_checkpoint(&self, checkpoint_id: Uuid) -> Result<RunAgentOutput, String> {
-        if let Some(api) = &self.stakpak_api {
-            let response = api.get_checkpoint(checkpoint_id).await?;
-            let c = response.checkpoint;
-
-            // Get session info
-            let session_response = api.get_session(c.session_id).await?;
-            let s = session_response.session;
-
-            Ok(RunAgentOutput {
-                checkpoint: AgentCheckpointListItem {
-                    id: c.id,
-                    status: AgentStatus::Complete,
-                    execution_depth: 0, // We don't track depth in new API
-                    parent: c.parent_id.map(|id| AgentParentCheckpoint { id }),
-                    created_at: c.created_at,
-                    updated_at: c.updated_at,
-                },
-                session: AgentSessionListItem {
-                    id: s.id,
-                    agent_id: AgentID::PabloV1,
-                    visibility: match s.visibility {
-                        crate::stakpak::SessionVisibility::Public => AgentSessionVisibility::Public,
-                        crate::stakpak::SessionVisibility::Private => {
-                            AgentSessionVisibility::Private
-                        }
-                    },
-                    created_at: s.created_at,
-                    updated_at: s.updated_at,
-                },
-                output: AgentOutput::PabloV1 {
-                    messages: c.state.messages,
-                    node_states: serde_json::json!({}),
-                },
-            })
-        } else {
-            db::get_checkpoint(&self.local_db, checkpoint_id).await
-        }
-    }
-
-    async fn get_agent_session_latest_checkpoint(
-        &self,
-        session_id: Uuid,
-    ) -> Result<RunAgentOutput, String> {
-        if let Some(api) = &self.stakpak_api {
-            // Get session with active checkpoint
-            let session_response = api.get_session(session_id).await?;
-            let s = session_response.session;
-
-            if let Some(active_checkpoint) = s.active_checkpoint {
-                Ok(RunAgentOutput {
-                    checkpoint: AgentCheckpointListItem {
-                        id: active_checkpoint.id,
-                        status: AgentStatus::Complete,
-                        execution_depth: 0,
-                        parent: active_checkpoint
-                            .parent_id
-                            .map(|id| AgentParentCheckpoint { id }),
-                        created_at: active_checkpoint.created_at,
-                        updated_at: active_checkpoint.updated_at,
-                    },
-                    session: AgentSessionListItem {
-                        id: s.id,
-                        agent_id: AgentID::PabloV1,
-                        visibility: match s.visibility {
-                            crate::stakpak::SessionVisibility::Public => {
-                                AgentSessionVisibility::Public
-                            }
-                            crate::stakpak::SessionVisibility::Private => {
-                                AgentSessionVisibility::Private
-                            }
-                        },
-                        created_at: s.created_at,
-                        updated_at: s.updated_at,
-                    },
-                    output: AgentOutput::PabloV1 {
-                        messages: active_checkpoint.state.messages,
-                        node_states: serde_json::json!({}),
-                    },
-                })
-            } else {
-                Err("Session has no active checkpoint".to_string())
-            }
-        } else {
-            db::get_latest_checkpoint(&self.local_db, session_id).await
-        }
-    }
-
-    // =========================================================================
     // Chat Completion
     // =========================================================================
 
@@ -340,8 +180,9 @@ impl AgentProvider for AgentClient {
         model: AgentModel,
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
+        session_id: Option<Uuid>,
     ) -> Result<ChatCompletionResponse, String> {
-        let mut ctx = HookContext::new(None, AgentState::new(model, messages, tools));
+        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
 
         // Execute before request hooks
         self.hook_registry
@@ -351,8 +192,8 @@ impl AgentProvider for AgentClient {
             .ok()?;
 
         // Initialize or resume session
-        let current_checkpoint = self.initialize_session(&ctx.state.messages).await?;
-        ctx.set_session_id(current_checkpoint.session.id);
+        let current_session = self.initialize_session(&ctx).await?;
+        ctx.set_session_id(current_session.session_id);
 
         // Run completion
         let new_message = self.run_agent_completion(&mut ctx, None).await?;
@@ -360,10 +201,10 @@ impl AgentProvider for AgentClient {
 
         // Save checkpoint
         let result = self
-            .update_session(&current_checkpoint, ctx.state.messages.clone())
+            .save_checkpoint(&current_session, ctx.state.messages.clone())
             .await?;
-        let checkpoint_created_at = result.checkpoint.created_at.timestamp() as u64;
-        ctx.set_new_checkpoint_id(result.checkpoint.id);
+        let checkpoint_created_at = result.checkpoint_created_at.timestamp() as u64;
+        ctx.set_new_checkpoint_id(result.checkpoint_id);
 
         // Execute after request hooks
         self.hook_registry
@@ -371,6 +212,20 @@ impl AgentProvider for AgentClient {
             .await
             .map_err(|e| e.to_string())?
             .ok()?;
+
+        let mut meta = serde_json::Map::new();
+        if let Some(session_id) = ctx.session_id {
+            meta.insert(
+                "session_id".to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+        }
+        if let Some(checkpoint_id) = ctx.new_checkpoint_id {
+            meta.insert(
+                "checkpoint_id".to_string(),
+                serde_json::Value::String(checkpoint_id.to_string()),
+            );
+        }
 
         Ok(ChatCompletionResponse {
             id: ctx.new_checkpoint_id.unwrap().to_string(),
@@ -395,7 +250,11 @@ impl AgentProvider for AgentClient {
                 .map(|u| u.usage.clone())
                 .unwrap_or_default(),
             system_fingerprint: None,
-            metadata: None,
+            metadata: if meta.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(meta))
+            },
         })
     }
 
@@ -405,6 +264,7 @@ impl AgentProvider for AgentClient {
         messages: Vec<ChatMessage>,
         tools: Option<Vec<Tool>>,
         _headers: Option<HeaderMap>,
+        session_id: Option<Uuid>,
     ) -> Result<
         (
             Pin<
@@ -414,7 +274,7 @@ impl AgentProvider for AgentClient {
         ),
         String,
     > {
-        let mut ctx = HookContext::new(None, AgentState::new(model, messages, tools));
+        let mut ctx = HookContext::new(session_id, AgentState::new(model, messages, tools));
 
         // Execute before request hooks
         self.hook_registry
@@ -424,20 +284,10 @@ impl AgentProvider for AgentClient {
             .ok()?;
 
         // Initialize session
-        let current_checkpoint = self.initialize_session(&ctx.state.messages).await?;
-        ctx.set_session_id(current_checkpoint.session.id);
+        let current_session = self.initialize_session(&ctx).await?;
+        ctx.set_session_id(current_session.session_id);
 
         let (tx, mut rx) = mpsc::channel::<Result<StreamMessage, String>>(100);
-
-        // Send initial checkpoint ID
-        let _ = tx
-            .send(Ok(StreamMessage::Delta(GenerationDelta::Content {
-                content: format!(
-                    "\n<checkpoint_id>{}</checkpoint_id>\n",
-                    current_checkpoint.checkpoint.id
-                ),
-            })))
-            .await;
 
         // Clone what we need for the spawned task
         let client = self.clone();
@@ -481,25 +331,17 @@ impl AgentProvider for AgentClient {
                         return;
                     }
 
-                    let output = client
-                        .update_session(&current_checkpoint, ctx_clone.state.messages.clone())
+                    let result = client
+                        .save_checkpoint(&current_session, ctx_clone.state.messages.clone())
                         .await;
 
-                    match output {
+                    match result {
                         Err(e) => {
                             let _ = tx.send(Err(e)).await;
                         }
-                        Ok(output) => {
-                            ctx_clone.set_new_checkpoint_id(output.checkpoint.id);
+                        Ok(updated) => {
+                            ctx_clone.set_new_checkpoint_id(updated.checkpoint_id);
                             let _ = tx.send(Ok(StreamMessage::Ctx(Box::new(ctx_clone)))).await;
-                            let _ = tx
-                                .send(Ok(StreamMessage::Delta(GenerationDelta::Content {
-                                    content: format!(
-                                        "\n<checkpoint_id>{}</checkpoint_id>\n",
-                                        output.checkpoint.id
-                                    ),
-                                })))
-                                .await;
                         }
                     }
                 }
@@ -513,6 +355,23 @@ impl AgentProvider for AgentClient {
                     Ok(delta) => match delta {
                         StreamMessage::Ctx(updated_ctx) => {
                             ctx = *updated_ctx;
+                            // Emit session metadata so callers can track session_id
+                            if let Some(session_id) = ctx.session_id {
+                                let mut meta = serde_json::Map::new();
+                                meta.insert("session_id".to_string(), serde_json::Value::String(session_id.to_string()));
+                                if let Some(checkpoint_id) = ctx.new_checkpoint_id {
+                                    meta.insert("checkpoint_id".to_string(), serde_json::Value::String(checkpoint_id.to_string()));
+                                }
+                                yield Ok(ChatCompletionStreamResponse {
+                                    id: ctx.request_id.to_string(),
+                                    object: "chat.completion.chunk".to_string(),
+                                    created: chrono::Utc::now().timestamp() as u64,
+                                    model: String::new(),
+                                    choices: vec![],
+                                    usage: None,
+                                    metadata: Some(serde_json::Value::Object(meta)),
+                                });
+                            }
                         }
                         StreamMessage::Delta(delta) => {
                             yield Ok(ChatCompletionStreamResponse {
@@ -675,6 +534,89 @@ impl AgentProvider for AgentClient {
 }
 
 // =============================================================================
+// SessionStorage implementation (delegates to inner session_storage)
+// =============================================================================
+
+#[async_trait]
+impl crate::storage::SessionStorage for super::AgentClient {
+    async fn list_sessions(
+        &self,
+        query: &crate::storage::ListSessionsQuery,
+    ) -> Result<crate::storage::ListSessionsResult, crate::storage::StorageError> {
+        self.session_storage.list_sessions(query).await
+    }
+
+    async fn get_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<crate::storage::Session, crate::storage::StorageError> {
+        self.session_storage.get_session(session_id).await
+    }
+
+    async fn create_session(
+        &self,
+        request: &crate::storage::CreateSessionRequest,
+    ) -> Result<crate::storage::CreateSessionResult, crate::storage::StorageError> {
+        self.session_storage.create_session(request).await
+    }
+
+    async fn update_session(
+        &self,
+        session_id: Uuid,
+        request: &crate::storage::UpdateSessionRequest,
+    ) -> Result<crate::storage::Session, crate::storage::StorageError> {
+        self.session_storage
+            .update_session(session_id, request)
+            .await
+    }
+
+    async fn delete_session(&self, session_id: Uuid) -> Result<(), crate::storage::StorageError> {
+        self.session_storage.delete_session(session_id).await
+    }
+
+    async fn list_checkpoints(
+        &self,
+        session_id: Uuid,
+        query: &crate::storage::ListCheckpointsQuery,
+    ) -> Result<crate::storage::ListCheckpointsResult, crate::storage::StorageError> {
+        self.session_storage
+            .list_checkpoints(session_id, query)
+            .await
+    }
+
+    async fn get_checkpoint(
+        &self,
+        checkpoint_id: Uuid,
+    ) -> Result<crate::storage::Checkpoint, crate::storage::StorageError> {
+        self.session_storage.get_checkpoint(checkpoint_id).await
+    }
+
+    async fn create_checkpoint(
+        &self,
+        session_id: Uuid,
+        request: &crate::storage::CreateCheckpointRequest,
+    ) -> Result<crate::storage::Checkpoint, crate::storage::StorageError> {
+        self.session_storage
+            .create_checkpoint(session_id, request)
+            .await
+    }
+
+    async fn get_active_checkpoint(
+        &self,
+        session_id: Uuid,
+    ) -> Result<crate::storage::Checkpoint, crate::storage::StorageError> {
+        self.session_storage.get_active_checkpoint(session_id).await
+    }
+
+    async fn get_session_stats(
+        &self,
+        session_id: Uuid,
+    ) -> Result<crate::storage::SessionStats, crate::storage::StorageError> {
+        self.session_storage.get_session_stats(session_id).await
+    }
+}
+
+// =============================================================================
 // Helper Methods
 // =============================================================================
 
@@ -682,26 +624,37 @@ const TITLE_GENERATOR_PROMPT: &str =
     include_str!("../local/prompts/session_title_generator.v1.txt");
 
 impl AgentClient {
-    /// Initialize or resume a session based on messages
+    /// Initialize or resume a session based on context
+    ///
+    /// If `ctx.session_id` is set, we resume that session directly.
+    /// Otherwise, we create a new session.
     pub(crate) async fn initialize_session(
         &self,
-        messages: &[ChatMessage],
-    ) -> Result<RunAgentOutput, String> {
+        ctx: &HookContext<AgentState>,
+    ) -> Result<SessionInfo, String> {
+        let messages = &ctx.state.messages;
+
         if messages.is_empty() {
             return Err("At least one message is required".to_string());
         }
 
-        // Check if we have an existing checkpoint ID in messages
-        let checkpoint_id = ChatMessage::last_server_message(messages).and_then(|message| {
-            message
-                .content
-                .as_ref()
-                .and_then(|content| content.extract_checkpoint_id())
-        });
+        // If session_id is set in context, resume that session directly
+        if let Some(session_id) = ctx.session_id {
+            let session = self
+                .session_storage
+                .get_session(session_id)
+                .await
+                .map_err(|e| e.to_string())?;
 
-        if let Some(checkpoint_id) = checkpoint_id {
-            // Resume existing session
-            return self.get_agent_checkpoint(checkpoint_id).await;
+            let checkpoint = session
+                .active_checkpoint
+                .ok_or_else(|| format!("Session {} has no active checkpoint", session_id))?;
+
+            return Ok(SessionInfo {
+                session_id: session.id,
+                checkpoint_id: checkpoint.id,
+                checkpoint_created_at: checkpoint.created_at,
+            });
         }
 
         // Create new session
@@ -730,144 +683,45 @@ impl AgentClient {
             .ok()
             .map(|p| p.to_string_lossy().to_string());
 
-        if let Some(api) = &self.stakpak_api {
-            // Create session via Stakpak API (includes initial checkpoint)
-            let mut session_request = CreateSessionRequest::new(
-                title,
-                CheckpointState {
-                    messages: messages.to_vec(),
-                },
-            );
-            if let Some(cwd) = cwd {
-                session_request = session_request.with_cwd(cwd);
-            }
-            let response = api.create_session(&session_request).await?;
-
-            Ok(RunAgentOutput {
-                checkpoint: AgentCheckpointListItem {
-                    id: response.checkpoint.id,
-                    status: AgentStatus::Complete,
-                    execution_depth: 0,
-                    parent: response
-                        .checkpoint
-                        .parent_id
-                        .map(|id| AgentParentCheckpoint { id }),
-                    created_at: response.checkpoint.created_at,
-                    updated_at: response.checkpoint.updated_at,
-                },
-                session: AgentSessionListItem {
-                    id: response.session_id,
-                    agent_id: AgentID::PabloV1,
-                    visibility: AgentSessionVisibility::Private,
-                    created_at: response.checkpoint.created_at,
-                    updated_at: response.checkpoint.updated_at,
-                },
-                output: AgentOutput::PabloV1 {
-                    messages: messages.to_vec(),
-                    node_states: serde_json::json!({}),
-                },
-            })
-        } else {
-            // Create locally
-            let now = chrono::Utc::now();
-            let session_id = Uuid::new_v4();
-            let session = AgentSession {
-                id: session_id,
-                title,
-                agent_id: AgentID::PabloV1,
-                visibility: AgentSessionVisibility::Private,
-                created_at: now,
-                updated_at: now,
-                checkpoints: vec![],
-            };
-            db::create_session(&self.local_db, &session).await?;
-
-            let checkpoint_id = Uuid::new_v4();
-            let checkpoint = AgentCheckpointListItem {
-                id: checkpoint_id,
-                status: AgentStatus::Complete,
-                execution_depth: 0,
-                parent: None,
-                created_at: now,
-                updated_at: now,
-            };
-            let initial_state = AgentOutput::PabloV1 {
-                messages: messages.to_vec(),
-                node_states: serde_json::json!({}),
-            };
-            db::create_checkpoint(&self.local_db, session_id, &checkpoint, &initial_state).await?;
-
-            db::get_checkpoint(&self.local_db, checkpoint_id).await
+        // Create session via storage trait
+        let mut session_request = StorageCreateSessionRequest::new(title, messages.to_vec());
+        if let Some(cwd) = cwd {
+            session_request = session_request.with_cwd(cwd);
         }
+
+        let result = self
+            .session_storage
+            .create_session(&session_request)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(SessionInfo {
+            session_id: result.session_id,
+            checkpoint_id: result.checkpoint.id,
+            checkpoint_created_at: result.checkpoint.created_at,
+        })
     }
 
-    /// Update session with new messages
-    pub(crate) async fn update_session(
+    /// Save a new checkpoint for the current session
+    pub(crate) async fn save_checkpoint(
         &self,
-        checkpoint_info: &RunAgentOutput,
-        new_messages: Vec<ChatMessage>,
-    ) -> Result<RunAgentOutput, String> {
-        if let Some(api) = &self.stakpak_api {
-            // Add checkpoint via Stakpak API
-            let checkpoint_request = CreateCheckpointRequest::new(CheckpointState {
-                messages: new_messages.clone(),
-            })
-            .with_parent(checkpoint_info.checkpoint.id);
+        current: &SessionInfo,
+        messages: Vec<ChatMessage>,
+    ) -> Result<SessionInfo, String> {
+        let checkpoint_request =
+            StorageCreateCheckpointRequest::new(messages).with_parent(current.checkpoint_id);
 
-            let response = api
-                .create_checkpoint(checkpoint_info.session.id, &checkpoint_request)
-                .await?;
+        let checkpoint = self
+            .session_storage
+            .create_checkpoint(current.session_id, &checkpoint_request)
+            .await
+            .map_err(|e| e.to_string())?;
 
-            Ok(RunAgentOutput {
-                checkpoint: AgentCheckpointListItem {
-                    id: response.checkpoint.id,
-                    status: AgentStatus::Complete,
-                    execution_depth: checkpoint_info.checkpoint.execution_depth + 1,
-                    parent: Some(AgentParentCheckpoint {
-                        id: checkpoint_info.checkpoint.id,
-                    }),
-                    created_at: response.checkpoint.created_at,
-                    updated_at: response.checkpoint.updated_at,
-                },
-                session: checkpoint_info.session.clone(),
-                output: AgentOutput::PabloV1 {
-                    messages: new_messages,
-                    node_states: serde_json::json!({}),
-                },
-            })
-        } else {
-            // Create checkpoint locally
-            let now = chrono::Utc::now();
-            let complete_checkpoint = AgentCheckpointListItem {
-                id: Uuid::new_v4(),
-                status: AgentStatus::Complete,
-                execution_depth: checkpoint_info.checkpoint.execution_depth + 1,
-                parent: Some(AgentParentCheckpoint {
-                    id: checkpoint_info.checkpoint.id,
-                }),
-                created_at: now,
-                updated_at: now,
-            };
-
-            let new_state = AgentOutput::PabloV1 {
-                messages: new_messages.clone(),
-                node_states: serde_json::json!({}),
-            };
-
-            db::create_checkpoint(
-                &self.local_db,
-                checkpoint_info.session.id,
-                &complete_checkpoint,
-                &new_state,
-            )
-            .await?;
-
-            Ok(RunAgentOutput {
-                checkpoint: complete_checkpoint,
-                session: checkpoint_info.session.clone(),
-                output: new_state,
-            })
-        }
+        Ok(SessionInfo {
+            session_id: current.session_id,
+            checkpoint_id: checkpoint.id,
+            checkpoint_created_at: checkpoint.created_at,
+        })
     }
 
     /// Run agent completion (inference)

@@ -11,6 +11,71 @@ use tokio::{
 
 const START_TASK_WAIT_TIME: Duration = Duration::from_millis(300);
 
+/// Kill a process and its entire process group.
+///
+/// Uses process group kill (`kill -9 -{pid}`) on Unix and `taskkill /F /T` on
+/// Windows to ensure child processes spawned by shells (node, vite, esbuild, etc.)
+/// are also terminated.
+///
+/// This is safe to call even if the process has already exited.
+fn terminate_process_group(process_id: u32) {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        // First check if the process exists
+        let check_result = Command::new("kill")
+            .arg("-0") // Signal 0 just checks if process exists
+            .arg(process_id.to_string())
+            .output();
+
+        // Only kill if the process actually exists
+        if check_result
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            // Kill the entire process group using negative PID
+            // Since we spawn with .process_group(0), the shell becomes the process group leader
+            // Using -{pid} kills all processes in that group (shell + children like node/vite/esbuild)
+            let _ = Command::new("kill")
+                .arg("-9")
+                .arg(format!("-{}", process_id))
+                .output();
+
+            // Also try to kill the individual process in case it's not a group leader
+            let _ = Command::new("kill")
+                .arg("-9")
+                .arg(process_id.to_string())
+                .output();
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        // On Windows, use taskkill with /T flag to kill the process tree
+        let check_result = Command::new("tasklist")
+            .arg("/FI")
+            .arg(format!("PID eq {}", process_id))
+            .arg("/FO")
+            .arg("CSV")
+            .output();
+
+        // Only kill if the process actually exists
+        if let Ok(output) = check_result {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            if output_str.lines().count() > 1 {
+                // More than just header line - use /T to kill process tree
+                let _ = Command::new("taskkill")
+                    .arg("/F")
+                    .arg("/T") // Kill process tree
+                    .arg("/PID")
+                    .arg(process_id.to_string())
+                    .output();
+            }
+        }
+    }
+}
+
 pub type TaskId = String;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -143,7 +208,6 @@ pub struct TaskManager {
     tasks: HashMap<TaskId, TaskEntry>,
     tx: mpsc::UnboundedSender<TaskMessage>,
     rx: mpsc::UnboundedReceiver<TaskMessage>,
-    #[allow(dead_code)]
     shutdown_tx: broadcast::Sender<()>,
     shutdown_rx: broadcast::Receiver<()>,
 }
@@ -171,6 +235,7 @@ impl TaskManager {
     pub fn handle(&self) -> Arc<TaskManagerHandle> {
         Arc::new(TaskManagerHandle {
             tx: self.tx.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
         })
     }
 
@@ -185,6 +250,9 @@ impl TaskManager {
                             }
                         }
                         None => {
+                            // All senders (TaskManagerHandles) have been dropped.
+                            // Clean up all running tasks and child processes.
+                            self.shutdown_all_tasks().await;
                             break;
                         }
                     }
@@ -351,63 +419,7 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the entire process group to ensure all child processes are terminated
-                // This is important for tools like vite/node that spawn child processes
-                #[cfg(unix)]
-                {
-                    use std::process::Command;
-                    // First check if the process exists
-                    let check_result = Command::new("kill")
-                        .arg("-0") // Signal 0 just checks if process exists
-                        .arg(process_id.to_string())
-                        .output();
-
-                    // Only kill if the process actually exists
-                    if check_result
-                        .map(|output| output.status.success())
-                        .unwrap_or(false)
-                    {
-                        // Kill the entire process group using negative PID
-                        // Since we spawn with .process_group(0), the shell becomes the process group leader
-                        // Using -{pid} kills all processes in that group (shell + children like node/vite/esbuild)
-                        let _ = Command::new("kill")
-                            .arg("-9")
-                            .arg(format!("-{}", process_id))
-                            .output();
-
-                        // Also try to kill the individual process in case it's not a group leader
-                        let _ = Command::new("kill")
-                            .arg("-9")
-                            .arg(process_id.to_string())
-                            .output();
-                    }
-                }
-
-                #[cfg(windows)]
-                {
-                    use std::process::Command;
-                    // On Windows, use taskkill with /T flag to kill the process tree
-                    let check_result = Command::new("tasklist")
-                        .arg("/FI")
-                        .arg(format!("PID eq {}", process_id))
-                        .arg("/FO")
-                        .arg("CSV")
-                        .output();
-
-                    // Only kill if the process actually exists
-                    if let Ok(output) = check_result {
-                        let output_str = String::from_utf8_lossy(&output.stdout);
-                        if output_str.lines().count() > 1 {
-                            // More than just header line - use /T to kill process tree
-                            let _ = Command::new("taskkill")
-                                .arg("/F")
-                                .arg("/T") // Kill process tree
-                                .arg("/PID")
-                                .arg(process_id.to_string())
-                                .output();
-                        }
-                    }
-                }
+                terminate_process_group(process_id);
             }
 
             entry.handle.abort();
@@ -700,63 +712,7 @@ impl TaskManager {
             }
 
             if let Some(process_id) = entry.process_id {
-                // Kill the entire process group to ensure all child processes are terminated
-                // This is important for tools like vite/node that spawn child processes
-                #[cfg(unix)]
-                {
-                    use std::process::Command;
-                    // First check if the process exists
-                    let check_result = Command::new("kill")
-                        .arg("-0") // Signal 0 just checks if process exists
-                        .arg(process_id.to_string())
-                        .output();
-
-                    // Only kill if the process actually exists
-                    if check_result
-                        .map(|output| output.status.success())
-                        .unwrap_or(false)
-                    {
-                        // Kill the entire process group using negative PID
-                        // Since we spawn with .process_group(0), the shell becomes the process group leader
-                        // Using -{pid} kills all processes in that group (shell + children like node/vite/esbuild)
-                        let _ = Command::new("kill")
-                            .arg("-9")
-                            .arg(format!("-{}", process_id))
-                            .output();
-
-                        // Also try to kill the individual process in case it's not a group leader
-                        let _ = Command::new("kill")
-                            .arg("-9")
-                            .arg(process_id.to_string())
-                            .output();
-                    }
-                }
-
-                #[cfg(windows)]
-                {
-                    use std::process::Command;
-                    // On Windows, use taskkill with /T flag to kill the process tree
-                    let check_result = Command::new("tasklist")
-                        .arg("/FI")
-                        .arg(format!("PID eq {}", process_id))
-                        .arg("/FO")
-                        .arg("CSV")
-                        .output();
-
-                    // Only kill if the process actually exists
-                    if let Ok(output) = check_result {
-                        let output_str = String::from_utf8_lossy(&output.stdout);
-                        if output_str.lines().count() > 1 {
-                            // More than just header line - use /T to kill process tree
-                            let _ = Command::new("taskkill")
-                                .arg("/F")
-                                .arg("/T") // Kill process tree
-                                .arg("/PID")
-                                .arg(process_id.to_string())
-                                .output();
-                        }
-                    }
-                }
+                terminate_process_group(process_id);
             }
 
             entry.handle.abort();
@@ -766,6 +722,21 @@ impl TaskManager {
 
 pub struct TaskManagerHandle {
     tx: mpsc::UnboundedSender<TaskMessage>,
+    shutdown_tx: broadcast::Sender<()>,
+}
+
+impl Drop for TaskManagerHandle {
+    fn drop(&mut self) {
+        // Signal the TaskManager to shut down all tasks and kill child processes.
+        // This fires on the broadcast channel that TaskManager::run() listens on,
+        // triggering shutdown_all_tasks() which kills every process group.
+        //
+        // This is a last-resort safety net — callers should prefer calling
+        // handle.shutdown().await for a clean async shutdown. But if the handle
+        // is dropped without that (e.g., panic, std::process::exit, unexpected
+        // scope exit), this ensures child processes don't leak.
+        let _ = self.shutdown_tx.send(());
+    }
 }
 
 impl TaskManagerHandle {
@@ -1027,6 +998,66 @@ mod tests {
             .shutdown()
             .await
             .expect("Failed to shutdown task manager");
+    }
+
+    #[tokio::test]
+    async fn test_task_manager_handle_drop_triggers_shutdown() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        let manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        // Start a long-running task
+        let _task_info = handle
+            .start_task("sleep 30".to_string(), None, None)
+            .await
+            .expect("Failed to start task");
+
+        // Drop the handle WITHOUT calling shutdown()
+        drop(handle);
+
+        // The Drop impl sends on the broadcast shutdown channel,
+        // which causes TaskManager::run() to call shutdown_all_tasks() and exit.
+        // Give it a moment to process.
+        sleep(Duration::from_millis(500)).await;
+
+        assert!(
+            manager_handle.is_finished(),
+            "TaskManager::run() should have exited after handle was dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_task_manager_handle_drop_kills_child_processes() {
+        let task_manager = TaskManager::new();
+        let handle = task_manager.handle();
+
+        let _manager_handle = tokio::spawn(async move {
+            task_manager.run().await;
+        });
+
+        // Start a task that writes a marker file while running
+        let marker = format!("/tmp/stakpak_test_drop_{}", std::process::id());
+        let task_info = handle
+            .start_task(format!("touch {} && sleep 30", marker), None, None)
+            .await
+            .expect("Failed to start task");
+
+        // Verify task is running
+        let status = handle
+            .get_task_status(task_info.id.clone())
+            .await
+            .expect("Failed to get status");
+        assert_eq!(status, Some(TaskStatus::Running));
+
+        // Drop handle without explicit shutdown — Drop should kill the process
+        drop(handle);
+        sleep(Duration::from_millis(500)).await;
+
+        // Clean up marker file
+        let _ = std::fs::remove_file(&marker);
     }
 
     #[tokio::test]
