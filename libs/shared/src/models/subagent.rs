@@ -60,10 +60,7 @@ impl SubagentConfigs {
                 .collect::<Vec<String>>()
                 .join("\n");
 
-            format!(
-                "SPACING_MARKER\n# Available Subagents:\nSPACING_MARKER\n{}",
-                subagents_text
-            )
+            format!("# Available Subagents:\n\n{}", subagents_text)
         }
     }
 }
